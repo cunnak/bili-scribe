@@ -1,0 +1,41 @@
+# bili-scribe 配置示例
+# 复制为 config.yaml 后修改。config.yaml 已被 .gitignore 排除，不会随仓库外传。
+
+server:
+  host: 127.0.0.1      # 只监听本机。不要改成 0.0.0.0 —— 这个进程持有你的 B站 登录凭据
+  port: 8818
+
+llm:
+  # 任意 OpenAI 兼容端点。默认 DeepSeek。
+  base_url: https://api.deepseek.com/v1
+  api_key: ""
+  model: deepseek-chat
+  temperature: 0.3
+  max_tokens: 4096
+  max_input_chars: 24000   # 素材超过这个长度就走分块归约
+  chunk_size: 6000
+  chunk_overlap: 400
+
+collect:
+  # 字幕语言优先级。ai-zh 是平台语音识别，误差高于人工字幕。
+  prefer_subtitle_lang: ["zh-CN", "zh-Hans", "zh-Hant", "ai-zh"]
+  # 平台自带的 AI 摘要，仅作对照展示，不参与生成
+  include_platform_summary: true
+  danmaku:
+    enabled: true
+    # 有字幕时是否也抓弹幕。开启会显著增加 token 消耗。
+    also_with_subtitle: false
+    max_items: 800
+    hot_items: 200       # 取高频弹幕条数（反映观众情绪高点）
+    sample_items: 200    # 沿时间轴均匀采样条数（保留叙事推进）
+
+publish:
+  require_confirm: true        # 人工闸门。设成 false 等于放弃最后一道防线，不建议
+  min_interval_seconds: 60     # 两次发布之间的最短间隔，防止触发 -509 限流
+  max_comment_chars: 900       # 评论上限 1000，留出余量
+  disclose_ai: true            # 是否在评论里注明 AI 生成
+  disclosure_text: "（本总结由 AI 依据视频字幕／弹幕生成）"
+
+storage:
+  db_path: ~/.bili-scribe/bili-scribe.db
+  key_path: ~/.bili-scribe/key.bin      # 凭据加密密钥，单独存放

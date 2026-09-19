@@ -1,0 +1,19 @@
+config.yaml
+config.yml
+*.db
+*.db-wal
+*.db-shm
+key.bin
+__pycache__/
+*.pyc
+.venv/
+venv/
+uvicorn.log
+
+# 打包产物与编辑器目录
+dist/
+build/
+*.spec
+.idea/
+.vscode/
+.pytest_cache/

@@ -1,0 +1,15 @@
+# 统一行尾，避免跨平台 checkout 时出现"文件全变了"的假 diff。
+#
+# 关键的一条是 .bat / .vbs 强制 CRLF：Windows 命令行脚本用 LF 行尾时，
+# goto :label 与多行 if 块存在已知的解析失败案例。这不是风格问题，是能不能跑的问题。
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.ico binary
