@@ -11,15 +11,53 @@
 from __future__ import annotations
 
 import argparse
+import json
+import socket
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
 import uvicorn
 
 from bili_scribe.config import AppConfig
+
+
+def _port_in_use(host: str, port: int, timeout: float = 1.0) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _is_our_instance(host: str, port: int, timeout: float = 2.0) -> bool:
+    """端口上跑的是不是本程序。
+
+    只看端口通不通不够——随便什么服务占了 8818，connect 都会成功。这里拉一次
+    /api/config 认一下响应结构，避免把别人的服务当成自己。
+    """
+    url = f"http://{host}:{port}/api/config"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return False
+    return isinstance(payload, dict) and {"llm", "publish"} <= set(payload)
+
+
+def _open_when_ready(host: str, port: int, url: str, timeout: float = 25.0) -> None:
+    """等服务真的能响应了再开浏览器。
+
+    固定 sleep 靠不住：机器慢、或首次导入依赖较久时，uvicorn 还没绑上端口，
+    浏览器就会打开一个打不开的地址——看起来像"前端没起来"，其实只是时序问题。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _is_our_instance(host, port, timeout=1.0):
+            break
+        time.sleep(0.3)
+    webbrowser.open(url)
 
 
 def _banner(cfg: AppConfig) -> None:
@@ -117,6 +155,22 @@ def main() -> int:
     if args.check:
         return _check(cfg)
 
+    url = f"http://{cfg.server.host}:{cfg.server.port}/"
+
+    # 已经有实例在跑 → 不重复启动，直接把页面打开。
+    # 没有这一步的话，双击两次快捷方式会撞上 "address already in use" 然后崩，
+    # 现象和"程序坏了"一模一样，很难自己判断出来。
+    if _is_our_instance(cfg.server.host, cfg.server.port):
+        print(f"检测到 bili-scribe 已经在运行，直接打开页面：{url}")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
+
+    if _port_in_use(cfg.server.host, cfg.server.port):
+        print(f"[x] 端口 {cfg.server.port} 被其他程序占用，无法启动。")
+        print(f"    可以换一个端口：python run.py --port {cfg.server.port + 1}")
+        return 3
+
     _banner(cfg)
 
     # create_app 需要注入配置，所以直接构造实例交给 uvicorn，
@@ -126,13 +180,11 @@ def main() -> int:
     app = create_app(cfg)
 
     if not args.no_browser:
-        url = f"http://{cfg.server.host}:{cfg.server.port}/"
-
-        def _open() -> None:
-            time.sleep(1.2)
-            webbrowser.open(url)
-
-        threading.Thread(target=_open, daemon=True).start()
+        threading.Thread(
+            target=_open_when_ready,
+            args=(cfg.server.host, cfg.server.port, url),
+            daemon=True,
+        ).start()
 
     uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, log_level="info")
     return 0
