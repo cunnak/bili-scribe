@@ -62,6 +62,17 @@ class LlmConfig:
     # 即使设为 auto / on，客户端发现"正文为空但烧了思考 token"时会自动关思考重试一次。
     thinking: str = "auto"
     timeout_seconds: int = 300
+    # 调用模型时走的 HTTP 代理。空 = 直连，不读环境变量。
+    #
+    # 这一项存在的原因：`requests` 默认 trust_env=True，会去读 HTTP_PROXY /
+    # HTTPS_PROXY。于是"程序走不走代理"实际由**启动它的那个 shell**决定——
+    # 从带代理的环境里启动，所有模型请求就被塞进那个代理。
+    # 实测踩过：从某个设了 HTTP_PROXY 的会话里启动，请求被送进一个连不到
+    # 目标站点的代理，界面报的是 "ProxyError / Tunnel connection failed: 502"，
+    # 看起来像"模型服务挂了"，其实是本机代理路由错误。
+    # 所以这里显式配置、并让客户端关掉 trust_env：行为可预期，不随 shell 变。
+    # 例：http://127.0.0.1:7897
+    proxy: str = ""
     # 总结角色。每个角色是一套提示词方法论，三轮回的会走
     # 「生成 → 自我批判 → 修订」三次独立调用（见 core/roles.py）。
     # standard 表示不套用任何角色方法论，行为与不设这一项时完全一致。
@@ -69,6 +80,9 @@ class LlmConfig:
 
 
 THINKING_MODES = ("auto", "off", "on")
+# requests 支持的代理协议。写错的话错误会延后到真正调用模型时才出现，
+# 所以在这里就挡掉（见 AppConfig.from_raw）。
+PROXY_SCHEMES = ("http", "https", "socks4", "socks5", "socks5h")
 
 
 @dataclass
@@ -166,6 +180,15 @@ class AppConfig:
             raise ValueError(
                 f"llm.thinking 只能是 {' / '.join(THINKING_MODES)}，收到：{llm_cfg.thinking!r}"
             )
+        # 代理写错（比如漏了 scheme）时，requests 会抛一个很难读的
+        # MissingSchema，而且是在真正调用模型时才炸。这里提前挡掉。
+        if llm_cfg.proxy:
+            scheme = llm_cfg.proxy.split("://", 1)[0].lower()
+            if "://" not in llm_cfg.proxy or scheme not in PROXY_SCHEMES:
+                raise ValueError(
+                    f"llm.proxy 必须是带协议的完整地址（如 http://127.0.0.1:7897），"
+                    f"收到：{llm_cfg.proxy!r}"
+                )
 
         return cls(
             server=section(ServerConfig, raw.get("server")),
@@ -285,6 +308,10 @@ def render_config_yaml(cfg: AppConfig) -> str:
             f"  thinking: {q(cfg.llm.thinking)}",
             "  # 单次请求的读超时（秒）。思考模型开着的话调大它只是缓解，根治靠关思考。",
             f"  timeout_seconds: {cfg.llm.timeout_seconds}",
+            "  # 调用模型时走的 HTTP 代理。留空 = 直连，并且不读 HTTP_PROXY/HTTPS_PROXY 环境变量。",
+            "  # 有些站点（DNS 被污染的那些）必须走代理才能连上，填上你的代理地址，例如：",
+            "  #   proxy: \"http://127.0.0.1:7897\"",
+            f"  proxy: {q(cfg.llm.proxy)}",
             "  # 总结角色。可选：standard / xueshu（学术分析）/ wengao（文稿编辑）/",
             "  # xiezuo（写作专家）/ fenxi（分析报告）/ jinglian（首席思想精炼师）。",
             "  # 除 standard 外都是三轮回（生成→自我批判→修订），调用数与耗时约为三倍。",

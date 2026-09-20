@@ -282,6 +282,7 @@ async function main() {
         max_tokens: 4096,
         thinking: "off",
         timeout_seconds: 300,
+        proxy: "http://127.0.0.1:7897",
         max_input_chars: 60000,
         chunk_size: 12000,
         chunk_overlap: 400,
@@ -393,7 +394,7 @@ async function main() {
     };
     sameKeys(sent, ["server", "llm", "collect", "publish", "storage", "confirm_disable_gate"], "顶层");
     sameKeys(sent.server, ["host", "port"], "server");
-    sameKeys(sent.llm, ["base_url", "api_key", "model", "temperature", "max_tokens", "thinking", "role", "timeout_seconds", "max_input_chars", "chunk_size", "chunk_overlap"], "llm");
+    sameKeys(sent.llm, ["base_url", "api_key", "proxy", "model", "temperature", "max_tokens", "thinking", "role", "timeout_seconds", "max_input_chars", "chunk_size", "chunk_overlap"], "llm");
     sameKeys(sent.collect, ["prefer_subtitle_lang", "include_platform_summary", "danmaku"], "collect");
     sameKeys(sent.collect.danmaku, ["enabled", "also_with_subtitle", "max_items", "hot_items", "sample_items"], "collect.danmaku");
     sameKeys(sent.publish, ["require_confirm", "min_interval_seconds", "max_comment_chars", "disclose_ai", "disclosure_text"], "publish");
@@ -406,6 +407,26 @@ async function main() {
     );
 
     assert("F16 正常值通过校验", validateSettings() === "", validateSettings());
+
+    // 代理：既要能回填，也要能拦住漏了协议的写法。
+    // 放过去的话它会写进 config.yaml，而加载配置时会校验协议前缀——
+    // 保存那一刻不报错、下次启动直接起不来。
+    assert(
+      "F16b 代理地址已回填且原样发出",
+      document.getElementById("s-proxy").value === "http://127.0.0.1:7897" &&
+        sent.llm.proxy === "http://127.0.0.1:7897",
+      document.getElementById("s-proxy").value
+    );
+    document.getElementById("s-proxy").value = "127.0.0.1:7897";
+    assert(
+      "F16c 拦住漏了协议的代理",
+      validateSettings().includes("proxy"),
+      validateSettings()
+    );
+    document.getElementById("s-proxy").value = "";
+    assert("F16d 代理留空即直连，不拦", validateSettings() === "", validateSettings());
+    document.getElementById("s-proxy").value = "http://127.0.0.1:7897";
+
     document.getElementById("s-chunk-overlap").value = "99999";
     assert("F17 拦住 overlap >= size", validateSettings().includes("chunk_overlap"), validateSettings());
     document.getElementById("s-chunk-overlap").value = "400";

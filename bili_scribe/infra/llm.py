@@ -11,6 +11,14 @@
      从响应表面完全看不出异常。
 对策是三层：允许用 `enable_thinking` 直接关掉；发现"空正文 + 有思考 token"
 时自动关掉重试一次；把超时错误写成可照做的建议而不是裸的 ReadTimeout。
+
+还有一条同样非显然的规则：**代理只能来自 `llm.proxy`，绝不来自环境变量。**
+`requests` 默认 `trust_env=True`，会读 `HTTP_PROXY` / `HTTPS_PROXY`，于是
+"走不走代理"实际由**启动程序的那个 shell** 决定。踩过的坑是：从一个设了代理的
+会话里启动，请求被送进一个连不到目标站点的代理，界面报
+`ProxyError / Tunnel connection failed: 502`——看起来像模型服务挂了，
+其实请求压根没出去。所以这里 `trust_env = False`，并在代理失败时把
+"这不是模型服务的问题"直接写进错误信息。
 """
 
 from __future__ import annotations
@@ -57,6 +65,17 @@ class LlmClient:
         configured_timeout = getattr(cfg, "timeout_seconds", None) or DEFAULT_TIMEOUT
         self.timeout = int(timeout or configured_timeout)
         self.session = requests.Session()
+        # 关掉 trust_env：requests 默认会去读 HTTP_PROXY / HTTPS_PROXY，
+        # 那会让"走不走代理"由**启动程序的 shell**决定，而不是由配置决定。
+        # 实测踩过：从一个设了代理的会话里启动，请求被塞进一个连不到目标站点的
+        # 代理，界面报 "ProxyError / Tunnel connection failed: 502"，
+        # 看起来像模型服务挂了，其实是本机代理路由错误。
+        # 代理只能来自 llm.proxy，绝不来自环境。
+        self.session.trust_env = False
+        proxy = (getattr(cfg, "proxy", "") or "").strip()
+        self.proxies: dict[str, str] | None = (
+            {"http": proxy, "https": proxy} if proxy else None
+        )
         # 最近一次调用的过程说明（例如"已自动关闭思考重试"），供界面展示。
         # 这些是"发生过但没失败"的事情，不记下来用户就不知道模型被降级过。
         self.notes: list[str] = []
@@ -66,7 +85,8 @@ class LlmClient:
         return bool(self.cfg.api_key and self.cfg.base_url and self.cfg.model)
 
     def describe(self) -> str:
-        return f"{self.cfg.model} @ {self.cfg.base_url}"
+        route = self.proxies["https"] if self.proxies else "直连"
+        return f"{self.cfg.model} @ {self.cfg.base_url}（{route}）"
 
     # ------------------------------------------------------------ 载荷
 
@@ -107,8 +127,31 @@ class LlmClient:
         }
         try:
             resp = self.session.post(
-                url, json=payload, headers=headers, timeout=self.timeout
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+                proxies=self.proxies,
             )
+        except requests.exceptions.ProxyError as exc:
+            # 代理失败长得非常像"模型服务挂了"（502 Bad Gateway / Unable to connect
+            # to proxy），实际上请求压根没出去。这里把话说明白。
+            where = self.proxies["https"] if self.proxies else "（未配置代理）"
+            raise LlmError(
+                f"代理连接失败：{exc}。当前 llm.proxy = {where}。"
+                "这通常不是模型服务的问题——先确认该代理能连上 "
+                f"{self.cfg.base_url}，连不上就换一个代理，或者留空直连。"
+            ) from exc
+        except requests.exceptions.ConnectTimeout as exc:
+            # 必须排在 requests.Timeout 前面：ConnectTimeout 是它的子类，
+            # 被它先接住的话，连不上站点的场景会得到"把 thinking 改成 off"
+            # 这种完全不相干的建议，反而把人带偏。
+            route = self.proxies["https"] if self.proxies else "直连"
+            raise LlmError(
+                f"连不上 {self.cfg.base_url}（{route}）：{exc}。"
+                "如果这个站点直连一直超时、而别的网站正常，多半是域名解析被污染"
+                "——在设置页的 llm.proxy 里填一个能连上它的代理再试。"
+            ) from exc
         except requests.Timeout as exc:
             raise LlmError(
                 f"模型请求超时：{self.timeout} 秒内没有拿到响应。"

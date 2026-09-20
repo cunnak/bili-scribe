@@ -328,6 +328,16 @@
           <div class="desc">OpenAI 兼容接口地址，一般以 /v1 结尾。</div>
         </div>
         <div class="field-box wide">
+          <label for="s-proxy">proxy（调用模型时走的代理）</label>
+          <input type="text" id="s-proxy" spellcheck="false" placeholder="留空 = 直连">
+          <div class="desc">
+            留空即直连，<strong>并且不读 HTTP_PROXY / HTTPS_PROXY 环境变量</strong>——
+            否则"走不走代理"会由启动程序的那个 shell 决定，很难查。
+            有些站点 DNS 被污染、直连必然超时，这时填上代理地址，例如
+            <code>http://127.0.0.1:7897</code>。只影响模型请求，抓 B站 不走这里。
+          </div>
+        </div>
+        <div class="field-box wide">
           <label for="s-api-key">api_key</label>
           <div class="row">
             <input type="password" id="s-api-key" autocomplete="off" spellcheck="false" placeholder="（未配置）">
@@ -966,6 +976,7 @@ function fillSettingsForm(v) {
   const pub = v.publish || {}, st = v.storage || {}, srv = v.server || {};
 
   _set("s-base-url", llm.base_url);
+  _set("s-proxy", llm.proxy);
   _set("s-api-key", llm.api_key);
   _set("s-model", llm.model);
   _set("s-temperature", llm.temperature);
@@ -1097,6 +1108,16 @@ function validateSettings() {
   }
   if (_num("s-timeout") < 5) return "timeout_seconds 至少要 5 秒。";
 
+  // 代理写错会连带害到下次启动：它会被写进 config.yaml，而加载时会校验协议前缀。
+  // 保存那一刻不报错、下次启动直接起不来，是最难查的一类。
+  const proxy = _val("s-proxy");
+  if (proxy) {
+    const ok = ["http", "https", "socks4", "socks5", "socks5h"].some(
+      s => proxy.slice(0, s.length + 3).toLowerCase() === s + "://"
+    );
+    if (!ok) return "proxy 要带协议，例如 http://127.0.0.1:7897（留空＝直连）。";
+  }
+
   const turningOff = !document.getElementById("s-require-confirm").checked
     && state.settings && state.settings.values
     && state.settings.values.publish && state.settings.values.publish.require_confirm;
@@ -1112,6 +1133,7 @@ function collectSettings() {
     llm: {
       base_url: _val("s-base-url"),
       api_key: _val("s-api-key"),
+      proxy: _val("s-proxy"),
       model: _val("s-model"),
       temperature: Number(_val("s-temperature")),
       max_tokens: _num("s-max-tokens"),
@@ -1179,6 +1201,7 @@ async function testLlm() {
     const body = JSON.stringify({
       base_url: _val("s-base-url"),
       api_key: _val("s-api-key"),
+      proxy: _val("s-proxy"),
       model: _val("s-model"),
       temperature: Number(_val("s-temperature")) || 0,
       max_tokens: _num("s-max-tokens") || 1024,

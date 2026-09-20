@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -398,6 +399,125 @@ def _llm_thinking() -> str:
     return "参数策略 / 枚举校验 / 空正文自动降级 / 超时提示，全部符合预期"
 
 
+def _llm_proxy() -> str:
+    """代理只能来自 llm.proxy，绝不来自环境变量。
+
+    这是一个真实事故的回归用例：服务从一个设了 HTTP_PROXY 的 shell 里启动，
+    requests 默认 trust_env=True 就把所有模型请求塞进了那个代理，
+    界面报 "ProxyError / Tunnel connection failed: 502"——看起来像模型服务挂了，
+    其实请求压根没出去。所以必须钉死两件事：
+      1) 客户端不读环境变量；2) 代理地址写错在加载配置时就被拒绝。
+    """
+    import os
+    import tempfile
+
+    import requests
+
+    from bili_scribe.config import PROXY_SCHEMES, AppConfig, LlmConfig
+    from bili_scribe.infra.llm import LlmClient, LlmError
+
+    msgs = [{"role": "user", "content": "hi"}]
+    url = "https://api.example.com/v1/chat/completions"
+
+    def make(proxy: str = "") -> LlmClient:
+        return LlmClient(
+            LlmConfig(
+                api_key="k",
+                model="m",
+                base_url="https://api.example.com/v1",
+                proxy=proxy,
+            )
+        )
+
+    # ---------- 1. 不配代理时：trust_env 关闭，proxies 为空 ----------
+    plain = make()
+    assert plain.session.trust_env is False, "trust_env 没关：会读环境变量里的代理"
+    assert plain.proxies is None, plain.proxies
+    assert "直连" in plain.describe(), plain.describe()
+
+    # ---------- 2. 配了代理时：显式带上 ----------
+    proxied = make("http://127.0.0.1:7897")
+    assert proxied.proxies == {
+        "http": "http://127.0.0.1:7897",
+        "https": "http://127.0.0.1:7897",
+    }, proxied.proxies
+    assert "127.0.0.1:7897" in proxied.describe(), proxied.describe()
+
+    # ---------- 3. 环境变量不能漏进来（这条是核心） ----------
+    # 用 requests 自己的解析函数取证：它就是真正决定"这次请求走哪个代理"的那一步。
+    saved = {k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
+    try:
+        for k in saved:
+            os.environ[k] = "http://127.0.0.1:55159"
+        plain2 = make()
+        merged = plain2.session.merge_environment_settings(url, dict(plain2.proxies or {}), None, None, None)
+        assert not merged.get("proxies"), (
+            f"环境变量里的代理漏进了请求：{merged.get('proxies')}——"
+            "这正是那个 502 事故的成因"
+        )
+        # 对照组：trust_env=True 时确实会读到，说明上面那条不是因为用例写错了
+        leaky = requests.Session()
+        leaky.trust_env = True
+        control = leaky.merge_environment_settings(url, {}, None, None, None)
+        assert control.get("proxies"), "对照组都没读到代理，说明这个取证方法无效"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    # ---------- 4. 代理地址写错：加载配置时就拒绝（不能等到下次启动才发现） ----------
+    assert "http" in PROXY_SCHEMES and "socks5" in PROXY_SCHEMES, PROXY_SCHEMES
+    for bad_value in ("127.0.0.1:7897", "ftp://x", "随便写的"):
+        cfg_file = Path(tempfile.mkdtemp()) / "bad-proxy.yaml"
+        cfg_file.write_text(f"llm:\n  proxy: {bad_value!r}\n", encoding="utf-8")
+        try:
+            AppConfig.load(cfg_file)
+        except ValueError as exc:
+            assert "proxy" in str(exc), exc
+        else:
+            raise AssertionError(f"非法代理值没有被拒绝：{bad_value!r}")
+
+    # ---------- 5. 代理失败要说明"这不是模型服务的问题" ----------
+    class _ProxyFailSession:
+        def post(self, *args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            raise requests.exceptions.ProxyError("Tunnel connection failed: 502 Bad Gateway")
+
+    failing = make("http://127.0.0.1:7897")
+    failing.session = _ProxyFailSession()  # type: ignore[assignment]
+    try:
+        failing.chat(msgs)
+    except LlmError as exc:
+        text = str(exc)
+        assert "代理" in text, f"代理失败没被识别出来：{text}"
+        assert "llm.proxy" in text, f"没告诉用户去改哪一项：{text}"
+        assert "7897" in text, f"没把当前代理地址带出来：{text}"
+    else:
+        raise AssertionError("代理失败应该转成可照做的 LlmError")
+
+    # ---------- 6. ConnectTimeout 不能被当成"读超时"处理 ----------
+    # ConnectTimeout 是 Timeout 的子类。catch 顺序写错的话，这个场景会得到
+    # "把 thinking 改成 off"这种和连接无关的建议，反而把人带偏——所以单独立一条。
+    class _ConnectFailSession:
+        def post(self, *args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            raise requests.exceptions.ConnectTimeout("Connection to api.example.com timed out")
+
+    unreachable = make()
+    unreachable.session = _ConnectFailSession()  # type: ignore[assignment]
+    try:
+        unreachable.chat(msgs)
+    except LlmError as exc:
+        text = str(exc)
+        assert "thinking" not in text, f"连接超时不该给思考相关的建议：{text}"
+        assert "proxy" in text, f"没提示可能是 DNS 问题、可以走代理：{text}"
+        assert "连不上" in text or "超时" in text, text
+    else:
+        raise AssertionError("连接超时应该转成 LlmError")
+
+    return "trust_env 已关 / 环境变量代理漏不进 / 非法值在加载时被拒 / 代理与连接超时提示可照做"
+
+
 def _roles_registry() -> str:
     """角色注册表的不变量。
 
@@ -509,6 +629,7 @@ check("发布闸门", _publisher_gates)
 check("二维码缺依赖时的提示", _qr_missing_message)
 check("敏感文件被排除", _sensitive_files_excluded)
 check("思考模型输出预算与自动降级", _llm_thinking)
+check("代理只来自配置、不来自环境变量", _llm_proxy)
 check("角色注册表", _roles_registry)
 check("发布长文与 Delta 转换", _publish_document)
 
@@ -539,6 +660,12 @@ def _http_probes() -> None:
     assert server.started, "uvicorn 未能启动"
 
     base = f"http://127.0.0.1:{port}"
+    # 探针必须直连 localhost。如果让 requests 读环境变量里的代理，请求会被送去
+    # 让那个代理转发到 127.0.0.1——而代理通常连不回来，测试就随启动它的 shell
+    # 变化。被测对象是应用，不是 shell 的环境。（这和 LlmClient 关掉 trust_env
+    # 是同一个原因，见 infra/llm.py。）
+    probe = requests.Session()
+    probe.trust_env = False
     probes = [
         ("GET", "/", 15, 200),
         ("GET", "/api/config", 10, 200),
@@ -553,9 +680,9 @@ def _http_probes() -> None:
     for method, path, timeout, expected in probes:
         try:
             if method == "GET":
-                resp = requests.get(base + path, timeout=timeout)
+                resp = probe.get(base + path, timeout=timeout)
             else:
-                resp = requests.post(base + path, json={}, timeout=timeout)
+                resp = probe.post(base + path, json={}, timeout=timeout)
             report["http"].append(
                 {
                     "path": f"{method} {path}",
@@ -858,6 +985,13 @@ def _settings_api() -> None:
         server.should_exit = True
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+# 这一整套 HTTP 探测都打本机 127.0.0.1。如果让 requests 去读环境变量里的代理，
+# 请求会被送去让代理转发回 localhost——而代理通常连不回来，于是测试结果随
+# 启动它的那个 shell 变化（实测踩过：一个指向别处的 HTTP_PROXY 让 /api/llm/check
+# 在 40 秒后超时，看起来像应用坏了）。被测对象是应用，不是 shell 的环境。
+os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
+os.environ["no_proxy"] = "127.0.0.1,localhost,::1"
 
 try:
     _http_probes()

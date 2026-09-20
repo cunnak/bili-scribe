@@ -164,6 +164,43 @@ python run.py --check
 | 模型报 `Access denied by API-Key restrictions` | 模型名没错，但这把 key 没被授权用那个模型。换一个被授权的 |
 | 模型请求超时（`Read timed out`） | 多半是思考模型。把设置页的 `thinking` 改成 `off`，见下节 |
 | 总结生成成功但内容是空的 | 同上，输出预算被思考吃光了 |
+| `ProxyError` / `Tunnel connection failed: 502` | **先看这一条**——模板见下。它长得像"模型服务挂了"，其实请求压根没出去 |
+| 模型站点直连超时（`ConnectTimeout`） | 该站点的 DNS 被污染，直连必然连不上。在设置页的 `proxy` 里填代理地址 |
+
+### `ProxyError` / `502 Bad Gateway`：看起来像模型挂了，其实是代理
+
+完整报错长这样：
+
+```
+模型请求失败：HTTPSConnectionPool(host='xxx.com', port=443): Max retries exceeded
+(Caused by ProxyError('Unable to connect to proxy',
+ OSError('Tunnel connection failed: 502 Bad Gateway')))
+```
+
+关键在 `ProxyError`——**请求被送进了一个代理，而那个代理连不到目标站点**。跟模型服务本身没关系。
+
+这个坑的成因值得知道，因为它很难查：`requests` 默认 `trust_env=True`，会读 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量。于是"程序走不走代理"实际由**启动它的那个进程环境**决定——从带代理的终端里启动，所有模型请求就被塞进那个代理，而配置文件里看不到任何异常。这不是配置错了，是**行为不可预期**。
+
+所以这个版本的客户端做了两件事：
+
+1. **`trust_env = False`**：代理**只能**来自 `llm.proxy`，绝不来自环境变量。
+2. **代理失败时把话说明白**：错误信息里带上当前代理地址，并提示"这通常不是模型服务的问题"。
+
+排查顺序：先确认 `llm.proxy` 是不是你以为的那个；再确认这个代理能不能连上 `base_url`；都不行就先留空试直连。
+
+### DNS 被污染的站点必须走代理
+
+有些站点在本机**直连一定失败**，因为域名被解析到无关的境外 IP。实测 `aihubmix.com` 被解析到 `31.13.86.21`（Facebook 的地址段），于是：
+
+| 路由 | 结果 |
+|---|---|
+| 直连 | `ConnectTimeout`（24 秒才放弃） |
+| 走一个连不到它的代理 | `502 Bad Gateway` |
+| 走能连上它的代理 | **200，1.5 秒** |
+
+判断方法：直连报 `ConnectTimeout`、同时别的国内站点正常，就基本可以确定是 DNS 问题。这时候去设置页把 `proxy` 填上，例如 `http://127.0.0.1:7897`。
+
+`proxy` 只作用于模型请求；抓 B站 的请求不经过它。
 
 ---
 
@@ -303,6 +340,8 @@ llm:
   model: deepseek-chat
   thinking: auto            # 思考模型填 off。理由见上面那节，这是个真会咬人的坑
   timeout_seconds: 300
+  proxy: ""                 # 留空＝直连，且不读环境变量里的代理。需要时填 http://127.0.0.1:7897
+  role: standard            # 默认总结角色，主页面上还能对单次任务临时改
   max_input_chars: 24000    # 超过就分块归约
 
 collect:
@@ -316,6 +355,8 @@ publish:
 ```
 
 `base_url` 只要兼容 OpenAI 的 `/chat/completions` 就能用，不绑定厂商。
+
+`proxy` 留空表示直连，**并且不读 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量**——这是有意的，理由见上面「`ProxyError` / `502 Bad Gateway`」那节。它只作用于模型请求，抓 B站 的请求永远直连。
 
 ### 关于人工确认闸门
 
@@ -366,13 +407,15 @@ bili-scribe/
 ### 跑测试
 
 ```bash
-python tests/smoke_test.py     # 16 项离线 + 23 项 HTTP
-node tests/frontend_test.js    # 69 项前端
+python tests/smoke_test.py     # 17 项离线 + 23 项 HTTP
+node tests/frontend_test.js    # 72 项前端
 ```
 
 `smoke_test.py` 会真的去请求一次 B站 的扫码接口（匿名取码，不涉及登录），并在临时目录里跑一遍设置页的完整读写——它在结尾会断言项目的 `config.yaml` 一个字节都没变，因为这个测试是真的会写配置文件的。
 
-前端那 69 项里，A 组专门盯着"页面没连上后端"这个出过事故的场景，F 组盯设置页的字段名与后端逐个对齐（对不上就会被静默忽略：保存"成功"但配置没生效）。
+它还会强制 `NO_PROXY=127.0.0.1,localhost`：整套 HTTP 探测都打本机，如果让 `requests` 去读环境变量里的代理，请求会被送去让代理转发回 localhost，而代理通常连不回来——测试结果就会随启动它的那个 shell 变化。被测对象是应用，不是 shell 的环境。
+
+前端那 72 项里，A 组专门盯着"页面没连上后端"这个出过事故的场景，F 组盯设置页的字段名与后端逐个对齐（对不上就会被静默忽略：保存"成功"但配置没生效）。
 
 ---
 

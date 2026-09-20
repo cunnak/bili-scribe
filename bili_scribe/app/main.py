@@ -14,7 +14,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..config import NEEDS_RESTART, AppConfig, LlmConfig, apply_settings, save_config
+from ..config import (
+    NEEDS_RESTART,
+    PROXY_SCHEMES,
+    AppConfig,
+    LlmConfig,
+    apply_settings,
+    save_config,
+)
 from ..core import collector as collector_mod
 from ..core import composer, resolver, summarizer
 from ..core.collector import CollectError
@@ -97,6 +104,8 @@ class LlmPatch(BaseModel):
     # 而它的错值恰好属于"看着没问题但行为不对"那一类，必须当场报出来。
     thinking: Literal["auto", "off", "on"] = "auto"
     timeout_seconds: int = Field(ge=5, le=3600)
+    # 空 = 直连（且不读环境变量代理）。非空必须是带协议的完整地址。
+    proxy: str = Field(default="", max_length=500)
     # 用 str + 显式校验而不是 Literal：角色清单定义在 core/roles.py 里，
     # 双份维护迟早会漂移。校验失败时把可选清单一起返回，比 422 有用。
     role: str = "standard"
@@ -323,6 +332,19 @@ def create_app(cfg: AppConfig) -> FastAPI:
                     + "、".join(summarizer.roles.ROLE_KEYS)
                 ),
             )
+        # 代理写错必须当场挡掉。它会被写进磁盘，而 AppConfig.from_raw 在加载
+        # 时会校验协议前缀——放过去的话，保存那一刻不报错，**下次启动直接起不来**。
+        proxy = (payload.llm.proxy or "").strip()
+        if proxy:
+            scheme = proxy.split("://", 1)[0].lower()
+            if "://" not in proxy or scheme not in PROXY_SCHEMES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"代理地址要带协议，例如 http://127.0.0.1:7897。收到：{proxy}"
+                    ),
+                )
+        payload.llm.proxy = proxy
 
         turning_off_gate = (
             cfg.publish.require_confirm and not payload.publish.require_confirm

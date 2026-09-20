@@ -22,6 +22,22 @@ llm:
   thinking: auto
   # 单次请求的读超时（秒）。思考模型开着的话，调大它只是缓解，根治靠把 thinking 关掉。
   timeout_seconds: 300
+  # 调用模型时走的 HTTP 代理。留空 = 直连，并且**不读** HTTP_PROXY / HTTPS_PROXY 环境变量。
+  #
+  # 为什么要显式配置：requests 默认 trust_env=True 会读环境变量，于是"走不走代理"
+  # 实际由启动本程序的 shell 决定。踩过的坑是从一个设了代理的会话里启动，所有模型请求
+  # 被送进那个代理，界面报 ProxyError / Tunnel connection failed: 502 —— 看起来像
+  # 模型服务挂了，其实请求压根没出去。
+  #
+  # 有些站点的 DNS 被污染（例如 aihubmix.com 被解析到境外无关 IP），直连必然超时，
+  # 这时必须填代理，例如：proxy: "http://127.0.0.1:7897"
+  # 只影响模型请求；抓 B站 的请求不走这里。
+  proxy: ""
+  # 总结角色。可选：standard / xueshu（学术分析）/ renhua（说人话）/ wengao（文稿编辑）
+  # / xiezuo（写作专家）/ fenxi（分析报告）/ jinglian（首席思想精炼师）。
+  # 除 standard 外都是三轮回（生成 → 自我批判 → 修订），调用数与耗时约为三倍。
+  # 主页面上还能针对单次任务临时选。
+  role: standard
   max_input_chars: 24000   # 素材超过这个长度就走分块归约
   chunk_size: 6000
   chunk_overlap: 400
