@@ -1,5 +1,8 @@
 config.yaml
 config.yml
+# 设置页保存配置时的备份/中间文件，可能含真实 api_key
+config.yaml.bak
+config.yaml.tmp
 *.db
 *.db-wal
 *.db-shm

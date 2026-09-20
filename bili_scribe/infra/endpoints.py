@@ -33,6 +33,10 @@ REPLY_MAIN = f"{API}/x/v2/reply/wbi/main"
 # —— 评论操作 ——
 REPLY_ADD = f"{API}/x/v2/reply/add"
 REPLY_DEL = f"{API}/x/v2/reply/del"
+# 视频笔记。auto_comment=1 时笔记摘要会自动发成评论区评论，
+# 这是突破普通评论 1000 字上限的唯一正规通道。
+NOTE_ADD = f"{API}/x/note/add"
+NOTE_DEL = f"{API}/x/note/del"
 
 # 评论区的资源类型代码，视频稿件固定为 1
 COMMENT_TYPE_VIDEO = 1

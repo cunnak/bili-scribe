@@ -36,7 +36,15 @@ EXCLUDE_DIRS = {
     "node_modules",
 }
 
-EXCLUDE_FILES = {"config.yaml", "config.yml", "key.bin", "uvicorn.log"}
+EXCLUDE_FILES = {
+    "config.yaml",
+    "config.yml",
+    # 设置页保存时会把原配置备份成这个，里面可能有真实 api_key
+    "config.yaml.bak",
+    "config.yaml.tmp",
+    "key.bin",
+    "uvicorn.log",
+}
 
 EXCLUDE_SUFFIXES = {
     ".db",
@@ -48,11 +56,14 @@ EXCLUDE_SUFFIXES = {
     ".zip",
     ".log",
     ".lnk",
+    ".bak",
+    ".tmp",
+    ".orig",
 }
 
 # 打包后必须确认不在包里的文件名/后缀
-FORBIDDEN_NAMES = {"config.yaml", "config.yml", "key.bin"}
-FORBIDDEN_SUFFIXES = {".db", ".db-wal", ".db-shm", ".bin"}
+FORBIDDEN_NAMES = {"config.yaml", "config.yaml.bak", "config.yml", "key.bin"}
+FORBIDDEN_SUFFIXES = {".db", ".db-wal", ".db-shm", ".bin", ".bak", ".tmp"}
 
 
 def should_skip(rel: Path) -> bool:

@@ -143,9 +143,13 @@ def main() -> int:
         print(f"配置装载失败：{exc}")
         return 2
 
+    # 记下配置文件的实际路径，设置页面要靠它知道该回写到哪。
+    # 用具名路径固化下来，避免工作目录变化后写到别处。
+    cfg.source_path = str(config_path.resolve())
+
     if not config_path.exists():
         print(f"提示：未找到 {config_path}，当前使用内置默认值。")
-        print("      可以复制 config.example.yaml 为 config.yaml 后按需修改。\n")
+        print("      在网页的设置页面点保存，就会把这个文件创建出来。\n")
 
     if args.host:
         cfg.server.host = args.host

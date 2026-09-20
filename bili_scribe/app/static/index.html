@@ -44,11 +44,39 @@
   .dot.on { background: var(--ok); }
   .dot.off { background: var(--danger); }
 
-  main {
+  .layout {
     display: grid; grid-template-columns: minmax(320px, 420px) 1fr;
     gap: 16px; padding: 16px 22px 40px; align-items: start;
   }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+    padding: 5px 14px; font-size: 13px; border-radius: 8px;
+  }
+  .tab.active { background: var(--panel-2); color: var(--text); border-color: var(--muted); }
+
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; }
+  .field-box { display: flex; flex-direction: column; gap: 4px; }
+  .field-box label { font-size: 12px; color: var(--muted); }
+  .field-box .desc { font-size: 11px; color: var(--dim); line-height: 1.5; }
+  .field-box input[type=text], .field-box input[type=password], .field-box input[type=number] { width: 100%; }
+  .field-box.wide { grid-column: 1 / -1; }
+
+  .switch-row { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; }
+  .switch-row input[type=checkbox] { margin-top: 3px; flex: none; }
+  .switch-row .txt { font-size: 13px; }
+  .switch-row .desc { font-size: 11px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
+
+  .danger-zone { border-left: 3px solid var(--danger); background: rgba(226,85,85,.08); padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 6px; }
+  .danger-zone .txt { color: #f0c0c0; }
+  .danger-confirm { display: none; margin-top: 8px; }
+  .danger-confirm.show { display: block; }
+
+  h3.sec { font-size: 13px; font-weight: 600; color: var(--text); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3.sec:first-of-type { margin-top: 4px; }
+  .ro-note { font-size: 11px; color: var(--warn); }
 
   .card {
     background: var(--panel); border: 1px solid var(--line);
@@ -61,12 +89,17 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   label.field { display: block; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
 
-  textarea, input[type=text], input[type=password] {
+  textarea, input[type=text], input[type=password], input[type=number], select {
     width: 100%; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px;
     padding: 9px 11px; font: inherit; resize: vertical;
   }
-  textarea:focus, input:focus { outline: none; border-color: var(--accent); }
+  /* number 输入框要显式写出外观，否则在暗色主题下会退回浏览器默认的浅色控件 */
+  input[type=number] { appearance: textfield; -moz-appearance: textfield; }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  select option { background: var(--panel); color: var(--text); }
+  textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
   textarea { min-height: 62px; }
   textarea#comment-box { min-height: 130px; font-size: 13px; }
 
@@ -162,14 +195,19 @@
 <header>
   <h1>bili-scribe</h1>
   <span class="sub">B站视频总结 · 本地自用</span>
+  <span class="tabs">
+    <button class="tab active" id="tab-main" onclick="switchView('main')">总结</button>
+    <button class="tab" id="tab-settings" onclick="switchView('settings')">设置</button>
+  </span>
   <span class="spacer"></span>
   <span class="chip"><span class="dot" id="auth-dot"></span><span id="auth-text">检查登录态…</span></span>
   <span class="chip" id="model-chip">模型：—</span>
 </header>
 
 <div id="backend-banner" class="banner" style="display:none"></div>
+<div id="gate-banner" class="banner" style="display:none"></div>
 
-<main>
+<div class="layout" id="view-main">
   <section>
     <div class="card">
       <h2>1 · 账号</h2>
@@ -216,6 +254,11 @@
     <div class="card">
       <h2>2 · 选择视频</h2>
       <textarea id="raw-input" placeholder="粘贴视频链接、b23.tv 短链、BV 号或 av 号&#10;例：https://www.bilibili.com/video/BV1xx411c7mD/?p=2"></textarea>
+      <div class="row" style="margin-top:10px; gap:10px">
+        <label for="task-role" style="font-size:12px; color:var(--muted)">总结角色</label>
+        <select id="task-role" onchange="onRoleChange()" style="max-width:300px"></select>
+      </div>
+      <div class="hint" id="role-hint"></div>
       <div class="row" style="margin-top:10px">
         <button id="run-btn" onclick="submitTask()">解析并总结</button>
         <span class="hint">带 ?p=2 会总结第 2 P</span>
@@ -272,10 +315,219 @@
       </div>
     </div>
   </section>
-</main>
+</div>
+
+<div class="layout" id="view-settings" style="display:none">
+  <section>
+    <div class="card">
+      <h2>大模型</h2>
+      <div class="form-grid">
+        <div class="field-box wide">
+          <label for="s-base-url">base_url</label>
+          <input type="text" id="s-base-url" spellcheck="false" placeholder="https://api.deepseek.com/v1">
+          <div class="desc">OpenAI 兼容接口地址，一般以 /v1 结尾。</div>
+        </div>
+        <div class="field-box wide">
+          <label for="s-api-key">api_key</label>
+          <div class="row">
+            <input type="password" id="s-api-key" autocomplete="off" spellcheck="false" placeholder="（未配置）">
+            <button class="ghost" id="s-key-toggle" type="button" onclick="toggleKey()">显示</button>
+          </div>
+          <div class="desc">保存后立即生效，不用重启。清空这一格再保存＝删除密钥。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-model">model</label>
+          <input type="text" id="s-model" spellcheck="false" placeholder="deepseek-chat">
+        </div>
+        <div class="field-box">
+          <label for="s-temperature">temperature</label>
+          <input type="number" id="s-temperature" min="0" max="2" step="0.1">
+          <div class="desc">越低越稳。总结任务建议 0.2–0.5。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-max-tokens">max_tokens</label>
+          <input type="number" id="s-max-tokens" min="1" max="200000" step="256">
+        </div>
+        <div class="field-box">
+          <label for="s-thinking">thinking（思考模式）</label>
+          <select id="s-thinking">
+            <option value="auto">auto — 不发送相关参数</option>
+            <option value="off">off — 显式关闭思考（推荐）</option>
+            <option value="on">on — 显式开启思考</option>
+          </select>
+          <div class="desc">
+            思考模型（Qwen3 系列等）先推理再作答，而这段推理<strong>不吃 max_tokens</strong>：
+            实测设 4096 却跑了 5125 tokens，全花在思考上，正文返回空数组。
+            表现就是"请求超时"或"总结为空"。用思考模型请选 off。
+          </div>
+        </div>
+        <div class="field-box">
+          <label for="s-role">role（默认总结角色）</label>
+          <select id="s-role"></select>
+          <div class="desc">
+            每个角色是一套提示词方法论。除「标准」外都是三轮回（生成 → 自我批判 → 修订），
+            调用数与耗时约为三倍。主页面上还能针对单次任务临时改。
+          </div>
+        </div>
+        <div class="field-box">
+          <label for="s-timeout">timeout_seconds</label>
+          <input type="number" id="s-timeout" min="5" max="3600" step="10">
+          <div class="desc">单次请求的读超时。开着思考时调大它只是缓解，根治靠把 thinking 关掉。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-max-input">max_input_chars</label>
+          <input type="number" id="s-max-input" min="1000" max="2000000" step="1000">
+          <div class="desc">喂给模型的最大素材字数，超出会触发分块。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-chunk-size">chunk_size</label>
+          <input type="number" id="s-chunk-size" min="200" max="200000" step="500">
+        </div>
+        <div class="field-box">
+          <label for="s-chunk-overlap">chunk_overlap</label>
+          <input type="number" id="s-chunk-overlap" min="0" max="100000" step="100">
+          <div class="desc">必须小于 chunk_size，否则分块窗口不会向前推进。</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="ghost" type="button" onclick="testLlm()">测试连接</button>
+        <span class="hint">用表单里当前的值试一次，不写盘。</span>
+      </div>
+      <div class="status-line" id="llm-test-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>采集</h2>
+      <div class="field-box wide">
+        <label for="s-langs">字幕语言优先级</label>
+        <input type="text" id="s-langs" spellcheck="false" placeholder="zh-CN, zh-Hans, zh-Hant, ai-zh">
+        <div class="desc">逗号分隔，从左到右依次尝试。</div>
+      </div>
+      <label class="switch-row">
+        <input type="checkbox" id="s-platform-summary">
+        <span>
+          <span class="txt">把平台 AI 摘要作为对照</span>
+          <div class="desc">多取一路信号，会多一点 token 开销。</div>
+        </span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="s-danmaku-enabled">
+        <span>
+          <span class="txt">没有字幕时用弹幕兜底</span>
+          <div class="desc">弹幕反映的是观众反应，不等于视频内容本体。总结里会标注来源。</div>
+        </span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="s-danmaku-with-sub">
+        <span>
+          <span class="txt">有字幕时也一起带上弹幕</span>
+          <div class="desc">内容与观众反应交叉验证，质量上限更高，成本也明显上升。</div>
+        </span>
+      </label>
+      <div class="form-grid" style="margin-top:10px">
+        <div class="field-box">
+          <label for="s-dm-max">max_items</label>
+          <input type="number" id="s-dm-max" min="1" max="50000">
+          <div class="desc">最多取多少条弹幕。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-dm-hot">hot_items</label>
+          <input type="number" id="s-dm-hot" min="1" max="20000">
+        </div>
+        <div class="field-box">
+          <label for="s-dm-sample">sample_items</label>
+          <input type="number" id="s-dm-sample" min="1" max="20000">
+          <div class="desc">均匀采样的条数，避免只看到开头一段。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>发布</h2>
+      <div class="danger-zone">
+        <label class="switch-row" style="padding:0">
+          <input type="checkbox" id="s-require-confirm" onchange="onGateToggle()">
+          <span>
+            <span class="txt">人工确认闸门</span>
+            <div class="desc">开启时，总结生成后会停下来等你看过并勾选确认，才会发出去。</div>
+          </span>
+        </label>
+        <div class="danger-confirm" id="gate-confirm">
+          <div class="txt">
+            <strong>关掉之后就没有确认环节了：总结一生成就发到对方视频的评论区。</strong>
+            发错了只能自己去评论区删。
+          </div>
+          <label class="switch-row" style="padding-top:6px">
+            <input type="checkbox" id="s-gate-ack">
+            <span class="txt">我知道后果，仍然要关闭</span>
+          </label>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-top:12px">
+        <div class="field-box">
+          <label for="s-interval">min_interval_seconds</label>
+          <input type="number" id="s-interval" min="0" max="3600">
+          <div class="desc">两次发布之间的强制间隔，防止撞上平台限流。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-max-chars">max_comment_chars</label>
+          <input type="number" id="s-max-chars" min="50" max="1000">
+          <div class="desc">平台硬上限 1000，不能超过。</div>
+        </div>
+      </div>
+      <label class="switch-row">
+        <input type="checkbox" id="s-disclose">
+        <span>
+          <span class="txt">在评论里标明这是 AI 生成的总结</span>
+          <div class="desc">让别人知道这条内容不是人写的。</div>
+        </span>
+      </label>
+      <div class="field-box wide">
+        <label for="s-disclosure-text">disclosure_text</label>
+        <input type="text" id="s-disclosure-text" maxlength="200">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>存储与服务器</h2>
+      <div class="form-grid">
+        <div class="field-box wide">
+          <label for="s-db">db_path</label>
+          <input type="text" id="s-db" spellcheck="false">
+        </div>
+        <div class="field-box wide">
+          <label for="s-key">key_path</label>
+          <input type="text" id="s-key" spellcheck="false">
+          <div class="desc">凭据加密用的密钥文件。改了路径，已存的登录凭据就读不出来了。</div>
+        </div>
+        <div class="field-box">
+          <label for="s-host">host</label>
+          <input type="text" id="s-host" spellcheck="false">
+        </div>
+        <div class="field-box">
+          <label for="s-port">port</label>
+          <input type="number" id="s-port" min="1" max="65535">
+        </div>
+      </div>
+      <div class="hint" id="restart-note"></div>
+    </div>
+
+    <div class="card">
+      <h2>保存</h2>
+      <div class="hint" id="settings-path">配置文件位置加载中…</div>
+      <div class="row" style="margin-top:12px">
+        <button id="save-btn" onclick="saveSettings()">保存设置</button>
+        <button class="ghost" type="button" onclick="loadSettings(true)">放弃改动</button>
+      </div>
+      <div class="status-line" id="settings-msg"></div>
+    </div>
+  </section>
+</div>
 
 <script>
-const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false };
+const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false, settings: null, settingsLoaded: false, roles: null, roleKey: "standard" };
 
 /* 这个页面有两种打开方式：由后端托管（http://127.0.0.1:8818/），
    或者被当成一个静态 HTML 直接打开／在预览面板里打开。后者所有接口都不存在，
@@ -329,6 +581,7 @@ function showBackendBanner(message) {
   document.getElementById("qr-btn").disabled = true;
   document.getElementById("run-btn").disabled = true;
   document.getElementById("publish-btn").disabled = true;
+  document.getElementById("save-btn").disabled = true;
 }
 
 function applyFeatureGates() {
@@ -353,6 +606,8 @@ async function detectBackend() {
     const chip = document.getElementById("model-chip");
     chip.textContent = "模型：" + cfg.llm.model + (cfg.llm.configured ? "" : "（未配置 key）");
     applyFeatureGates();
+    // 闸门状态在 /api/config 里就有，不用为此再拉一次设置接口
+    setGateBanner(cfg.publish && cfg.publish.require_confirm === false);
     return true;
   } catch (e) {
     state.online = false;
@@ -508,7 +763,10 @@ async function submitTask() {
   document.getElementById("progress-card").style.display = "block";
   setMsg("task-msg", "已提交，正在处理…");
   try {
-    const r = await api("/api/task", { method: "POST", body: JSON.stringify({ raw_input: raw }) });
+    const roleSel = document.getElementById("task-role");
+    const body = { raw_input: raw };
+    if (roleSel && roleSel.value) body.role = roleSel.value;
+    const r = await api("/api/task", { method: "POST", body: JSON.stringify(body) });
     state.taskId = r.task_id;
     clearInterval(state.pollTimer);
     state.pollTimer = setInterval(pollTask, 1200);
@@ -572,7 +830,8 @@ function renderPreview(task) {
 
   document.getElementById("preview-md").textContent = task.preview_md || "（无预览内容）";
 
-  state.defaultComment = task.comment_text || "";
+  // 发布版用完整长文（不是概括版）。后端会按长度自动决定走笔记还是普通评论。
+  state.defaultComment = task.publish_document || task.comment_text || "";
   document.getElementById("comment-box").value = state.defaultComment;
   document.getElementById("confirm-box").checked = false;
   updateCounter();
@@ -589,15 +848,21 @@ function updateCounter() {
   const text = document.getElementById("comment-box").value;
   const limit = (state.cfg && state.cfg.publish && state.cfg.publish.max_comment_chars) || 900;
   const el = document.getElementById("counter");
-  el.textContent = text.length + " / " + limit + "（平台上限 1000）";
-  el.className = "counter" + (text.length > limit ? " over" : "");
+  if (text.length > 1000) {
+    // 超过普通评论上限不是错误——会自动改走笔记通道
+    el.textContent = text.length + " 字 · 超出普通评论上限，将以笔记形式发布";
+    el.className = "counter";
+  } else {
+    el.textContent = text.length + " / " + limit + "（平台上限 1000）";
+    el.className = "counter" + (text.length > limit ? " over" : "");
+  }
 }
 
 function updatePublishButton() {
   const text = document.getElementById("comment-box").value.trim();
   const confirmed = document.getElementById("confirm-box").checked;
-  const limit = (state.cfg && state.cfg.publish && state.cfg.publish.max_comment_chars) || 900;
-  document.getElementById("publish-btn").disabled = !(confirmed && text && text.length <= limit);
+  // 超过 1000 字不再禁用发布：长文走笔记通道，这是设计内行为
+  document.getElementById("publish-btn").disabled = !(confirmed && text);
 }
 
 /* -------------------------------------------------------------- 发布 */
@@ -612,11 +877,13 @@ async function publish() {
       body: JSON.stringify({
         task_id: state.taskId,
         text: document.getElementById("comment-box").value,
-        confirm: true
+        confirm: true,
+        mode: "auto"
       })
     });
     if (r.status === "published") {
-      setMsg("publish-msg", "已发布（rpid=" + (r.rpid || "未知") + "）。", "ok");
+      const viaNote = (r.rpid || "").startsWith("note:");
+      setMsg("publish-msg", viaNote ? "已发布为笔记并同步到评论区。" : "已发布到评论区。", "ok");
     } else {
       setMsg("publish-msg", r.message, "err");
     }
@@ -661,12 +928,318 @@ async function loadPublishes() {
   } catch (e) { /* 历史读不到不影响主流程 */ }
 }
 
+/* -------------------------------------------------------------- 设置页 */
+
+/* 设置默认不加载：/api/settings 会返回明文 api_key，
+   不该让每次打开主页面都把它拉一遍。等你切到设置页才取。 */
+function switchView(name) {
+  const settings = name === "settings";
+  document.getElementById("view-main").style.display = settings ? "none" : "grid";
+  document.getElementById("view-settings").style.display = settings ? "grid" : "none";
+  document.getElementById("tab-main").classList.toggle("active", !settings);
+  document.getElementById("tab-settings").classList.toggle("active", settings);
+  if (settings) loadSettings(false);
+}
+
+/* 闸门关闭是个持续性的风险状态，不是一次性提示，
+   所以这条横幅不给关闭按钮，只能回设置里把闸门打开。 */
+function setGateBanner(disabled) {
+  const bar = document.getElementById("gate-banner");
+  if (!disabled) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+  bar.style.display = "block";
+  bar.innerHTML =
+    "<strong>人工确认闸门是关闭的。</strong><br>" +
+    "总结生成后会直接发到对应视频的评论区，中间没有确认环节。" +
+    "误发了只能自己去评论区删。<br>" +
+    '到「设置 → 发布」里可以把闸门重新打开。';
+}
+
+function _val(id) { return document.getElementById(id).value.trim(); }
+function _num(id) { const v = _val(id); return v === "" ? NaN : Number(v); }
+/* 显式转成字符串：input.value 对非字符串赋值会隐式转换，但代码不该依赖这一点 */
+function _set(id, v) {
+  document.getElementById(id).value = v === null || v === undefined ? "" : String(v);
+}
+
+function fillSettingsForm(v) {
+  const llm = v.llm || {}, collect = v.collect || {}, dm = collect.danmaku || {};
+  const pub = v.publish || {}, st = v.storage || {}, srv = v.server || {};
+
+  _set("s-base-url", llm.base_url);
+  _set("s-api-key", llm.api_key);
+  _set("s-model", llm.model);
+  _set("s-temperature", llm.temperature);
+  _set("s-max-tokens", llm.max_tokens);
+  _set("s-thinking", llm.thinking || "auto");
+  _set("s-role", llm.role || "standard");
+  _set("s-timeout", llm.timeout_seconds);
+  _set("s-max-input", llm.max_input_chars);
+  _set("s-chunk-size", llm.chunk_size);
+  _set("s-chunk-overlap", llm.chunk_overlap);
+
+  _set("s-langs", (collect.prefer_subtitle_lang || []).join(", "));
+  document.getElementById("s-platform-summary").checked = !!collect.include_platform_summary;
+  document.getElementById("s-danmaku-enabled").checked = !!dm.enabled;
+  document.getElementById("s-danmaku-with-sub").checked = !!dm.also_with_subtitle;
+  _set("s-dm-max", dm.max_items);
+  _set("s-dm-hot", dm.hot_items);
+  _set("s-dm-sample", dm.sample_items);
+
+  document.getElementById("s-require-confirm").checked = !!pub.require_confirm;
+  document.getElementById("s-gate-ack").checked = false;
+  document.getElementById("gate-confirm").classList.remove("show");
+  _set("s-interval", pub.min_interval_seconds);
+  _set("s-max-chars", pub.max_comment_chars);
+  document.getElementById("s-disclose").checked = !!pub.disclose_ai;
+  _set("s-disclosure-text", pub.disclosure_text);
+
+  _set("s-db", st.db_path);
+  _set("s-key", st.key_path);
+  _set("s-host", srv.host);
+  _set("s-port", srv.port);
+
+  // 密钥默认掩着，避免你在共享屏幕/有人路过时被直接看到
+  const keyBox = document.getElementById("s-api-key");
+  keyBox.type = "password";
+  document.getElementById("s-key-toggle").textContent = "显示";
+  keyBox.placeholder = llm.api_key ? "" : "（未配置）";
+}
+
+function toggleKey() {
+  const box = document.getElementById("s-api-key");
+  const shown = box.type === "text";
+  box.type = shown ? "password" : "text";
+  document.getElementById("s-key-toggle").textContent = shown ? "显示" : "隐藏";
+}
+
+function onGateToggle() {
+  const on = document.getElementById("s-require-confirm").checked;
+  document.getElementById("gate-confirm").classList.toggle("show", !on);
+  if (on) document.getElementById("s-gate-ack").checked = false;
+}
+
+/* quiet=true 时不碰 settings-msg。
+   保存流程需要它：刷新表单要顺带重填各字段，但回执不能被擦掉。 */
+async function loadSettings(force, quiet) {
+  if (!state.online) {
+    setMsg("settings-msg", "还没连上后端，设置读写都不可用。", "err");
+    return false;
+  }
+  if (state.settingsLoaded && !force) return true;
+  if (!quiet) setMsg("settings-msg", "读取中…");
+  try {
+    const data = await api("/api/settings");
+    state.settings = data;
+    state.settingsLoaded = true;
+    fillSettingsForm(data.values || {});
+
+    document.getElementById("settings-path").textContent = data.config_exists
+      ? "配置文件：" + data.path + "（保存前会自动备份为 .bak）"
+      : "配置文件还不存在，保存时会创建：" + (data.path || "路径未知");
+
+    const restart = data.restart_needed_for || [];
+    document.getElementById("restart-note").textContent = restart.length
+      ? "改动这些段落需要重启程序才生效：" + restart.join("、")
+      : "全部设置都无需重启。";
+    if (data.platform_comment_max) {
+      document.getElementById("s-max-chars").max = data.platform_comment_max;
+    }
+    setGateBanner(!!data.gate_disabled);
+    if (!quiet) setMsg("settings-msg", "");
+    return true;
+  } catch (e) {
+    setMsg("settings-msg", "读取设置失败：" + e.message, "err");
+    return false;
+  }
+}
+
+/* 前端先挡一遍明显的错，省得往返一次；
+   但服务端也会独立校验——前端校验只是提示，不是防线。 */
+function validateSettings() {
+  const ints = [
+    ["s-max-tokens", "max_tokens"],
+    ["s-timeout", "timeout_seconds"],
+    ["s-max-input", "max_input_chars"],
+    ["s-chunk-size", "chunk_size"],
+    ["s-chunk-overlap", "chunk_overlap"],
+    ["s-dm-max", "弹幕 max_items"],
+    ["s-dm-hot", "弹幕 hot_items"],
+    ["s-dm-sample", "弹幕 sample_items"],
+    ["s-interval", "min_interval_seconds"],
+    ["s-max-chars", "max_comment_chars"],
+    ["s-port", "port"],
+  ];
+  for (const [id, label] of ints) {
+    const v = _num(id);
+    if (!Number.isFinite(v)) return label + " 得填一个数字。";
+    if (!Number.isInteger(v)) return label + " 必须是整数。";
+  }
+  const temp = Number(_val("s-temperature"));
+  if (!Number.isFinite(temp) || temp < 0 || temp > 2) return "temperature 得在 0 到 2 之间。";
+
+  if (_num("s-chunk-overlap") >= _num("s-chunk-size")) {
+    return "chunk_overlap 必须小于 chunk_size，否则分块窗口不会向前推进。";
+  }
+  const maxChars = _num("s-max-chars");
+  const platformMax = Number(document.getElementById("s-max-chars").max) || 1000;
+  if (maxChars > platformMax) {
+    return "max_comment_chars 不能超过 " + platformMax + "，这是平台的硬限制。";
+  }
+  for (const [id, label] of [["s-base-url", "base_url"], ["s-model", "model"], ["s-host", "host"]]) {
+    if (!_val(id)) return label + " 不能为空。";
+  }
+  const langs = _val("s-langs").split(",").map(s => s.trim()).filter(Boolean);
+  if (!langs.length) return "字幕语言优先级至少要留一项。";
+
+  // thinking 的错值会被后端当成 422，但报错信息不如这里直白
+  if (!["auto", "off", "on"].includes(_val("s-thinking"))) {
+    return "thinking 只能是 auto / off / on。";
+  }
+  if (_num("s-timeout") < 5) return "timeout_seconds 至少要 5 秒。";
+
+  const turningOff = !document.getElementById("s-require-confirm").checked
+    && state.settings && state.settings.values
+    && state.settings.values.publish && state.settings.values.publish.require_confirm;
+  if (turningOff && !document.getElementById("s-gate-ack").checked) {
+    return "关闭人工确认闸门需要勾选下面的确认框。";
+  }
+  return "";
+}
+
+function collectSettings() {
+  return {
+    server: { host: _val("s-host"), port: _num("s-port") },
+    llm: {
+      base_url: _val("s-base-url"),
+      api_key: _val("s-api-key"),
+      model: _val("s-model"),
+      temperature: Number(_val("s-temperature")),
+      max_tokens: _num("s-max-tokens"),
+      thinking: _val("s-thinking"),
+      role: _val("s-role"),
+      timeout_seconds: _num("s-timeout"),
+      max_input_chars: _num("s-max-input"),
+      chunk_size: _num("s-chunk-size"),
+      chunk_overlap: _num("s-chunk-overlap"),
+    },
+    collect: {
+      prefer_subtitle_lang: _val("s-langs").split(",").map(s => s.trim()).filter(Boolean),
+      include_platform_summary: document.getElementById("s-platform-summary").checked,
+      danmaku: {
+        enabled: document.getElementById("s-danmaku-enabled").checked,
+        also_with_subtitle: document.getElementById("s-danmaku-with-sub").checked,
+        max_items: _num("s-dm-max"),
+        hot_items: _num("s-dm-hot"),
+        sample_items: _num("s-dm-sample"),
+      },
+    },
+    publish: {
+      require_confirm: document.getElementById("s-require-confirm").checked,
+      min_interval_seconds: _num("s-interval"),
+      max_comment_chars: _num("s-max-chars"),
+      disclose_ai: document.getElementById("s-disclose").checked,
+      disclosure_text: _val("s-disclosure-text"),
+    },
+    storage: { db_path: _val("s-db"), key_path: _val("s-key") },
+    confirm_disable_gate: document.getElementById("s-gate-ack").checked,
+  };
+}
+
+async function saveSettings() {
+  const bad = validateSettings();
+  if (bad) { setMsg("settings-msg", bad, "err"); return; }
+
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
+  setMsg("settings-msg", "保存中…");
+  try {
+    const res = await api("/api/settings", { method: "PUT", body: JSON.stringify(collectSettings()) });
+    let msg = "已保存。";
+    if (res.written && res.written.backup) msg += " 原配置已备份为 " + res.written.backup + "。";
+    if (res.restart_required) {
+      msg += " 需要重启才生效：" + (res.restart_sections || []).join("、") + "。";
+    }
+    setGateBanner(!!res.gate_disabled);
+    // 模型名、是否已配置 key 都可能变了，让顶部状态条跟上
+    await detectBackend();
+    // 静默重填表单，否则上面这段回执会被 loadSettings 的收尾清空，
+    // 表现为"点了保存什么都没发生"，然后你会反复点。
+    if (await loadSettings(true, true)) setMsg("settings-msg", msg, "ok");
+  } catch (e) {
+    setMsg("settings-msg", "保存失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function testLlm() {
+  if (!state.online) { setMsg("llm-test-msg", "还没连上后端。", "err"); return; }
+  setMsg("llm-test-msg", "正在测试…");
+  try {
+    const body = JSON.stringify({
+      base_url: _val("s-base-url"),
+      api_key: _val("s-api-key"),
+      model: _val("s-model"),
+      temperature: Number(_val("s-temperature")) || 0,
+      max_tokens: _num("s-max-tokens") || 1024,
+      thinking: _val("s-thinking") || "auto",
+      timeout_seconds: _num("s-timeout") || 300,
+      max_input_chars: _num("s-max-input") || 60000,
+      chunk_size: _num("s-chunk-size") || 12000,
+      chunk_overlap: _num("s-chunk-overlap") || 400,
+    });
+    const res = await api("/api/settings/test-llm", { method: "POST", body });
+    setMsg("llm-test-msg", (res.ok ? "连接正常：" : "连接失败：") + (res.detail || ""), res.ok ? "ok" : "err");
+  } catch (e) {
+    setMsg("llm-test-msg", "测试失败：" + e.message, "err");
+  }
+}
+
+/* -------------------------------------------------------------- 角色 */
+
+/* 角色清单由后端 /api/roles 提供，不在 JS 里抄一份——
+   抄一份的下场是加了新角色前端看不见，而且不会有任何报错提醒。 */
+async function loadRoles() {
+  try {
+    const data = await api("/api/roles");
+    state.roles = data.roles || [];
+    state.roleKey = data.current || "standard";
+    const optionsHtml = state.roles.map(r =>
+      '<option value="' + escapeHtml(r.key) + '">' + escapeHtml(r.name) + "</option>"
+    ).join("");
+    const sel = document.getElementById("task-role");
+    sel.innerHTML = optionsHtml;
+    sel.value = state.roleKey;
+    // 设置页里那个"默认角色"用同一份清单，避免两处列表漂移
+    const sRole = document.getElementById("s-role");
+    if (sRole) sRole.innerHTML = optionsHtml;
+    onRoleChange();
+    return true;
+  } catch (e) {
+    setMsg("task-msg", "角色清单读取失败，本次将用标准角色：" + e.message, "err");
+    return false;
+  }
+}
+
+function onRoleChange() {
+  const sel = document.getElementById("task-role");
+  const hint = document.getElementById("role-hint");
+  if (!state.roles || !sel) { if (hint) hint.textContent = ""; return; }
+  const info = state.roles.filter(r => r.key === sel.value)[0];
+  if (!info) { hint.textContent = ""; return; }
+  let text = info.tagline || "";
+  if (info.passes >= 3) text += "　·　三轮回（生成 → 自我批判 → 修订），调用数与耗时为标准角色的约三倍";
+  if (info.note) text += "　·　" + info.note;
+  hint.textContent = text;
+}
+
 /* -------------------------------------------------------------- 启动 */
 
 (async function init() {
   const online = await detectBackend();
   if (online) {
     await checkAuth();
+    await loadRoles();
     loadPublishes();
   } else {
     document.getElementById("auth-dot").className = "dot off";

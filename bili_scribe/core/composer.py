@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from ..config import PublishConfig
@@ -108,3 +109,84 @@ def build_preview(bundle: Bundle, summary: Summary, cfg: PublishConfig) -> str:
         lines.append(f"*素材较长，已分 {summary.chunks} 段预读后再归约。*")
 
     return "\n".join(lines).strip()
+
+
+# ---------------------------------------------------------------- 发布长文
+
+
+def build_publish_document(summary: Summary) -> str:
+    """发到评论区的**完整长文**（不是概括版）。
+
+    形态由用户明确指定：加粗的一句话开头 + 分节正文 + 要点 + 时间轴。
+    与 build_preview 的区别是**刻意不带**元数据头、素材局限、采集提示、
+    平台侧摘要——那些是给操作者看的工作信息，发出去只会稀释正文。
+
+    普通评论 1000 字符装不下这种长度，所以它只能走笔记通道（见 publisher）。
+    """
+    parts: list[str] = []
+    if summary.one_line:
+        parts.append(f"**{summary.one_line}**")
+        parts.append("")
+    if summary.summary_md:
+        parts.append(summary.summary_md.strip())
+        parts.append("")
+    if summary.key_points:
+        parts.append("## 要点")
+        parts.extend(f"- {point}" for point in summary.key_points)
+        parts.append("")
+    if summary.timeline:
+        parts.append("## 时间轴")
+        for item in summary.timeline:
+            stamp = item.get("t", "")
+            text = item.get("text", "")
+            parts.append(f"- `{stamp}` {text}" if stamp else f"- {text}")
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+_BOLD_SEGMENT = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _inline_ops(text: str) -> list[dict[str, object]]:
+    """把一行里的 **加粗** 拆成 Delta 片段。其余标记一律按纯文本保留。"""
+    ops: list[dict[str, object]] = []
+    cursor = 0
+    for match in _BOLD_SEGMENT.finditer(text):
+        if match.start() > cursor:
+            ops.append({"insert": text[cursor : match.start()]})
+        ops.append({"insert": match.group(1), "attributes": {"bold": True}})
+        cursor = match.end()
+    if cursor < len(text):
+        ops.append({"insert": text[cursor:]})
+    if not ops:
+        ops.append({"insert": text})
+    return ops
+
+
+def markdown_to_delta(markdown: str) -> str:
+    """把 Markdown 转成 B站 笔记正文需要的 Quill Delta JSON。
+
+    **刻意保守**：只使用文档示例里验证过的属性（bold），标题一律降级成加粗行，
+    列表保留字面的 `- ` 前缀。B站 对未知属性的反应未知——多塞一个
+    `header` 或 `list` 属性可能直接 -400，而降级成加粗最多只是不好看。
+    拿到一次真实写入的响应之后再考虑放开。
+    """
+    ops: list[dict[str, object]] = []
+    for raw_line in (markdown or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if ops:
+                ops.append({"insert": "\n"})
+            continue
+        if stripped.startswith("#"):
+            stripped = stripped.lstrip("#").strip()
+        for op in _inline_ops(stripped):
+            ops.append(op)
+        ops.append({"insert": "\n"})
+
+    # Quill 约定正文以换行结尾；开头不要留空行
+    while ops and ops[0].get("insert") == "\n":
+        ops.pop(0)
+    if not ops:
+        ops.append({"insert": "\n"})
+    return json.dumps(ops, ensure_ascii=False)

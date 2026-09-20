@@ -16,6 +16,7 @@ from typing import Any
 
 from ..config import AppConfig
 from ..infra.llm import LlmClient
+from . import roles
 from .collector import Bundle
 from .resolver import format_duration
 
@@ -84,6 +85,7 @@ class Summary:
     comment_short: str = ""
     chunks: int = 1
     model: str = ""
+    role: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +97,7 @@ class Summary:
             "comment_short": self.comment_short,
             "chunks": self.chunks,
             "model": self.model,
+            "role": self.role,
         }
 
 
@@ -171,7 +174,13 @@ def summarize(
     llm: LlmClient,
     cfg: AppConfig,
     progress=None,
+    role_key: str | None = None,
 ) -> Summary:
+    """role_key 为单次任务覆盖角色；不传则用配置里的默认角色。
+
+    做成参数而不是"临时改 cfg.llm.role"：任务跑在后台线程里，改共享配置
+    会和别的任务互相踩，还会把一次性的选择意外持久化。
+    """
     notify = progress or (lambda _stage, _message: None)
     llm_cfg = cfg.llm
     body = bundle.body or ""
@@ -192,7 +201,8 @@ def summarize(
                         "role": "user",
                         "content": f"这是第 {index} 段，共 {chunks} 段。素材类型：{bundle.source_label}\n\n{piece}",
                     },
-                ]
+                ],
+                note=lambda message, _i=index: notify("mapping", f"第 {_i} 段：{message}"),
             )
             notes.append(note.strip())
         body = "\n\n".join(
@@ -202,7 +212,15 @@ def summarize(
         if len(body) > budget:
             body = body[:budget] + "\n…（笔记已截断）"
 
-    notify("reducing", "生成结构化总结")
+    role = roles.get_role(role_key or llm_cfg.role)
+    # 角色自带方法论时，用它的提示词，并把输出契约显式接在后面。
+    # 角色原文里那些「打印阶段 1/2/3」「输出 ReAct 执行日志」的要求会击穿 JSON 解析、
+    # 并把思考过程发进评论区，所以由 OUTPUT_CONTRACT 明确覆盖掉。
+    system_prompt = SYSTEM_PROMPT
+    if role.system:
+        system_prompt = role.system.strip() + "\n" + roles.OUTPUT_CONTRACT
+
+    notify("reducing", f"生成结构化总结（角色：{role.name}）")
     user_prompt = USER_TEMPLATE.format(
         title=bundle.title or "（无）",
         up_name=bundle.up_name or "（未知）",
@@ -222,12 +240,48 @@ def summarize(
 
     raw = llm.chat(
         [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         json_mode=True,
+        note=lambda message: notify("reducing", message),
     )
     payload = _extract_json(raw)
+
+    # 三轮回：把「自我批判」从"要求模型打印出来"改成"真的多跑两次调用"。
+    # 批判和修订都必须看到原始素材，否则无从判断是否失真——那样这三轮就只是走形式。
+    if role.passes >= 3 and role.critique and role.revise:
+        draft = json.dumps(payload, ensure_ascii=False)
+
+        notify("critiquing", f"{role.name}：自我批判")
+        critique = llm.chat(
+            [
+                {"role": "system", "content": role.critique},
+                {
+                    "role": "user",
+                    "content": f"—— 原始素材 ——\n{body}\n\n—— 待评文本 ——\n{draft}",
+                },
+            ],
+            note=lambda message: notify("critiquing", message),
+        )
+
+        notify("revising", f"{role.name}：按批判修订")
+        revised = llm.chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"{role.revise.format(critique=critique.strip())}\n\n"
+                        f"—— 原始素材（核对是否失真用）——\n{body}\n\n"
+                        f"—— 待修订文本 ——\n{draft}"
+                    ),
+                },
+            ],
+            json_mode=True,
+            note=lambda message: notify("revising", message),
+        )
+        payload = _extract_json(revised)
 
     summary = Summary(
         one_line=_coerce_text(payload.get("one_line")),
@@ -238,6 +292,7 @@ def summarize(
         comment_short=_coerce_text(payload.get("comment_short")),
         chunks=chunks,
         model=llm.cfg.model,
+        role=role.key,
     )
 
     if not summary.summary_md and not summary.one_line:

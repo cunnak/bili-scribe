@@ -12,6 +12,16 @@ llm:
   model: deepseek-chat
   temperature: 0.3
   max_tokens: 4096
+  # 思考模型（Qwen3 系列、QwQ、带 -thinking 的型号等）会先产出一大段推理再作答，
+  # 而这段推理不吃 max_tokens 的限制 —— 实测设 4096 却跑了 5125 tokens，其中 5120 是思考。
+  # 后果有两个：耗时失控撞上读超时；或者预算被思考吃光、正文返回空（HTTP 200，看不出来）。
+  #   auto = 不发任何相关参数（对非思考模型最兼容）
+  #   off  = 显式发 enable_thinking: false（用思考模型时建议这个，实测 49s → 10s）
+  #   on   = 显式发 enable_thinking: true
+  # 即使填 auto 或 on，客户端发现「空正文 + 有思考 token」时也会自动关掉重试一次。
+  thinking: auto
+  # 单次请求的读超时（秒）。思考模型开着的话，调大它只是缓解，根治靠把 thinking 关掉。
+  timeout_seconds: 300
   max_input_chars: 24000   # 素材超过这个长度就走分块归约
   chunk_size: 6000
   chunk_overlap: 400

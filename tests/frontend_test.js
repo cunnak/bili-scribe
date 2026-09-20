@@ -59,21 +59,38 @@ for (const [name, ok] of structural) assert(name, ok);
 
 function makeDocument() {
   const cache = Object.create(null);
-  const mk = (id) => ({
-    id,
-    style: {},
-    textContent: "",
-    innerHTML: "",
-    value: "",
-    href: "",
-    src: "",
-    disabled: false,
-    checked: false,
-    open: false,
-    className: "",
-    classList: { add() {}, remove() {}, toggle() {} },
-    addEventListener() {},
-  });
+  const mk = (id) => {
+    const classes = new Set();
+    let _value = "";
+    return {
+      id,
+      style: {},
+      textContent: "",
+      innerHTML: "",
+      // 真实 DOM 对 input.value 赋值会强制转成字符串，
+      // 桩必须照做，否则"数字赋值后 .trim()"这类真实可跑的逻辑会被误判为错。
+      get value() { return _value; },
+      set value(v) { _value = v === null || v === undefined ? "" : String(v); },
+      href: "",
+      src: "",
+      disabled: false,
+      checked: false,
+      open: false,
+      className: "",
+      // 需要记录状态：设置页要靠 classList.toggle 控制确认区的显隐
+      classList: {
+        add(c) { classes.add(c); },
+        remove(c) { classes.delete(c); },
+        toggle(c, force) {
+          const on = force === undefined ? !classes.has(c) : !!force;
+          if (on) classes.add(c); else classes.delete(c);
+          return on;
+        },
+        has(c) { return classes.has(c); },
+      },
+      addEventListener() {},
+    };
+  };
   return {
     cache,
     getElementById(id) {
@@ -99,7 +116,10 @@ async function boot(fetchStub) {
     "alert",
     "window",
     "console",
-    code + "\nreturn { state, api, detectBackend, showBackendBanner };"
+    code +
+      "\nreturn { state, api, detectBackend, showBackendBanner, switchView, loadSettings," +
+      " fillSettingsForm, collectSettings, validateSettings, saveSettings, testLlm," +
+      " toggleKey, onGateToggle, setGateBanner };"
   );
   const api = expose(
     document,
@@ -113,6 +133,29 @@ async function boot(fetchStub) {
   );
   await new Promise((r) => setTimeout(r, 80)); // 等 init 的异步链跑完
   return { document, ...api };
+}
+
+/* 设置页要按路径区分 GET /api/settings 与 PUT /api/settings，
+   单一返回值的桩不够用了，所以加一个路由桩。 */
+function routeFetch(routes) {
+  const seen = [];
+  const fn = async (path, options) => {
+    const method = (options && options.method) || "GET";
+    seen.push({ path, method, body: options && options.body });
+    const key = method + " " + path;
+    const hit = routes[key] || routes[path];
+    if (!hit) {
+      return { ok: false, status: 404, text: async () => JSON.stringify({ detail: "no route: " + key }) };
+    }
+    const r = typeof hit === "function" ? hit(options) : hit;
+    return {
+      ok: r.status >= 200 && r.status < 300,
+      status: r.status,
+      text: async () => (typeof r.body === "string" ? r.body : JSON.stringify(r.body)),
+    };
+  };
+  fn.seen = seen;
+  return fn;
 }
 
 const okResponse = (payload) => async () => ({
@@ -224,6 +267,208 @@ async function main() {
       message = e.message;
     }
     assert("E1 透出后端给的可操作提示", message.includes("qrcode[pil]"), message);
+  }
+
+  // F · 设置页
+  {
+    // GET /api/settings 的真实响应形状
+    const settingsValues = {
+      server: { host: "127.0.0.1", port: 8818 },
+      llm: {
+        base_url: "https://api.deepseek.com/v1",
+        api_key: "sk-test-abcdef123456",
+        model: "deepseek-chat",
+        temperature: 0.3,
+        max_tokens: 4096,
+        thinking: "off",
+        timeout_seconds: 300,
+        max_input_chars: 60000,
+        chunk_size: 12000,
+        chunk_overlap: 400,
+      },
+      collect: {
+        prefer_subtitle_lang: ["zh-CN", "zh-Hans"],
+        include_platform_summary: false,
+        danmaku: { enabled: true, also_with_subtitle: false, max_items: 3000, hot_items: 200, sample_items: 300 },
+      },
+      publish: {
+        require_confirm: true,
+        min_interval_seconds: 60,
+        max_comment_chars: 900,
+        disclose_ai: true,
+        disclosure_text: "本总结由 AI 生成",
+      },
+      storage: { db_path: "~/.bili-scribe/data.db", key_path: "~/.bili-scribe/key.bin" },
+    };
+    const settingsBody = {
+      values: settingsValues,
+      path: "C:\\tmp\\config.yaml",
+      config_exists: true,
+      gate_disabled: false,
+      restart_needed_for: ["server"],
+      platform_comment_max: 1000,
+    };
+    const routes = {
+      "/api/config": { status: 200, body: baseCfg },
+      "GET /api/settings": { status: 200, body: settingsBody },
+      "PUT /api/settings": {
+        status: 200,
+        body: {
+          ok: true,
+          written: { path: "C:\\tmp\\config.yaml", backup: "config.yaml.bak" },
+          restart_required: false,
+          restart_sections: [],
+          gate_disabled: false,
+        },
+      },
+      "/api/settings/test-llm": { status: 200, body: { ok: true, detail: "连接正常", model: "deepseek-chat" } },
+    };
+
+    assert(
+      "F1 两个视图各自闭合（没有裸露的 </main>）",
+      (html.match(/id="view-main"/g) || []).length === 1 &&
+        (html.match(/id="view-settings"/g) || []).length === 1 &&
+        !/<\/main>/.test(html),
+      "若仍有 </main>，设置视图会被浏览器并进主视图"
+    );
+    assert("F2 两个 tab 都已接线", /id="tab-main"/.test(html) && /id="tab-settings"/.test(html));
+
+    const stub = routeFetch(routes);
+    const { document, state, switchView, collectSettings, validateSettings, saveSettings, onGateToggle, setGateBanner, toggleKey } = await boot(stub);
+
+    assert("F3 初始不加载设置", state.settingsLoaded === false);
+    assert(
+      "F4 首屏没有请求 /api/settings（密钥不进首屏）",
+      !stub.seen.some((s) => s.path === "/api/settings" && s.method === "GET"),
+      JSON.stringify(stub.seen.map((s) => s.method + " " + s.path))
+    );
+
+    switchView("settings");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert("F5 切到设置页才加载", stub.seen.some((s) => s.path === "/api/settings" && s.method === "GET"));
+    assert("F6 设置视图被显示", document.getElementById("view-settings").style.display === "grid");
+    assert("F7 主视图被隐藏", document.getElementById("view-main").style.display === "none");
+
+    assert(
+      "F8 base_url 已回填",
+      document.getElementById("s-base-url").value === "https://api.deepseek.com/v1",
+      document.getElementById("s-base-url").value
+    );
+    assert(
+      "F9 语言数组转成逗号分隔",
+      document.getElementById("s-langs").value === "zh-CN, zh-Hans",
+      document.getElementById("s-langs").value
+    );
+    assert(
+      "F10 嵌套的 danmaku 已回填",
+      document.getElementById("s-dm-max").value === String(settingsValues.collect.danmaku.max_items) &&
+        document.getElementById("s-dm-hot").value === String(settingsValues.collect.danmaku.hot_items),
+      document.getElementById("s-dm-max").value + "/" + document.getElementById("s-dm-hot").value
+    );
+    assert(
+      "F10b thinking 与超时已回填",
+      document.getElementById("s-thinking").value === "off" &&
+        document.getElementById("s-timeout").value === String(settingsValues.llm.timeout_seconds),
+      document.getElementById("s-thinking").value + "/" + document.getElementById("s-timeout").value
+    );
+    assert(
+      "F11 密钥回显但默认掩着",
+      document.getElementById("s-api-key").value === "sk-test-abcdef123456" &&
+        document.getElementById("s-api-key").type === "password"
+    );
+
+    toggleKey();
+    assert("F12 「显示」切成明文", document.getElementById("s-api-key").type === "text");
+    toggleKey();
+    assert("F13 再点切回掩码", document.getElementById("s-api-key").type === "password");
+
+    // 最关键的一条：前端发出的键名必须与后端 Pydantic 逐个对齐。
+    // 对不上会被 apply_settings 静默忽略——保存"成功"，但配置没生效。
+    const sent = collectSettings();
+    const sameKeys = (got, want, label) => {
+      const g = Object.keys(got).sort().join(",");
+      const w = want.slice().sort().join(",");
+      assert("F14 字段名对齐 · " + label, g === w, "前端=[" + g + "] 后端=[" + w + "]");
+    };
+    sameKeys(sent, ["server", "llm", "collect", "publish", "storage", "confirm_disable_gate"], "顶层");
+    sameKeys(sent.server, ["host", "port"], "server");
+    sameKeys(sent.llm, ["base_url", "api_key", "model", "temperature", "max_tokens", "thinking", "role", "timeout_seconds", "max_input_chars", "chunk_size", "chunk_overlap"], "llm");
+    sameKeys(sent.collect, ["prefer_subtitle_lang", "include_platform_summary", "danmaku"], "collect");
+    sameKeys(sent.collect.danmaku, ["enabled", "also_with_subtitle", "max_items", "hot_items", "sample_items"], "collect.danmaku");
+    sameKeys(sent.publish, ["require_confirm", "min_interval_seconds", "max_comment_chars", "disclose_ai", "disclosure_text"], "publish");
+    sameKeys(sent.storage, ["db_path", "key_path"], "storage");
+
+    assert(
+      "F15 数字字段发出的是数字",
+      typeof sent.llm.temperature === "number" && typeof sent.server.port === "number",
+      typeof sent.llm.temperature + "/" + typeof sent.server.port
+    );
+
+    assert("F16 正常值通过校验", validateSettings() === "", validateSettings());
+    document.getElementById("s-chunk-overlap").value = "99999";
+    assert("F17 拦住 overlap >= size", validateSettings().includes("chunk_overlap"), validateSettings());
+    document.getElementById("s-chunk-overlap").value = "400";
+
+    document.getElementById("s-max-chars").value = "5000";
+    assert("F18 拦住超过平台评论上限", validateSettings().includes("1000"), validateSettings());
+    document.getElementById("s-max-chars").value = "900";
+
+    document.getElementById("s-langs").value = "  ,  ";
+    assert("F19 拦住空的字幕语言列表", validateSettings().includes("字幕语言"), validateSettings());
+    document.getElementById("s-langs").value = "zh-CN, zh-Hans";
+
+    document.getElementById("s-thinking").value = "sometimes";
+    assert("F19b 拦住非法的 thinking 值", validateSettings().includes("thinking"), validateSettings());
+    document.getElementById("s-thinking").value = "off";
+
+    document.getElementById("s-require-confirm").checked = false;
+    onGateToggle();
+    assert("F20 取消勾选后展开后果确认区", document.getElementById("gate-confirm").classList.has("show") === true);
+    assert("F21 未勾选确认时拦住保存", validateSettings().includes("闸门"), validateSettings());
+    document.getElementById("s-gate-ack").checked = true;
+    assert("F22 勾选确认后放行", validateSettings() === "", validateSettings());
+    assert("F23 关闭闸门时一并发出确认标志", collectSettings().confirm_disable_gate === true);
+
+    document.getElementById("s-require-confirm").checked = true;
+    onGateToggle();
+    assert("F24 重新勾选后收起确认区", document.getElementById("gate-confirm").classList.has("show") === false);
+
+    const before = stub.seen.length;
+    await saveSettings();
+    const put = stub.seen.slice(before).find((s) => s.method === "PUT" && s.path === "/api/settings");
+    assert(
+      "F25 保存发出了 PUT /api/settings",
+      !!put,
+      JSON.stringify(stub.seen.slice(before).map((s) => s.method + " " + s.path))
+    );
+    let parsed = null;
+    try { parsed = JSON.parse(put.body); } catch (e) { /* 下面会断言出来 */ }
+    assert("F26 请求体是合法 JSON", !!parsed);
+    assert(
+      "F27 请求体带上了模型与密钥",
+      !!parsed && parsed.llm.model === "deepseek-chat" && parsed.llm.api_key === "sk-test-abcdef123456"
+    );
+    assert(
+      "F28 保存成功的提示里带出备份文件名",
+      document.getElementById("settings-msg").textContent.includes("config.yaml.bak"),
+      document.getElementById("settings-msg").textContent
+    );
+    // 保存后会把表单静默重拉一次（各字段要回到服务端的真值）。
+    // 那次重拉曾经把上面这条回执清空——用户点保存看不到任何确认。
+    assert(
+      "F28b 保存后有重拉表单，且回执没被擦掉",
+      stub.seen.slice(before).filter((s) => s.method === "GET" && s.path === "/api/settings").length === 1 &&
+        document.getElementById("settings-msg").textContent !== "",
+      "重拉次数=" + stub.seen.slice(before).filter((s) => s.method === "GET" && s.path === "/api/settings").length +
+        " 回执=[" + document.getElementById("settings-msg").textContent + "]"
+    );
+
+    setGateBanner(true);
+    assert("F29 闸门关闭时横幅可见", document.getElementById("gate-banner").style.display === "block");
+    assert("F30 横幅说明了后果", document.getElementById("gate-banner").innerHTML.includes("没有确认环节"));
+    setGateBanner(false);
+    assert("F31 闸门恢复后横幅消失", document.getElementById("gate-banner").style.display === "none");
   }
 
   report();
