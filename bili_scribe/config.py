@@ -86,6 +86,26 @@ PROXY_SCHEMES = ("http", "https", "socks4", "socks5", "socks5h")
 
 
 @dataclass
+class FramesConfig:
+    """全片抽帧（画面）。
+
+    默认开是有意的：成本极低（12 帧 ≈ 1,464 image_tokens，约为一条 4 小时视频
+    总输入的 1.7%），而它在"有 PPT／图表的讲座"上能读到字幕里根本没有的信息。
+
+    但**它的价值高度依赖内容类型**：纯口播直播（人像小窗 + 字幕 + 壁纸）里，
+    画面上的有效文字就是字幕本身，增量接近零。所以 `max_frames` 是给使用者
+    按内容类型自己拧的旋钮——这也是加这个上限的原因：不说上限的话，
+    它就是整条流水线里唯一没有刹车的输入。
+    """
+
+    enabled: bool = True
+    # 送出多少帧。等距铺满整条视频，所以张数决定"时间分辨率"。
+    # 4 小时视频给 12 帧 ≈ 每 20 分钟一帧。
+    max_frames: int = 12
+    quality: int = 85
+
+
+@dataclass
 class DanmakuConfig:
     enabled: bool = True
     also_with_subtitle: bool = False
@@ -101,6 +121,7 @@ class CollectConfig:
     )
     include_platform_summary: bool = True
     danmaku: DanmakuConfig = field(default_factory=DanmakuConfig)
+    frames: FramesConfig = field(default_factory=FramesConfig)
 
 
 @dataclass
@@ -190,6 +211,16 @@ class AppConfig:
                     f"收到：{llm_cfg.proxy!r}"
                 )
 
+        frames_cfg = section(FramesConfig, collect_raw.get("frames"))
+        # 张数负值会被当成 0、质量超出范围会让 Pillow 抛参数错——两者都属于
+        # "写错了但看起来正常"，当场挡掉。
+        if frames_cfg.max_frames < 0:
+            raise ValueError(f"collect.frames.max_frames 不能为负，收到：{frames_cfg.max_frames}")
+        if not 1 <= frames_cfg.quality <= 100:
+            raise ValueError(
+                f"collect.frames.quality 必须在 1–100，收到：{frames_cfg.quality}"
+            )
+
         return cls(
             server=section(ServerConfig, raw.get("server")),
             llm=llm_cfg,
@@ -201,6 +232,7 @@ class AppConfig:
                     collect_raw.get("include_platform_summary", True)
                 ),
                 danmaku=section(DanmakuConfig, danmaku_raw),
+                frames=frames_cfg,
             ),
             publish=section(PublishConfig, raw.get("publish")),
             storage=section(StorageConfig, raw.get("storage")),
@@ -335,6 +367,16 @@ def render_config_yaml(cfg: AppConfig) -> str:
             f"    hot_items: {cfg.collect.danmaku.hot_items}",
             "    # 沿时间轴均匀采样条数（保留叙事推进）",
             f"    sample_items: {cfg.collect.danmaku.sample_items}",
+            "  frames:",
+            "    # 全片抽帧（画面）。不下载视频，从平台的抽帧拼图里裁出单格。",
+            "    # 成本很低：12 帧约 1464 image_tokens，约为一条 4 小时视频总输入的 1.7%。",
+            "    # 但价值取决于内容类型——有 PPT／图表的讲座能读到字幕里没有的信息；",
+            "    # 纯口播直播（人像小窗 + 字幕 + 壁纸）里画面文字就是字幕本身，增量接近零。",
+            f"    enabled: {flag(cfg.collect.frames.enabled)}",
+            "    # 送出多少帧，等距铺满整条视频，所以它决定画面的时间分辨率。",
+            "    # 4 小时视频给 12 帧 ≈ 每 20 分钟一帧。这也是这条路上唯一的刹车。",
+            f"    max_frames: {cfg.collect.frames.max_frames}",
+            f"    quality: {cfg.collect.frames.quality}",
             "",
             "publish:",
             "  # 人工闸门。关掉等于放弃最后一道防线：",

@@ -25,6 +25,12 @@ FINGER_SPI = f"{API}/x/frontend/finger/spi"
 VIDEO_VIEW = f"{API}/x/web-interface/view"
 PLAYER_V2 = f"{API}/x/player/wbi/v2"
 ARCHIVE_TAGS = f"{API}/x/tag/archive/tags"
+# 全片抽帧拼图。只需 aid 即可调用，**不需要登录**（实测）。
+# 返回形如 {image: [18 个 jpg 地址], index: [1726 个时间戳], img_x_len: 10, ...}。
+# 每张图是一个 10×10 的网格拼图，单格 480×270；一张拼图覆盖约 14 分钟，
+# 所以张数随时长自动增长（4 小时 → 18 张）。这是"不下载视频就能拿到画面"的唯一通路。
+# 注意：传 bvid 时 image 有返回但 index 为空，**要用 aid 才有时间戳**。
+VIDEOSHOT = f"{API}/x/player/videoshot"
 DANMAKU_XML = f"{API}/x/v1/dm/list.so"
 DANMAKU_SEG = f"{API}/x/v2/dm/web/seg.so"
 PLATFORM_SUMMARY = f"{API}/x/web-interface/view/conclusion/get"

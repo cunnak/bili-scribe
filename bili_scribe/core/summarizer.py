@@ -16,6 +16,7 @@ from typing import Any
 
 from ..config import AppConfig
 from ..infra.llm import LlmClient
+from . import frames as frames_mod
 from . import roles
 from .collector import Bundle
 from .resolver import format_duration
@@ -86,6 +87,9 @@ class Summary:
     chunks: int = 1
     model: str = ""
     role: str = ""
+    # 这次总结附了几帧画面。0 表示没附（未启用／采集失败／该视频没有抽帧图）。
+    # 记它是因为"模型到底看没看到画面"直接决定产出可信度，事后必须能从记录里查。
+    frames: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +102,7 @@ class Summary:
             "chunks": self.chunks,
             "model": self.model,
             "role": self.role,
+            "frames": self.frames,
         }
 
 
@@ -175,11 +180,17 @@ def summarize(
     cfg: AppConfig,
     progress=None,
     role_key: str | None = None,
+    frameset: frames_mod.FrameSet | None = None,
 ) -> Summary:
     """role_key 为单次任务覆盖角色；不传则用配置里的默认角色。
 
     做成参数而不是"临时改 cfg.llm.role"：任务跑在后台线程里，改共享配置
     会和别的任务互相踩，还会把一次性的选择意外持久化。
+
+    frameset 是画面帧，**只接在最终归约那一次调用上**。理由：
+    帧一旦进入预读或三轮回，就会被同一份素材反复送好几遍——预读最多 7 次、
+    三轮回再 2 次，22k 的帧量会变成十几倍。而归约是唯一"把全部素材合起来
+    看一遍"的调用，画面在那里最有价值，也只需要付一次钱。
     """
     notify = progress or (lambda _stage, _message: None)
     llm_cfg = cfg.llm
@@ -238,10 +249,22 @@ def summarize(
         body=body,
     )
 
+    # 画面帧只在这一处进入请求：前面所有调用（预读、三轮回的批判与修订）都不带。
+    user_content: Any = user_prompt
+    frame_blocks = frames_mod.as_content_blocks(frameset) if frameset else []
+    if frame_blocks:
+        user_content = [{"type": "text", "text": user_prompt}] + frame_blocks
+        notify(
+            "reducing",
+            f"已附 {len(frameset.frames)} 帧画面（{frameset.total_bytes / 1024:.0f} KB）",
+        )
+        for note in frameset.notes:
+            notify("reducing", f"画面：{note}")
+
     raw = llm.chat(
         [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
         json_mode=True,
         note=lambda message: notify("reducing", message),
@@ -293,6 +316,7 @@ def summarize(
         chunks=chunks,
         model=llm.cfg.model,
         role=role.key,
+        frames=len(frameset.frames) if frameset else 0,
     )
 
     if not summary.summary_md and not summary.one_line:

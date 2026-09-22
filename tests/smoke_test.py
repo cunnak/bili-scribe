@@ -518,6 +518,257 @@ def _llm_proxy() -> str:
     return "trust_env 已关 / 环境变量代理漏不进 / 非法值在加载时被拒 / 代理与连接超时提示可照做"
 
 
+def _frames_module() -> str:
+    """全片抽帧的纯函数与不变量。
+
+    这里出错是**静默的**：挑错帧、裁错格子、或者把"没有时间戳"说成有时间戳，
+    都不会抛异常，只会让总结里的画面和时间对不上。所以逐个钉死。
+    """
+    import tempfile
+
+    from bili_scribe.config import AppConfig, FramesConfig
+    from bili_scribe.core.frames import (
+        Frame,
+        FrameSet,
+        as_content_blocks,
+        cache_size,
+        cell_box,
+        clear_cache,
+        pick_cells,
+        purge_stale,
+    )
+
+    # ---------- 1. 挑格子：必须铺满整条视频 ----------
+    # 真实数据：18 张拼图 × 10×10 = 1800 格，接口给了 1726 个时间戳
+    picks = pick_cells(total_cells=1800, index_len=1726, want=12)
+    assert len(picks) == 12, picks
+    assert picks[0] == 0, f"必须从第一格开始，实际 {picks[0]}"
+    assert picks[-1] == 1725, f"必须在最后一个有时间戳的格子上结束，实际 {picks[-1]}"
+    steps = [b - a for a, b in zip(picks, picks[1:])]
+    assert max(steps) - min(steps) <= 1, f"间隔不均：{steps}"
+    assert picks == sorted(picks) and len(set(picks)) == 12, "必须升序且不重复"
+
+    # 没有时间戳时退化到按格子等距（短一点的视频会出现这种）
+    no_ts = pick_cells(total_cells=400, index_len=0, want=6)
+    assert no_ts[0] == 0 and no_ts[-1] == 399, no_ts
+    assert len(no_ts) == 6, no_ts
+
+    # 格子比想要的数量还少时，只能给这么多，不能崩
+    few = pick_cells(total_cells=3, index_len=3, want=12)
+    assert len(few) == 3 and few == [0, 1, 2], few
+    # 极短视频：取 1 帧
+    assert pick_cells(total_cells=1, index_len=1, want=12) == [0]
+    assert pick_cells(total_cells=0, index_len=0, want=12) == []
+    assert pick_cells(total_cells=100, index_len=100, want=0) == []
+
+    # ---------- 2. 裁格子的坐标：行优先，别裁错位置 ----------
+    # 10×10 网格、单格 480×270。第 0 格在左上，第 9 格在第 0 行最右，
+    # 第 10 格换到第 1 行开头，第 99 格是这张拼图的右下角。
+    assert cell_box(0, 10, 10, 480, 270) == (0, 0, 480, 270), cell_box(0, 10, 10, 480, 270)
+    assert cell_box(9, 10, 10, 480, 270) == (4320, 0, 4800, 270), cell_box(9, 10, 10, 480, 270)
+    assert cell_box(10, 10, 10, 480, 270) == (0, 270, 480, 540), cell_box(10, 10, 10, 480, 270)
+    assert cell_box(99, 10, 10, 480, 270) == (4320, 2430, 4800, 2700), cell_box(99, 10, 10, 480, 270)
+    # 跨到第二张拼图时，格内下标要回绕（这是最容易写错的一处）
+    assert cell_box(100, 10, 10, 480, 270) == (0, 0, 480, 270), cell_box(100, 10, 10, 480, 270)
+
+    # ---------- 3. 拼给模型的内容块：必须成对，且是 data URL ----------
+    fs = FrameSet(
+        frames=[
+            Frame(order=1, timestamp=0, data_url="data:image/jpeg;base64,AAA", size=3),
+            Frame(order=2, timestamp=754, data_url="data:image/jpeg;base64,BBB", size=3),
+        ],
+        total_cells=1800,
+        sprites=18,
+        has_timestamps=True,
+    )
+    blocks = as_content_blocks(fs)
+    assert blocks and blocks[0]["type"] == "text", blocks[:1]
+    assert "00:00:00" in blocks[0]["text"] and "00:12:34" in blocks[0]["text"], blocks[0]["text"]
+    kinds = [b["type"] for b in blocks[1:]]
+    assert kinds == ["text", "image_url", "text", "image_url"], kinds
+    assert all(
+        b["image_url"]["url"].startswith("data:image/jpeg;base64,")
+        for b in blocks if b["type"] == "image_url"
+    )
+    # 必须明确"不要逐帧描述"——实测不然会烧掉大量输出 token
+    assert "不要逐帧描述" in blocks[0]["text"], blocks[0]["text"]
+    assert as_content_blocks(FrameSet()) == [], "空帧集不该产出任何内容块"
+
+    # ---------- 4. 没有时间戳时必须如实说，不能编时刻 ----------
+    blind = FrameSet(
+        frames=[Frame(order=1, timestamp=None, data_url="data:image/jpeg;base64,AAA", size=3)],
+        total_cells=400,
+        sprites=4,
+        has_timestamps=False,
+    )
+    note = blind.timeline_note()
+    assert "没有" in note or "未提供" in note, note
+    assert "不要" in note and "编造" in note, note
+    assert "00:00" not in note, f"没有时间戳却出现了时刻：{note}"
+    assert blind.frames[0].label == "第 1 帧", blind.frames[0].label
+    assert as_content_blocks(blind)[0]["text"].count("00:") == 0
+
+    # ---------- 5. 配置校验：写错的值必须当场挡掉 ----------
+    def cfg_with(frames_yaml: str):
+        p = Path(tempfile.mkdtemp()) / "c.yaml"
+        p.write_text(f"collect:\n  frames:\n{frames_yaml}", encoding="utf-8")
+        return AppConfig.load(p)
+
+    for bad, why in (
+        ("    max_frames: -1\n", "负的张数"),
+        ("    quality: 0\n", "质量为 0"),
+        ("    quality: 101\n", "质量超过 100"),
+    ):
+        try:
+            cfg_with(bad)
+        except ValueError as exc:
+            assert "frames" in str(exc), f"{why} 的报错信息里没提到 frames：{exc}"
+        else:
+            raise AssertionError(f"{why} 没有被拒绝")
+
+    ok = cfg_with("    enabled: false\n    max_frames: 24\n    quality: 70\n").collect.frames
+    assert ok.enabled is False and ok.max_frames == 24 and ok.quality == 70, ok
+    # 默认值：默认开、上限 12（这是"默认开 + 加上限"那个决定）
+    dflt = FramesConfig()
+    assert dflt.enabled is True and dflt.max_frames == 12, dflt
+
+    # ---------- 6. 缓存目录挂在 data home 下，且能清、能算大小 ----------
+    tmp_db = str(Path(tempfile.mkdtemp()) / "t.db")
+    assert cache_size(tmp_db) == 0, "一开始应当是空的"
+    d = Path(tmp_db).parent / "frames" / "123"
+    d.mkdir(parents=True)
+    (d / "1.jpg").write_bytes(b"x" * 100)
+    assert cache_size(tmp_db) == 100, cache_size(tmp_db)
+    assert clear_cache(tmp_db, 123) == 1, "应当删掉 1 个文件"
+    assert clear_cache(tmp_db, 999) == 0, "不存在的视频应当返回 0，而不是报错"
+    assert cache_size(tmp_db) == 0, "清完之后不该还有占用"
+
+    # ---------- 7. purge_stale：只清过期的，不动正在用的 ----------
+    # 这是"任务结束就删"之外的兜底：进程被杀／崩溃时根本没机会走到清理，
+    # 那些残留必须在下一次启动时被收走，否则别人的画面会永久留在磁盘上。
+    d2 = Path(tmp_db).parent / "frames" / "456"
+    d2.mkdir(parents=True)
+    (d2 / "2.jpg").write_bytes(b"y" * 10)
+    assert purge_stale(tmp_db, max_age_seconds=3600) == 0, "刚写下的缓存被当成残留清掉了"
+    assert (d2 / "2.jpg").exists(), "新鲜的缓存在 purge 里被误删"
+    old = time.time() - 3 * 3600
+    os.utime(d2, (old, old))
+    assert purge_stale(tmp_db, max_age_seconds=3600) == 1, "过期的残留没被清掉"
+    assert not d2.exists(), "过期目录还留在磁盘上"
+    assert cache_size(tmp_db) == 0, "purge 之后应当归零"
+
+    return (
+        "挑帧铺满全片 / 裁格行优先且跨图回绕正确 / 内容块成对且为 data URL / "
+        "无时间戳如实说明 / 配置非法值被拒 / 缓存可算可清 / purge 只清过期残留"
+    )
+
+
+def _frames_wired() -> str:
+    """画面必须真的进到**发出去的那次请求**里，且只进那一次。
+
+    这是"写了接线"和"接线对了"的区别。summarize 里拼好了 blocks 却没传下去、
+    或者传给了错误的那一轮，都不会报错——总结照常生成，只是没有画面，
+    而且从产出上完全看不出来。所以这里直接抓请求体断言，不信任何中间变量。
+    """
+    import types
+
+    from bili_scribe.config import AppConfig
+    from bili_scribe.core import summarizer
+    from bili_scribe.core.collector import Bundle
+    from bili_scribe.core.frames import Frame, FrameSet
+
+    bundle = Bundle(
+        bvid="BV1smoke",
+        aid=1,
+        cid=2,
+        page=1,
+        page_count=1,
+        title="测试稿件",
+        desc="",
+        up_name="某人",
+        up_mid=9,
+        duration=600,
+        tname="知识",
+        source_kind="subtitle_ai",
+        source_label="平台 AI 字幕",
+        source_trust="中",
+        source_detail="717 段",
+        body="这是一段用来测试的素材正文，长度不足以触发分块。" * 3,
+    )
+    frameset = FrameSet(
+        frames=[
+            Frame(order=1, timestamp=0, data_url="data:image/jpeg;base64,AAA", size=3),
+            Frame(order=2, timestamp=300, data_url="data:image/jpeg;base64,BBB", size=3),
+        ],
+        total_cells=200,
+        sprites=2,
+        has_timestamps=True,
+    )
+
+    seen: list[list[dict[str, Any]]] = []
+    reply = (
+        '{"one_line":"一句话结论","summary_md":"正文","key_points":["要点"],'
+        '"timeline":[{"t":"00:00","text":"开场"}],"caution":"","comment_short":"短评"}'
+    )
+
+    class FakeLlm:
+        cfg = types.SimpleNamespace(model="fake-model")
+
+        def chat(self, messages, **_kwargs):
+            seen.append(messages)
+            return reply
+
+    cfg = AppConfig()
+    stages: list[str] = []
+    out = summarizer.summarize(
+        bundle,
+        FakeLlm(),
+        cfg,
+        progress=lambda stage, _msg: stages.append(stage),
+        role_key="standard",
+        frameset=frameset,
+    )
+
+    assert len(seen) == 1, f"standard 角色应当只调用一次，实际 {len(seen)} 次"
+    content = seen[0][1]["content"]
+    assert isinstance(content, list), "带帧时 user content 必须是内容块数组，实际还是字符串"
+    kinds = [c["type"] for c in content]
+    assert kinds[0] == "text", f"第一个块必须是正文：{kinds[:2]}"
+    assert kinds.count("image_url") == 2, f"应当有 2 张图，实际 {kinds.count('image_url')}：{kinds}"
+    images = [c for c in content if c["type"] == "image_url"]
+    assert all(
+        c["image_url"]["url"].startswith("data:image/jpeg;base64,") for c in images
+    ), images
+    assert out.frames == 2, f"summary 要记下这次附了几帧，实际 {out.frames}"
+    assert "reducing" in stages, stages
+
+    # 不带帧时行为必须与加这个功能之前**完全一致**（content 还是字符串）
+    seen.clear()
+    out2 = summarizer.summarize(bundle, FakeLlm(), cfg, role_key="standard")
+    assert isinstance(seen[0][1]["content"], str), "无帧路径被改成了数组，属于行为回归"
+    assert out2.frames == 0, out2.frames
+
+    # 三轮回：帧只能进归约那一次，批判与修订都不能带——
+    # 否则同一批图会被反复计费，而它们的作用在归约时已经用完。
+    seen.clear()
+    out3 = summarizer.summarize(bundle, FakeLlm(), cfg, role_key="xueshu", frameset=frameset)
+    assert len(seen) == 3, f"三轮回应当是 3 次调用，实际 {len(seen)} 次"
+    assert isinstance(seen[0][1]["content"], list), "归约那一次必须带帧"
+    assert isinstance(seen[1][1]["content"], str), "自我批判那一次不该带帧"
+    assert isinstance(seen[2][1]["content"], str), "修订那一次不该带帧"
+    assert out3.frames == 2, out3.frames
+
+    # 空帧集（采集拿不到图）不能把请求变成空数组，必须安全退回纯文本
+    seen.clear()
+    out4 = summarizer.summarize(
+        bundle, FakeLlm(), cfg, role_key="standard", frameset=FrameSet()
+    )
+    assert isinstance(seen[0][1]["content"], str), "空帧集不该把 content 变成数组"
+    assert out4.frames == 0, out4.frames
+
+    return "帧只进归约那一次（standard 1 次 / 三轮回 3 次中仅第 1 次）/ 无帧路径行为不变 / 空帧集安全退回"
+
+
 def _roles_registry() -> str:
     """角色注册表的不变量。
 
@@ -630,6 +881,8 @@ check("二维码缺依赖时的提示", _qr_missing_message)
 check("敏感文件被排除", _sensitive_files_excluded)
 check("思考模型输出预算与自动降级", _llm_thinking)
 check("代理只来自配置、不来自环境变量", _llm_proxy)
+check("全片抽帧", _frames_module)
+check("画面接进了总结请求", _frames_wired)
 check("角色注册表", _roles_registry)
 check("发布长文与 Delta 转换", _publish_document)
 

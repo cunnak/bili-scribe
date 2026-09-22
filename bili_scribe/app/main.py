@@ -24,6 +24,7 @@ from ..config import (
 )
 from ..core import collector as collector_mod
 from ..core import composer, resolver, summarizer
+from ..core import frames as frames_mod
 from ..core.collector import CollectError
 from ..core.publisher import Publisher
 from ..core.resolver import ResolveError
@@ -199,8 +200,17 @@ def _qr_png_data_url(content: str) -> str:
 
 
 def _run_task(state: AppState, task_id: str, raw_input: str, role: str | None = None) -> None:
-    """后台跑完整条链：解析 → 采集 → 总结 → 组装。失败就落错误，不吞异常。"""
+    """后台跑完整条链：解析 → 采集 → 画面 → 总结 → 组装。失败就落错误，不吞异常。"""
     store = state.store
+    collected_aid: int | None = None
+
+    # 顺手收掉上次异常退出留下的画面缓存。放这里而不是只在启动时做，是因为
+    # 这个应用可能连着跑好几天不重启，而残留恰恰是"崩溃的那一次"留下的——
+    # 只在启动时清，等于指望使用者去重启它。清理失败不能影响任务，所以单独吞掉。
+    try:
+        frames_mod.purge_stale(state.cfg.db_path)
+    except OSError:
+        pass
 
     def progress(stage: str, message: str) -> None:
         store.update_task(task_id, status=stage, progress=message)
@@ -215,6 +225,26 @@ def _run_task(state: AppState, task_id: str, raw_input: str, role: str | None = 
         bundle = collector_mod.collect(
             client, target.bvid, target.page, state.cfg.collect, progress=progress
         )
+        collected_aid = bundle.aid
+
+        # 画面是加分项，不是必需品：拿不到就如实记一条，绝不让整条任务失败。
+        # 主动关掉时（enabled=False）不记——那是使用者的选择，不是异常。
+        frameset = None
+        warnings = list(bundle.warnings)
+        if state.cfg.collect.frames.enabled:
+            try:
+                frameset = frames_mod.collect_frames(
+                    client,
+                    state.cfg.collect.frames,
+                    bundle.aid,
+                    state.cfg.db_path,
+                    progress=progress,
+                )
+            except frames_mod.FrameError as exc:
+                warnings.append(f"未附画面：{exc}")
+            else:
+                warnings.extend(f"画面：{note}" for note in frameset.notes)
+
         store.update_task(
             task_id,
             aid=bundle.aid,
@@ -225,13 +255,18 @@ def _run_task(state: AppState, task_id: str, raw_input: str, role: str | None = 
             source_kind=bundle.source_kind,
             source_label=bundle.source_label,
             source_trust=bundle.source_trust,
-            warnings=bundle.warnings,
+            warnings=warnings,
             candidates=bundle.checks_as_dicts(),
             platform_summary=bundle.platform_summary,
         )
 
         summary = summarizer.summarize(
-            bundle, state.llm, state.cfg, progress=progress, role_key=role
+            bundle,
+            state.llm,
+            state.cfg,
+            progress=progress,
+            role_key=role,
+            frameset=frameset,
         )
         comment_text = composer.build_comment(summary, bundle, state.cfg.publish)
         preview_md = composer.build_preview(bundle, summary, state.cfg.publish)
@@ -250,6 +285,15 @@ def _run_task(state: AppState, task_id: str, raw_input: str, role: str | None = 
         store.update_task(
             task_id, status="failed", progress="失败", error=f"未预期的错误：{exc!r}"
         )
+    finally:
+        # 画面帧用完即删。它是整条链路上唯一会把**第三方内容实体**落到本地的东西，
+        # 缓存只服务于"同一次任务内不重复下载"，没有理由让它跨任务留存。
+        # 放 finally 而不是成功分支：失败同样要清，否则报错的任务会留下残留。
+        if collected_aid:
+            try:
+                frames_mod.clear_cache(state.cfg.db_path, collected_aid)
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------- 应用
@@ -259,6 +303,12 @@ def create_app(cfg: AppConfig) -> FastAPI:
     app = FastAPI(title="bili-scribe", version=__version__)
     state = AppState(cfg)
     app.state.ctx = state
+
+    # 兜底清一次画面缓存。正常路径下每个任务结束就删了，这里清的是上次
+    # 异常退出（被杀／崩溃／断电）留下的残留——否则它们会一直躺在磁盘上。
+    stale = frames_mod.purge_stale(cfg.db_path)
+    if stale:
+        print(f"[i] 清掉了 {stale} 个上次未清理的画面缓存目录")
 
     if not _qr_available():
         print(
