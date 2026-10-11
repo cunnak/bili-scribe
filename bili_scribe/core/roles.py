@@ -61,7 +61,8 @@ OUTPUT_CONTRACT = """
   "key_points": ["3-6 条要点，每条 30 字以内"],
   "timeline": [{"t": "03:12", "text": "该节点讲了什么"}],
   "caution": "素材的局限与不确定之处；无需说明则填空字符串",
-  "comment_short": "给评论区用的短版，180-280 字，纯文本，不要 Markdown 标记，不要换行"
+  "comment_short": "给评论区用的短版，180-280 字，纯文本，不要 Markdown 标记，不要换行",
+  "revise_note": "本次修订改了哪些部分、为什么；不是修订就填空字符串"
 }
 """
 

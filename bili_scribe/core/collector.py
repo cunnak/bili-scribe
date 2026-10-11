@@ -31,8 +31,17 @@ from ..infra.endpoints import (
     REPLY_MAIN,
     VIDEO_VIEW,
 )
+from . import srt as srt_mod
 
 SOURCE_META: dict[str, tuple[str, str, str]] = {
+    "subtitle_user": (
+        "你上传的字幕",
+        "未知",
+        "由使用者提供的 srt 文件。内容未经平台或本工具校验——"
+        "如果是第三方下载的，可能与这条视频的版本不一致；"
+        "也可能只覆盖了视频的一部分（例如被裁剪过），"
+        "所以不要把「素材里没有」当成「视频里没有」",
+    ),
     "subtitle_human": ("人工字幕", "高", "UP 主上传或平台校对的字幕，最贴近视频原意"),
     "subtitle_ai": ("B站 AI 字幕", "中", "平台语音识别生成，存在同音字与断句错误"),
     "danmaku": ("弹幕", "低", "只反映观众反应与情绪高点，不等于视频内容本体"),
@@ -181,9 +190,14 @@ def _merge_subtitle(
 # ----------------------------------------------------------------- 各来源
 
 
-def _collect_subtitle(
+def _list_subtitles(
     client: BiliClient, aid: int, cid: int, cfg: CollectConfig
 ) -> tuple[dict[str, Any] | None, str]:
+    """只拿字幕清单，不下载内容。
+
+    单独抽出来，是为了"使用者已经上传了字幕、但仍要如实告诉他平台有没有字幕"
+    这个场景——那种情况下只想知道有没有，不该白下一遍字幕文件。
+    """
     if not client.is_logged_in:
         return None, "未登录。字幕接口对匿名请求恒定返回空列表，没有免登录路径"
     try:
@@ -202,6 +216,15 @@ def _collect_subtitle(
     chosen = _pick_subtitle(subtitles, cfg.prefer_subtitle_lang)
     if not chosen or not chosen.get("subtitle_url"):
         return None, "字幕列表为空或条目缺少 subtitle_url"
+    return chosen, ""
+
+
+def _collect_subtitle(
+    client: BiliClient, aid: int, cid: int, cfg: CollectConfig
+) -> tuple[dict[str, Any] | None, str]:
+    chosen, note = _list_subtitles(client, aid, cid, cfg)
+    if not chosen:
+        return None, note
 
     try:
         payload = client.get_json_url(chosen["subtitle_url"])
@@ -223,6 +246,44 @@ def _collect_subtitle(
         "line_count": len(merged),
         "raw_segments": len(lines),
     }, ""
+
+
+def _prepare_user_subtitle(
+    raw: bytes, duration: int
+) -> tuple[dict[str, Any] | None, list[str], str]:
+    """解析使用者上传的 srt，返回 (素材, 警告, 说明)。
+
+    **刻意不抛异常**：传错文件、编码不认识都是常事，这时应当降级回平台字幕
+    并如实说明，而不是让一次总结直接失败。
+    """
+    try:
+        items, encoding = srt_mod.parse_bytes(raw)
+    except srt_mod.SrtError as exc:
+        return None, [f"你上传的字幕文件用不了：{exc}"], ""
+
+    warnings: list[str] = []
+    if not srt_mod.is_ordered(items):
+        items = sorted(items, key=lambda pair: pair[0])
+        warnings.append("你上传的字幕时间戳不是递增的，已按时间重新排序")
+    warnings.extend(srt_mod.check_alignment(items, duration))
+
+    # 用户字幕**不做 15 秒窗聚合**：srt 通常已是规范的一整句一条，
+    # 再按时间窗粘合会把独立对白并成一坨（理由见 core/srt.py 的模块说明）。
+    return (
+        {
+            "text": "\n".join(f"[{_stamp(start)}] {text}" for start, text in items),
+            "lang": "",
+            "lang_doc": "",
+            # 不给它定 human/ai：那两者的区分是平台字幕内部的事，
+            # 用户字幕走独立的 source_kind。
+            "is_ai": False,
+            "line_count": len(items),
+            "raw_segments": len(items),
+            "encoding": encoding,
+        },
+        warnings,
+        f"已解析 {len(items)} 段（识别为 {encoding} 编码）",
+    )
 
 
 def _collect_danmaku(
@@ -352,6 +413,7 @@ def collect(
     bvid: str,
     page: int,
     cfg: CollectConfig,
+    user_srt: bytes | None = None,
     progress: Callable[[str, str], None] | None = None,
 ) -> Bundle:
     notify = progress or (lambda _stage, _message: None)
@@ -396,24 +458,56 @@ def collect(
     notify("fetching_tags", "读取标签")
     bundle.tags = _collect_tags(client, bundle.bvid)
 
+    # —— 字幕：使用者上传的优先 ——
+    # 顺序是先处理上传件、再决定要不要采平台字幕。这样"平台到底有没有字幕"
+    # 仍然会被查到并如实报告（杜绝静默忽略上传的文件），但已经上传时
+    # 就不必白下一遍平台字幕文件。
     notify("fetching_subtitle", "尝试获取字幕")
-    subtitle, subtitle_note = _collect_subtitle(client, aid, cid, cfg)
-    checks.append(
-        SourceCheck(
-            "subtitle",
-            "字幕",
-            bool(subtitle),
-            (
-                f"已取得 {subtitle['lang_doc'] or subtitle['lang']} 字幕，"
-                f"聚合为 {subtitle['line_count']} 段（原始 {subtitle['raw_segments']} 条）"
-                if subtitle
-                else subtitle_note
-            ),
+    user_subtitle: dict[str, Any] | None = None
+    if user_srt:
+        user_subtitle, user_warnings, user_note = _prepare_user_subtitle(
+            user_srt, bundle.duration
         )
-    )
+        warnings.extend(user_warnings)
+        checks.append(
+            SourceCheck(
+                "subtitle_user",
+                "你上传的字幕",
+                bool(user_subtitle),
+                user_note or "未能解析，已回落到平台字幕",
+            )
+        )
 
+    subtitle: dict[str, Any] | None = None
+    subtitle_note = ""
+    if user_subtitle:
+        chosen, platform_note = _list_subtitles(client, aid, cid, cfg)
+        if chosen:
+            platform_note = (
+                f"平台另有 {chosen.get('lan_doc') or chosen.get('lan')} 字幕，"
+                "按你的选择本次未采用"
+            )
+        checks.append(SourceCheck("subtitle", "平台字幕", bool(chosen), platform_note))
+    else:
+        subtitle, subtitle_note = _collect_subtitle(client, aid, cid, cfg)
+        checks.append(
+            SourceCheck(
+                "subtitle",
+                "字幕",
+                bool(subtitle),
+                (
+                    f"已取得 {subtitle['lang_doc'] or subtitle['lang']} 字幕，"
+                    f"聚合为 {subtitle['line_count']} 段（原始 {subtitle['raw_segments']} 条）"
+                    if subtitle
+                    else subtitle_note
+                ),
+            )
+        )
+
+    # 判断"已有字幕"必须把上传件算进去，否则传了字幕还会再去抓一遍弹幕
+    have_subtitle = bool(user_subtitle or subtitle)
     need_danmaku = cfg.danmaku.enabled and (
-        subtitle is None or cfg.danmaku.also_with_subtitle
+        not have_subtitle or cfg.danmaku.also_with_subtitle
     )
     danmaku: dict[str, Any] | None = None
     if need_danmaku:
@@ -435,7 +529,7 @@ def collect(
     )
 
     notify("fetching_replies", "读取热门评论")
-    if subtitle is None and danmaku is None:
+    if not have_subtitle and danmaku is None:
         bundle.hot_replies = _collect_replies(client, aid)
     checks.append(
         SourceCheck(
@@ -453,7 +547,11 @@ def collect(
         bundle.platform_summary = _collect_platform_summary(client, aid, cid, bundle.up_mid)
 
     # —— 选主素材 ——
-    if subtitle:
+    # 使用者上传的排在最前：他特意准备了这份文件，就说明他要的是它。
+    if user_subtitle:
+        bundle.source_kind = "subtitle_user"
+        bundle.body = user_subtitle["text"]
+    elif subtitle:
         bundle.source_kind = "subtitle_human" if not subtitle["is_ai"] else "subtitle_ai"
         bundle.body = subtitle["text"]
         if subtitle["is_ai"]:

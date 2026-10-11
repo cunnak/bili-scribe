@@ -31,6 +31,17 @@ B站 的 `x/player/videoshot` 返回的是 **10×10 的网格拼图**（原图 4
 
 所以启用与否应该由使用者判断，不该默认对一切视频都生效。
 
+## 缓存的生死：谁建谁删
+
+每次采集都在 `frames/<aid>-<随机>` 下建一个**独占**目录，采完（无论成败）立刻删掉。
+画面在返回前已经进了内存（`Frame.data_url`），所以那些文件从那一刻起就没用了。
+
+为什么不按 aid 复用同一个目录：那样两次采集会共用它，而清理的人并不知道自己删的
+可能是别人正在写的目录。实测就是这么翻车的——迭代开始采集、主任务姗姗来迟的收尾
+把它整个删掉，于是迭代写到第 2 帧时 FileNotFoundError，一整轮白跑（复现率约 1/6，
+脚本见项目根的 `refine-debug-race.py`）。改成独占目录后，这个竞争是**从构造上**
+消失的。`purge_stale` 仍然兜着"进程被杀／断电"留下的残骸。
+
 ## 已知的边缘情况
 
 - **`index` 可能为空**：短一点的视频只有 `image` 没有时间戳（实测 35 分钟那条
@@ -45,6 +56,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import secrets
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -153,9 +165,44 @@ def cell_box(cell: int, grid_x: int, grid_y: int, cw: int, ch: int) -> tuple[int
 # ------------------------------------------------------------------ 缓存
 
 
-def _cache_dir(db_path: str, aid: int) -> Path:
+def _frames_root(db_path: str) -> Path:
     """帧缓存放在数据库旁边，跟着 storage 配置走。"""
-    return Path(db_path).parent / "frames" / str(aid)
+    return Path(db_path).parent / "frames"
+
+
+def _new_cache_dir(db_path: str, aid: int) -> Path:
+    """给**这一次采集**建一个独占的缓存目录：`frames/<aid>-<随机>`。
+
+    ## 为什么不是 `frames/<aid>`（这是踩出来的）
+
+    原来是按 aid 命名的，于是「同一个视频的两次采集」共用同一个目录；而清理又是
+    「任务结束时把这个 aid 的目录删掉」。两者一撞就是数据竞争：
+
+        主任务 t+2.43s 采集完成、写库说 ready
+                  t+2.66s 迭代开始采集，mkdir 并把 0.jpg 写进去
+                  t+3.00s 主任务的 finally 才走到 clear_cache → 整个目录被删掉
+                  → 迭代写到后面某一帧时 FileNotFoundError，这一轮白跑
+
+    实测复现率约 1/6（脚本见项目根的 refine-debug-race.py），而且它长得非常像
+    "偶发网络问题"。那次追到的间隙约 0.5 秒，**成因至今没定位**（已排除提交路径：
+    整次 record_version 只有 5–7ms）——而这正是不该靠"把清理提前/延后"去修的理由：
+    那是拿一个不理解的时序去赌。改成每次采集一个独占目录之后，"谁建谁删"成立，
+    竞争从**构造上**消失，与那段间隙多长、多频繁都无关。
+    """
+    return _frames_root(db_path) / f"{aid}-{secrets.token_hex(4)}"
+
+
+def _remove_dir(path: Path) -> int:
+    """删掉一个缓存目录，返回删除的文件数。
+
+    用 rmtree 而不是逐文件 unlink：真出了意外（半途中断留下的临时文件、子目录）时，
+    逐文件删除会留下一个删不掉的目录，而"删了但没删干净"比"没删"更难被发现。
+    """
+    if not path.exists():
+        return 0
+    n = sum(1 for p in path.rglob("*") if p.is_file())
+    shutil.rmtree(path, ignore_errors=True)
+    return 0 if path.exists() else n
 
 
 def _load_meta(cache: Path) -> dict[str, Any] | None:
@@ -192,9 +239,24 @@ def collect_frames(
     if cfg.max_frames <= 0:
         raise FrameError("画面张数上限为 0")
 
-    cache = _cache_dir(db_path, aid)
+    cache = _new_cache_dir(db_path, aid)
     cache.mkdir(parents=True, exist_ok=True)
+    try:
+        return _crop_frames(client, cfg, aid, cache, notify)
+    finally:
+        # **谁建谁删，就在这一个函数里。** 画面此时已经在内存里（Frame.data_url），
+        # 所以文件从这一刻起就没用了——收得越早，"第三方内容留在磁盘上"的窗口越小。
+        # 失败路径也走这里：接口报错、图片不是图片、写盘失败，一条都不会漏。
+        _remove_dir(cache)
+        _prune_empty_root(db_path)
 
+
+def _crop_frames(client, cfg: FramesConfig, aid: int, cache: Path, notify) -> "FrameSet":
+    """裁帧的主体。**只管用 cache，不管它的生死**——创建与删除都在 collect_frames 里。
+
+    单独拆出来，是为了让"谁建谁删"一眼可见：主体里有十几处可能中途失败的地方，
+    清理必须由一个 finally 包住整体，否则总有一条路径会漏。
+    """
     notify("fetching_frames", "读取全片抽帧索引")
     meta = _load_meta(cache)
     if meta is None:
@@ -319,26 +381,27 @@ def as_content_blocks(frameset: FrameSet) -> list[dict[str, Any]]:
 
 
 def clear_cache(db_path: str, aid: int) -> int:
-    """删掉某个视频的帧缓存，返回删除的文件数。
+    """删掉某个视频留下的帧缓存，返回删除的文件数。
 
-    用 rmtree 而不是逐文件 unlink：缓存目录里理论上只有裁好的单格和 meta.json，
-    但真出了意外（半途中断留下的临时文件、子目录）时，逐文件删除会留下一个
-    删不掉的目录，而"删了但没删干净"比"没删"更难被发现。
+    现在**正常路径用不到它了**（采集自己收尾，见 collect_frames），留着是因为它
+    表达的是一句仍然成立的话：「把这个视频的画面从磁盘上抹掉」。异常退出留下的
+    残留、或者将来某个不自己收尾的调用方，都还需要它。
     """
-    cache = _cache_dir(db_path, aid)
-    if not cache.exists():
-        return 0
-    n = sum(1 for p in cache.rglob("*") if p.is_file())
-    shutil.rmtree(cache, ignore_errors=True)
-    if cache.exists():
-        return 0
-    _prune_empty_root(db_path)
-    return n
+    removed = 0
+    for path in _frames_root(db_path).glob(f"{aid}-*"):
+        removed += _remove_dir(path)
+    if removed:
+        _prune_empty_root(db_path)
+    return removed
 
 
 def _prune_empty_root(db_path: str) -> None:
-    """frames/ 空了就连它一起收掉，别留一个空壳目录。"""
-    root = Path(db_path).parent / "frames"
+    """frames/ 空了就连它一起收掉，别留一个空壳目录。
+
+    只在"确认已经空了"时才 rmdir，所以别人刚建好的目录不会被它带走：
+    那会让 root 非空，直接跳过。
+    """
+    root = _frames_root(db_path)
     try:
         if root.exists() and not any(root.iterdir()):
             root.rmdir()
@@ -346,41 +409,61 @@ def _prune_empty_root(db_path: str) -> None:
         pass
 
 
+def _aid_of(dir_name: str) -> int | None:
+    """缓存目录名 → aid。名字形如 `116630440972726-1a2b3c4d`。
+
+    解析不出来就返回 None：**不是我们建的目录，一律不碰**。
+    """
+    head = dir_name.partition("-")[0]
+    return int(head) if head.isdigit() else None
+
+
 def purge_stale(db_path: str, max_age_seconds: int = 2 * 3600) -> int:
     """清掉过期未动的帧缓存目录，返回清掉的目录数。
 
-    正常路径下任务一结束就 clear_cache 了，所以这里通常无物可清。它兜的是
-    **没走到清理的退出**——进程被杀、崩溃、断电。没有它，一次异常退出就会让
-    别人的视频画面永久留在磁盘上，而使用者只会在某天看到一个不认识的目录、
-    不知道那是什么、也不知道能不能删。
+    正常路径下采集自己就收干净了（见 collect_frames），所以这里通常无物可清。
+    它兜的是**没走到清理的退出**——进程被杀、崩溃、断电。没有它，一次异常退出
+    就会让别人的视频画面永久留在磁盘上，而使用者只会在某天看到一个不认识的
+    目录、不知道那是什么、也不知道能不能删。
 
     按目录 mtime 判断：还在被写的目录 mtime 是新的，不会被误清。
     """
-    root = Path(db_path).parent / "frames"
+    root = _frames_root(db_path)
     if not root.exists():
         return 0
     now = time.time()
     removed = 0
     for d in list(root.iterdir()):
-        if not d.is_dir() or not d.name.isdigit():
+        if not d.is_dir() or _aid_of(d.name) is None:
             continue
         try:
             if now - d.stat().st_mtime < max_age_seconds:
                 continue
         except OSError:
             continue
-        if clear_cache(db_path, int(d.name)):
+        if _remove_dir(d):
             removed += 1
     _prune_empty_root(db_path)
     return removed
 
 
 def cache_size(db_path: str) -> int:
-    """整个帧缓存占多少字节。"""
-    root = Path(db_path).parent / "frames"
+    """整个帧缓存占多少字节。
+
+    逐个文件 stat 时容错：采集是并发的，目录可能在遍历途中就没了
+    （正常收尾），这时按"没有这个文件"算，不该让一个诊断函数崩掉。
+    """
+    root = _frames_root(db_path)
     if not root.exists():
         return 0
-    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+    total = 0
+    for p in root.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 __all__ = [

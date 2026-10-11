@@ -73,8 +73,29 @@ CREATE TABLE IF NOT EXISTS publish (
     deleted_at TEXT
 );
 
+-- 总结的版本史。**这个表必须落库，不能像素材笔记那样只放内存。**
+-- 区别在于「能不能重建」：素材笔记丢了重新预读就能算回来（只是贵一点），
+-- 而一段已经生成、已经被人逐条改过的文字，重跑模型不会给出同一个结果——
+-- 那是丢劳动，不是丢缓存。程序重启一次就把人改的五版全抹掉，是不可接受的。
+CREATE TABLE IF NOT EXISTS summary_version (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id      TEXT    NOT NULL,
+    version_no   INTEGER NOT NULL,
+    source       TEXT    NOT NULL,   -- initial 初版 / refine 按要求改的 / restore 以旧版为底稿
+    requirement  TEXT,               -- 这一版是被什么要求改出来的（初版为空）
+    role         TEXT,
+    summary_json TEXT,
+    preview_md   TEXT,
+    comment_text TEXT,
+    -- 这一版的消耗：{usage: {...}, chunks, frames, model, elapsed}。JSON 而不是拆成列，
+    -- 因为这些字段会随着流水线变化增删，而它们只是给人看的账，不参与查询。
+    metrics      TEXT,
+    created_at   TEXT    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_publish_bvid ON publish(bvid, status);
 CREATE INDEX IF NOT EXISTS idx_task_created ON task(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_version_task ON summary_version(task_id, version_no);
 """
 
 
@@ -211,10 +232,13 @@ class Store:
 
     _JSON_FIELDS = {"warnings", "candidates", "summary_json"}
 
-    def update_task(self, task_id: str, **fields: Any) -> None:
-        if not fields:
-            return
-        assignments = []
+    def _task_columns(self, fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
+        """把「字段＝值」摊成 SQL 赋值片段。update_task 与 record_version 共用。
+
+        合成一份而不是各写一遍：版本落库要在**同一条语句/同一个事务**里既写版本
+        又更新任务当前状态，两处若各拼一套，迟早会有一处漏掉 JSON 序列化。
+        """
+        assignments: list[str] = []
         values: list[Any] = []
         for name, value in fields.items():
             if name in self._JSON_FIELDS and not isinstance(value, (str, type(None))):
@@ -223,6 +247,12 @@ class Store:
             values.append(value)
         assignments.append("updated_at = ?")
         values.append(_now())
+        return assignments, values
+
+    def update_task(self, task_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        assignments, values = self._task_columns(fields)
         values.append(task_id)
         with self._connect() as conn:
             conn.execute(
@@ -255,6 +285,223 @@ class Store:
             except (TypeError, ValueError):
                 data[name] = None
         return data
+
+    # ------------------------------------------------------------- 版本史
+
+    # 版本从哪儿来。restore 和另外两种不是一回事：它**不调用模型**，
+    # 只是把某一版全文重新设为当前版（所以它没有消耗，也不该被算成"未记录"）。
+    VERSION_SOURCES = ("initial", "refine", "restore")
+
+    _VERSION_JSON_FIELDS = {"summary_json", "metrics"}
+
+    def record_version(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        summary_json: Any,
+        preview_md: str = "",
+        comment_text: str = "",
+        requirement: str = "",
+        role: str = "",
+        metrics: dict[str, Any] | None = None,
+        **task_fields: Any,
+    ) -> dict[str, Any]:
+        """追加一个版本，并把它设为该任务的「当前版」。整件事在一个事务里完成。
+
+        **为什么要合成一个事务**：版本表和 task 表都要写，而它们必须一致。
+        分开写的话，进程在两次写之间被杀，就会留下「任务显示新内容、版本史里却没有
+        它」这种自相矛盾的状态——而版本史存在的全部意义就是可信。
+
+        **旧记录的自愈**：升级前生成的任务只有 task.summary_json，没有任何版本行。
+        这里在确实一条版本都没有、而任务已有总结时，把它补成第 1 版再追加新版本。
+        这样老任务第一次迭代后就能看到完整的两版，不必专门写迁移脚本。
+
+        版本号用 `MAX(version_no) + 1` 在**同一条 SQL 里**算，不先读再写——
+        先读再写会让两个并发的迭代抢到同一个号，而唯一索引会把它变成一次
+        莫名其妙的失败。
+        """
+        if source not in self.VERSION_SOURCES:
+            raise ValueError(f"未知的版本来源：{source}")
+        stamp = _now()
+        payload = (
+            summary_json
+            if isinstance(summary_json, str)
+            else json.dumps(summary_json, ensure_ascii=False)
+        )
+        blob = json.dumps(metrics, ensure_ascii=False) if metrics else None
+
+        with self._connect() as conn:
+            # BEGIN IMMEDIATE：下面要先读后写，普通事务会先取共享锁、写时再升级，
+            # 两个并发迭代就可能双双升级失败（database is locked）。直接拿写锁。
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT summary_json, preview_md, comment_text, created_at "
+                "FROM task WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+
+            backfilled = self._backfill_initial(conn, task_id, row)
+
+            cur = conn.execute(
+                """
+                INSERT INTO summary_version
+                    (task_id, version_no, source, requirement, role,
+                     summary_json, preview_md, comment_text, metrics, created_at)
+                VALUES (?, (SELECT COALESCE(MAX(version_no), 0) + 1
+                            FROM summary_version WHERE task_id = ?),
+                        ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    task_id,
+                    source,
+                    requirement,
+                    role,
+                    payload,
+                    preview_md,
+                    comment_text,
+                    blob,
+                    stamp,
+                ),
+            )
+            version_no = conn.execute(
+                "SELECT version_no FROM summary_version WHERE id = ?",
+                (int(cur.lastrowid),),
+            ).fetchone()["version_no"]
+
+            # 新版本一旦写入，它就是「当前版」——所以任务表里那三份当前内容
+            # 必须跟着换。这不是顺手同步：少更新一处，界面就会出现"版本史里是
+            # 新版、发布框里是旧版"这种自相矛盾，而它看起来像模型没改。
+            fields: dict[str, Any] = {
+                "summary_json": payload,  # 已是字符串，_task_columns 不会再序列化一遍
+                "preview_md": preview_md,
+                "comment_text": comment_text,
+            }
+            fields.update(task_fields)
+            assignments, values = self._task_columns(fields)
+            values.append(task_id)
+            conn.execute(
+                f"UPDATE task SET {', '.join(assignments)} WHERE id = ?", values
+            )
+
+        return {
+            "task_id": task_id,
+            "version_no": version_no,
+            "source": source,
+            "backfilled_previous": backfilled,
+            "created_at": stamp,
+        }
+
+    @staticmethod
+    def _backfill_initial(conn: sqlite3.Connection, task_id: str, row: sqlite3.Row) -> bool:
+        """把「升级前生成、还没有版本行」的旧总结补成第 1 版。
+
+        时间用任务的创建时间：真正的生成时刻当时没有记录，而 created_at 至少是
+        「不晚于它」的一个稳定下界，比此刻的时间诚实。metrics 留空，界面上会显示
+        「未记录消耗」——那时确实没有记账这回事，用 0 冒名顶替才是说谎。
+
+        **来源要按内容自己说的话来定**：升级前已经改过版的任务，它的 summary_json
+        里带着 `revise_note`（"我这次改了什么"）。把这种记录标成「初次生成」，
+        标签就和内容自己说的话对不上——这种小谎最难被发现，因为它看起来很正常。
+        （这一条是活体验收时从真实库里看出来的：那条老任务的第 1 版一边写着"初次生成"，
+        一边带着一句"根据修改要求，检查发现……"。）
+
+        调用方负责事务与锁（record_version 在自己的事务里调它）。
+        """
+        if not row["summary_json"]:
+            return False
+        existing = conn.execute(
+            "SELECT COUNT(*) AS n FROM summary_version WHERE task_id = ?", (task_id,)
+        ).fetchone()["n"]
+        if existing:
+            return False
+        summary = Store._decode_field(row["summary_json"], {}) or {}
+        revised = bool(summary.get("revise_note"))
+        conn.execute(
+            """
+            INSERT INTO summary_version
+                (task_id, version_no, source, requirement, role,
+                 summary_json, preview_md, comment_text, metrics, created_at)
+            VALUES (?, 1, ?, ?, ?, ?, ?, ?, NULL, ?)
+            """,
+            (
+                task_id,
+                "refine" if revised else "initial",
+                # 当时的要求没有被记下来（那时还没有"要求"这个概念），如实说而不是留白
+                "（旧记录：当时的要求没有留存）" if revised else "",
+                # 角色从旧的 summary_json 里取：task 表没有这一列
+                summary.get("role", ""),
+                row["summary_json"],
+                row["preview_md"] or "",
+                row["comment_text"] or "",
+                row["created_at"],
+            ),
+        )
+        return True
+
+    def ensure_initial_version(self, task_id: str) -> bool:
+        """读的时候顺手把旧记录补成第 1 版。
+
+        读接口写库通常是要避免的，这里是个有意的例外：没有迁移框架、而"升级前的
+        任务打开后版本史是空的"是一种让人困惑的坏状态（明明有总结，却显示没有版本）。
+        它幂等、只在「有总结且零版本」时触发一次，触发后永远不再发生。
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT summary_json, preview_md, comment_text, created_at "
+                "FROM task WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            return self._backfill_initial(conn, task_id, row)
+
+    def latest_version_no(self, task_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(version_no) AS n FROM summary_version WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+        return int(row["n"] or 0)
+
+    def list_versions(self, task_id: str) -> list[dict[str, Any]]:
+        """按时间顺序返回全部版本。**含全文**——调用方要按体积自己裁剪。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM summary_version WHERE task_id = ? ORDER BY version_no ASC",
+                (task_id,),
+            ).fetchall()
+        return [self._decode_version(row) for row in rows]
+
+    def get_version(self, task_id: str, version_no: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM summary_version WHERE task_id = ? AND version_no = ?",
+                (task_id, version_no),
+            ).fetchone()
+        return self._decode_version(row) if row else None
+
+    @classmethod
+    def _decode_version(cls, row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        data = dict(row)
+        for name in cls._VERSION_JSON_FIELDS:
+            data[name] = cls._decode_field(data.get(name), None)
+        return data
+
+    @staticmethod
+    def _decode_field(raw: Any, empty: Any) -> Any:
+        if not raw:
+            return empty
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return empty
 
     # --------------------------------------------------------------- 发布
 

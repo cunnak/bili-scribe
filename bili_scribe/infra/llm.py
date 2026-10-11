@@ -55,8 +55,70 @@ class ChatResult:
     """
 
     content: str
+    prompt_tokens: int = 0
     completion_tokens: int = 0
     reasoning_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
+class Usage:
+    """一次任务（往往由很多次调用组成）的累计消耗。
+
+    为什么要把账记在这个粒度上：迭代打磨卖的正是"同一份素材改很多版"，而使用者
+    唯一能判断这件事值不值的依据，就是每一版各花了多少。没有这个数字，界面上
+    只剩一个「再改一版」按钮，它的代价完全是隐形的。
+
+    `unpriced` 是**未被计价的调用数**：不少兼容端点（尤其是中转）压根不返回
+    usage，那时计数会是 0，看起来像"不要钱"。把"这几笔没记账"单独说出来，
+    比给一个漂亮的 0 诚实。
+    """
+
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    unpriced: int = 0
+
+    def add(self, result: "ChatResult") -> None:
+        self.calls += 1
+        self.prompt_tokens += result.prompt_tokens
+        self.completion_tokens += result.completion_tokens
+        self.reasoning_tokens += result.reasoning_tokens
+        self.total_tokens += result.total_tokens or (
+            result.prompt_tokens + result.completion_tokens
+        )
+        if not (result.prompt_tokens or result.completion_tokens or result.total_tokens):
+            self.unpriced += 1
+
+    def merge(self, other: dict[str, Any] | None) -> None:
+        """把一份 to_dict() 的结果加进来。汇总历史版本时用。"""
+        if not other:
+            return
+        for name in ("calls", "prompt_tokens", "completion_tokens",
+                     "reasoning_tokens", "total_tokens", "unpriced"):
+            setattr(self, name, getattr(self, name) + int(other.get(name) or 0))
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "calls": self.calls,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "total_tokens": self.total_tokens,
+            "unpriced": self.unpriced,
+        }
+
+    def describe(self) -> str:
+        parts = [f"{self.calls} 次调用"]
+        if self.prompt_tokens or self.completion_tokens:
+            parts.append(f"输入 {self.prompt_tokens} / 输出 {self.completion_tokens} tokens")
+        if self.total_tokens:
+            parts.append(f"合计 {self.total_tokens} tokens")
+        if self.unpriced:
+            parts.append(f"其中 {self.unpriced} 次端点未返回 usage，无法计价")
+        return "，".join(parts)
 
 
 class LlmClient:
@@ -79,6 +141,9 @@ class LlmClient:
         # 最近一次调用的过程说明（例如"已自动关闭思考重试"），供界面展示。
         # 这些是"发生过但没失败"的事情，不记下来用户就不知道模型被降级过。
         self.notes: list[str] = []
+        # 这个实例上的累计消耗。**刻意挂在实例上**：调用方按任务／按次迭代各建一个
+        # 实例，账就不会在并发任务之间串起来（见 AppState.new_llm）。
+        self.usage = Usage()
 
     @property
     def configured(self) -> bool:
@@ -176,11 +241,17 @@ class LlmClient:
         message = choices[0].get("message") or {}
         usage = body.get("usage") or {}
         details = usage.get("completion_tokens_details") or {}
-        return ChatResult(
+        result = ChatResult(
             content=str(message.get("content") or "").strip(),
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
             reasoning_tokens=int(details.get("reasoning_tokens") or 0),
+            total_tokens=int(usage.get("total_tokens") or 0),
         )
+        # 记账点放这儿、而不是 chat() 的出口：钱是在这一次 HTTP 往返里花掉的，
+        # 哪怕它的正文随后因为"思考吃光预算"被丢弃重试（见 chat），那一笔也花了。
+        self.usage.add(result)
+        return result
 
     # ------------------------------------------------------------ 对外
 

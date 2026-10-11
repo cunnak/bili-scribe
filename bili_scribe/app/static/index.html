@@ -98,6 +98,28 @@
   input[type=number] { appearance: textfield; -moz-appearance: textfield; }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  /* 上传入口刻意不用原生 input[type=file] 的外观，两个原因：
+     ① 各浏览器对 ::file-selector-button 的支持不一致，样式会漂；
+     ② 这个主题下原生外观**几乎不可见**——边框 var(--line) #2c313a 对
+        背景 var(--bg) #16181d 的对比度只有约 1.4:1（可辨识阈值是 3:1），
+        结果就是使用者反馈"页面上找不到上传入口"。
+     改成用 label 当按钮（点击同样会触发文件选择），外观与主按钮一致。 */
+  .file-btn {
+    display: inline-flex; align-items: center;
+    background: var(--accent); color: #fff;
+    border: 0; border-radius: 8px; padding: 8px 15px;
+    font-size: 13px; cursor: pointer;
+    max-width: 320px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-btn:hover { filter: brightness(1.08); }
+  /* 原生 input 只留功能，不参与视觉。
+     用「视觉隐藏」而不是 display:none —— 后者在个别浏览器上会让
+     label 的点击不再转发给 input，那时按钮会**点了没反应**，比看不见更糟。 */
+  input[type=file] {
+    position: absolute; width: 1px; height: 1px;
+    opacity: 0; overflow: hidden;
+  }
   select option { background: var(--panel); color: var(--text); }
   textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
   textarea { min-height: 62px; }
@@ -259,6 +281,12 @@
         <select id="task-role" onchange="onRoleChange()" style="max-width:300px"></select>
       </div>
       <div class="hint" id="role-hint"></div>
+      <div class="row" style="margin-top:12px; gap:10px; align-items:center; flex-wrap:wrap">
+        <label class="file-btn" id="srt-btn" for="srt-file">选择字幕文件</label>
+        <input type="file" id="srt-file" accept=".srt,.txt" onchange="onSrtPicked()">
+        <button id="srt-clear" onclick="clearSrt()" style="display:none">清除</button>
+      </div>
+      <div class="hint" id="srt-hint">视频没有字幕时，可以自己准备一份 .srt 传上来；传了就会优先用它。</div>
       <div class="row" style="margin-top:10px">
         <button id="run-btn" onclick="submitTask()">解析并总结</button>
         <span class="hint">带 ?p=2 会总结第 2 P</span>
@@ -286,32 +314,65 @@
       <div id="preview-area" style="display:none">
         <div class="row" style="margin-bottom:10px">
           <span class="badge" id="source-badge">来源</span>
+          <span class="badge" id="version-badge">第 1 版</span>
           <span class="spacer"></span>
           <a id="video-link" href="#" target="_blank" rel="noopener">在 B站 打开</a>
         </div>
 
+        <!-- 累计消耗放在最上面一行：它是"这个功能值不值"的唯一依据，
+             不该藏在折叠区里。没有它，「再改一版」的代价完全是隐形的。 -->
+        <div class="hint" id="usage-line"></div>
+
         <div id="warning-box"></div>
+
+        <!-- 翻看历史版时的横幅。它同时承担"怎么回去"和"怎么拿它当底稿"两个入口——
+             历史版是只读的，不给出口就成了死胡同。 -->
+        <div id="history-note" class="warn-box" style="display:none"></div>
 
         <pre class="preview" id="preview-md"></pre>
 
-        <h2 style="margin-top:18px">将发到评论区的文本</h2>
-        <textarea id="comment-box" oninput="updateCounter()"></textarea>
-        <div class="row" style="margin-top:8px">
-          <span class="counter" id="counter">0 / 0</span>
-          <span class="spacer"></span>
-          <button class="ghost" onclick="resetComment()">还原为模型原文</button>
+        <div id="refine-block">
+          <h2 style="margin-top:18px">迭代打磨</h2>
+          <div class="warn-box" id="refine-blocked" style="display:none"></div>
+          <div class="hint" id="refine-hint"></div>
+          <textarea id="refine-req" placeholder="哪里不满意就直说。例：第三节太笼统，展开讲清楚；开头那句压到 30 字以内；不要用比喻&#10;只改你提到的部分，其余保持原样。" oninput="updateRefineButton()"></textarea>
+          <div class="row" style="margin-top:8px">
+            <button id="refine-btn" onclick="refine()" disabled>再改一版</button>
+            <span class="hint">基于当前版改，会另存为新的一版，旧版都留着。素材不会重新采集，所以比第一次快得多。</span>
+          </div>
+          <div class="status-line" id="refine-msg"></div>
+
+          <details id="version-box">
+            <summary id="version-summary">版本历史</summary>
+            <div class="row" id="diff-toggle-row" style="display:none;margin:8px 0">
+              <button class="ghost" id="diff-toggle" onclick="toggleDiffs()">展开全部差异</button>
+              <span class="hint">把每一版「具体差在哪里」铺开显示（默认只看字段名，鼠标停上去才看得到细节）。</span>
+            </div>
+            <ul class="list" id="version-list"></ul>
+            <div class="hint" id="version-hint">每一版都留着，随时可以回头拿某一版当底稿。「改动说明」是模型自己写的；「实际改动」是把这一版和上一版逐字段比出来的（本地算，不花钱）——两者不一致时，以后者为准。</div>
+          </details>
         </div>
 
-        <label class="checkline">
-          <input type="checkbox" id="confirm-box" onchange="updatePublishButton()">
-          <span>我已过目这条内容，确认发到该视频的评论区。</span>
-        </label>
+        <div id="publish-block">
+          <h2 style="margin-top:18px">将发到评论区的文本</h2>
+          <textarea id="comment-box" oninput="updateCounter(); updateRefineHint()"></textarea>
+          <div class="row" style="margin-top:8px">
+            <span class="counter" id="counter">0 / 0</span>
+            <span class="spacer"></span>
+            <button class="ghost" onclick="resetComment()">还原为模型原文</button>
+          </div>
 
-        <div class="row">
-          <button id="publish-btn" onclick="publish()" disabled>发布到评论区</button>
-          <span class="hint">同一视频只允许发一次；两次发布之间有强制间隔。</span>
+          <label class="checkline">
+            <input type="checkbox" id="confirm-box" onchange="updatePublishButton()">
+            <span>我已过目这条内容，确认发到该视频的评论区。</span>
+          </label>
+
+          <div class="row">
+            <button id="publish-btn" onclick="publish()" disabled>发布到评论区</button>
+            <span class="hint">同一视频只允许发一次；两次发布之间有强制间隔。</span>
+          </div>
+          <div class="status-line" id="publish-msg"></div>
         </div>
-        <div class="status-line" id="publish-msg"></div>
       </div>
     </div>
   </section>
@@ -537,7 +598,17 @@
 </div>
 
 <script>
-const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false, settings: null, settingsLoaded: false, roles: null, roleKey: "standard" };
+const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false, settings: null, settingsLoaded: false, roles: null, roleKey: "standard", subtitleToken: null,
+  /* ---- 迭代打磨相关 ---- */
+  versions: [],            // 版本列表（不含全文）
+  versionTotal: null,      // 累计消耗
+  currentVersion: null,    // 当前版是第几版
+  viewingVersion: null,    // 正在翻看的历史版；null = 在看当前版
+  canRefine: false,        // 后端查实的结果，不是猜的
+  refineBlocked: "",       // 不能改时的原因，直接显示给人看
+  showDiffs: false,        // 版本列表是否把「具体差在哪里」铺开显示（默认收起，靠 title 悬停）
+  awaitingRefine: null     // 提交迭代时记下"基于第几版"，用来判断新那版有没有出来
+};
 
 /* 这个页面有两种打开方式：由后端托管（http://127.0.0.1:8818/），
    或者被当成一个静态 HTML 直接打开／在预览面板里打开。后者所有接口都不存在，
@@ -591,6 +662,7 @@ function showBackendBanner(message) {
   document.getElementById("qr-btn").disabled = true;
   document.getElementById("run-btn").disabled = true;
   document.getElementById("publish-btn").disabled = true;
+  document.getElementById("refine-btn").disabled = true;
   document.getElementById("save-btn").disabled = true;
 }
 
@@ -741,6 +813,13 @@ function renderSteps(task) {
     box.innerHTML = '<li class="active"><span class="mark">·</span><span>排队中</span></li>';
     return;
   }
+  if (current === "refining") {
+    // 迭代只有一步：素材笔记已经有了，这次既不重新采集也不重新预读。
+    box.innerHTML = '<li class="active"><span class="mark">▶</span><span>按你的要求修改这一版</span></li>' +
+      '<li><span class="mark">✓</span><span>素材沿用上一版（未重新采集、未重新预读）</span></li>';
+    if (task.progress) setMsg("task-msg", task.progress);
+    return;
+  }
   const done = STAGES.indexOf(current);
   box.innerHTML = STAGES.map((s, i) => {
     let cls = "", mark = "○";
@@ -765,6 +844,86 @@ function renderChecks(task) {
     </li>`).join("");
 }
 
+/* -------------------------------------------------------- 字幕文件上传 */
+
+/* 上传走的是**原始字节**（application/octet-stream），不是 multipart——
+   后端为此不引入 python-multipart 这个新依赖。所以这里用 file.arrayBuffer()
+   直接读字节，而**刻意不用 file.text()**：srt 可能是 GBK 或 UTF-16，
+   一旦按 UTF-8 解一遍就毁了，编码探测必须留给服务端做。 */
+
+function setSrtHint(text, kind) {
+  const el = document.getElementById("srt-hint");
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = kind === "err" ? "status-line err" : (kind === "ok" ? "status-line ok" : "hint");
+}
+
+/* 按钮上的字要跟着状态走。否则选完文件它还写着「选择字幕文件」，
+   使用者会不确定到底选上没有，进而反复点。长文件名交给 CSS 截断。 */
+const SRT_BTN_DEFAULT = "选择字幕文件";
+
+function setSrtBtn(text) {
+  const el = document.getElementById("srt-btn");
+  if (!el) return;
+  const label = text || SRT_BTN_DEFAULT;
+  el.textContent = label;
+  el.title = label;   // 截断时悬停可看全名
+}
+
+async function uploadSrt(file) {
+  setSrtHint("读取并解析中…");
+  let buf;
+  try {
+    buf = await file.arrayBuffer();
+  } catch (e) {
+    setSrtHint("读不了这个文件：" + e.message, "err");
+    return;
+  }
+  try {
+    const r = await api("/api/subtitle/parse", {
+      method: "POST",
+      body: buf,
+      headers: { "Content-Type": "application/octet-stream" }
+    });
+    state.subtitleToken = r.token;
+    document.getElementById("srt-clear").style.display = "";
+    setSrtBtn(file.name);
+    setSrtHint(
+      file.name + "：解析出 " + r.segments + " 段，覆盖 " + r.first + "–" + r.last +
+        "（编码 " + r.encoding + "）。这份字幕会优先于平台字幕使用。",
+      "ok"
+    );
+  } catch (e) {
+    state.subtitleToken = null;
+    document.getElementById("srt-clear").style.display = "none";
+    setSrtBtn(SRT_BTN_DEFAULT);
+    setSrtHint("这份字幕用不了：" + e.message, "err");
+  }
+}
+
+function onSrtPicked() {
+  const el = document.getElementById("srt-file");
+  const file = el && el.files && el.files[0];
+  if (file) uploadSrt(file);
+}
+
+async function clearSrt() {
+  const token = state.subtitleToken;
+  state.subtitleToken = null;
+  const el = document.getElementById("srt-file");
+  if (el) el.value = "";
+  document.getElementById("srt-clear").style.display = "none";
+  setSrtBtn(SRT_BTN_DEFAULT);
+  setSrtHint("已清除，本次将使用平台字幕（如果有的话）。");
+  if (token) {
+    try {
+      await api("/api/subtitle/" + encodeURIComponent(token), { method: "DELETE" });
+    } catch (e) {
+      // 服务端没删成也不影响使用，兜底清理会收走它
+    }
+  }
+}
+
 async function submitTask() {
   const raw = document.getElementById("raw-input").value.trim();
   if (!raw) { setMsg("task-msg", "先粘贴一个视频链接或 BV 号。", "err"); return; }
@@ -776,8 +935,24 @@ async function submitTask() {
     const roleSel = document.getElementById("task-role");
     const body = { raw_input: raw };
     if (roleSel && roleSel.value) body.role = roleSel.value;
+    const hadSrt = !!state.subtitleToken;
+    if (hadSrt) body.subtitle_token = state.subtitleToken;
     const r = await api("/api/task", { method: "POST", body: JSON.stringify(body) });
+    // 提交成功就该忘掉这个 token：服务端会在任务结束时把文件删掉，
+    // 留着它下次再提交只会拿到一句「已过期」。
+    state.subtitleToken = null;
+    if (hadSrt) {
+      document.getElementById("srt-clear").style.display = "none";
+      setSrtHint("字幕已随本次任务提交（任务结束后自动删除）。要再用请重新选择文件。", "ok");
+    }
     state.taskId = r.task_id;
+    // 新任务意味着上一轮的一切都作废：上一轮的"等迭代结果"标记如果留着，
+    // 会让这一轮的第一次轮询误判成"迭代还没出结果"，从而永远停在等待里。
+    state.awaitingRefine = null;
+    state.viewingVersion = null;
+    state.versions = [];
+    state.versionTotal = null;
+    state.currentVersion = null;
     clearInterval(state.pollTimer);
     state.pollTimer = setInterval(pollTask, 1200);
     pollTask();
@@ -794,18 +969,46 @@ async function pollTask() {
     state.task = task;
     renderSteps(task);
     renderChecks(task);
-    if (task.status === "ready") {
+    if (task.status === "refining") {
+      // 迭代不是流水线：解析、采集、预读这次一件都没发生，所以只报一行进度，
+      // 不去点亮那排步骤（点亮它等于告诉使用者它又跑了一遍完整流程）。
+      clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(pollTask, 1500);
+      document.getElementById("refine-btn").disabled = true;
+      setMsg("task-msg", task.progress || "正在按你的要求改…");
+      setMsg("refine-msg", task.progress || "正在按你的要求改…");
+    } else if (task.status === "ready") {
+      /* 提交迭代后，服务端会当场把状态置成 refining；但万一这一版快得离谱，
+         第一次轮询读到的可能还是上一轮的 ready。那时如果"看到 ready 就收工"，
+         刚提交的迭代结果就永远不会被取回来了。所以用版本号判断：
+         当前版还是提交时那一版，说明新的一版还没出来，继续等。 */
+      if (state.awaitingRefine && (task.current_version || 0) <= state.awaitingRefine) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = setInterval(pollTask, 1500);
+        setMsg("task-msg", "正在按你的要求改…");
+        return;
+      }
+      const wasRefine = !!state.awaitingRefine;
+      state.awaitingRefine = null;
       clearInterval(state.pollTimer);
       document.getElementById("run-btn").disabled = false;
       setMsg("task-msg", "总结已生成，请在右侧确认。", "ok");
       renderPreview(task);
+      if (wasRefine) {
+        const note = (task.summary_json && task.summary_json.revise_note) || "";
+        setMsg("refine-msg",
+          "第 " + task.current_version + " 版改好了" + (note ? "——它说：" + note : "。"),
+          "ok");
+      }
     } else if (task.status === "failed") {
       clearInterval(state.pollTimer);
+      state.awaitingRefine = null;
       document.getElementById("run-btn").disabled = false;
       setMsg("task-msg", "失败：" + (task.error || "未知原因"), "err");
     }
   } catch (e) {
     clearInterval(state.pollTimer);
+    state.awaitingRefine = null;
     document.getElementById("run-btn").disabled = false;
     setMsg("task-msg", "轮询失败：" + e.message, "err");
   }
@@ -814,8 +1017,47 @@ async function pollTask() {
 /* -------------------------------------------------------------- 预览 */
 
 function escapeHtml(s) {
+  // 顺带把引号也转掉：这个函数的结果有时会进 title="..." 这类属性，
+  // 只转 & < > 的话，文本里出现一个引号就能把属性切开。
   return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/* 「实际改了什么」——把这一版和上一版逐字段比出来的，本地算，零成本。
+   它和上一行的「改动说明」是两件事：那是模型自己写的（线索），这是可核对的事实。
+   三种状态分开说，混起来就会把"没比过"读成"没改动"：
+     null → 不适用（第 1 版没有上一版 / 回退版没有"改"这回事），不显示这一行
+     []   → 比过了，逐字相同（要求没被落实，这本身就是有用信息）
+     非空 → 逐字段列出 */
+function versionDiffText(v) {
+  const fields = v.changed_fields;
+  if (fields === null || fields === undefined) return "";
+  if (!fields.length) return "无 —— 和上一版逐字相同（要求没被落实）";
+  return fields.map(f => {
+    const ratio = (f.ratio === null || f.ratio === undefined) ? "" : "，相似度 " + f.ratio;
+    return f.label + "（" + f.detail + ratio + "）";
+  }).join(" · ");
+}
+
+function versionDiffHint(v) {
+  const fields = v.changed_fields;
+  if (!fields || !fields.length) return "";
+  return fields.filter(f => f.example).map(f => f.label + "：" + f.example).join("\n");
+}
+
+/* 具体差在哪里，一行一条。默认只在 title 里（列表好扫），
+   打开开关才铺进列表——因为"改成了什么"才是判断"这次改动能不能接受"的依据，
+   而悬停是个极容易被忽略的交互（这一点是设计时自己发现的）。 */
+function versionDiffExamples(v) {
+  const fields = v.changed_fields;
+  if (!fields || !fields.length) return [];
+  return fields.filter(f => f.example).map(f => "例 · " + f.label + "：" + f.example);
+}
+
+function toggleDiffs() {
+  state.showDiffs = !state.showDiffs;
+  renderVersionList();
 }
 
 function renderPreview(task) {
@@ -843,10 +1085,303 @@ function renderPreview(task) {
   // 发布版用完整长文（不是概括版）。后端会按长度自动决定走笔记还是普通评论。
   state.defaultComment = task.publish_document || task.comment_text || "";
   document.getElementById("comment-box").value = state.defaultComment;
+  // 每次重新渲染都**重置确认勾选**。这不是顺手清一下：内容变了而勾选还在，
+  // 就等于让人对着新版内容举着"上一版的确认"。迭代打磨这一版尤其如此。
   document.getElementById("confirm-box").checked = false;
   updateCounter();
   updatePublishButton();
   setMsg("publish-msg", "");
+
+  // 回到"看当前版"的状态：翻历史版的残留必须清掉，否则会出现
+  // 预览里是第 2 版、发布框里却是第 4 版这种最危险的组合。
+  state.task = task;
+  state.viewingVersion = null;
+  showHistoryNote("");
+  document.getElementById("refine-block").style.display = "";
+  document.getElementById("publish-block").style.display = "";
+  setVersionBadge(task.current_version, task.version_count);
+  applyRefineState(task);
+  loadVersions(task.id);
+}
+
+/* -------------------------------------------------------- 迭代打磨 */
+
+function fmtNum(n) {
+  const s = String(n == null ? 0 : n);
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function setVersionBadge(current, count) {
+  const el = document.getElementById("version-badge");
+  if (!el) return;
+  if (!current) { el.textContent = "暂无版本"; return; }
+  el.textContent = "第 " + current + " 版" + (count > 1 ? " · 共 " + count + " 版" : "");
+}
+
+/* 这一版花了多少。分开写是因为三类的语义完全不同：
+   回退没有消耗（没调模型）、老版本没有记录（当时还没有记账）、其余是真账。 */
+function versionCostText(v) {
+  if (v.source === "restore") return "没有调用模型，无消耗";
+  const m = v.metrics || {};
+  const u = m.usage;
+  if (!u) return "消耗未记录（这一版生成于记账功能之前）";
+  const bits = [u.calls + " 次调用"];
+  if (u.total_tokens) {
+    bits.push("合计 " + fmtNum(u.total_tokens) + " tokens（输入 " + fmtNum(u.prompt_tokens) +
+      " / 输出 " + fmtNum(u.completion_tokens) + "）");
+  }
+  if (u.unpriced) bits.push(u.unpriced + " 次端点未返回用量");
+  if (m.elapsed) bits.push("耗时 " + m.elapsed + " 秒");
+  if (m.chunks > 1) bits.push("素材预读 " + m.chunks + " 段");
+  if (m.frames) bits.push("附 " + m.frames + " 帧画面");
+  return bits.join(" · ");
+}
+
+function renderUsageLine() {
+  const el = document.getElementById("usage-line");
+  if (!el) return;
+  const t = state.versionTotal;
+  if (!t || (!t.calls && !t.untracked)) { el.textContent = ""; return; }
+  const bits = [];
+  if (t.calls) bits.push(t.calls + " 次模型调用");
+  if (t.total_tokens) {
+    bits.push("输入 " + fmtNum(t.prompt_tokens) + " / 输出 " + fmtNum(t.completion_tokens) +
+      "，合计 " + fmtNum(t.total_tokens) + " tokens");
+  }
+  if (t.unpriced) bits.push(t.unpriced + " 次端点未返回用量，无法计价");
+  if (t.untracked) bits.push(t.untracked + " 版没有消耗记录（升级前生成的）");
+  el.textContent = "这条视频累计：" + bits.join("；");
+}
+
+async function loadVersions(taskId) {
+  try {
+    const data = await api("/api/task/" + taskId + "/versions");
+    state.versions = data.versions || [];
+    state.versionTotal = data.total || null;
+    state.currentVersion = data.current;
+    renderVersionList();
+    renderUsageLine();
+    if (state.task) setVersionBadge(state.currentVersion, state.versions.length);
+  } catch (e) {
+    const el = document.getElementById("version-hint");
+    if (el) {
+      el.textContent = "版本历史读不到：" + e.message;
+      el.className = "status-line err";
+    }
+  }
+}
+
+function renderVersionList() {
+  const box = document.getElementById("version-list");
+  const summary = document.getElementById("version-summary");
+  const list = state.versions || [];
+  if (summary) {
+    summary.textContent = list.length ? "版本历史（共 " + list.length + " 版）" : "版本历史";
+  }
+  // 开关只在**真的有差异可展开**时出现——没有差异还摆一个按不动的按钮，是假入口
+  const toggleRow = document.getElementById("diff-toggle-row");
+  const toggleBtn = document.getElementById("diff-toggle");
+  const anyDiff = list.some(v => (v.changed_fields || []).length);
+  if (toggleRow) toggleRow.style.display = anyDiff ? "" : "none";
+  if (toggleBtn) toggleBtn.textContent = state.showDiffs ? "收起差异" : "展开全部差异";
+  if (!list.length) { box.innerHTML = '<li class="m">还没有版本记录。</li>'; return; }
+  box.innerHTML = list.map(v => {
+    const isCurrent = v.version_no === state.currentVersion;
+    const viewing = state.viewingVersion === v.version_no;
+    const kind = v.source === "refine" ? "按你的要求改"
+      : (v.source === "restore" ? "回退到底稿" : "初次生成");
+    const rows = [];
+    if (v.one_line) rows.push('<div class="m">' + escapeHtml(v.one_line) + "</div>");
+    if (v.requirement) rows.push('<div class="m">要求：' + escapeHtml(v.requirement) + "</div>");
+    // 「这一版改了什么」——使用者就是靠这一行判断自己的要求有没有被听进去。
+    // 但它只是**模型的自述**，实测会不准，所以紧跟一行本地比对的结果。
+    if (v.revise_note) rows.push('<div class="m">改动说明：' + escapeHtml(v.revise_note) + "</div>");
+    const diff = versionDiffText(v);
+    if (diff) {
+      const hint = versionDiffHint(v);
+      rows.push('<div class="m"' + (hint ? ' title="' + escapeHtml(hint) + '"' : "") +
+        ">实际改动：" + escapeHtml(diff) + "</div>");
+      if (state.showDiffs) {
+        versionDiffExamples(v).forEach(line => {
+          rows.push('<div class="m">' + escapeHtml(line) + "</div>");
+        });
+      }
+    }
+    rows.push('<div class="m">' + versionCostText(v) + "</div>");
+    const tail = isCurrent
+      ? '<span class="badge high">当前</span>'
+      : '<button class="ghost" onclick="showVersion(' + v.version_no + ')">' +
+        (viewing ? "正在看" : "查看") + "</button>";
+    return "<li><div class='grow'>" +
+      '<div class="t">第 ' + v.version_no + " 版 · " + kind + " · " +
+      escapeHtml(v.created_at || "") + "</div>" +
+      rows.join("") + "</div>" + tail + "</li>";
+  }).join("");
+}
+
+function showHistoryNote(html) {
+  const el = document.getElementById("history-note");
+  if (!el) return;
+  el.innerHTML = html || "";
+  el.style.display = html ? "block" : "none";
+}
+
+/* 翻看历史版：**只读**，而且把迭代和发布两块都收起来。
+
+   为什么不是"直接切换到那一版来发布"：那样的话，你看着第 2 版、点发布，
+   发出去的其实是第 4 版——版本越多，这个错越难发现。所以历史版只用来回看，
+   想拿它当底稿就得显式点一下（那会真的把当前版换成它）。 */
+async function showVersion(no) {
+  const current = state.currentVersion;
+  if (!no || no === current) { viewCurrent(); return; }
+  try {
+    const v = await api("/api/task/" + state.taskId + "/versions/" + no);
+    state.viewingVersion = no;
+    document.getElementById("preview-md").textContent = v.preview_md || "（这一版没有预览内容）";
+    setVersionBadge(no, (state.versions || []).length);
+    const badge = document.getElementById("version-badge");
+    if (badge) badge.textContent = "第 " + no + " 版（历史，只读）";
+    document.getElementById("refine-block").style.display = "none";
+    document.getElementById("publish-block").style.display = "none";
+    showHistoryNote(
+      "<strong>你在看第 " + no + " 版，这是历史版本。</strong><br>" +
+      "发到评论区的永远是当前版（第 " + current + " 版）——要按这一版发，得先把它设为底稿。" +
+      '<div class="row" style="margin-top:8px">' +
+      '<button class="ghost" onclick="viewCurrent()">回到当前版（第 ' + current + " 版）</button>" +
+      '<button onclick="restoreVersion(' + no + ')">以这一版为底稿</button>' +
+      "</div>"
+    );
+    renderVersionList();
+  } catch (e) {
+    setMsg("refine-msg", "读不到第 " + no + " 版：" + e.message, "err");
+  }
+}
+
+function viewCurrent() {
+  const t = state.task;
+  if (!t) return;
+  state.viewingVersion = null;
+  // 不碰评论框与确认勾选：当前版的内容一个字都没变，没必要让人重新确认一遍。
+  document.getElementById("preview-md").textContent = t.preview_md || "（无预览内容）";
+  showHistoryNote("");
+  document.getElementById("refine-block").style.display = "";
+  document.getElementById("publish-block").style.display = "";
+  setVersionBadge(t.current_version, (state.versions || []).length);
+  renderVersionList();
+}
+
+async function restoreVersion(no) {
+  if (!confirm("以第 " + no + " 版为底稿？\n\n会追加一版新的当前版（内容与它相同），" +
+               "已有的版本都保留。这一步不调用模型，不产生消耗。")) return;
+  setMsg("refine-msg", "正在回退…");
+  try {
+    const r = await api("/api/task/" + state.taskId + "/versions/" + no + "/restore",
+      { method: "POST", body: JSON.stringify({}) });
+    const task = await api("/api/task/" + state.taskId);
+    state.task = task;
+    document.getElementById("refine-req").value = "";
+    renderPreview(task);   // 重新渲染会回到当前版、刷新版本列表、重置确认勾选
+    setMsg("refine-msg",
+      "已把第 " + r.restored_from + " 版设为当前版（现在是第 " + r.version_no + " 版，没有花任何模型调用）。",
+      "ok");
+  } catch (e) {
+    setMsg("refine-msg", "回退失败：" + e.message, "err");
+  }
+}
+
+/* 能不能改、为什么不能。判断只认后端给的 can_refine / refine_blocked，
+   前端不自己猜——猜错的表现是"按钮亮着却点不动"。 */
+function applyRefineState(task) {
+  const t = task || state.task || {};
+  state.canRefine = !!t.can_refine;
+  state.refineBlocked = t.refine_blocked || "";
+  state.currentVersion = t.current_version || state.currentVersion;
+
+  const blocked = document.getElementById("refine-blocked");
+  if (blocked) {
+    blocked.innerHTML = state.refineBlocked ? "<strong>现在还不能改这一版</strong><br>" + escapeHtml(state.refineBlocked) : "";
+    blocked.style.display = state.refineBlocked ? "block" : "none";
+  }
+  const live = t.live_publish;
+  if (live && !state.refineBlocked) {
+    // 理论上 refine_gate 已经给过原因了，这里是兜底，保证"已发布"这件事一定被说出来。
+    blocked.innerHTML = "<strong>这条视频的总结已经发出去了。</strong><br>评论发出后不能编辑，要改得先撤回。";
+    blocked.style.display = "block";
+  }
+  const req = document.getElementById("refine-req");
+  if (req) req.disabled = !state.canRefine;
+  updateRefineHint();
+  updateRefineButton();
+}
+
+function updateRefineHint() {
+  const el = document.getElementById("refine-hint");
+  if (!el) return;
+  const bits = [];
+  const role = (state.task && state.task.summary_json && state.task.summary_json.role) || "";
+  const info = (state.roles || []).filter(r => r.key === role)[0];
+  if (info) {
+    bits.push("角色保持「" + info.name + "」不变——换角色等于换个人重讲，那得重新提交任务。");
+  }
+  // 手改过下方正文的提醒：迭代基于的是**模型那一版**，不是你在框里改的。
+  // 不说的话，改完发现手改的部分没了，会以为是程序弄丢了。
+  const box = document.getElementById("comment-box");
+  if (state.defaultComment && box && box.value.trim() && box.value !== state.defaultComment) {
+    bits.push("（你在「将发到评论区的文本」里手改过。迭代基于的是模型那一版，改完会覆盖这些手改。）");
+  }
+  el.textContent = bits.join(" ");
+}
+
+function updateRefineButton() {
+  const btn = document.getElementById("refine-btn");
+  if (!btn) return;
+  const req = document.getElementById("refine-req");
+  const text = ((req && req.value) || "").trim();
+  // 看着历史版时不许直接改：要求必须落在某一版上，而界面得让你先确定是哪一版。
+  const blocked = !state.canRefine || !!state.viewingVersion || !state.online;
+  btn.disabled = blocked || !text;
+}
+
+async function refine() {
+  const req = document.getElementById("refine-req");
+  const text = (req.value || "").trim();
+  if (!text) { setMsg("refine-msg", "先写一句你想怎么改。", "err"); return; }
+  if (!state.canRefine) {
+    setMsg("refine-msg", state.refineBlocked || "现在还不能改这一版。", "err");
+    return;
+  }
+  const btn = document.getElementById("refine-btn");
+  btn.disabled = true;
+  setMsg("refine-msg", "已提交，正在按你的要求改（素材不会重新采集）…");
+  try {
+    const body = { requirement: text };
+    // 带上"我是在看第几版提的要求"。后端会核对它是否仍是当前版，不符就拒绝——
+    // 比默默把你的要求落到别的底稿上强。
+    if (state.currentVersion) body.base_version = state.currentVersion;
+    const r = await api("/api/task/" + state.taskId + "/refine",
+      { method: "POST", body: JSON.stringify(body) });
+    state.awaitingRefine = r.base_version || state.currentVersion || 0;
+    req.value = "";
+    clearInterval(state.pollTimer);
+    state.pollTimer = setInterval(pollTask, 1500);
+    pollTask();
+  } catch (e) {
+    setMsg("refine-msg", "没能开始改：" + e.message, "err");
+    btn.disabled = false;
+    // 失败原因可能是界面上还不知道的状态（比如刚在别处发布过），刷新一次任务状态
+    refreshTaskState();
+  }
+}
+
+/* 只刷新"能不能改/发布状态"这类判定，不动已经渲染出来的正文——
+   发布之后调用它，不能把"已发布"的回执和正文一起冲掉。 */
+async function refreshTaskState() {
+  if (!state.taskId || !state.online) return;
+  try {
+    const task = await api("/api/task/" + state.taskId);
+    state.task = task;
+    applyRefineState(task);
+  } catch (e) { /* 刷新失败不影响主流程 */ }
 }
 
 function resetComment() {
@@ -898,6 +1433,10 @@ async function publish() {
       setMsg("publish-msg", r.message, "err");
     }
     loadPublishes();
+    // 发出去之后打磨入口就该关掉了（评论不能编辑），所以立刻把任务状态拉一遍。
+    // 这里只刷新"能不能改"这类判定、不重渲染正文：重渲染会把上面那句回执冲掉，
+    // 看起来像什么都没发生。
+    await refreshTaskState();
   } catch (e) {
     setMsg("publish-msg", "发布失败：" + e.message, "err");
   } finally {
@@ -911,6 +1450,8 @@ async function withdraw(publishId) {
     const r = await api("/api/publish/withdraw", { method: "POST", body: JSON.stringify({ publish_id: publishId }) });
     alert(r.message);
     loadPublishes();
+    // 撤回之后这条视频的打磨入口会重新打开——判定在后端，所以必须重新问一次。
+    await refreshTaskState();
   } catch (e) {
     alert("撤回失败：" + e.message);
   }
