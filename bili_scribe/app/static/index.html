@@ -597,6 +597,8 @@
   </section>
 </div>
 
+<div class="hint" id="app-version" style="margin-top:18px;text-align:center">版本读取中…</div>
+
 <script>
 const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false, settings: null, settingsLoaded: false, roles: null, roleKey: "standard", subtitleToken: null,
   /* ---- 迭代打磨相关 ---- */
@@ -685,6 +687,7 @@ async function detectBackend() {
     }
     state.cfg = cfg;
     state.online = true;
+    setVersionLine(cfg.version);
     const chip = document.getElementById("model-chip");
     chip.textContent = "模型：" + cfg.llm.model + (cfg.llm.configured ? "" : "（未配置 key）");
     applyFeatureGates();
@@ -693,10 +696,25 @@ async function detectBackend() {
     return true;
   } catch (e) {
     state.online = false;
+    setVersionLine(null);
     document.getElementById("model-chip").textContent = "未连接后端";
     showBackendBanner(e.message);
     return false;
   }
+}
+
+/* 版本号来自后端（/api/config 里的 version），**前端不另抄一份**——
+   两个都会过期的数字里，人总是相信界面上那个，而错的往往是它。
+   读不到就如实说读不到，不显示一个猜的。
+
+   这一行看着不起眼，它回答的是一个具体问题："我现在跑的是哪一版？"——
+   在"文档说有、我这没有"这类困惑里，这是第一个该看的地方。 */
+function setVersionLine(version) {
+  const el = document.getElementById("app-version");
+  if (!el) return;
+  el.textContent = version
+    ? "bili-scribe " + version
+    : "bili-scribe（未连上后端，版本未知 —— 请从 http://127.0.0.1:8818/ 打开本页）";
 }
 
 async function checkAuth() {

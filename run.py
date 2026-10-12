@@ -22,6 +22,7 @@ from pathlib import Path
 
 import uvicorn
 
+from bili_scribe import __version__
 from bili_scribe.config import AppConfig
 
 
@@ -62,7 +63,7 @@ def _open_when_ready(host: str, port: int, url: str, timeout: float = 25.0) -> N
 
 def _banner(cfg: AppConfig) -> None:
     print("=" * 62)
-    print("  bili-scribe —— B站视频内容总结（本地自用）")
+    print(f"  bili-scribe {__version__} —— B站视频内容总结（本地自用）")
     print("=" * 62)
     print(f"  监听地址   http://{cfg.server.host}:{cfg.server.port}")
     print(f"  数据文件   {cfg.db_path}")

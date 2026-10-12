@@ -2243,7 +2243,15 @@ def _http_probes() -> None:
         features = data.get("features")
         assert isinstance(features, dict), f"config 缺少 features 字段：{list(data)}"
         assert isinstance(features.get("qr_login"), bool), features
-        return f"features.qr_login={features['qr_login']}"
+        # 版本号必须由后端给出，界面才能显示"我现在跑的是哪一版"。
+        # 断言它等于包版本——**这样它就不可能和 __version__ 漂开**，
+        # 而不是只断言"字段存在"（存在但写死一个旧数字是最坏的情况）。
+        import bili_scribe
+
+        assert data.get("version") == bili_scribe.__version__, (
+            f"config 里的版本 {data.get('version')!r} 与包版本 {bili_scribe.__version__!r} 不一致"
+        )
+        return f"features.qr_login={features['qr_login']}，version={data['version']}"
 
     def _qr_missing_returns_503() -> str:
         import sys

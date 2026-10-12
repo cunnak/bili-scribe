@@ -192,6 +192,9 @@ const baseCfg = {
   llm: { model: "deepseek-chat", configured: false },
   publish: { require_confirm: true, max_comment_chars: 900 },
   features: { qr_login: true },
+  // 故意用一个不可能存在的版本号：如果前端把它渲染出来了，就证明页脚显示的是
+  // **后端说的**，而不是前端另抄的一份。抄一份的数字会过期，而过期的那个还摆在界面上。
+  version: "9.9.9-探头",
 };
 
 async function main() {
@@ -203,6 +206,11 @@ async function main() {
     const banner = document.getElementById("backend-banner");
     assert("A1 离线时横幅可见", banner.style.display === "block", banner.style.display);
     assert("A2 横幅说明了原因", banner.innerHTML.includes("没有连上后端"));
+    assert(
+      "A7 离线时版本行如实说读不到（不显示一个猜的版本号）",
+      /未连上后端/.test(document.getElementById("app-version").textContent),
+      document.getElementById("app-version").textContent
+    );
     assert(
       "A3 横幅给出了启动命令与地址",
       banner.innerHTML.includes("python run.py") && banner.innerHTML.includes("127.0.0.1:8818")
@@ -234,6 +242,17 @@ async function main() {
     assert(
       "B5 未配置 key 时有标注",
       document.getElementById("model-chip").textContent.includes("未配置 key")
+    );
+    assert(
+      "B6 页脚显示后端报的版本号（不是前端另抄的一份）",
+      document.getElementById("app-version").textContent.includes("9.9.9-探头"),
+      document.getElementById("app-version").textContent
+    );
+    // 反过来也要守住：前端源码里不许出现写死的版本号，否则页脚会显示一个过期的数字
+    assert(
+      "B7 前端没有硬编码版本号",
+      !/\bbili-scribe\s+\d+\.\d+\.\d+/.test(code),
+      (code.match(/bili-scribe\s+\d+\.\d+\.\d+/) || ["（无）"])[0]
     );
   }
 

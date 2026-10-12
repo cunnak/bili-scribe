@@ -727,6 +727,10 @@ def create_app(cfg: AppConfig) -> FastAPI:
         # 把能力探测结果交给前端，让界面能提前把不可用的入口关掉，
         # 而不是等用户点了才报错。
         payload["features"] = {"qr_login": _qr_available()}
+        # 版本号只有一处定义（`bili_scribe/__init__.py`），这里读出来交给界面显示。
+        # **不要在前端另抄一份**：那样就会出现两个都会过期的数字，而界面上显示的
+        # 往往是你最信的那个。
+        payload["version"] = __version__
         return payload
 
     @app.get("/api/llm/check")
