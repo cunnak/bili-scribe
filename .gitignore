@@ -20,3 +20,7 @@ build/
 .idea/
 .vscode/
 .pytest_cache/
+
+# 在仓库目录里运行 gh 时它会把自己的状态写到这里（device-id 之类）。
+# 不是项目内容，但会一直挂在 git status 里，所以挡掉。
+.local/

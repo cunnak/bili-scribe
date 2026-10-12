@@ -1138,7 +1138,7 @@ def _roles_registry() -> str:
     """
     from bili_scribe.core import roles
 
-    assert len(roles.ALL_ROLES) == 7, [r.key for r in roles.ALL_ROLES]
+    assert len(roles.ALL_ROLES) == 8, [r.key for r in roles.ALL_ROLES]
     assert roles.STANDARD.key == "standard" and roles.STANDARD.passes == 1, (
         "standard 必须是一轮回、且不带自己的提示词，否则默认行为会改变"
     )
@@ -1172,8 +1172,66 @@ def _roles_registry() -> str:
     assert roles.get_role("bogus").key == "standard", "未知角色必须安全回退"
     assert roles.get_role(None).key == "standard"
     described = roles.describe_roles()
-    assert len(described) == 7 and all("key" in d and "name" in d for d in described)
-    return f"{len(roles.ALL_ROLES)} 个角色，6 个三轮回，输出契约与底线条款齐备"
+    assert len(described) == 8 and all("key" in d and "name" in d for d in described)
+    return f"{len(roles.ALL_ROLES)} 个角色，7 个三轮回，输出契约与底线条款齐备"
+
+
+def _role_shensi() -> str:
+    """「超强思考模式总结」：四问骨架 + 文体纪律 + 归纳可核对。
+
+    这个角色的价值**全在提示词里**——没有代码实现它。所以提示词被改坏
+    （四问少了一节、套话禁令被删掉、"归纳必须指出依据"那一句丢了）不会有任何报错，
+    只会静默地变成另一个东西。规格是使用者直接给的，所以逐条钉住。
+
+    三条最容易被"顺手优化掉"的：
+    - 四个二级标题被改成不显式的叙述（那就不再是这个角色了）；
+    - 禁令从"具体形态"退化成"要真诚、要去掉废话"（这种话对着模型说等于没说）；
+    - 「归纳隐含问题」丢掉"必须指出素材依据"，于是变成替作者立论。
+    """
+    from bili_scribe.core import roles
+
+    role = roles.get_role("shensi")
+    assert role.key == "shensi" and role.name == "超强思考模式总结", role
+    assert role.passes == 3, "这个角色要三轮回：文体问题靠一轮自己看不见"
+
+    for section in (
+        "## 作者提出的问题",
+        "## 内容的实质",
+        "## 他给出的解法",
+        "## 他发现了什么",
+    ):
+        assert section in role.system, f"四问骨架缺了：{section}"
+
+    for ban in ("接下来我们看看", "深刻地揭示了", "不仅仅是", "综上所述", "我们应该"):
+        assert ban in role.system, f"套话禁令被删了：{ban}"
+    assert "能删掉一个词就删掉" in role.system, "奥威尔那条（能删就删）没了"
+    assert "玻璃窗" in role.system, "文体判据（好文章像玻璃窗）没了"
+
+    # 「尽量替它归纳隐含问题」必须带着可核对的两条，缺一条就退化成替作者立论
+    assert "归纳" in role.system and ("支撑" in role.system or "依据" in role.system), (
+        "归纳隐含问题却没说必须指出素材依据"
+    )
+
+    assert "不要按你自己的清单去挑内容毛病" in role.critique, (
+        "批判轮又变成通用清单了——它会顺手把四问结构也改掉（这个坑踩过）"
+    )
+    assert "逐字保留" in role.critique, "没有「逐字保留处」，修订会把好句子一起磨平"
+    assert "指不出依据" in role.critique, "批判轮没有专门盯「替作者立论」"
+
+    assert "{critique}" in role.revise, "修订提示词没有插批判"
+    assert "不要用另一句套话补上" in role.revise, "修订时可以拿套话补套话"
+    assert "长度不是目标" in role.revise, "没写「长度不是目标」，容易被注水"
+
+    # key_points 与引用：活体验证第一版就栽在这里——模型把原话碎片（还带省略号截断、
+    # 夹着英文白字）直接当成了要点，而批判轮因为被限定在"只盯文体与立论"而看不见。
+    # 所以这两条必须写在提示词里，且批判轮必须点名检查。
+    assert "提炼过的判断，不是素材里的原话片段" in role.system and "省略号截断" in role.system, (
+        "要点必须被明确要求成提炼后的判断，否则模型会剪贴原话"
+    )
+    assert "同音字错误" in role.system, "没写 AI 字幕同音字不要直接搬"
+    assert "要点与引用" in role.critique, "批判轮没有点名检查要点与引用——它只看文体，会漏掉剪贴"
+
+    return "四问骨架齐、禁令具体、归纳必须给出素材依据、批判轮专盯文体与立论"
 
 
 def _subtitle_parse_offload() -> str:
@@ -2094,6 +2152,7 @@ check("token 记账与汇总", _llm_usage)
 check("迭代落库成新一版", _refine_writes_version)
 check("迭代要求穿过三轮回", _refine_survives_three_passes)
 check("角色注册表", _roles_registry)
+check("超强思考模式总结的四问与文体纪律", _role_shensi)
 check("发布长文与 Delta 转换", _publish_document)
 check("报错指出出错的那一行", _error_detail_points_at_the_frame)
 
