@@ -1,1836 +1,2528 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bili-scribe · B站视频总结</title>
+<title>bili-scribe</title>
 <style>
-  :root {
-    --bg: #16181d;
-    --panel: #1e2128;
-    --panel-2: #23272f;
-    --line: #2c313a;
-    --text: #e6e8ee;
-    --muted: #9aa3b2;
-    --dim: #6f7787;
-    --accent: #4b8bf5;
-    --ok: #35b37e;
-    --warn: #e0a030;
-    --danger: #e25555;
-    --radius: 10px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  }
-  a { color: var(--accent); }
-  header {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 14px 22px; border-bottom: 1px solid var(--line);
-    background: var(--panel); position: sticky; top: 0; z-index: 10;
-  }
-  header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .3px; }
-  header .sub { color: var(--dim); font-size: 12px; }
-  .spacer { flex: 1; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--panel-2); font-size: 12px; color: var(--muted);
-  }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-  .dot.on { background: var(--ok); }
-  .dot.off { background: var(--danger); }
+/* ===================================================================
+   配色取自明日方舟 / 终末地海报的实测取色。
+   酸性黄绿是主强调，工业橙红只用在一件事上：需要你马上看一眼。
+   =================================================================== */
+:root{
+  --void:#08090A;
+  --bg:#0D0F10;
+  --panel:#131617;
+  --panel-2:#191D1E;
+  --line:rgba(255,255,255,.10);
+  --line-s:rgba(255,255,255,.055);
 
-  .layout {
-    display: grid; grid-template-columns: minmax(320px, 420px) 1fr;
-    gap: 16px; padding: 16px 22px 40px; align-items: start;
-  }
-  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  --acid:#D8F24B;
+  --acid-d:#8A9B22;
+  --ember:#FF6B35;
+  --paper:#E8E2D4;
 
-  .tabs { display: flex; gap: 4px; }
-  .tab {
-    background: transparent; border: 1px solid var(--line); color: var(--muted);
-    padding: 5px 14px; font-size: 13px; border-radius: 8px;
-  }
-  .tab.active { background: var(--panel-2); color: var(--text); border-color: var(--muted); }
+  --text:#F2F4F2;
+  --muted:#8B9490;
+  /* 第三档灰。**别再调暗。** 原来这里是 #4A5250，对 --bg 的对比度只有
+     2.39:1——设计上想靠"更暗"来分层，实际结果是那几行字在深色底上根本读不出来
+     （实测反馈：标题下面那行元信息、版本面板里的差异说明，都要凑近看）。
+     现在 #6B7672 = 4.08:1，过 WCAG AA 的 4.5 还差一点，但它是"辅助信息"档，
+     正文与关键信息一律用 --muted。改前请先算对比度，别凭感觉。 */
+  --dim:#6B7672;
 
-  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; }
-  .field-box { display: flex; flex-direction: column; gap: 4px; }
-  .field-box label { font-size: 12px; color: var(--muted); }
-  .field-box .desc { font-size: 11px; color: var(--dim); line-height: 1.5; }
-  .field-box input[type=text], .field-box input[type=password], .field-box input[type=number] { width: 100%; }
-  .field-box.wide { grid-column: 1 / -1; }
+  --mono:'Cascadia Mono','Consolas','SF Mono',monospace;
+  --sans:'Segoe UI','Microsoft YaHei',sans-serif;
+  --cn:'Microsoft YaHei','PingFang SC',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void);color:var(--text);
+  font-family:var(--sans);font-size:13px;line-height:1.6;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit}
+input,textarea,select{font:inherit}
+::selection{background:rgba(216,242,75,.28);color:#fff}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}
+::-webkit-scrollbar-thumb:hover{background:rgba(216,242,75,.35)}
 
-  .switch-row { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; }
-  .switch-row input[type=checkbox] { margin-top: 3px; flex: none; }
-  .switch-row .txt { font-size: 13px; }
-  .switch-row .desc { font-size: 11px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
+/* ============ 刻度尺 ============ */
+.ruler{
+  height:9px;flex:0 0 auto;display:flex;align-items:flex-end;
+  border-bottom:1px solid var(--line-s);background:var(--bg);
+}
+.ruler i{flex:1;height:3px;background:rgba(255,255,255,.13)}
+.ruler i:nth-child(5n+1){height:8px;background:rgba(255,255,255,.30)}
 
-  .danger-zone { border-left: 3px solid var(--danger); background: rgba(226,85,85,.08); padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 6px; }
-  .danger-zone .txt { color: #f0c0c0; }
-  .danger-confirm { display: none; margin-top: 8px; }
-  .danger-confirm.show { display: block; }
+/* ============ 顶栏 ============ */
+.top{
+  height:52px;flex:0 0 auto;display:flex;align-items:center;
+  padding:0 20px;position:relative;
+  background:
+    linear-gradient(90deg, rgba(216,242,75,.06), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+  border-bottom:1px solid var(--line);
+}
+.top::before{
+  content:'';position:absolute;left:0;top:0;width:34px;height:52px;
+  background:var(--acid);
+  clip-path:polygon(0 0, 100% 0, 44% 100%, 0 100%);
+}
+.top::after{
+  content:'';position:absolute;left:0;top:0;width:34px;height:52px;
+  background:repeating-linear-gradient(115deg, rgba(0,0,0,.9) 0 3px, transparent 3px 7px);
+  clip-path:polygon(0 0, 100% 0, 44% 100%, 0 100%);
+}
+.brand{display:flex;align-items:baseline;gap:11px;padding-left:16px;z-index:1}
+.brand b{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.16em;color:var(--acid)}
+.brand .cn{font-family:var(--cn);font-size:12px;font-weight:600;letter-spacing:.30em;color:var(--muted)}
+.top .sp{flex:1}
 
-  h3.sec { font-size: 13px; font-weight: 600; color: var(--text); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-  h3.sec:first-of-type { margin-top: 4px; }
-  .ro-note { font-size: 11px; color: var(--warn); }
+.st{
+  display:inline-flex;align-items:center;gap:7px;margin-left:9px;cursor:pointer;
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  color:var(--muted);border:1px solid var(--line);
+  padding:4px 10px;background:rgba(255,255,255,.02);
+}
+.st:hover{border-color:rgba(216,242,75,.4);color:var(--text)}
+.st i{width:4px;height:4px;background:var(--acid);flex:0 0 auto}
+.st.warn i{background:var(--ember)}
+.st.off i{background:var(--dim)}
+.st b{font-weight:400;color:var(--text);letter-spacing:.06em}
 
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px;
-  }
-  .card h2 {
-    font-size: 13px; font-weight: 600; margin: 0 0 10px;
-    color: var(--muted); text-transform: none; letter-spacing: .4px;
-  }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  label.field { display: block; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+/* 顶栏的角色选择器：一个小浮层，不占整块抽屉。
+   跟 620px 的设置抽屉分开放，是因为换角色是高频动作——每总结一类视频就想换一次，
+   让它跟「设置」并排、点一下就开，比每次翻进抽屉再滚到底部找那个下拉框省事。 */
+.pop{
+  position:fixed;top:58px;right:20px;width:360px;z-index:39;
+  background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 18px 48px rgba(0,0,0,.62);
+  opacity:0;pointer-events:none;transform:translateY(-6px);
+  transition:opacity .14s ease,transform .14s ease;
+}
+.pop.on{opacity:1;pointer-events:auto;transform:none}
+.pop .ph{
+  display:flex;align-items:center;padding:9px 14px;
+  border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;
+  color:var(--acid);text-transform:uppercase;
+}
+.pop .ph .x{
+  margin-left:auto;cursor:pointer;color:var(--muted);
+  font-size:15px;line-height:1;letter-spacing:0;text-transform:none;
+}
+.pop .ph .x:hover{color:var(--acid)}
+.pop .pl{max-height:min(58vh,420px);overflow-y:auto}
+.role{
+  display:block;width:100%;text-align:left;background:none;border:0;
+  border-left:2px solid transparent;padding:9px 14px;cursor:pointer;
+}
+.role:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
+.role.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.role .rn{display:flex;align-items:baseline;gap:8px}
+.role .rn b{font-size:12.5px;font-weight:600;color:var(--text);letter-spacing:.02em}
+.role.on .rn b{color:var(--acid)}
+.role .rn .p{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--muted)}
+.role .rn .cur{
+  margin-left:auto;font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;color:var(--acid);
+}
+.role .rt{display:block;font-size:11px;line-height:1.6;color:var(--muted);margin-top:2px}
+.role.on .rt{color:var(--text)}
+.pop .pn{
+  padding:9px 14px;border-top:1px solid var(--line);
+  font-size:10.5px;line-height:1.6;color:var(--muted);
+}
 
-  textarea, input[type=text], input[type=password], input[type=number], select {
-    width: 100%; background: var(--bg); color: var(--text);
-    border: 1px solid var(--line); border-radius: 8px;
-    padding: 9px 11px; font: inherit; resize: vertical;
-  }
-  /* number 输入框要显式写出外观，否则在暗色主题下会退回浏览器默认的浅色控件 */
-  input[type=number] { appearance: textfield; -moz-appearance: textfield; }
-  input[type=number]::-webkit-outer-spin-button,
-  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  /* 上传入口刻意不用原生 input[type=file] 的外观，两个原因：
-     ① 各浏览器对 ::file-selector-button 的支持不一致，样式会漂；
-     ② 这个主题下原生外观**几乎不可见**——边框 var(--line) #2c313a 对
-        背景 var(--bg) #16181d 的对比度只有约 1.4:1（可辨识阈值是 3:1），
-        结果就是使用者反馈"页面上找不到上传入口"。
-     改成用 label 当按钮（点击同样会触发文件选择），外观与主按钮一致。 */
-  .file-btn {
-    display: inline-flex; align-items: center;
-    background: var(--accent); color: #fff;
-    border: 0; border-radius: 8px; padding: 8px 15px;
-    font-size: 13px; cursor: pointer;
-    max-width: 320px; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap;
-  }
-  .file-btn:hover { filter: brightness(1.08); }
-  /* 原生 input 只留功能，不参与视觉。
-     用「视觉隐藏」而不是 display:none —— 后者在个别浏览器上会让
-     label 的点击不再转发给 input，那时按钮会**点了没反应**，比看不见更糟。 */
-  input[type=file] {
-    position: absolute; width: 1px; height: 1px;
-    opacity: 0; overflow: hidden;
-  }
-  select option { background: var(--panel); color: var(--text); }
-  textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
-  textarea { min-height: 62px; }
-  textarea#comment-box { min-height: 130px; font-size: 13px; }
+/* ============ 主体 ============ */
+.wrap{height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 322px}
 
-  button {
-    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
-    padding: 8px 15px; font: inherit; font-size: 13px; cursor: pointer;
-  }
-  button:hover { filter: brightness(1.08); }
-  button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
-  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
-  button.ghost:hover { border-color: var(--muted); color: var(--text); }
-  button.danger { background: transparent; border: 1px solid #5c2f2f; color: var(--danger); padding: 5px 10px; font-size: 12px; }
+.left{padding:20px 22px 40px;overflow:auto;position:relative}
+.left::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.016) 1px, transparent 1px);
+  background-size:38px 38px;
+  mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
+}
 
-  .qr-wrap { display: flex; gap: 14px; align-items: flex-start; margin-top: 10px; }
-  .qr-wrap img { width: 156px; height: 156px; border-radius: 8px; background: #fff; padding: 4px; }
-  .qr-side { flex: 1; font-size: 12px; color: var(--muted); }
+/* 输入条 */
+.inrow{display:flex;gap:9px;margin-bottom:9px;position:relative;z-index:1}
+.fld{
+  flex:1;display:flex;align-items:center;gap:12px;height:46px;cursor:text;
+  background:var(--panel);border:1px solid var(--line);padding:0 15px;
+}
+.fld:focus-within{border-color:rgba(216,242,75,.45)}
+.fld .k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--acid-d);flex:0 0 auto}
+.fld .v{
+  flex:1;background:none;border:none;outline:none;
+  font-family:var(--mono);font-size:14px;letter-spacing:.06em;color:var(--text);
+}
+.fld .v::placeholder{color:var(--dim);letter-spacing:.02em;font-family:var(--cn);font-size:12.5px}
+.fld .cur{width:1px;height:15px;background:var(--acid);animation:bl 1.1s steps(2) infinite}
+@keyframes bl{50%{opacity:0}}
 
-  .steps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  .steps li { display: flex; gap: 8px; padding: 4px 0; color: var(--dim); }
-  .steps li.active { color: var(--text); }
-  .steps li.done { color: var(--ok); }
-  .steps li.fail { color: var(--danger); }
-  .steps .mark { width: 14px; text-align: center; }
+.btn{
+  height:46px;padding:0 26px;border:none;cursor:pointer;
+  background:var(--acid);color:#0A0B08;
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.18em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+.btn:hover{background:#E4FA6B}
+.btn:disabled{background:rgba(255,255,255,.10);color:var(--dim);cursor:not-allowed}
+.btn2{
+  height:46px;padding:0 18px;cursor:pointer;flex:0 0 auto;
+  background:transparent;border:1px solid var(--line);color:var(--muted);
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.btn2:hover{border-color:rgba(216,242,75,.42);color:var(--acid)}
+.btn2:disabled{opacity:.4;cursor:not-allowed}
+.btn2.on{border-color:rgba(216,242,75,.55);color:var(--acid);background:rgba(216,242,75,.07)}
 
-  .checks { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
-  .checks li { display: flex; gap: 8px; padding: 5px 0; border-top: 1px dashed var(--line); }
-  .checks .name { min-width: 62px; color: var(--text); }
-  .checks .name.yes::before { content: "●"; color: var(--ok); margin-right: 5px; }
-  .checks .name.no::before { content: "○"; color: var(--dim); margin-right: 5px; }
-  .checks .why { color: var(--muted); flex: 1; }
+/* 状态行 */
+.line{
+  min-height:0;font-family:var(--cn);font-size:11.5px;color:var(--muted);
+  padding:2px 0 0;line-height:1.75;
+}
+.line:empty{display:none}
+.line.ok{color:var(--acid-d)}
+.line.err{color:var(--ember)}
+.line.gap{margin-bottom:14px}
 
-  .warn-box {
-    border-left: 3px solid var(--warn); background: rgba(224,160,48,.08);
-    padding: 8px 11px; border-radius: 0 8px 8px 0; font-size: 12px;
-    color: #e8c98a; margin: 10px 0;
-  }
-  .warn-box.danger { border-color: var(--danger); background: rgba(226,85,85,.08); color: #f0a9a9; }
-  .warn-box ul { margin: 4px 0 0; padding-left: 18px; }
+/* 标题区 */
+.hd{display:flex;gap:16px;margin:20px 0 18px;position:relative;z-index:1}
+.hd .rail{flex:0 0 auto;width:2px;background:linear-gradient(180deg,var(--acid),transparent 78%)}
+.hd .body{flex:1;padding-left:2px;min-width:0}
+.hd h1{font-family:var(--cn);font-size:21px;font-weight:700;line-height:1.42;letter-spacing:.01em}
+.chips{display:flex;flex-wrap:wrap;margin-top:10px}
+.c{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;color:var(--muted);
+  padding:0 11px;border-right:1px solid var(--line-s);
+}
+.c:first-child{padding-left:0}
+.c:last-child{border:none}
+.c em{color:var(--acid-d);font-style:normal}
+.c a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
+.c a:hover{color:var(--acid)}
 
-  .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
-  }
-  .badge.high { color: #8fe0bd; border-color: #2b5c48; }
-  .badge.mid  { color: #e8c98a; border-color: #5c4a24; }
-  .badge.low  { color: #f0a9a9; border-color: #5c2f2f; }
+/* 进度 */
+.prog{position:relative;z-index:1;margin-bottom:16px}
+.seg{display:flex;gap:2px;margin-bottom:7px}
+.seg i{flex:1;height:5px;background:rgba(255,255,255,.075)}
+.seg i.on{background:var(--acid)}
+.seg i.cur{background:var(--ember);animation:pl 1.4s ease-in-out infinite}
+.seg i.bad{background:rgba(255,107,53,.72)}
+.seg.anim i{background:var(--ember);animation:pl 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * 80ms)}
+@keyframes pl{50%{opacity:.30}}
+.prow{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
+.prow .l{font-family:var(--cn);font-size:11.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .r{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--acid);flex:0 0 auto;font-variant-numeric:tabular-nums}
 
-  pre.preview {
-    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-    padding: 12px 14px; font-size: 13px; line-height: 1.7;
-    max-height: 460px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-    margin: 0; font-family: inherit;
-  }
-  .counter { font-size: 12px; color: var(--dim); }
-  .counter.over { color: var(--danger); }
+/* 提示块 */
+.wblock{
+  border-left:2px solid var(--ember);background:rgba(255,107,53,.05);
+  padding:9px 12px;margin-bottom:14px;position:relative;z-index:1;
+}
+.wblock .wt{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ember);
+  text-transform:uppercase;margin-bottom:5px;
+}
+.wblock li{list-style:none;font-size:11.5px;color:#C8CFCB;line-height:1.75;padding-left:11px;position:relative}
+.wblock li::before{content:'·';position:absolute;left:2px;color:var(--ember)}
+.cand{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;position:relative;z-index:1}
+.cand span{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  border:1px solid var(--line);padding:2px 7px;color:var(--dim);
+}
+.cand span.yes{color:var(--acid-d);border-color:rgba(216,242,75,.28)}
+.cand span.no{color:var(--dim);text-decoration:line-through}
 
-  .list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
-  .list li {
-    padding: 8px 0; border-top: 1px dashed var(--line);
-    display: flex; gap: 8px; align-items: flex-start;
-  }
-  .list .grow { flex: 1; min-width: 0; }
-  .list .t { color: var(--text); }
-  .list .m { color: var(--dim); font-size: 11px; }
-  .list .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ============ 正文卡 ============ */
+.card{
+  position:relative;z-index:1;margin-bottom:18px;
+  background:var(--panel);border:1px solid var(--line);
+  padding:22px 24px;
+  clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+.card::before,.card::after{content:'';position:absolute;width:12px;height:12px}
+.card::before{top:0;right:0;border-top:2px solid var(--acid);border-right:2px solid var(--acid)}
+.card::after{bottom:0;left:0;border-bottom:2px solid var(--acid);border-left:2px solid var(--acid)}
+.card .idx{
+  position:absolute;top:10px;right:26px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);
+  text-transform:uppercase;
+}
 
-  .status-line { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 18px; }
-  .status-line.ok { color: var(--ok); }
-  .status-line.err { color: var(--danger); }
+h2.s{
+  font-family:var(--cn);font-size:12.5px;font-weight:700;color:var(--text);
+  letter-spacing:.12em;margin:19px 0 9px;
+  display:flex;align-items:center;gap:10px;
+}
+h2.s:first-of-type{margin-top:0}
+h2.s .n{
+  font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.14em;
+  border:1px solid rgba(216,242,75,.32);padding:1px 5px;flex:0 0 auto;
+}
+h2.s::after{content:'';flex:1;height:1px;background:var(--line-s)}
+p.tx{color:#C8CFCB;font-size:13px;line-height:1.95;margin-bottom:10px}
+p.tx:last-child{margin-bottom:0}
+strong{color:#fff;font-weight:700}
+.hl{color:var(--acid);border-bottom:1px solid rgba(216,242,75,.4)}
+.warn-tx{color:var(--ember)}
+.ic{
+  font-family:var(--mono);font-size:11.5px;color:var(--acid-d);
+  background:rgba(216,242,75,.07);padding:1px 5px;
+}
+.tx-h{
+  font-family:var(--cn);font-size:12px;font-weight:700;color:var(--paper);
+  letter-spacing:.08em;margin:16px 0 8px;padding-left:9px;
+  border-left:2px solid rgba(216,242,75,.42);
+}
+.tx-h:first-child{margin-top:0}
+.tx-ul{list-style:none;margin:0 0 10px}
+.tx-ul li{
+  font-size:12.5px;color:#C8CFCB;line-height:1.85;padding-left:15px;position:relative;
+}
+.tx-ul li::before{
+  content:'';position:absolute;left:0;top:.72em;width:5px;height:1px;background:var(--acid-d);
+}
 
-  details { margin-top: 10px; }
-  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
-  details summary:hover { color: var(--text); }
-  .checkline { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; margin: 10px 0; }
-  .checkline input { margin-top: 3px; }
-  .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+/* 时间轴 */
+.tl{list-style:none;margin:2px 0 0}
+.tl li{display:flex;gap:13px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.tl li:last-child{border:none}
+.tl .t{
+  font-family:var(--mono);font-size:10.5px;color:var(--acid);letter-spacing:.06em;
+  flex:0 0 62px;padding-top:2px;font-variant-numeric:tabular-nums;
+}
+.tl .x{flex:1;font-size:12.5px;color:#C8CFCB;line-height:1.72}
 
-  .banner {
-    margin: 14px 22px 0; padding: 12px 16px; border-radius: var(--radius);
-    border: 1px solid #5c2f2f; background: rgba(226, 85, 85, .10);
-    color: #f0c0c0; font-size: 13px; line-height: 1.75;
-  }
-  .banner strong { color: #ffd6d6; }
-  .banner code {
-    background: rgba(255, 255, 255, .09); padding: 1px 6px;
-    border-radius: 4px; font-size: 12px; color: #e6e8ee;
-  }
-  .banner .detail { color: #c99494; font-size: 12px; margin-top: 6px; }
+/* 空态 */
+.empty{
+  height:100%;min-height:280px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;position:relative;z-index:1;
+  padding:40px 0;
+}
+.empty .mark{
+  width:66px;height:66px;border:1px solid rgba(216,242,75,.20);
+  display:flex;align-items:center;justify-content:center;position:relative;
+  clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  background:rgba(216,242,75,.03);
+}
+.empty .mark::before,.empty .mark::after{content:'';position:absolute;background:var(--acid)}
+.empty .mark::before{width:16px;height:1px}
+.empty .mark::after{width:1px;height:16px}
+.empty .t1{font-family:var(--cn);font-size:13px;color:var(--muted);letter-spacing:.1em}
+.empty .t2{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:.18em;text-transform:uppercase}
+
+/* ============ 右栏 ============ */
+.side{border-left:1px solid var(--line);padding:20px 18px 40px;overflow:auto;background:var(--panel-2)}
+.side .ph{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);
+  text-transform:uppercase;padding:26px 0;text-align:center;line-height:2;
+}
+.blk{margin-bottom:24px}
+.bh{
+  display:flex;align-items:center;gap:9px;margin-bottom:11px;
+  padding-bottom:8px;border-bottom:1px solid var(--line-s);
+}
+.bh .t{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;
+  color:var(--muted);text-transform:uppercase;flex:0 0 auto;
+}
+.bh .ln{flex:1;height:1px;background:var(--line-s)}
+.bh .c{font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.1em;flex:0 0 auto}
+
+/* 版本条目 */
+.v{display:flex;gap:10px;padding:8px 9px;margin-bottom:3px;border-left:2px solid transparent;background:rgba(255,255,255,.012)}
+.v:hover{background:rgba(255,255,255,.035)}
+.v.on{border-left-color:var(--acid);background:rgba(216,242,75,.055)}
+.v .n{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 18px;padding-top:1px;font-variant-numeric:tabular-nums}
+.v.on .n{color:var(--acid)}
+.v .x{flex:1;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.v.on .x{color:var(--text)}
+.v .act{
+  flex:0 0 auto;font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--muted);background:none;border:none;cursor:pointer;padding:0 2px;
+}
+.v .act:hover{color:var(--acid)}
+.v .cur{flex:0 0 auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--acid);padding-top:2px}
+.vd{font-size:10.5px;color:var(--muted);line-height:1.7;padding:0 9px 7px 37px}
+.vd .k{color:var(--acid)}
+.vd .w{color:var(--ember)}
+
+textarea{
+  width:100%;height:82px;resize:none;background:var(--void);
+  border:1px solid var(--line);color:var(--text);
+  font-family:var(--cn);font-size:12px;padding:10px 11px;line-height:1.7;outline:none;
+}
+textarea::placeholder{color:var(--dim)}
+textarea:focus{border-color:rgba(216,242,75,.45)}
+textarea:disabled{opacity:.45;cursor:not-allowed}
+.b2{
+  width:100%;height:38px;margin-top:7px;cursor:pointer;
+  background:transparent;border:1px solid rgba(216,242,75,.42);color:var(--acid);
+  font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+.b2:hover{background:rgba(216,242,75,.10)}
+.b2:disabled{border-color:var(--line);color:var(--dim);cursor:not-allowed;background:none}
+
+/* 开销表 */
+.kt{display:flex;justify-content:space-between;gap:12px;padding:5.5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.kt:last-child{border:none}
+.kt .k{font-size:11.5px;color:var(--muted);flex:0 0 auto}
+.kt .v2{
+  font-family:var(--mono);font-size:11.5px;color:var(--text);
+  font-variant-numeric:tabular-nums;text-align:right;
+}
+.kt .v2.a{color:var(--acid)}
+.kt .v2.e{color:var(--ember)}
+
+/* ============ 底栏 ============ */
+.ft{
+  flex:0 0 auto;height:28px;display:flex;align-items:center;gap:14px;
+  padding:0 18px;border-top:1px solid var(--line);background:#0A0C0D;position:relative;
+}
+.ft::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:56px;
+  background:repeating-linear-gradient(115deg, var(--acid) 0 4px, transparent 4px 9px);
+  opacity:.5;
+}
+.ft .t{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--muted)}
+.ft .t.a{color:var(--acid-d);padding-left:46px}
+.ft .t.e{color:var(--ember)}
+
+/* ============ 抽屉（设置） ============ */
+.mask{
+  position:fixed;inset:0;background:rgba(4,5,6,.72);opacity:0;pointer-events:none;
+  transition:opacity .2s;z-index:40;
+}
+.mask.on{opacity:1;pointer-events:auto}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:620px;max-width:92vw;z-index:41;
+  background:var(--bg);border-left:1px solid var(--line);
+  transform:translateX(101%);transition:transform .22s cubic-bezier(.3,.8,.3,1);
+  display:flex;flex-direction:column;
+}
+.drawer.on{transform:none}
+.dh{
+  flex:0 0 auto;height:52px;display:flex;align-items:center;gap:12px;padding:0 20px;
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+}
+.dh .t{font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--acid);text-transform:uppercase}
+.dh .sp{flex:1}
+.dh button{
+  background:none;border:1px solid var(--line);color:var(--muted);cursor:pointer;
+  font-family:var(--mono);font-size:9px;letter-spacing:.14em;padding:4px 10px;text-transform:uppercase;
+}
+.dh button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.db{flex:1;overflow:auto;padding:18px 20px 40px}
+
+.grp{margin-bottom:26px}
+.gt{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  text-transform:uppercase;
+}
+.gt::after{content:'';flex:1;height:1px;background:var(--line-s)}
+.gh{font-size:11px;color:var(--dim);line-height:1.8;margin:-4px 0 12px}
+
+.f{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.f label{
+  flex:0 0 138px;font-size:11.5px;color:var(--muted);text-align:right;line-height:1.5;
+}
+.f .i{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+.f input[type=text],.f input[type=password],.f input[type=number],.f select{
+  width:100%;height:32px;background:var(--void);border:1px solid var(--line);
+  color:var(--text);font-family:var(--mono);font-size:11.5px;padding:0 9px;outline:none;
+}
+.f input:focus,.f select:focus{border-color:rgba(216,242,75,.45)}
+.f input::placeholder{color:var(--dim);font-family:var(--cn)}
+.f select{cursor:pointer}
+.f .u{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 auto}
+.f .mini{
+  flex:0 0 auto;background:none;border:1px solid var(--line);color:var(--dim);cursor:pointer;
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:5px 8px;
+}
+.f .mini:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+
+.sw{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.sw input{display:none}
+.sw .tb{
+  width:34px;height:18px;border:1px solid var(--line);background:var(--void);
+  position:relative;flex:0 0 auto;transition:border-color .15s;
+}
+.sw .tb::after{
+  content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;
+  background:var(--dim);transition:transform .15s,background .15s;
+}
+.sw input:checked + .tb{border-color:rgba(216,242,75,.5)}
+.sw input:checked + .tb::after{transform:translateX(16px);background:var(--acid)}
+.sw .tx{font-size:11.5px;color:var(--muted)}
+.sw input:checked ~ .tx{color:var(--text)}
+
+.gate{
+  border:1px solid rgba(255,107,53,.42);background:rgba(255,107,53,.055);
+  padding:12px 14px;margin-top:10px;
+}
+.gate .t{
+  font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--ember);
+  text-transform:uppercase;margin-bottom:8px;
+}
+.gate p{font-size:11.5px;color:#C8CFCB;line-height:1.8;margin-bottom:9px}
+.chk{display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:11.5px;color:var(--muted);line-height:1.7}
+.chk input{
+  appearance:none;-webkit-appearance:none;width:13px;height:13px;flex:0 0 auto;margin-top:3px;
+  border:1px solid var(--line);background:var(--void);cursor:pointer;position:relative;
+}
+.chk input:checked{border-color:var(--acid);background:var(--acid)}
+.chk input:checked::after{
+  content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;
+  border-right:2px solid #0A0B08;border-bottom:2px solid #0A0B08;transform:rotate(42deg);
+}
+.chk:hover input{border-color:rgba(216,242,75,.5)}
+
+.dfoot{
+  flex:0 0 auto;border-top:1px solid var(--line);padding:14px 20px;
+  display:flex;align-items:center;gap:12px;background:#0A0C0D;
+}
+.dfoot .sp{flex:1}
+.dfoot .st-line{font-size:11px;color:var(--muted);min-width:0;line-height:1.6}
+.dfoot .st-line.ok{color:var(--acid-d)}
+.dfoot .st-line.err{color:var(--ember)}
+
+/* ============ 模态 ============ */
+.modal{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.97);z-index:51;
+  width:420px;max-width:90vw;background:var(--panel);border:1px solid var(--line);
+  padding:22px 24px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;
+  clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal .mt{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  text-transform:uppercase;margin-bottom:12px;
+}
+.modal p{font-size:12.5px;color:#C8CFCB;line-height:1.85;margin-bottom:14px;white-space:pre-wrap}
+.modal .acts{display:flex;gap:9px;justify-content:flex-end}
+.modal .acts button{
+  height:34px;padding:0 18px;cursor:pointer;background:none;
+  border:1px solid var(--line);color:var(--muted);
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+.modal .acts button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.modal .acts button.pri{background:var(--acid);border-color:var(--acid);color:#0A0B08;font-weight:700}
+.modal .acts button.pri:hover{background:#E4FA6B;color:#0A0B08}
+.modal .acts button.dan{border-color:rgba(255,107,53,.5);color:var(--ember)}
+.modal .acts button.dan:hover{background:rgba(255,107,53,.12);color:var(--ember)}
+
+/* 二维码 */
+.qrwrap{display:flex;gap:18px;align-items:flex-start;margin-bottom:14px}
+.qrwrap .im{
+  width:148px;height:148px;flex:0 0 auto;background:#fff;padding:6px;
+  display:flex;align-items:center;justify-content:center;
+}
+.qrwrap .im img{width:100%;height:100%;object-fit:contain;display:block}
+.qrwrap .side2{flex:1;min-width:0}
+.qrwrap .side2 .s1{font-size:12px;color:var(--text);line-height:1.8;margin-bottom:8px}
+.qrwrap .side2 .s2{font-size:11px;color:var(--dim);line-height:1.8}
+.modal .sep{height:1px;background:var(--line-s);margin:16px 0 14px}
+.modal textarea{height:64px}
+.modal .fl{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.modal .fl label{flex:0 0 82px;font-size:11px;color:var(--muted);text-align:right}
+.modal .fl input{
+  flex:1;height:30px;background:var(--void);border:1px solid var(--line);
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:0 8px;outline:none;
+}
+.modal .fl input:focus{border-color:rgba(216,242,75,.45)}
+
+/* 断桥横幅 */
+#bridge{
+  display:none;flex:0 0 auto;padding:8px 18px;background:rgba(255,107,53,.10);
+  border-bottom:1px solid rgba(255,107,53,.35);
+  font-family:var(--cn);font-size:11.5px;color:var(--ember);
+}
+#bridge.on{display:block}
+
+.hidden{display:none !important}
 </style>
 </head>
 <body>
+<div class="wrap">
+  <div class="ruler" id="ruler"></div>
 
-<header>
-  <h1>bili-scribe</h1>
-  <span class="sub">B站视频总结 · 本地自用</span>
-  <span class="tabs">
-    <button class="tab active" id="tab-main" onclick="switchView('main')">总结</button>
-    <button class="tab" id="tab-settings" onclick="switchView('settings')">设置</button>
-  </span>
-  <span class="spacer"></span>
-  <span class="chip"><span class="dot" id="auth-dot"></span><span id="auth-text">检查登录态…</span></span>
-  <span class="chip" id="model-chip">模型：—</span>
-</header>
+  <div class="top">
+    <div class="brand"><b>BILI·SCRIBE</b><span class="cn">视频内容总结</span></div>
+    <div class="sp"></div>
+    <button class="st off" id="chip-auth" title="点这里登录 / 退出"><i></i><span>未连接</span></button>
+    <button class="st warn" id="chip-model" title="点这里打开设置"><i></i><span>—</span></button>
+    <button class="st" id="chip-role" title="选择总结角色"><i></i><span>角色</span></button>
+    <button class="st" id="chip-settings" title="设置"><i></i><span>设置</span></button>
+  </div>
 
-<div id="backend-banner" class="banner" style="display:none"></div>
-<div id="gate-banner" class="banner" style="display:none"></div>
+  <div class="pop" id="role-pop">
+    <div class="ph"><span>总结角色</span><span class="x" id="role-pop-x" title="关闭">×</span></div>
+    <div class="pl" id="role-list"></div>
+    <div class="pn" id="role-note"></div>
+  </div>
 
-<div class="layout" id="view-main">
-  <section>
-    <div class="card">
-      <h2>1 · 账号</h2>
-      <div id="logged-in" style="display:none">
-        <div class="row">
-          <span class="badge high" id="uname">已登录</span>
-          <span class="spacer"></span>
-          <button class="ghost" onclick="logout()">退出登录</button>
-        </div>
-        <div class="hint" id="cred-time"></div>
-      </div>
+  <div id="bridge">桥接没有建立起来：界面拿不到本地接口。请关掉窗口重新启动程序；如果一直这样，说明安装不完整。</div>
 
-      <div id="logged-out">
-        <div class="row">
-          <button id="qr-btn" onclick="startQr()">获取登录二维码</button>
-          <button class="ghost" onclick="checkAuth()">刷新状态</button>
-        </div>
-        <div class="qr-wrap" id="qr-wrap" style="display:none">
-          <img id="qr-img" alt="登录二维码">
-          <div class="qr-side">
-            <div id="qr-status">等待扫码…</div>
-            <div class="hint" style="margin-top:8px">用 B站 App 扫码并确认。二维码 180 秒内有效。</div>
-          </div>
-        </div>
-
-        <details>
-          <summary>扫码走不通？手动填 Cookie</summary>
-          <label class="field">SESSDATA</label>
-          <input type="password" id="in-sessdata" placeholder="浏览器 Cookie 里的 SESSDATA">
-          <label class="field">bili_jct（即 csrf）</label>
-          <input type="password" id="in-jct" placeholder="浏览器 Cookie 里的 bili_jct">
-          <label class="field">DedeUserID（可选）</label>
-          <input type="text" id="in-uid" placeholder="可留空">
-          <div class="row" style="margin-top:10px">
-            <button onclick="submitCookie()">保存凭据</button>
-          </div>
-          <div class="hint">凭据只存在本机，用 Fernet 加密后落盘。</div>
-        </details>
-      </div>
-
-      <div class="status-line" id="auth-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>2 · 选择视频</h2>
-      <textarea id="raw-input" placeholder="粘贴视频链接、b23.tv 短链、BV 号或 av 号&#10;例：https://www.bilibili.com/video/BV1xx411c7mD/?p=2"></textarea>
-      <div class="row" style="margin-top:10px; gap:10px">
-        <label for="task-role" style="font-size:12px; color:var(--muted)">总结角色</label>
-        <select id="task-role" onchange="onRoleChange()" style="max-width:300px"></select>
-      </div>
-      <div class="hint" id="role-hint"></div>
-      <div class="row" style="margin-top:12px; gap:10px; align-items:center; flex-wrap:wrap">
-        <label class="file-btn" id="srt-btn" for="srt-file">选择字幕文件</label>
-        <input type="file" id="srt-file" accept=".srt,.txt" onchange="onSrtPicked()">
-        <button id="srt-clear" onclick="clearSrt()" style="display:none">清除</button>
-      </div>
-      <div class="hint" id="srt-hint">视频没有字幕时，可以自己准备一份 .srt 传上来；传了就会优先用它。</div>
-      <div class="row" style="margin-top:10px">
-        <button id="run-btn" onclick="submitTask()">解析并总结</button>
-        <span class="hint">带 ?p=2 会总结第 2 P</span>
-      </div>
-      <div class="status-line" id="task-msg"></div>
-    </div>
-
-    <div class="card" id="progress-card" style="display:none">
-      <h2>3 · 进度</h2>
-      <ul class="steps" id="steps"></ul>
-      <ul class="checks" id="checks"></ul>
-    </div>
-
-    <div class="card">
-      <h2>历史发布</h2>
-      <ul class="list" id="publish-list"><li class="m">暂无记录</li></ul>
-    </div>
-  </section>
-
-  <section>
-    <div class="card">
-      <h2>4 · 预览与确认</h2>
-      <div id="preview-empty" class="hint">还没有内容。先在左边提交一个视频。</div>
-
-      <div id="preview-area" style="display:none">
-        <div class="row" style="margin-bottom:10px">
-          <span class="badge" id="source-badge">来源</span>
-          <span class="badge" id="version-badge">第 1 版</span>
-          <span class="spacer"></span>
-          <a id="video-link" href="#" target="_blank" rel="noopener">在 B站 打开</a>
-        </div>
-
-        <!-- 累计消耗放在最上面一行：它是"这个功能值不值"的唯一依据，
-             不该藏在折叠区里。没有它，「再改一版」的代价完全是隐形的。 -->
-        <div class="hint" id="usage-line"></div>
-
-        <div id="warning-box"></div>
-
-        <!-- 翻看历史版时的横幅。它同时承担"怎么回去"和"怎么拿它当底稿"两个入口——
-             历史版是只读的，不给出口就成了死胡同。 -->
-        <div id="history-note" class="warn-box" style="display:none"></div>
-
-        <pre class="preview" id="preview-md"></pre>
-
-        <div id="refine-block">
-          <h2 style="margin-top:18px">迭代打磨</h2>
-          <div class="warn-box" id="refine-blocked" style="display:none"></div>
-          <div class="hint" id="refine-hint"></div>
-          <textarea id="refine-req" placeholder="哪里不满意就直说。例：第三节太笼统，展开讲清楚；开头那句压到 30 字以内；不要用比喻&#10;只改你提到的部分，其余保持原样。" oninput="updateRefineButton()"></textarea>
-          <div class="row" style="margin-top:8px">
-            <button id="refine-btn" onclick="refine()" disabled>再改一版</button>
-            <span class="hint">基于当前版改，会另存为新的一版，旧版都留着。素材不会重新采集，所以比第一次快得多。</span>
-          </div>
-          <div class="status-line" id="refine-msg"></div>
-
-          <details id="version-box">
-            <summary id="version-summary">版本历史</summary>
-            <div class="row" id="diff-toggle-row" style="display:none;margin:8px 0">
-              <button class="ghost" id="diff-toggle" onclick="toggleDiffs()">展开全部差异</button>
-              <span class="hint">把每一版「具体差在哪里」铺开显示（默认只看字段名，鼠标停上去才看得到细节）。</span>
-            </div>
-            <ul class="list" id="version-list"></ul>
-            <div class="hint" id="version-hint">每一版都留着，随时可以回头拿某一版当底稿。「改动说明」是模型自己写的；「实际改动」是把这一版和上一版逐字段比出来的（本地算，不花钱）——两者不一致时，以后者为准。</div>
-          </details>
-        </div>
-
-        <div id="publish-block">
-          <h2 style="margin-top:18px">将发到评论区的文本</h2>
-          <textarea id="comment-box" oninput="updateCounter(); updateRefineHint()"></textarea>
-          <div class="row" style="margin-top:8px">
-            <span class="counter" id="counter">0 / 0</span>
-            <span class="spacer"></span>
-            <button class="ghost" onclick="resetComment()">还原为模型原文</button>
-          </div>
-
-          <label class="checkline">
-            <input type="checkbox" id="confirm-box" onchange="updatePublishButton()">
-            <span>我已过目这条内容，确认发到该视频的评论区。</span>
-          </label>
-
-          <div class="row">
-            <button id="publish-btn" onclick="publish()" disabled>发布到评论区</button>
-            <span class="hint">同一视频只允许发一次；两次发布之间有强制间隔。</span>
-          </div>
-          <div class="status-line" id="publish-msg"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-</div>
-
-<div class="layout" id="view-settings" style="display:none">
-  <section>
-    <div class="card">
-      <h2>大模型</h2>
-      <div class="form-grid">
-        <div class="field-box wide">
-          <label for="s-base-url">base_url</label>
-          <input type="text" id="s-base-url" spellcheck="false" placeholder="https://api.deepseek.com/v1">
-          <div class="desc">OpenAI 兼容接口地址，一般以 /v1 结尾。</div>
-        </div>
-        <div class="field-box wide">
-          <label for="s-proxy">proxy（调用模型时走的代理）</label>
-          <input type="text" id="s-proxy" spellcheck="false" placeholder="留空 = 直连">
-          <div class="desc">
-            留空即直连，<strong>并且不读 HTTP_PROXY / HTTPS_PROXY 环境变量</strong>——
-            否则"走不走代理"会由启动程序的那个 shell 决定，很难查。
-            有些站点 DNS 被污染、直连必然超时，这时填上代理地址，例如
-            <code>http://127.0.0.1:7897</code>。只影响模型请求，抓 B站 不走这里。
-          </div>
-        </div>
-        <div class="field-box wide">
-          <label for="s-api-key">api_key</label>
-          <div class="row">
-            <input type="password" id="s-api-key" autocomplete="off" spellcheck="false" placeholder="（未配置）">
-            <button class="ghost" id="s-key-toggle" type="button" onclick="toggleKey()">显示</button>
-          </div>
-          <div class="desc">保存后立即生效，不用重启。清空这一格再保存＝删除密钥。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-model">model</label>
-          <input type="text" id="s-model" spellcheck="false" placeholder="deepseek-chat">
-        </div>
-        <div class="field-box">
-          <label for="s-temperature">temperature</label>
-          <input type="number" id="s-temperature" min="0" max="2" step="0.1">
-          <div class="desc">越低越稳。总结任务建议 0.2–0.5。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-max-tokens">max_tokens</label>
-          <input type="number" id="s-max-tokens" min="1" max="200000" step="256">
-        </div>
-        <div class="field-box">
-          <label for="s-thinking">thinking（思考模式）</label>
-          <select id="s-thinking">
-            <option value="auto">auto — 不发送相关参数</option>
-            <option value="off">off — 显式关闭思考（推荐）</option>
-            <option value="on">on — 显式开启思考</option>
-          </select>
-          <div class="desc">
-            思考模型（Qwen3 系列等）先推理再作答，而这段推理<strong>不吃 max_tokens</strong>：
-            实测设 4096 却跑了 5125 tokens，全花在思考上，正文返回空数组。
-            表现就是"请求超时"或"总结为空"。用思考模型请选 off。
-          </div>
-        </div>
-        <div class="field-box">
-          <label for="s-role">role（默认总结角色）</label>
-          <select id="s-role"></select>
-          <div class="desc">
-            每个角色是一套提示词方法论。除「标准」外都是三轮回（生成 → 自我批判 → 修订），
-            调用数与耗时约为三倍。主页面上还能针对单次任务临时改。
-          </div>
-        </div>
-        <div class="field-box">
-          <label for="s-timeout">timeout_seconds</label>
-          <input type="number" id="s-timeout" min="5" max="3600" step="10">
-          <div class="desc">单次请求的读超时。开着思考时调大它只是缓解，根治靠把 thinking 关掉。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-max-input">max_input_chars</label>
-          <input type="number" id="s-max-input" min="1000" max="2000000" step="1000">
-          <div class="desc">喂给模型的最大素材字数，超出会触发分块。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-chunk-size">chunk_size</label>
-          <input type="number" id="s-chunk-size" min="200" max="200000" step="500">
-        </div>
-        <div class="field-box">
-          <label for="s-chunk-overlap">chunk_overlap</label>
-          <input type="number" id="s-chunk-overlap" min="0" max="100000" step="100">
-          <div class="desc">必须小于 chunk_size，否则分块窗口不会向前推进。</div>
-        </div>
-      </div>
-      <div class="row" style="margin-top:14px">
-        <button class="ghost" type="button" onclick="testLlm()">测试连接</button>
-        <span class="hint">用表单里当前的值试一次，不写盘。</span>
-      </div>
-      <div class="status-line" id="llm-test-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>采集</h2>
-      <div class="field-box wide">
-        <label for="s-langs">字幕语言优先级</label>
-        <input type="text" id="s-langs" spellcheck="false" placeholder="zh-CN, zh-Hans, zh-Hant, ai-zh">
-        <div class="desc">逗号分隔，从左到右依次尝试。</div>
-      </div>
-      <label class="switch-row">
-        <input type="checkbox" id="s-platform-summary">
-        <span>
-          <span class="txt">把平台 AI 摘要作为对照</span>
-          <div class="desc">多取一路信号，会多一点 token 开销。</div>
-        </span>
-      </label>
-      <label class="switch-row">
-        <input type="checkbox" id="s-danmaku-enabled">
-        <span>
-          <span class="txt">没有字幕时用弹幕兜底</span>
-          <div class="desc">弹幕反映的是观众反应，不等于视频内容本体。总结里会标注来源。</div>
-        </span>
-      </label>
-      <label class="switch-row">
-        <input type="checkbox" id="s-danmaku-with-sub">
-        <span>
-          <span class="txt">有字幕时也一起带上弹幕</span>
-          <div class="desc">内容与观众反应交叉验证，质量上限更高，成本也明显上升。</div>
-        </span>
-      </label>
-      <div class="form-grid" style="margin-top:10px">
-        <div class="field-box">
-          <label for="s-dm-max">max_items</label>
-          <input type="number" id="s-dm-max" min="1" max="50000">
-          <div class="desc">最多取多少条弹幕。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-dm-hot">hot_items</label>
-          <input type="number" id="s-dm-hot" min="1" max="20000">
-        </div>
-        <div class="field-box">
-          <label for="s-dm-sample">sample_items</label>
-          <input type="number" id="s-dm-sample" min="1" max="20000">
-          <div class="desc">均匀采样的条数，避免只看到开头一段。</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="card">
-      <h2>发布</h2>
-      <div class="danger-zone">
-        <label class="switch-row" style="padding:0">
-          <input type="checkbox" id="s-require-confirm" onchange="onGateToggle()">
-          <span>
-            <span class="txt">人工确认闸门</span>
-            <div class="desc">开启时，总结生成后会停下来等你看过并勾选确认，才会发出去。</div>
-          </span>
+  <div class="main">
+    <!-- ==================== 左：工作面 ==================== -->
+    <div class="left" id="left">
+      <div class="inrow">
+        <label class="fld">
+          <span class="k">BV</span>
+          <input id="raw-input" class="v" placeholder="粘贴视频链接、BV 号，或整段分享文案"
+                 autocomplete="off" spellcheck="false">
+          <span class="cur"></span>
         </label>
-        <div class="danger-confirm" id="gate-confirm">
-          <div class="txt">
-            <strong>关掉之后就没有确认环节了：总结一生成就发到对方视频的评论区。</strong>
-            发错了只能自己去评论区删。
+        <button class="btn2" id="srt-btn" title="选一份本地字幕文件，本次任务优先用它">字幕</button>
+        <button class="btn" id="run-btn">开始总结</button>
+      </div>
+      <div class="line" id="srt-line"></div>
+      <div class="line gap" id="task-msg"></div>
+
+      <div class="empty" id="empty">
+        <div class="mark"></div>
+        <div class="t1">粘一条视频链接，开始</div>
+        <div class="t2">local · no port · no polling</div>
+      </div>
+
+      <div id="work" class="hidden">
+        <div class="hd">
+          <div class="rail"></div>
+          <div class="body">
+            <h1 id="t-title">—</h1>
+            <div class="chips" id="t-chips"></div>
           </div>
-          <label class="switch-row" style="padding-top:6px">
-            <input type="checkbox" id="s-gate-ack">
-            <span class="txt">我知道后果，仍然要关闭</span>
+        </div>
+
+        <div class="prog">
+          <div class="seg" id="seg"></div>
+          <div class="prow">
+            <span class="l" id="seg-label">—</span>
+            <span class="r" id="seg-pct">0%</span>
+          </div>
+        </div>
+
+        <div class="cand" id="cand"></div>
+        <div class="wblock hidden" id="warn-blk">
+          <div class="wt">采集提示</div>
+          <ul id="warn-list"></ul>
+        </div>
+
+        <div class="card hidden" id="body-card">
+          <span class="idx" id="body-idx">V—</span>
+          <div id="body-inner"></div>
+        </div>
+
+        <div class="card hidden" id="pub-card">
+          <span class="idx">PUBLISH</span>
+          <h2 class="s"><span class="n">发</span>将发到评论区的文本</h2>
+          <textarea id="comment-box" spellcheck="false"></textarea>
+          <div class="prow" style="margin-top:7px">
+            <span class="l" id="counter">0 字</span>
+            <span class="r" id="via-hint"></span>
+          </div>
+          <label class="chk" style="margin-top:12px">
+            <input type="checkbox" id="confirm-box">
+            <span>我已核对上面这段文字，确认发到这条视频的评论区。</span>
           </label>
+          <button class="btn2" id="publish-btn" style="margin-top:12px;height:38px">发布</button>
+          <div class="line" id="publish-msg"></div>
         </div>
-      </div>
-      <div class="form-grid" style="margin-top:12px">
-        <div class="field-box">
-          <label for="s-interval">min_interval_seconds</label>
-          <input type="number" id="s-interval" min="0" max="3600">
-          <div class="desc">两次发布之间的强制间隔，防止撞上平台限流。</div>
+
+        <div class="blk hidden" id="hist-blk" style="margin-top:4px">
+          <div class="bh"><span class="t">发布记录</span><span class="ln"></span></div>
+          <div id="hist-list"></div>
         </div>
-        <div class="field-box">
-          <label for="s-max-chars">max_comment_chars</label>
-          <input type="number" id="s-max-chars" min="50" max="1000">
-          <div class="desc">平台硬上限 1000，不能超过。</div>
-        </div>
-      </div>
-      <label class="switch-row">
-        <input type="checkbox" id="s-disclose">
-        <span>
-          <span class="txt">在评论里标明这是 AI 生成的总结</span>
-          <div class="desc">让别人知道这条内容不是人写的。</div>
-        </span>
-      </label>
-      <div class="field-box wide">
-        <label for="s-disclosure-text">disclosure_text</label>
-        <input type="text" id="s-disclosure-text" maxlength="200">
       </div>
     </div>
 
-    <div class="card">
-      <h2>存储与服务器</h2>
-      <div class="form-grid">
-        <div class="field-box wide">
-          <label for="s-db">db_path</label>
-          <input type="text" id="s-db" spellcheck="false">
-        </div>
-        <div class="field-box wide">
-          <label for="s-key">key_path</label>
-          <input type="text" id="s-key" spellcheck="false">
-          <div class="desc">凭据加密用的密钥文件。改了路径，已存的登录凭据就读不出来了。</div>
-        </div>
-        <div class="field-box">
-          <label for="s-host">host</label>
-          <input type="text" id="s-host" spellcheck="false">
-        </div>
-        <div class="field-box">
-          <label for="s-port">port</label>
-          <input type="number" id="s-port" min="1" max="65535">
-        </div>
-      </div>
-      <div class="hint" id="restart-note"></div>
-    </div>
+    <!-- ==================== 右：版本 / 打磨 / 开销 ==================== -->
+    <div class="side" id="side">
+      <div class="ph" id="side-ph">NO TASK<br>—<br>选择一条视频后<br>这里显示版本与消耗</div>
 
-    <div class="card">
-      <h2>保存</h2>
-      <div class="hint" id="settings-path">配置文件位置加载中…</div>
-      <div class="row" style="margin-top:12px">
-        <button id="save-btn" onclick="saveSettings()">保存设置</button>
-        <button class="ghost" type="button" onclick="loadSettings(true)">放弃改动</button>
+      <div id="side-body" class="hidden">
+        <div class="blk">
+          <div class="bh"><span class="t">版本 · version</span><span class="ln"></span><span class="c" id="v-count">0</span></div>
+          <div id="v-list"></div>
+          <div class="line" id="v-hint"></div>
+        </div>
+
+        <div class="blk" id="refine-blk">
+          <div class="bh"><span class="t">迭代打磨</span><span class="ln"></span></div>
+          <textarea id="refine-req" placeholder="说要改什么，比如「第三部分太绕，压成两段」"></textarea>
+          <button class="b2" id="refine-btn">改这一版</button>
+          <div class="line" id="refine-hint"></div>
+        </div>
+
+        <div class="blk">
+          <div class="bh"><span class="t">这一版开销</span><span class="ln"></span></div>
+          <div id="cost-now"></div>
+        </div>
+
+        <div class="blk">
+          <div class="bh"><span class="t">这条视频累计</span><span class="ln"></span></div>
+          <div id="cost-all"></div>
+        </div>
       </div>
-      <div class="status-line" id="settings-msg"></div>
     </div>
-  </section>
+  </div>
+
+  <div class="ft">
+    <span class="t a" id="ft-mode">本地 · 无端口</span>
+    <span class="t" id="ft-ver">—</span>
+    <span class="t" id="ft-note">—</span>
+    <span style="flex:1"></span>
+    <span class="t e hidden" id="ft-gate">确认闸门已关闭</span>
+    <span class="t" id="ft-clock"></span>
+  </div>
 </div>
 
-<div class="hint" id="app-version" style="margin-top:18px;text-align:center">版本读取中…</div>
+<!-- ==================== 设置抽屉 ==================== -->
+<div class="mask" id="mask"></div>
+<aside class="drawer" id="drawer">
+  <div class="dh">
+    <span class="t">设置 · settings</span>
+    <span class="sp"></span>
+    <button id="d-test">测试连通</button>
+    <button id="d-close">关闭</button>
+  </div>
+  <div class="db" id="d-body">
+
+    <div class="grp">
+      <div class="gt">大模型</div>
+      <div class="gh">所有总结都由这里配置的端点生成。改完点右下角「保存并生效」。</div>
+      <div class="f"><label>接口地址</label><div class="i"><input type="text" data-path="llm.base_url" placeholder="https://aihubmix.com/v1"></div></div>
+      <div class="f"><label>API Key</label><div class="i">
+        <input type="password" data-path="llm.api_key" id="s-key" placeholder="sk-…">
+        <button class="mini" id="s-key-eye">显示</button>
+      </div></div>
+      <div class="f"><label>模型名</label><div class="i"><input type="text" data-path="llm.model" placeholder="qwen3.8-omni-flash"></div></div>
+      <div class="f"><label>温度</label><div class="i"><input type="number" data-path="llm.temperature" data-kind="number" min="0" max="2" step="0.1"><span class="u">0–2</span></div></div>
+      <div class="f"><label>单次输出上限</label><div class="i"><input type="number" data-path="llm.max_tokens" data-kind="number" min="1" step="256"><span class="u">tokens</span></div></div>
+      <div class="f"><label>素材送入上限</label><div class="i"><input type="number" data-path="llm.max_input_chars" data-kind="number" min="1000" step="1000"><span class="u">字符</span></div></div>
+      <div class="f"><label>分块大小</label><div class="i"><input type="number" data-path="llm.chunk_size" data-kind="number" min="200" step="500"><span class="u">字符</span></div></div>
+      <div class="f"><label>分块重叠</label><div class="i"><input type="number" data-path="llm.chunk_overlap" data-kind="number" min="0" step="100"><span class="u">必须小于分块大小</span></div></div>
+      <div class="f"><label>思考模式</label><div class="i"><select data-path="llm.thinking">
+        <option value="auto">auto · 不干预</option>
+        <option value="off">off · 显式关闭</option>
+        <option value="on">on · 显式打开</option>
+      </select></div></div>
+      <div class="f"><label>超时</label><div class="i"><input type="number" data-path="llm.timeout_seconds" data-kind="number" min="5" step="10"><span class="u">秒</span></div></div>
+      <div class="f"><label>代理</label><div class="i"><input type="text" data-path="llm.proxy" placeholder="留空 = 直连（不读系统代理）"></div></div>
+      <!-- 角色选择器已经搬到顶栏（跟「设置」并排）。这里留一个隐藏字段，只做一件事：
+           让 collectSettings() 交上去的 llm.role 仍然是用户选的那个。
+           删掉它的话，保存设置时这个字段缺席，Pydantic 的 LlmPatch.role 默认值
+           "standard" 会把角色悄悄重置——那种"我明明选了学术分析，改个代理就又变回标准"的
+           问题，找起来非常费劲。 -->
+      <input type="hidden" data-path="llm.role" id="s-role">
+    </div>
+
+    <div class="grp">
+      <div class="gt">采集</div>
+      <div class="gh">决定“拿什么当素材”。字幕优先，没有字幕才退到弹幕和简介。</div>
+      <div class="f"><label>字幕语言优先</label><div class="i"><input type="text" data-path="collect.prefer_subtitle_lang" data-kind="csv" placeholder="zh-CN, zh-Hans, ai-zh"></div></div>
+      <div class="f"><label>平台侧摘要</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.include_platform_summary"><span class="tb"></span><span class="tx">仅作对照，不参与生成</span></label>
+      </div></div>
+      <div class="f"><label>弹幕</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.danmaku.enabled"><span class="tb"></span><span class="tx">启用</span></label>
+      </div></div>
+      <div class="f"><label>有字幕也用弹幕</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.danmaku.also_with_subtitle"><span class="tb"></span><span class="tx">补充语气与反应</span></label>
+      </div></div>
+      <div class="f"><label>弹幕条数</label><div class="i"><input type="number" data-path="collect.danmaku.max_items" data-kind="number" min="1" step="100"></div></div>
+      <div class="f"><label>画面帧</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.frames.enabled" id="s-frames"><span class="tb"></span><span class="tx">抽取关键画面（PPT、图表上的字只有它有）</span></label>
+      </div></div>
+      <div class="f"><label>帧数上限</label><div class="i"><input type="number" data-path="collect.frames.max_frames" data-kind="number" min="1" step="1"></div></div>
+      <div class="f"><label>帧质量</label><div class="i"><input type="number" data-path="collect.frames.quality" data-kind="number" min="1" max="100" step="1"><span class="u">1–100</span></div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">发布</div>
+      <div class="gh">评论发出后不能编辑。这里的闸门是最后一道拦截。</div>
+      <div class="f"><label>人工确认闸门</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="publish.require_confirm" id="s-gate"><span class="tb"></span><span class="tx">发布前必须勾选确认</span></label>
+      </div></div>
+      <div class="gate hidden" id="gate-ack">
+        <div class="t">关闭闸门 · 持续风险</div>
+        <p>关掉之后，总结一生成就会直接发到评论区，中间没有让你看一眼的机会。
+           评论不能编辑，发错了只能撤回重发——而撤回有频率限制。</p>
+        <label class="chk"><input type="checkbox" id="s-gate-ack"><span>我知道这意味着什么，仍然要关掉。</span></label>
+      </div>
+      <div class="f"><label>发帖最小间隔</label><div class="i"><input type="number" data-path="publish.min_interval_seconds" data-kind="number" min="0" step="10"><span class="u">秒</span></div></div>
+      <div class="f"><label>评论字数上限</label><div class="i"><input type="number" data-path="publish.max_comment_chars" data-kind="number" min="50" max="1000" step="10"><span class="u">平台硬限制 1000</span></div></div>
+      <div class="f"><label>署明 AI 生成</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="publish.disclose_ai" id="s-disclose"><span class="tb"></span><span class="tx">在评论末尾加上声明</span></label>
+      </div></div>
+      <div class="f"><label>声明文字</label><div class="i"><input type="text" data-path="publish.disclosure_text" placeholder="本总结由 AI 辅助整理"></div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">存储</div>
+      <div class="f"><label>数据库</label><div class="i"><input type="text" data-path="storage.db_path"></div></div>
+      <div class="f"><label>密钥文件</label><div class="i"><input type="text" data-path="storage.key_path"></div></div>
+      <div class="f"><label>预读缓存</label><div class="i">
+        <span class="u" id="notes-info" style="flex:1;text-align:left">—</span>
+        <button class="mini" id="notes-clear">清空</button>
+      </div></div>
+      <div class="f"><label>数据目录</label><div class="i">
+        <span class="u" id="data-dir" style="flex:1;text-align:left;word-break:break-all">—</span>
+        <button class="mini" id="open-dir">打开</button>
+      </div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">服务器（仅命令行）</div>
+      <div class="gh">桌面模式不起 HTTP 服务，这一段只有用 <code class="ic" style="font-size:10px">python run.py</code> 时才生效。</div>
+      <div class="f"><label>监听地址</label><div class="i"><input type="text" data-path="server.host"></div></div>
+      <div class="f"><label>端口</label><div class="i"><input type="number" data-path="server.port" data-kind="number" min="1" max="65535"></div></div>
+    </div>
+  </div>
+  <div class="dfoot">
+    <span class="st-line" id="d-msg"></span>
+    <span class="sp"></span>
+    <button class="btn" id="d-save" style="height:36px;padding:0 20px">保存并生效</button>
+  </div>
+</aside>
+
+<!-- ==================== 模态 ==================== -->
+<div class="modal" id="modal">
+  <div class="mt" id="m-title">CONFIRM</div>
+  <div id="m-body"></div>
+  <div class="acts" id="m-acts"></div>
+</div>
 
 <script>
-const state = { taskId: null, task: null, qrTimer: null, pollTimer: null, cfg: null, defaultComment: "", online: false, settings: null, settingsLoaded: false, roles: null, roleKey: "standard", subtitleToken: null,
-  /* ---- 迭代打磨相关 ---- */
-  versions: [],            // 版本列表（不含全文）
-  versionTotal: null,      // 累计消耗
-  currentVersion: null,    // 当前版是第几版
-  viewingVersion: null,    // 正在翻看的历史版；null = 在看当前版
-  canRefine: false,        // 后端查实的结果，不是猜的
-  refineBlocked: "",       // 不能改时的原因，直接显示给人看
-  showDiffs: false,        // 版本列表是否把「具体差在哪里」铺开显示（默认收起，靠 title 悬停）
-  awaitingRefine: null     // 提交迭代时记下"基于第几版"，用来判断新那版有没有出来
-};
+/* ===================================================================
+   bili-scribe 桌面前端
 
-/* 这个页面有两种打开方式：由后端托管（http://127.0.0.1:8818/），
-   或者被当成一个静态 HTML 直接打开／在预览面板里打开。后者所有接口都不存在，
-   按钮点下去只会静默失败。所以每个请求都要把失败原因说清楚，不能只丢一个状态码。 */
-async function api(path, options) {
-  let resp;
-  try {
-    resp = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, options));
-  } catch (e) {
-    throw new Error("连不上后端：" + e.message + "。请先运行 python run.py，再从 http://127.0.0.1:8818/ 打开本页面。");
-  }
+   两条硬约束决定了这里的写法：
 
-  const raw = await resp.text();
-  let body = null;
-  try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = null; }
+   1. **不轮询。** 进度由后端在状态变更时 `evaluate_js` 主动推进来，
+      入口是全局的 `window.__onTaskUpdate`。原来 1.2 秒一次的 GET 全部消失。
+   2. **不拼 URL。** 所有调用走 `window.pywebview.api.<方法>`，返回统一的
+      `{ok, data}` / `{ok:false, error, status}`。传输层的翻译只此一处。
+   =================================================================== */
 
-  if (!resp.ok) {
-    let detail = body && body.detail ? body.detail : null;
-    if (Array.isArray(detail)) {
-      detail = detail.map(d => d.msg || JSON.stringify(d)).join("; ");
-    }
-    if (!detail) {
-      detail = "HTTP " + resp.status + (raw ? "：" + raw.slice(0, 200) : "（响应无正文）");
-    }
-    throw new Error(detail);
-  }
-  return body;
-}
+"use strict";
 
-function setMsg(id, text, kind) {
-  const el = document.getElementById(id);
-  el.textContent = text || "";
-  el.className = "status-line" + (kind ? " " + kind : "");
-}
+/* ------------------------------------------------------------ 常量 */
 
-/* ---------------------------------------------------------------- 登录 */
-
-/* ---------------------------------------------------------- 后端连通性 */
-
-function showBackendBanner(message) {
-  const bar = document.getElementById("backend-banner");
-  bar.style.display = "block";
-  bar.innerHTML =
-    "<strong>这个页面没有连上后端。</strong><br>" +
-    "你现在看到的是一个静态文件，所有按钮都不会工作，二维码自然也生成不出来。<br>" +
-    "请先进入 <code>bili-scribe</code> 目录运行 <code>python run.py</code>，" +
-    "然后从 <code>http://127.0.0.1:8818/</code> 打开。<br>" +
-    '<div class="detail">' + escapeHtml(message || "") + "</div>";
-
-  // 把会打后端的入口都停掉，避免继续误导
-  document.getElementById("qr-btn").disabled = true;
-  document.getElementById("run-btn").disabled = true;
-  document.getElementById("publish-btn").disabled = true;
-  document.getElementById("refine-btn").disabled = true;
-  document.getElementById("save-btn").disabled = true;
-}
-
-function applyFeatureGates() {
-  const features = (state.cfg && state.cfg.features) || {};
-  if (features.qr_login === false) {
-    const btn = document.getElementById("qr-btn");
-    btn.disabled = true;
-    btn.textContent = "扫码登录不可用";
-    setMsg("auth-msg", '当前环境缺少 qrcode / Pillow，扫码登录不可用。请执行 pip install "qrcode[pil]" 后重启，或直接用下方的手动 Cookie 登录。', "err");
-    document.querySelector("details").open = true;
-  }
-}
-
-async function detectBackend() {
-  try {
-    const cfg = await api("/api/config");
-    if (!cfg || !cfg.llm || !cfg.publish) {
-      throw new Error("后端响应结构不符合预期，可能不是本程序提供的服务");
-    }
-    state.cfg = cfg;
-    state.online = true;
-    setVersionLine(cfg.version);
-    const chip = document.getElementById("model-chip");
-    chip.textContent = "模型：" + cfg.llm.model + (cfg.llm.configured ? "" : "（未配置 key）");
-    applyFeatureGates();
-    // 闸门状态在 /api/config 里就有，不用为此再拉一次设置接口
-    setGateBanner(cfg.publish && cfg.publish.require_confirm === false);
-    return true;
-  } catch (e) {
-    state.online = false;
-    setVersionLine(null);
-    document.getElementById("model-chip").textContent = "未连接后端";
-    showBackendBanner(e.message);
-    return false;
-  }
-}
-
-/* 版本号来自后端（/api/config 里的 version），**前端不另抄一份**——
-   两个都会过期的数字里，人总是相信界面上那个，而错的往往是它。
-   读不到就如实说读不到，不显示一个猜的。
-
-   这一行看着不起眼，它回答的是一个具体问题："我现在跑的是哪一版？"——
-   在"文档说有、我这没有"这类困惑里，这是第一个该看的地方。 */
-function setVersionLine(version) {
-  const el = document.getElementById("app-version");
-  if (!el) return;
-  el.textContent = version
-    ? "bili-scribe " + version
-    : "bili-scribe（未连上后端，版本未知 —— 请从 http://127.0.0.1:8818/ 打开本页）";
-}
-
-async function checkAuth() {
-  if (!state.online) {
-    document.getElementById("auth-dot").className = "dot off";
-    document.getElementById("auth-text").textContent = "未连接后端";
-    return;
-  }
-  try {
-    const s = await api("/api/auth/status");
-    const dot = document.getElementById("auth-dot");
-    if (s.logged_in) {
-      dot.className = "dot on";
-      document.getElementById("auth-text").textContent = s.identity.uname || "已登录";
-      document.getElementById("logged-in").style.display = "block";
-      document.getElementById("logged-out").style.display = "none";
-      document.getElementById("uname").textContent = (s.identity.uname || "已登录") + " · mid " + s.identity.mid;
-      document.getElementById("cred-time").textContent = "凭据保存于 " + (s.updated_at || "未知");
-    } else {
-      dot.className = "dot off";
-      document.getElementById("auth-text").textContent = "未登录";
-      document.getElementById("logged-in").style.display = "none";
-      document.getElementById("logged-out").style.display = "block";
-    }
-  } catch (e) {
-    setMsg("auth-msg", "状态检查失败：" + e.message, "err");
-  }
-}
-
-async function startQr() {
-  if (!state.online) {
-    showBackendBanner("当前页面不是由本程序的后端提供的，登录接口不存在。");
-    return;
-  }
-  const btn = document.getElementById("qr-btn");
-  btn.disabled = true;
-  setMsg("auth-msg", "正在生成二维码…");
-  try {
-    const q = await api("/api/auth/qrcode");
-    document.getElementById("qr-img").src = q.image;
-    document.getElementById("qr-wrap").style.display = "flex";
-    document.getElementById("qr-status").textContent = "等待扫码…";
-    setMsg("auth-msg", "");
-    clearInterval(state.qrTimer);
-    state.qrTimer = setInterval(() => pollQr(q.key), 2000);
-  } catch (e) {
-    setMsg("auth-msg", "生成失败：" + e.message, "err");
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function pollQr(key) {
-  try {
-    const r = await api("/api/auth/poll?key=" + encodeURIComponent(key));
-    document.getElementById("qr-status").textContent = r.status_text || "";
-    if (r.status === 0) {
-      clearInterval(state.qrTimer);
-      if (r.error) {
-        setMsg("auth-msg", "登录成功但凭据保存失败：" + r.error, "err");
-      } else {
-        setMsg("auth-msg", "登录成功，凭据已加密保存。", "ok");
-        document.getElementById("qr-wrap").style.display = "none";
-        checkAuth();
-      }
-    } else if (r.status === 86038) {
-      clearInterval(state.qrTimer);
-      setMsg("auth-msg", "二维码已失效，请重新获取。", "err");
-    }
-  } catch (e) {
-    clearInterval(state.qrTimer);
-    setMsg("auth-msg", "轮询失败：" + e.message, "err");
-  }
-}
-
-async function submitCookie() {
-  const sessdata = document.getElementById("in-sessdata").value.trim();
-  const jct = document.getElementById("in-jct").value.trim();
-  const uid = document.getElementById("in-uid").value.trim();
-  if (!sessdata || !jct) { setMsg("auth-msg", "SESSDATA 和 bili_jct 都要填。", "err"); return; }
-  setMsg("auth-msg", "正在校验…");
-  try {
-    await api("/api/auth/cookie", { method: "POST", body: JSON.stringify({ sessdata, bili_jct: jct, dedeuserid: uid }) });
-    setMsg("auth-msg", "凭据校验通过并已保存。", "ok");
-    document.getElementById("in-sessdata").value = "";
-    document.getElementById("in-jct").value = "";
-    checkAuth();
-  } catch (e) {
-    setMsg("auth-msg", "校验失败：" + e.message, "err");
-  }
-}
-
-async function logout() {
-  await api("/api/auth/logout", { method: "POST" });
-  setMsg("auth-msg", "已退出，本地凭据已清除。", "ok");
-  checkAuth();
-}
-
-/* ---------------------------------------------------------------- 任务 */
-
-const STAGES = ["resolving", "fetching_meta", "fetching_tags", "fetching_subtitle",
-                "fetching_danmaku", "fetching_replies", "fetching_platform", "mapping", "reducing"];
+const STAGES = [
+  "resolving", "fetching_meta", "fetching_tags", "fetching_subtitle",
+  "fetching_danmaku", "fetching_replies", "fetching_platform",
+  "fetching_frames", "mapping", "reducing", "critiquing", "revising",
+];
 const STAGE_LABEL = {
-  resolving: "解析输入", fetching_meta: "读取视频信息", fetching_tags: "读取标签",
-  fetching_subtitle: "获取字幕", fetching_danmaku: "获取弹幕", fetching_replies: "读取热门评论",
-  fetching_platform: "读取平台侧摘要", mapping: "分段预读长素材", reducing: "生成结构化总结",
-  ready: "完成", failed: "失败"
+  resolving: "解析输入",
+  fetching_meta: "读取视频信息",
+  fetching_tags: "读取标签",
+  fetching_subtitle: "获取字幕",
+  fetching_danmaku: "获取弹幕",
+  fetching_replies: "读取热门评论",
+  fetching_platform: "读取平台侧摘要",
+  fetching_frames: "抽取画面帧",
+  mapping: "分段预读长素材",
+  reducing: "生成结构化总结",
+  critiquing: "自我批判",
+  revising: "按批判修订",
+  queued: "待排队",
+  ready: "完成",
+  failed: "失败",
+  refining: "按你的要求修改",
 };
 
-function renderSteps(task) {
-  const current = task.status;
-  const box = document.getElementById("steps");
-  if (current === "queued") {
-    box.innerHTML = '<li class="active"><span class="mark">·</span><span>排队中</span></li>';
-    return;
+/* ------------------------------------------------------------ 状态 */
+
+const S = {
+  cfg: null,
+  roles: [],
+  auth: null,
+  task: null,
+  taskId: null,
+  versions: [],
+  versionTotal: null,
+  currentVersion: null,
+  viewingVersion: null,
+  awaitingRefine: null,
+  subtitleToken: null,
+  subtitleName: "",
+  publishes: [],
+  settingsLoaded: false,
+  showDiffs: false,
+  online: false,
+  qrTimer: null,
+  qrKey: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const has = (id) => document.getElementById(id) !== null;
+
+/* ------------------------------------------------------------ 传输层
+   同一个界面要能跑在两种形态里：
+
+   - **桌面版**（`bili-scribe.exe`）：pywebview 把 Python 方法直接挂成
+     `window.pywebview.api.*`，是同一个进程里的函数调用。不开端口，进度由
+     Python 从后台线程 `evaluate_js` 推过来（见 `__onTaskUpdate`）。
+   - **源码版**（`python run.py` + 浏览器）：中间隔着一层 HTTP，方法名要翻成
+     路由和动词，进度只能自己定时去问。
+
+   差别**只有这一层**。业务判断、渲染、状态机全在上面共用——两边要是各写一份，
+   就会出现"桌面上能发、网页上不能发"这种最难查的 bug。
+
+   为什么留着 HTTP：改后端时能一边改一边刷新页面看效果，而重打包 exe 要 25 秒。
+   代价是源码版每逢进度更新都要发一次请求，桌面版一次都不发。 */
+
+/* 由 `start()` 在页面起来时定下来，跑起来之后不再改。 */
+let TRANSPORT = null;
+
+/* 方法名 → HTTP 路由。表里的每一项都对应 `app/main.py` 里一个真实路由；
+   名字对不上时不会静默失败，`callHttp` 会明确抛出"源码版没有这条接口"。
+   `b` 是「把位置参数拼成请求体」的函数，没有就不发 body。 */
+const HTTP_ROUTES = {
+  get_config:       { m: "GET",    p: () => "/api/config" },
+  check_llm:        { m: "GET",    p: () => "/api/llm/check" },
+  get_roles:        { m: "GET",    p: () => "/api/roles" },
+  set_role:         { m: "POST",   p: () => "/api/role", b: (v) => v },
+
+  get_settings:     { m: "GET",    p: () => "/api/settings" },
+  save_settings:    { m: "PUT",    p: () => "/api/settings", b: (v) => v },
+  test_llm:         { m: "POST",   p: () => "/api/settings/test-llm", b: (v) => v },
+
+  auth_status:      { m: "GET",    p: () => "/api/auth/status" },
+  auth_qrcode:      { m: "GET",    p: () => "/api/auth/qrcode" },
+  auth_poll:        { m: "GET",    p: (k) => "/api/auth/poll?key=" + encodeURIComponent(k) },
+  auth_cookie:      { m: "POST",   p: () => "/api/auth/cookie", b: (v) => v },
+  auth_logout:      { m: "POST",   p: () => "/api/auth/logout" },
+
+  discard_subtitle: { m: "DELETE", p: (t) => "/api/subtitle/" + encodeURIComponent(t) },
+
+  create_task:      { m: "POST",   p: () => "/api/task", b: (v) => v },
+  get_task:         { m: "GET",    p: (id) => "/api/task/" + encodeURIComponent(id) },
+  list_versions:    { m: "GET",    p: (id) => "/api/task/" + encodeURIComponent(id) + "/versions" },
+  get_version:      { m: "GET",    p: (id, n) => "/api/task/" + encodeURIComponent(id) + "/versions/" + n },
+  restore_version:  { m: "POST",   p: (id, n) => "/api/task/" + encodeURIComponent(id) + "/versions/" + n + "/restore" },
+  refine_task:      { m: "POST",   p: (id) => "/api/task/" + encodeURIComponent(id) + "/refine", b: (id, v) => v },
+  list_tasks:       { m: "GET",    p: (lim) => "/api/tasks?limit=" + (lim || 20) },
+
+  publish:          { m: "POST",   p: () => "/api/publish", b: (v) => v },
+  withdraw:         { m: "POST",   p: () => "/api/publish/withdraw", b: (pid) => ({ publish_id: pid }) },
+  list_publishes:   { m: "GET",    p: (lim) => "/api/publishes?limit=" + (lim || 20) },
+
+  notes_stats:      { m: "GET",    p: () => "/api/notes/stats" },
+  clear_notes:      { m: "POST",   p: () => "/api/notes/clear" },
+};
+
+/* 浏览器里的"选文件"。桌面版走 Python 的原生对话框（`pick_subtitle`），
+   这边只能用 `<input type=file>`——它拿不到路径，但能拿到字节，够用。 */
+function pickFile(accept) {
+  return new Promise((resolve) => {
+    const el = document.createElement("input");
+    el.type = "file";
+    el.accept = accept;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const done = (v) => { el.remove(); resolve(v); };
+    el.addEventListener("change", () => {
+      done(el.files && el.files[0] ? el.files[0] : null);
+    }, { once: true });
+    // 点"取消"时不会触发 change。现代浏览器有 cancel 事件，没有的话
+    // 这个 promise 就一直挂着——但只有源码版会走到这里，不值得为它做兜底超时。
+    el.addEventListener("cancel", () => done(null), { once: true });
+    el.click();
+  });
+}
+
+async function callHttp(name, ...args) {
+  // 这三条在 HTTP 世界里没有对应物，逐个处理。
+  if (name === "mark_ready") return null;          // 桥的唯一用途就是握手，HTTP 不需要
+  if (name === "open_data_dir") {
+    // 浏览器里"打开文件夹"等于让服务器去开资源管理器，跨了信任边界，不做。
+    throw new Error("源码版没法从浏览器打开文件夹，目录是 " + dataDir());
   }
-  if (current === "refining") {
-    // 迭代只有一步：素材笔记已经有了，这次既不重新采集也不重新预读。
-    box.innerHTML = '<li class="active"><span class="mark">▶</span><span>按你的要求修改这一版</span></li>' +
-      '<li><span class="mark">✓</span><span>素材沿用上一版（未重新采集、未重新预读）</span></li>';
-    if (task.progress) setMsg("task-msg", task.progress);
-    return;
-  }
-  const done = STAGES.indexOf(current);
-  box.innerHTML = STAGES.map((s, i) => {
-    let cls = "", mark = "○";
-    if (current === "failed") { cls = (i <= done) ? "fail" : ""; mark = (i <= done) ? "×" : "○"; }
-    else if (current === "ready" || (done > -1 && i < done)) { cls = "done"; mark = "✓"; }
-    else if (i === done) { cls = "active"; mark = "▶"; }
-    return `<li class="${cls}"><span class="mark">${mark}</span><span>${STAGE_LABEL[s]}</span></li>`;
-  }).join("") + `<li class="${current === 'failed' ? 'fail' : (current === 'ready' ? 'done' : '')}">
-      <span class="mark">${current === 'ready' ? '✓' : (current === 'failed' ? '×' : '○')}</span>
-      <span>${STAGE_LABEL[current] || current}</span></li>`;
-  if (task.progress) setMsg("task-msg", task.progress);
-}
-
-function renderChecks(task) {
-  const list = task.candidates || [];
-  const box = document.getElementById("checks");
-  if (!list.length) { box.innerHTML = ""; return; }
-  box.innerHTML = list.map(c => `
-    <li>
-      <span class="name ${c.available ? 'yes' : 'no'}">${c.label}</span>
-      <span class="why">${escapeHtml(c.detail || "")}</span>
-    </li>`).join("");
-}
-
-/* -------------------------------------------------------- 字幕文件上传 */
-
-/* 上传走的是**原始字节**（application/octet-stream），不是 multipart——
-   后端为此不引入 python-multipart 这个新依赖。所以这里用 file.arrayBuffer()
-   直接读字节，而**刻意不用 file.text()**：srt 可能是 GBK 或 UTF-16，
-   一旦按 UTF-8 解一遍就毁了，编码探测必须留给服务端做。 */
-
-function setSrtHint(text, kind) {
-  const el = document.getElementById("srt-hint");
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = kind === "err" ? "status-line err" : (kind === "ok" ? "status-line ok" : "hint");
-}
-
-/* 按钮上的字要跟着状态走。否则选完文件它还写着「选择字幕文件」，
-   使用者会不确定到底选上没有，进而反复点。长文件名交给 CSS 截断。 */
-const SRT_BTN_DEFAULT = "选择字幕文件";
-
-function setSrtBtn(text) {
-  const el = document.getElementById("srt-btn");
-  if (!el) return;
-  const label = text || SRT_BTN_DEFAULT;
-  el.textContent = label;
-  el.title = label;   // 截断时悬停可看全名
-}
-
-async function uploadSrt(file) {
-  setSrtHint("读取并解析中…");
-  let buf;
-  try {
-    buf = await file.arrayBuffer();
-  } catch (e) {
-    setSrtHint("读不了这个文件：" + e.message, "err");
-    return;
-  }
-  try {
-    const r = await api("/api/subtitle/parse", {
+  if (name === "pick_subtitle") {
+    const file = await pickFile(".srt,.txt,text/plain");
+    if (!file) return { cancelled: true };
+    const buf = await file.arrayBuffer();
+    const res = await fetch("/api/subtitle/parse", {
       method: "POST",
+      headers: { "content-type": "application/octet-stream" },
       body: buf,
-      headers: { "Content-Type": "application/octet-stream" }
     });
-    state.subtitleToken = r.token;
-    document.getElementById("srt-clear").style.display = "";
-    setSrtBtn(file.name);
-    setSrtHint(
-      file.name + "：解析出 " + r.segments + " 段，覆盖 " + r.first + "–" + r.last +
-        "（编码 " + r.encoding + "）。这份字幕会优先于平台字幕使用。",
-      "ok"
-    );
-  } catch (e) {
-    state.subtitleToken = null;
-    document.getElementById("srt-clear").style.display = "none";
-    setSrtBtn(SRT_BTN_DEFAULT);
-    setSrtHint("这份字幕用不了：" + e.message, "err");
+    const d = await readJson(res);
+    return Object.assign({ cancelled: false, name: file.name }, d);
   }
+
+  const r = HTTP_ROUTES[name];
+  if (!r) throw new Error("源码版没有「" + name + "」这条接口。");
+  const body = r.b ? r.b(...args) : undefined;
+  const res = await fetch(r.p(...args), {
+    method: r.m,
+    headers: body === undefined ? {} : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return readJson(res);
 }
 
-function onSrtPicked() {
-  const el = document.getElementById("srt-file");
-  const file = el && el.files && el.files[0];
-  if (file) uploadSrt(file);
-}
-
-async function clearSrt() {
-  const token = state.subtitleToken;
-  state.subtitleToken = null;
-  const el = document.getElementById("srt-file");
-  if (el) el.value = "";
-  document.getElementById("srt-clear").style.display = "none";
-  setSrtBtn(SRT_BTN_DEFAULT);
-  setSrtHint("已清除，本次将使用平台字幕（如果有的话）。");
-  if (token) {
-    try {
-      await api("/api/subtitle/" + encodeURIComponent(token), { method: "DELETE" });
-    } catch (e) {
-      // 服务端没删成也不影响使用，兜底清理会收走它
-    }
+/* FastAPI 的成功响应就是数据本身，失败是 `{detail}`——和桥的 `{ok,data}`
+   形状不同，在这里抹平。 */
+async function readJson(res) {
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+  if (!res.ok) {
+    const raw = data && (data.detail || data.error);
+    const msg = typeof raw === "string" ? raw
+      : Array.isArray(raw) ? raw.map((x) => (x && (x.msg || x.detail)) || JSON.stringify(x)).join("；")
+      : raw ? JSON.stringify(raw) : ("HTTP " + res.status);
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
+  return data;
 }
 
-async function submitTask() {
-  const raw = document.getElementById("raw-input").value.trim();
-  if (!raw) { setMsg("task-msg", "先粘贴一个视频链接或 BV 号。", "err"); return; }
-  const btn = document.getElementById("run-btn");
-  btn.disabled = true;
-  document.getElementById("progress-card").style.display = "block";
-  setMsg("task-msg", "已提交，正在处理…");
+async function call(name, ...args) {
+  if (TRANSPORT === "http") return callHttp(name, ...args);
+
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || typeof api[name] !== "function") {
+    throw new Error("界面还没连上本地接口，请稍等一下或重启程序。");
+  }
+  const r = await api[name](...args);
+  if (!r || r.ok !== true) {
+    const err = new Error((r && r.error) || "调用没有返回结果");
+    err.status = r && r.status;
+    throw err;
+  }
+  return r.data;
+}
+
+/* ------------------------------------------------------- 进度：HTTP 才需要
+   桌面版由 Python 主动推（`__onTaskUpdate`），这边一条请求都不用发。
+   源码版只能问。用 setTimeout 串起来而不是 setInterval：上一轮没回来就不开下一轮，
+   网络慢的时候不会堆出一串并发请求。任务进入终态就停表，不留永远在跑的定时器。 */
+
+let pollTimer = null;
+
+function ensurePolling() {
+  if (TRANSPORT !== "http" || pollTimer || !S.taskId) return;
+  pollTimer = setTimeout(pollOnce, 1200);
+}
+
+async function pollOnce() {
+  pollTimer = null;
+  if (TRANSPORT !== "http" || !S.taskId) return;
+  let t = null;
   try {
-    const roleSel = document.getElementById("task-role");
-    const body = { raw_input: raw };
-    if (roleSel && roleSel.value) body.role = roleSel.value;
-    const hadSrt = !!state.subtitleToken;
-    if (hadSrt) body.subtitle_token = state.subtitleToken;
-    const r = await api("/api/task", { method: "POST", body: JSON.stringify(body) });
-    // 提交成功就该忘掉这个 token：服务端会在任务结束时把文件删掉，
-    // 留着它下次再提交只会拿到一句「已过期」。
-    state.subtitleToken = null;
-    if (hadSrt) {
-      document.getElementById("srt-clear").style.display = "none";
-      setSrtHint("字幕已随本次任务提交（任务结束后自动删除）。要再用请重新选择文件。", "ok");
-    }
-    state.taskId = r.task_id;
-    // 新任务意味着上一轮的一切都作废：上一轮的"等迭代结果"标记如果留着，
-    // 会让这一轮的第一次轮询误判成"迭代还没出结果"，从而永远停在等待里。
-    state.awaitingRefine = null;
-    state.viewingVersion = null;
-    state.versions = [];
-    state.versionTotal = null;
-    state.currentVersion = null;
-    clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(pollTask, 1200);
-    pollTask();
+    t = await call("get_task", S.taskId);
   } catch (e) {
-    setMsg("task-msg", "提交失败：" + e.message, "err");
-    btn.disabled = false;
+    /* 一次没问到不算错（后面可能正在重启后端）。下一轮再试，不要在界面上闪红。 */
   }
+  if (t) {
+    window.__onTaskUpdate(t);
+    if (t.status === "ready" || t.status === "failed") return;
+  }
+  ensurePolling();
 }
 
-async function pollTask() {
-  if (!state.taskId) return;
-  try {
-    const task = await api("/api/task/" + state.taskId);
-    state.task = task;
-    renderSteps(task);
-    renderChecks(task);
-    if (task.status === "refining") {
-      // 迭代不是流水线：解析、采集、预读这次一件都没发生，所以只报一行进度，
-      // 不去点亮那排步骤（点亮它等于告诉使用者它又跑了一遍完整流程）。
-      clearInterval(state.pollTimer);
-      state.pollTimer = setInterval(pollTask, 1500);
-      document.getElementById("refine-btn").disabled = true;
-      setMsg("task-msg", task.progress || "正在按你的要求改…");
-      setMsg("refine-msg", task.progress || "正在按你的要求改…");
-    } else if (task.status === "ready") {
-      /* 提交迭代后，服务端会当场把状态置成 refining；但万一这一版快得离谱，
-         第一次轮询读到的可能还是上一轮的 ready。那时如果"看到 ready 就收工"，
-         刚提交的迭代结果就永远不会被取回来了。所以用版本号判断：
-         当前版还是提交时那一版，说明新的一版还没出来，继续等。 */
-      if (state.awaitingRefine && (task.current_version || 0) <= state.awaitingRefine) {
-        clearInterval(state.pollTimer);
-        state.pollTimer = setInterval(pollTask, 1500);
-        setMsg("task-msg", "正在按你的要求改…");
-        return;
-      }
-      const wasRefine = !!state.awaitingRefine;
-      state.awaitingRefine = null;
-      clearInterval(state.pollTimer);
-      document.getElementById("run-btn").disabled = false;
-      setMsg("task-msg", "总结已生成，请在右侧确认。", "ok");
-      renderPreview(task);
-      if (wasRefine) {
-        const note = (task.summary_json && task.summary_json.revise_note) || "";
-        setMsg("refine-msg",
-          "第 " + task.current_version + " 版改好了" + (note ? "——它说：" + note : "。"),
-          "ok");
-      }
-    } else if (task.status === "failed") {
-      clearInterval(state.pollTimer);
-      state.awaitingRefine = null;
-      document.getElementById("run-btn").disabled = false;
-      setMsg("task-msg", "失败：" + (task.error || "未知原因"), "err");
-    }
-  } catch (e) {
-    clearInterval(state.pollTimer);
-    state.awaitingRefine = null;
-    document.getElementById("run-btn").disabled = false;
-    setMsg("task-msg", "轮询失败：" + e.message, "err");
-  }
-}
+/* ------------------------------------------------------------ 小工具 */
 
-/* -------------------------------------------------------------- 预览 */
-
-function escapeHtml(s) {
-  // 顺带把引号也转掉：这个函数的结果有时会进 title="..." 这类属性，
-  // 只转 & < > 的话，文本里出现一个引号就能把属性切开。
+function esc(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
 
-/* 「实际改了什么」——把这一版和上一版逐字段比出来的，本地算，零成本。
-   它和上一行的「改动说明」是两件事：那是模型自己写的（线索），这是可核对的事实。
-   三种状态分开说，混起来就会把"没比过"读成"没改动"：
-     null → 不适用（第 1 版没有上一版 / 回退版没有"改"这回事），不显示这一行
-     []   → 比过了，逐字相同（要求没被落实，这本身就是有用信息）
-     非空 → 逐字段列出 */
-function versionDiffText(v) {
-  const fields = v.changed_fields;
-  if (fields === null || fields === undefined) return "";
-  if (!fields.length) return "无 —— 和上一版逐字相同（要求没被落实）";
-  return fields.map(f => {
-    const ratio = (f.ratio === null || f.ratio === undefined) ? "" : "，相似度 " + f.ratio;
-    return f.label + "（" + f.detail + ratio + "）";
-  }).join(" · ");
+function fmt(n) {
+  return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-function versionDiffHint(v) {
-  const fields = v.changed_fields;
-  if (!fields || !fields.length) return "";
-  return fields.filter(f => f.example).map(f => f.label + "：" + f.example).join("\n");
+function bytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
 }
 
-/* 具体差在哪里，一行一条。默认只在 title 里（列表好扫），
-   打开开关才铺进列表——因为"改成了什么"才是判断"这次改动能不能接受"的依据，
-   而悬停是个极容易被忽略的交互（这一点是设计时自己发现的）。 */
-function versionDiffExamples(v) {
-  const fields = v.changed_fields;
-  if (!fields || !fields.length) return [];
-  return fields.filter(f => f.example).map(f => "例 · " + f.label + "：" + f.example);
+/* 数据目录。取数据库文件所在的那一层——库、凭据密钥、笔记缓存都放在一起。 */
+function dataDir() {
+  const p = (S.cfg && S.cfg.storage && S.cfg.storage.db_path) || "";
+  return p.replace(/[\\/][^\\/]*$/, "") || p;
 }
 
-function toggleDiffs() {
-  state.showDiffs = !state.showDiffs;
-  renderVersionList();
-}
-
-function renderPreview(task) {
-  document.getElementById("preview-empty").style.display = "none";
-  document.getElementById("preview-area").style.display = "block";
-
-  const badge = document.getElementById("source-badge");
-  const trust = task.source_trust || "";
-  badge.textContent = "素材：" + (task.source_label || "未知") + (trust ? "（可信度 " + trust + "）" : "");
-  badge.className = "badge " + (trust === "高" ? "high" : (trust === "中" ? "mid" : "low"));
-
-  document.getElementById("video-link").href = "https://www.bilibili.com/video/" + task.bvid;
-
-  const warns = task.warnings || [];
-  const wb = document.getElementById("warning-box");
-  wb.innerHTML = warns.length
-    ? `<div class="warn-box${task.source_kind === 'meta' ? ' danger' : ''}">
-         <strong>采集提示</strong>
-         <ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul>
-       </div>`
-    : "";
-
-  document.getElementById("preview-md").textContent = task.preview_md || "（无预览内容）";
-
-  // 发布版用完整长文（不是概括版）。后端会按长度自动决定走笔记还是普通评论。
-  state.defaultComment = task.publish_document || task.comment_text || "";
-  document.getElementById("comment-box").value = state.defaultComment;
-  // 每次重新渲染都**重置确认勾选**。这不是顺手清一下：内容变了而勾选还在，
-  // 就等于让人对着新版内容举着"上一版的确认"。迭代打磨这一版尤其如此。
-  document.getElementById("confirm-box").checked = false;
-  updateCounter();
-  updatePublishButton();
-  setMsg("publish-msg", "");
-
-  // 回到"看当前版"的状态：翻历史版的残留必须清掉，否则会出现
-  // 预览里是第 2 版、发布框里却是第 4 版这种最危险的组合。
-  state.task = task;
-  state.viewingVersion = null;
-  showHistoryNote("");
-  document.getElementById("refine-block").style.display = "";
-  document.getElementById("publish-block").style.display = "";
-  setVersionBadge(task.current_version, task.version_count);
-  applyRefineState(task);
-  loadVersions(task.id);
-}
-
-/* -------------------------------------------------------- 迭代打磨 */
-
-function fmtNum(n) {
-  const s = String(n == null ? 0 : n);
-  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-function setVersionBadge(current, count) {
-  const el = document.getElementById("version-badge");
+function setMsg(id, text, kind) {
+  const el = $(id);
   if (!el) return;
-  if (!current) { el.textContent = "暂无版本"; return; }
-  el.textContent = "第 " + current + " 版" + (count > 1 ? " · 共 " + count + " 版" : "");
+  el.textContent = text || "";
+  el.className = "line" + (kind ? " " + kind : "") + (id === "task-msg" ? " gap" : "");
 }
 
-/* 这一版花了多少。分开写是因为三类的语义完全不同：
-   回退没有消耗（没调模型）、老版本没有记录（当时还没有记账）、其余是真账。 */
-function versionCostText(v) {
-  if (v.source === "restore") return "没有调用模型，无消耗";
-  const m = v.metrics || {};
-  const u = m.usage;
-  if (!u) return "消耗未记录（这一版生成于记账功能之前）";
-  const bits = [u.calls + " 次调用"];
-  if (u.total_tokens) {
-    bits.push("合计 " + fmtNum(u.total_tokens) + " tokens（输入 " + fmtNum(u.prompt_tokens) +
-      " / 输出 " + fmtNum(u.completion_tokens) + "）");
+function getPath(obj, path) {
+  return path.split(".").reduce((a, k) => (a == null ? a : a[k]), obj);
+}
+
+function setPath(obj, path, v) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null || typeof cur[parts[i]] !== "object") cur[parts[i]] = {};
+    cur = cur[parts[i]];
   }
-  if (u.unpriced) bits.push(u.unpriced + " 次端点未返回用量");
-  if (m.elapsed) bits.push("耗时 " + m.elapsed + " 秒");
-  if (m.chunks > 1) bits.push("素材预读 " + m.chunks + " 段");
-  if (m.frames) bits.push("附 " + m.frames + " 帧画面");
-  return bits.join(" · ");
+  cur[parts[parts.length - 1]] = v;
 }
 
-function renderUsageLine() {
-  const el = document.getElementById("usage-line");
-  if (!el) return;
-  const t = state.versionTotal;
-  if (!t || (!t.calls && !t.untracked)) { el.textContent = ""; return; }
-  const bits = [];
-  if (t.calls) bits.push(t.calls + " 次模型调用");
-  if (t.total_tokens) {
-    bits.push("输入 " + fmtNum(t.prompt_tokens) + " / 输出 " + fmtNum(t.completion_tokens) +
-      "，合计 " + fmtNum(t.total_tokens) + " tokens");
+/* 极简 Markdown：标题、列表、加粗、行内代码、段落。
+   **先转义再加标签**，所以模型写的内容不可能注进 HTML。 */
+function inlineMd(s) {
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, '<code class="ic">$1</code>');
+}
+
+function mdBlocks(md) {
+  const out = [];
+  let list = null;
+  const flush = () => {
+    if (list) { out.push('<ul class="tx-ul">' + list.join("") + "</ul>"); list = null; }
+  };
+  for (const raw of String(md || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flush(); out.push('<div class="tx-h">' + inlineMd(h[2]) + "</div>"); continue; }
+    const li = line.match(/^[-*+]\s+(.*)$/);
+    if (li) { (list = list || []).push("<li>" + inlineMd(li[1]) + "</li>"); continue; }
+    flush();
+    out.push('<p class="tx">' + inlineMd(line) + "</p>");
   }
-  if (t.unpriced) bits.push(t.unpriced + " 次端点未返回用量，无法计价");
-  if (t.untracked) bits.push(t.untracked + " 版没有消耗记录（升级前生成的）");
-  el.textContent = "这条视频累计：" + bits.join("；");
+  flush();
+  return out.join("");
 }
 
-async function loadVersions(taskId) {
+/* ------------------------------------------------------------ 自定义确认框
+   WebView 里的原生 confirm() 行为取决于宿主是否接管，不可靠。
+   而且它长得和这个界面完全不搭。自己做一个。 */
+
+let modalResolve = null;
+
+function closeModal() {
+  $("modal").classList.remove("on");
+  $("mask").classList.remove("on");
+  const r = modalResolve;
+  modalResolve = null;
+  if (r) r(false);
+}
+
+function openModal({ title, bodyHtml, actions }) {
+  $("m-title").textContent = title || "CONFIRM";
+  $("m-body").innerHTML = bodyHtml || "";
+  const box = $("m-acts");
+  box.innerHTML = "";
+  (actions || []).forEach((a) => {
+    const b = document.createElement("button");
+    b.textContent = a.label;
+    if (a.kind) b.className = a.kind;
+    b.onclick = () => {
+      if (a.onClick) { a.onClick(); return; }
+      const r = modalResolve;
+      modalResolve = null;
+      $("modal").classList.remove("on");
+      if (!a.keepMask) $("mask").classList.remove("on");
+      if (r) r(a.value === undefined ? true : a.value);
+    };
+    box.appendChild(b);
+  });
+  $("mask").classList.add("on");
+  $("modal").classList.add("on");
+}
+
+function ask(title, message, { ok = "确认", cancel = "取消", danger = false } = {}) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    openModal({
+      title,
+      bodyHtml: "<p>" + esc(message) + "</p>",
+      actions: [
+        { label: cancel, value: false },
+        { label: ok, value: true, kind: danger ? "dan" : "pri" },
+      ],
+    });
+  });
+}
+
+function alertBox(title, message) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    openModal({
+      title,
+      bodyHtml: "<p>" + esc(message) + "</p>",
+      actions: [{ label: "知道了", value: true, kind: "pri" }],
+    });
+  });
+}
+
+/* ------------------------------------------------------------ 顶栏 */
+
+function renderTop() {
+  // 账号
+  const a = $("chip-auth");
+  const id = S.auth && S.auth.identity;
+  if (id) {
+    a.className = "st";
+    a.innerHTML = "<i></i><span>UID <b>" + esc(id.mid) + "</b> · " + esc(id.uname || "") + "</span>";
+  } else {
+    a.className = "st off";
+    a.innerHTML = "<i></i><span>未登录 · 点此扫码</span>";
+  }
+  // 模型
+  const m = $("chip-model");
+  const llm = S.cfg && S.cfg.llm;
+  if (llm && llm.model) {
+    m.className = "st" + (llm.configured ? "" : " warn");
+    m.innerHTML = "<i></i><span>" + esc(llm.model) + (llm.configured ? "" : " · 缺 KEY") + "</span>";
+    m.title = llm.base_url || "";
+  } else {
+    m.className = "st off";
+    m.innerHTML = "<i></i><span>未配置</span>";
+  }
+  // 底栏
+  const g = S.cfg && S.cfg.publish && S.cfg.publish.require_confirm === false;
+  $("ft-gate").classList.toggle("hidden", !g);
+  renderRoleChip();
+}
+
+/* 顶栏的角色 chip。
+   显示的是「下一次总结会用哪个角色」，不是某个任务的历史角色——
+   任务自己的角色记在任务的 summary_json 里，跟着版本走。 */
+function renderRoleChip() {
+  const el = $("chip-role");
+  const r = currentRole();
+  el.innerHTML = "<i></i><span>角色 · <b>" + esc(r.name) + "</b></span>";
+  el.title = r.tagline
+    ? "总结角色：" + r.name + "（" + r.tagline + "）"
+    : "选择总结角色";
+}
+
+function currentRole() {
+  const k = (S.cfg && S.cfg.llm && S.cfg.llm.role) || "standard";
+  const hit = S.roles.find((r) => r.key === k);
+  // 配置里是个已经不存在的 key 时不要显示空白：get_role 在后端也会退回 standard，
+  // 界面上跟着退回同一个默认值，两边才不会互相矛盾。
+  return hit || { key: k, name: k, tagline: "", note: "", passes: 0 };
+}
+
+function renderRoleList() {
+  const cur = currentRole().key;
+  $("role-list").innerHTML = S.roles.map((r) => {
+    const on = r.key === cur;
+    return '<button class="role' + (on ? " on" : "") + '" data-role="' + esc(r.key) + '">' +
+      '<span class="rn"><b>' + esc(r.name) + "</b>" +
+      '<span class="p">' + (r.passes > 1 ? r.passes + " 轮" : "单轮") + "</span>" +
+      (on ? '<span class="cur">当前</span>' : "") +
+      "</span>" +
+      '<span class="rt">' + esc(r.tagline || "") + "</span>" +
+      "</button>";
+  }).join("");
+  $("role-list").querySelectorAll("[data-role]").forEach((b) => {
+    b.onclick = () => pickRole(b.dataset.role);
+  });
+  /* 底部这行写死，不放 role.note。
+     note 是给维护者看的实现说明（「原文要求正文≥原文 20%」这种），
+     摆在选择器底下既占地方又答非所问——用户此刻想知道的是"我选了之后会发生什么"。 */
+  $("role-note").textContent =
+    "选中的角色对下一次总结生效。三轮回的角色会多花约两倍调用成本；已经生成的内容可以用「迭代打磨」单独改。";
+}
+
+function openRolePop() {
+  if (!S.roles.length) return;
+  renderRoleList();
+  $("role-pop").classList.add("on");
+}
+
+function closeRolePop() {
+  $("role-pop").classList.remove("on");
+}
+
+async function pickRole(key) {
+  if (key === currentRole().key) { closeRolePop(); return; }
+  closeRolePop();
   try {
-    const data = await api("/api/task/" + taskId + "/versions");
-    state.versions = data.versions || [];
-    state.versionTotal = data.total || null;
-    state.currentVersion = data.current;
-    renderVersionList();
-    renderUsageLine();
-    if (state.task) setVersionBadge(state.currentVersion, state.versions.length);
+    const r = await call("set_role", { role: key });
+    S.cfg.llm.role = r.role;
+    $("s-role").value = r.role;  // 抽屉里那个隐藏字段必须跟上，否则保存设置会把它写回旧值
+    renderRoleChip();
+    setMsg("task-msg", "角色已切到「" + r.name + "」，下一次总结生效。", "ok");
   } catch (e) {
-    const el = document.getElementById("version-hint");
-    if (el) {
-      el.textContent = "版本历史读不到：" + e.message;
-      el.className = "status-line err";
+    setMsg("task-msg", "切换角色失败：" + e.message, "err");
+  }
+}
+
+function tickClock() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  $("ft-clock").textContent =
+    d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+/* ------------------------------------------------------------ 输入区 */
+
+/* 任务在跑的时候不能重复提交——但"在跑"不是自己维护的一个布尔值，
+   而是从任务状态推出来的。多存一份状态，就会有"两处不一致"的那一天。 */
+function isRunning() {
+  const st = S.task && S.task.status;
+  return !!st && st !== "ready" && st !== "failed";
+}
+
+function updateRunBtn() {
+  const raw = $("raw-input").value.trim();
+  $("run-btn").disabled = !raw || !S.online || isRunning();
+}
+
+function setSrtLine(text, kind) {
+  const el = $("srt-line");
+  el.textContent = text || "";
+  el.className = "line" + (kind ? " " + kind : "");
+  el.style.display = text ? "" : "none";
+}
+
+/* ------------------------------------------------------------ 任务渲染 */
+
+function renderSegments() {
+  const box = $("seg");
+  if (!box.children.length) {
+    for (let i = 0; i < STAGES.length; i++) {
+      const el = document.createElement("i");
+      el.style.setProperty("--i", i);
+      box.appendChild(el);
     }
   }
+  const t = S.task;
+  const seg = Array.from(box.children);
+  seg.forEach((el) => (el.className = ""));
+
+  if (!t) return;
+
+  if (t.status === "refining") {
+    box.classList.add("anim");
+    $("seg-label").textContent = t.progress || "正在按你的要求改这一版…";
+    $("seg-pct").textContent = "···";
+    return;
+  }
+  box.classList.remove("anim");
+
+  if (t.status === "queued") {
+    $("seg-label").textContent = t.progress || "已接受请求，排队中";
+    $("seg-pct").textContent = "0%";
+    return;
+  }
+  if (t.status === "ready") {
+    seg.forEach((el) => (el.className = "on"));
+    $("seg-label").textContent = t.progress || "总结已生成";
+    $("seg-pct").textContent = "100%";
+    return;
+  }
+  if (t.status === "failed") {
+    const idx = STAGES.indexOf(t.status);
+    seg.forEach((el, i) => (el.className = i === seg.length - 1 ? "bad" : ""));
+    $("seg-label").textContent = t.progress || "失败";
+    $("seg-pct").textContent = "—";
+    return;
+  }
+  const idx = STAGES.indexOf(t.status);
+  if (idx < 0) {
+    $("seg-label").textContent = t.progress || t.status;
+    $("seg-pct").textContent = "—";
+    return;
+  }
+  seg.forEach((el, i) => {
+    if (i < idx) el.className = "on";
+    else if (i === idx) el.className = "cur";
+  });
+  $("seg-label").textContent = t.progress || STAGE_LABEL[t.status] || t.status;
+  $("seg-pct").textContent = Math.round(((idx + 1) / STAGES.length) * 100) + "%";
 }
 
-function renderVersionList() {
-  const box = document.getElementById("version-list");
-  const summary = document.getElementById("version-summary");
-  const list = state.versions || [];
-  if (summary) {
-    summary.textContent = list.length ? "版本历史（共 " + list.length + " 版）" : "版本历史";
+function renderHead() {
+  const t = S.task;
+  if (!t) return;
+  $("t-title").textContent = t.title || (t.bvid ? t.bvid : "（正在读取视频信息）");
+
+  const chips = [];
+  if (t.up_name) chips.push('<span class="c">UP · ' + esc(t.up_name) + "</span>");
+  if (t.source_label) {
+    const trust = t.source_trust || "";
+    chips.push('<span class="c">素材 · ' + esc(t.source_label) +
+      (trust ? "（" + esc(trust) + "）" : "") + "</span>");
   }
-  // 开关只在**真的有差异可展开**时出现——没有差异还摆一个按不动的按钮，是假入口
-  const toggleRow = document.getElementById("diff-toggle-row");
-  const toggleBtn = document.getElementById("diff-toggle");
-  const anyDiff = list.some(v => (v.changed_fields || []).length);
-  if (toggleRow) toggleRow.style.display = anyDiff ? "" : "none";
-  if (toggleBtn) toggleBtn.textContent = state.showDiffs ? "收起差异" : "展开全部差异";
-  if (!list.length) { box.innerHTML = '<li class="m">还没有版本记录。</li>'; return; }
-  box.innerHTML = list.map(v => {
-    const isCurrent = v.version_no === state.currentVersion;
-    const viewing = state.viewingVersion === v.version_no;
+  if (t.current_version) {
+    chips.push('<span class="c em">第 ' + t.current_version + " 版" +
+      (t.version_count > 1 ? " · 共 " + t.version_count + " 版" : "") + "</span>");
+  }
+  const role = (t.summary_json && t.summary_json.role) || "";
+  if (role) {
+    const r = S.roles.find((x) => x.key === role);
+    chips.push('<span class="c">' + esc(r ? r.name : role) +
+      (r ? " · " + r.passes + " 轮" : "") + "</span>");
+  }
+  if (t.bvid) {
+    chips.push('<span class="c"><a href="#" id="open-bili">原视频 ↗</a></span>');
+  }
+  $("t-chips").innerHTML = chips.join("");
+  const link = $("open-bili");
+  if (link) {
+    link.onclick = (e) => {
+      e.preventDefault();
+      // 交给系统浏览器。窗口本身是应用，不是浏览器的标签页。
+      window.open("https://www.bilibili.com/video/" + t.bvid, "_blank");
+    };
+  }
+}
+
+function renderWarnings() {
+  const t = S.task;
+  const warns = (t && t.warnings) || [];
+  const cands = (t && t.candidates) || [];
+
+  $("warn-blk").classList.toggle("hidden", !warns.length);
+  $("warn-list").innerHTML = warns.map((w) => "<li>" + esc(w) + "</li>").join("");
+
+  const box = $("cand");
+  const list = cands.filter((c) => c && c.label);
+  box.classList.toggle("hidden", !list.length);
+  box.innerHTML = list.map((c) =>
+    '<span class="' + (c.available ? "yes" : "no") + '" title="' + esc(c.detail || "") + '">' +
+    esc(c.label) + "</span>"
+  ).join("");
+}
+
+/* 正文卡：一句话 / 主体 / 要点 / 时间轴 / 局限
+   `src` 是 summary_json（可能是当前版，也可能是正在回看的历史版）。 */
+function renderBody(src, idxText) {
+  const s = src || {};
+  $("body-idx").textContent = idxText || "";
+
+  const parts = [];
+  if (s.one_line) {
+    parts.push('<h2 class="s"><span class="n">01</span>一句话</h2>');
+    parts.push('<p class="tx"><span class="hl">' + inlineMd(s.one_line) + "</span></p>");
+  }
+  if (s.summary_md) {
+    parts.push('<h2 class="s"><span class="n">02</span>主体</h2>');
+    parts.push(mdBlocks(s.summary_md));
+  }
+  if (s.key_points && s.key_points.length) {
+    parts.push('<h2 class="s"><span class="n">03</span>要点</h2>');
+    parts.push('<ul class="tx-ul">' +
+      s.key_points.map((p) => "<li>" + inlineMd(p) + "</li>").join("") + "</ul>");
+  }
+  if (s.timeline && s.timeline.length) {
+    parts.push('<h2 class="s"><span class="n">04</span>时间轴</h2>');
+    parts.push('<ul class="tl">' + s.timeline.map((it) =>
+      "<li>" + (it.t ? '<span class="t">' + esc(it.t) + "</span>" : "") +
+      '<span class="x">' + inlineMd(it.text || "") + "</span></li>").join("") + "</ul>");
+  }
+  if (s.caution) {
+    parts.push('<h2 class="s"><span class="n">05</span>素材局限</h2>');
+    parts.push('<p class="tx"><span class="warn-tx">' + inlineMd(s.caution) + "</span></p>");
+  }
+  if (!parts.length) {
+    parts.push('<p class="tx" style="color:var(--dim)">还没有内容。</p>');
+  }
+  $("body-inner").innerHTML = parts.join("");
+  $("body-card").classList.remove("hidden");
+}
+
+function renderCounter() {
+  const box = $("comment-box");
+  const text = box.value;
+  const limit = (S.cfg && S.cfg.publish && S.cfg.publish.max_comment_chars) || 900;
+  const el = $("counter");
+  // 超过 1000 字不是错误：会自动改走笔记通道。所以这里不变红、不禁用按钮。
+  if (text.length > 1000) {
+    el.textContent = text.length + " 字";
+    el.style.color = "var(--acid-d)";
+    $("via-hint").textContent = "超普通评论上限 · 走笔记";
+  } else {
+    el.textContent = text.length + " / " + limit + "（平台上限 1000）";
+    el.style.color = text.length > limit ? "var(--ember)" : "";
+    $("via-hint").textContent = "";
+  }
+  $("publish-btn").disabled = !(box.value.trim() && $("confirm-box").checked);
+}
+
+function renderVersions() {
+  const list = S.versions || [];
+  $("v-count").textContent = String(list.length).padStart(2, "0");
+
+  const anyDiff = list.some((v) => (v.changed_fields || []).length);
+  const box = $("v-list");
+
+  if (!list.length) {
+    box.innerHTML = '<div class="vd">还没有版本记录。</div>';
+    return;
+  }
+
+  box.innerHTML = list.map((v) => {
+    const isCur = v.version_no === S.currentVersion;
+    const viewing = S.viewingVersion === v.version_no;
     const kind = v.source === "refine" ? "按你的要求改"
       : (v.source === "restore" ? "回退到底稿" : "初次生成");
-    const rows = [];
-    if (v.one_line) rows.push('<div class="m">' + escapeHtml(v.one_line) + "</div>");
-    if (v.requirement) rows.push('<div class="m">要求：' + escapeHtml(v.requirement) + "</div>");
-    // 「这一版改了什么」——使用者就是靠这一行判断自己的要求有没有被听进去。
-    // 但它只是**模型的自述**，实测会不准，所以紧跟一行本地比对的结果。
-    if (v.revise_note) rows.push('<div class="m">改动说明：' + escapeHtml(v.revise_note) + "</div>");
+    const text = v.one_line || v.requirement || kind;
+
+    let right;
+    if (isCur) right = '<span class="cur">当前</span>';
+    else {
+      right = '<button class="act" data-view="' + v.version_no + '">' +
+        (viewing ? "在看" : "查看") + "</button>";
+    }
+
+    let extra = "";
+    if (v.revise_note) {
+      extra += '<div class="vd"><span class="k">它说：</span>' + esc(v.revise_note) + "</div>";
+    }
     const diff = versionDiffText(v);
     if (diff) {
-      const hint = versionDiffHint(v);
-      rows.push('<div class="m"' + (hint ? ' title="' + escapeHtml(hint) + '"' : "") +
-        ">实际改动：" + escapeHtml(diff) + "</div>");
-      if (state.showDiffs) {
-        versionDiffExamples(v).forEach(line => {
-          rows.push('<div class="m">' + escapeHtml(line) + "</div>");
-        });
-      }
+      const ex = versionDiffExamples(v);
+      extra += '<div class="vd"><span class="k">实际改动：</span>' +
+        (diff.bad ? '<span class="w">' + esc(diff.text) + "</span>" : esc(diff.text)) +
+        (ex.length && S.showDiffs ? "<br>" + ex.map((l) => "例 · " + esc(l)).join("<br>") : "") +
+        "</div>";
     }
-    rows.push('<div class="m">' + versionCostText(v) + "</div>");
-    const tail = isCurrent
-      ? '<span class="badge high">当前</span>'
-      : '<button class="ghost" onclick="showVersion(' + v.version_no + ')">' +
-        (viewing ? "正在看" : "查看") + "</button>";
-    return "<li><div class='grow'>" +
-      '<div class="t">第 ' + v.version_no + " 版 · " + kind + " · " +
-      escapeHtml(v.created_at || "") + "</div>" +
-      rows.join("") + "</div>" + tail + "</li>";
+    return '<div class="v' + (isCur ? " on" : "") + '" data-v="' + v.version_no + '">' +
+      '<span class="n">' + String(v.version_no).padStart(2, "0") + "</span>" +
+      '<span class="x" title="' + esc(kind + " · " + (v.created_at || "")) + '">' + esc(text) + "</span>" +
+      right + "</div>" + extra;
   }).join("");
+
+  box.querySelectorAll("[data-view]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); showVersion(Number(b.dataset.view)); };
+  });
+  box.querySelectorAll("[data-v]").forEach((row) => {
+    row.onclick = () => {
+      const n = Number(row.dataset.v);
+      if (n !== S.currentVersion) showVersion(n);
+      else viewCurrent();
+    };
+  });
+
+  if (anyDiff && !$("v-difftoggle")) {
+    const b = document.createElement("button");
+    b.id = "v-difftoggle";
+    b.className = "b2";
+    b.style.marginTop = "6px";
+    b.textContent = "展开全部差异";
+    b.onclick = () => {
+      S.showDiffs = !S.showDiffs;
+      b.textContent = S.showDiffs ? "收起差异" : "展开全部差异";
+      renderVersions();
+    };
+    box.appendChild(b);
+  } else if (anyDiff && $("v-difftoggle")) {
+    $("v-difftoggle").textContent = S.showDiffs ? "收起差异" : "展开全部差异";
+  }
 }
 
-function showHistoryNote(html) {
-  const el = document.getElementById("history-note");
-  if (!el) return;
-  el.innerHTML = html || "";
-  el.style.display = html ? "block" : "none";
+/* 「实际改了什么」三态：null 不显示、[] 明说没变、非空逐字段列。
+   混起来就会把"没比过"读成"没改动"。 */
+function versionDiffText(v) {
+  const f = v.changed_fields;
+  if (f === null || f === undefined) return null;
+  if (!f.length) return { text: "无 —— 和上一版逐字相同（要求没被落实）", bad: true };
+  return {
+    text: f.map((x) => {
+      const r = (x.ratio === null || x.ratio === undefined) ? "" : "，相似度 " + x.ratio;
+      return x.label + "（" + x.detail + r + "）";
+    }).join(" · "),
+    bad: false,
+  };
 }
 
-/* 翻看历史版：**只读**，而且把迭代和发布两块都收起来。
+function versionDiffExamples(v) {
+  const f = v.changed_fields;
+  if (!f || !f.length) return [];
+  return f.filter((x) => x.example).map((x) => x.label + "：" + x.example);
+}
 
-   为什么不是"直接切换到那一版来发布"：那样的话，你看着第 2 版、点发布，
-   发出去的其实是第 4 版——版本越多，这个错越难发现。所以历史版只用来回看，
-   想拿它当底稿就得显式点一下（那会真的把当前版换成它）。 */
-async function showVersion(no) {
-  const current = state.currentVersion;
-  if (!no || no === current) { viewCurrent(); return; }
+/* 这一版花了多少。三类语义不同，分开写。 */
+function costRows(v) {
+  if (!v) return [["—", "—"]];
+  if (v.source === "restore") return [["回退", "没有调用模型，无消耗"]];
+  const m = v.metrics || {};
+  const u = m.usage;
+  if (!u) return [["消耗", "未记录（这一版生成于记账功能之前）"]];
+  const rows = [];
+  if (u.prompt_tokens != null) rows.push(["输入 tokens", fmt(u.prompt_tokens)]);
+  if (u.completion_tokens != null) rows.push(["输出 tokens", fmt(u.completion_tokens)]);
+  rows.push(["调用次数", String(u.calls == null ? "—" : u.calls)]);
+  if (m.elapsed != null) rows.push(["耗时", m.elapsed + "s"]);
+  if (m.chunks) rows.push(["素材预读", m.chunks > 1 ? m.chunks + " 段" : "未触发"]);
+  if (m.frames) rows.push(["画面帧", String(m.frames)]);
+  if (m.model) rows.push(["模型", m.model]);
+  if (u.unpriced) rows.push(["未返回用量", u.unpriced + " 次"]);
+  return rows;
+}
+
+function renderCost() {
+  const cur = (S.versions || []).find((v) => v.version_no === S.currentVersion);
+  $("cost-now").innerHTML = costRows(cur)
+    .map(([k, val]) => '<div class="kt"><span class="k">' + esc(k) +
+      '</span><span class="v2">' + esc(val) + "</span></div>").join("");
+
+  const t = S.versionTotal;
+  if (!t || (!t.calls && !t.untracked)) {
+    $("cost-all").innerHTML = '<div class="kt"><span class="k">累计</span><span class="v2">—</span></div>';
+    return;
+  }
+  const rows = [];
+  if (t.calls) rows.push(["模型调用", t.calls + " 次"]);
+  if (t.prompt_tokens) rows.push(["输入合计", fmt(t.prompt_tokens)]);
+  if (t.completion_tokens) rows.push(["输出合计", fmt(t.completion_tokens)]);
+  if (t.total_tokens) rows.push(["总 tokens", fmt(t.total_tokens)]);
+  if (t.unpriced) rows.push(["端点未返回用量", t.unpriced + " 次"]);
+  if (t.untracked) rows.push(["无记录版本", t.untracked + " 版"]);
+  $("cost-all").innerHTML = rows.map(([k, v], i) =>
+    '<div class="kt"><span class="k">' + esc(k) + '</span><span class="v2' +
+    (i === rows.length - 1 ? " a" : "") + '">' + esc(v) + "</span></div>").join("");
+}
+
+function applyRefineState() {
+  const t = S.task || {};
+  const can = !!t.can_refine;
+  const blocked = t.refine_blocked || "";
+  const live = t.live_publish;
+
+  const req = $("refine-req");
+  req.disabled = !can || !!S.viewingVersion;
+  $("refine-btn").disabled = !can || !!S.viewingVersion || !req.value.trim() || !S.online;
+
+  const hint = $("refine-hint");
+  let msg = "", kind = "";
+  if (S.viewingVersion) {
+    msg = "正在回看第 " + S.viewingVersion + " 版（只读）。要用它当底稿，先点上面的「以这版为底稿」。";
+  } else if (blocked) {
+    msg = "现在还不能改： " + blocked;
+    kind = "err";
+  } else if (live) {
+    msg = "这条视频的总结已经发出去了。评论发出后不能编辑，要改得先撤回。";
+    kind = "err";
+  } else if (!can) {
+    msg = "现在还不能改这一版。";
+    kind = "err";
+  }
+  hint.textContent = msg;
+  hint.className = "line" + (kind ? " " + kind : "");
+  hint.style.display = msg ? "" : "none";
+
+  $("refine-blk").classList.toggle("hidden", !!S.viewingVersion && !can);
+}
+
+function renderWork() {
+  const t = S.task;
+  const hasTask = !!t;
+  $("empty").classList.toggle("hidden", hasTask);
+  $("work").classList.toggle("hidden", !hasTask);
+  $("side-ph").classList.toggle("hidden", hasTask);
+  $("side-body").classList.toggle("hidden", !hasTask);
+  if (!hasTask) return;
+
+  renderHead();
+  renderSegments();
+  renderWarnings();
+  applyRefineState();
+}
+
+/* 完整渲染：只在"当前版变了"或"第一次拿到任务"时跑。
+   进度推送每秒来好几次，每次都重排正文会把滚动位置和选区打掉。 */
+function renderTask(task) {
+  S.task = task;
+  const prevVer = S.currentVersion;
+  S.currentVersion = task.current_version || null;
+
+  renderWork();
+
+  const ready = task.status === "ready" || task.status === "failed";
+  const hasSummary = !!task.summary_json;
+
+  if (hasSummary && !S.viewingVersion) {
+    renderBody(task.summary_json, "V" + String(task.current_version || 0).padStart(2, "0") + " / CURRENT");
+
+    // 发布框只在"看着当前版"时存在。翻历史版时整块收起——
+    // 否则会出现"预览里是第 2 版、发布框里是第 4 版"这种最危险的组合。
+    $("pub-card").classList.remove("hidden");
+    const doc = task.publish_document || task.comment_text || "";
+    if (prevVer !== S.currentVersion || $("comment-box").value === "") {
+      $("comment-box").value = doc;
+      // 内容变了而勾选还在，等于对着新版举着上一版的确认。
+      $("confirm-box").checked = false;
+    }
+    renderCounter();
+  } else if (!hasSummary) {
+    $("body-card").classList.add("hidden");
+    $("pub-card").classList.add("hidden");
+  }
+
+  if (ready) loadVersions();
+  else if (prevVer !== S.currentVersion) loadVersions();
+
+  loadPublishes();
+}
+
+/* 轻量更新：推进度用。只碰进度、标题和右侧判定，不重排正文。 */
+function applyPush(task) {
+  const before = S.task;
+  S.task = task;
+  renderSegments();
+  renderHead();
+  renderWarnings();
+
+  const verChanged = (task.current_version || null) !== (S.currentVersion || null);
+  if (verChanged) {
+    S.currentVersion = task.current_version || null;
+    if (!S.viewingVersion && task.summary_json) {
+      renderBody(task.summary_json, "V" + String(task.current_version).padStart(2, "0") + " / CURRENT");
+      $("pub-card").classList.remove("hidden");
+      $("comment-box").value = task.publish_document || task.comment_text || "";
+      $("confirm-box").checked = false;
+      renderCounter();
+    }
+    loadVersions();
+  }
+
+  const statusChanged = !before || before.status !== task.status;
+  if (statusChanged || verChanged) onStatusChange(task, before);
+  applyRefineState();
+}
+
+/* ------------------------------------------------------------ 状态机
+   这三条判断是旧界面用血换来的，任何一条丢了都会出现"永远等下去"或
+   "看着旧版发新版"。 */
+
+function onStatusChange(task, before) {
+  const prev = before || {};
+
+  if (task.status === "refining") {
+    // 状态还是 refining、后端却说没有线程在跑 —— 不是"正在改"，
+    // 是"上次改到一半程序退出了"。用 === false 而不是 !task.refining：
+    // 字段万一缺失，宁可什么都不说，也不能凭空宣布任务中断。
+    if (task.refining === false) {
+      S.awaitingRefine = null;
+      const lost = "上一次改到一半程序就退出了（重启或关掉了窗口），这一版没有改成。";
+      setMsg("task-msg", lost, "err");
+      setMsg("refine-hint", lost + " 下面仍是上一版，可以继续改。", "err");
+      return;
+    }
+    $("run-btn").disabled = true;
+    $("refine-btn").disabled = true;
+    setMsg("task-msg", task.progress || "正在按你的要求改…");
+    return;
+  }
+
+  if (task.status === "ready") {
+    // 迭代失败时后端把状态放回 ready 保住上一版，且刻意不写版本号——
+    // 只看版本号会把"已经失败了"读成"还在改"。真信号是 refining + error。
+    if (!task.refining && task.error) {
+      S.awaitingRefine = null;
+      updateRunBtn();
+      const why = task.progress || task.error;
+      setMsg("task-msg", why, "err");
+      setMsg("refine-hint", why + "（下面仍是上一版，可以继续改）", "err");
+      return;
+    }
+    // 刚提交的迭代可能快得离谱，第一次读到 ready 时新版还没落库。
+    // 用版本号确认"新的一版确实出来了"，否则这次迭代结果会永久丢失。
+    if (S.awaitingRefine && (task.current_version || 0) <= S.awaitingRefine) {
+      setMsg("task-msg", "正在按你的要求改…");
+      return;
+    }
+    const wasRefine = !!S.awaitingRefine;
+    S.awaitingRefine = null;
+    updateRunBtn();
+    setMsg("task-msg", wasRefine ? "" : "总结已生成，请在右侧确认。",
+      wasRefine ? "" : "ok");
+    if (wasRefine) {
+      const note = (task.summary_json && task.summary_json.revise_note) || "";
+      setMsg("refine-hint", "第 " + task.current_version + " 版改好了" +
+        (note ? "——它说：" + note : "。"), "ok");
+    }
+    return;
+  }
+
+  if (task.status === "failed") {
+    S.awaitingRefine = null;
+    updateRunBtn();
+    setMsg("task-msg", "失败：" + (task.error || "未知原因"), "err");
+    return;
+  }
+
+  // 流水线在跑
+  $("run-btn").disabled = true;
+  setMsg("task-msg", task.progress || "处理中…");
+}
+
+/* ------------------------------------------------------------ 版本接口 */
+
+async function loadVersions() {
+  if (!S.taskId) return;
   try {
-    const v = await api("/api/task/" + state.taskId + "/versions/" + no);
-    state.viewingVersion = no;
-    document.getElementById("preview-md").textContent = v.preview_md || "（这一版没有预览内容）";
-    setVersionBadge(no, (state.versions || []).length);
-    const badge = document.getElementById("version-badge");
-    if (badge) badge.textContent = "第 " + no + " 版（历史，只读）";
-    document.getElementById("refine-block").style.display = "none";
-    document.getElementById("publish-block").style.display = "none";
-    showHistoryNote(
-      "<strong>你在看第 " + no + " 版，这是历史版本。</strong><br>" +
-      "发到评论区的永远是当前版（第 " + current + " 版）——要按这一版发，得先把它设为底稿。" +
-      '<div class="row" style="margin-top:8px">' +
-      '<button class="ghost" onclick="viewCurrent()">回到当前版（第 ' + current + " 版）</button>" +
-      '<button onclick="restoreVersion(' + no + ')">以这一版为底稿</button>' +
-      "</div>"
-    );
-    renderVersionList();
+    const d = await call("list_versions", S.taskId);
+    S.versions = d.versions || [];
+    S.versionTotal = d.total || null;
+    S.currentVersion = d.current;
+    renderVersions();
+    renderCost();
+    if (S.task) {
+      S.task.current_version = d.current;
+      S.task.version_count = S.versions.length;
+      renderHead();
+    }
   } catch (e) {
-    setMsg("refine-msg", "读不到第 " + no + " 版：" + e.message, "err");
+    $("v-hint").textContent = "版本历史读不到：" + e.message;
+    $("v-hint").className = "line err";
+  }
+}
+
+/* 翻历史版：只读，且把发布块与打磨块一起收起。 */
+async function showVersion(no) {
+  try {
+    const v = await call("get_version", S.taskId, no);
+    S.viewingVersion = no;
+    $("pub-card").classList.add("hidden");
+    renderBody(v.summary_json || {}, "V" + String(no).padStart(2, "0") + " / HISTORY");
+    renderVersions();
+    applyRefineState();
+
+    const hint = $("refine-hint");
+    hint.innerHTML = "";
+    const span = document.createElement("span");
+    span.textContent = "正在回看第 " + no + " 版（只读）。";
+    hint.appendChild(span);
+    const btn = document.createElement("button");
+    btn.className = "b2";
+    btn.style.marginTop = "7px";
+    btn.textContent = "以第 " + no + " 版为底稿";
+    btn.onclick = () => restoreVersion(no);
+    hint.appendChild(btn);
+    const back = document.createElement("button");
+    back.className = "b2";
+    back.style.marginTop = "5px";
+    back.textContent = "回到当前版";
+    back.onclick = () => viewCurrent();
+    hint.appendChild(back);
+    hint.className = "line";
+    hint.style.display = "";
+    $("refine-blk").classList.remove("hidden");
+    $("refine-req").disabled = true;
+    $("refine-btn").disabled = true;
+  } catch (e) {
+    setMsg("refine-hint", "读不到这一版：" + e.message, "err");
   }
 }
 
 function viewCurrent() {
-  const t = state.task;
-  if (!t) return;
-  state.viewingVersion = null;
-  // 不碰评论框与确认勾选：当前版的内容一个字都没变，没必要让人重新确认一遍。
-  document.getElementById("preview-md").textContent = t.preview_md || "（无预览内容）";
-  showHistoryNote("");
-  document.getElementById("refine-block").style.display = "";
-  document.getElementById("publish-block").style.display = "";
-  setVersionBadge(t.current_version, (state.versions || []).length);
-  renderVersionList();
+  S.viewingVersion = null;
+  if (S.task) {
+    renderTask(S.task);
+    renderVersions();
+  }
+  setMsg("refine-hint", "");
 }
 
 async function restoreVersion(no) {
-  if (!confirm("以第 " + no + " 版为底稿？\n\n会追加一版新的当前版（内容与它相同），" +
-               "已有的版本都保留。这一步不调用模型，不产生消耗。")) return;
-  setMsg("refine-msg", "正在回退…");
+  const ok = await ask(
+    "以这一版为底稿",
+    "会追加一版新的当前版（内容与第 " + no + " 版相同），已有的版本都保留。\n\n" +
+    "这一步不调用模型，不产生任何消耗。",
+    { ok: "确认回退" }
+  );
+  if (!ok) return;
+  setMsg("refine-hint", "正在回退…");
   try {
-    const r = await api("/api/task/" + state.taskId + "/versions/" + no + "/restore",
-      { method: "POST", body: JSON.stringify({}) });
-    const task = await api("/api/task/" + state.taskId);
-    state.task = task;
-    document.getElementById("refine-req").value = "";
-    renderPreview(task);   // 重新渲染会回到当前版、刷新版本列表、重置确认勾选
-    setMsg("refine-msg",
-      "已把第 " + r.restored_from + " 版设为当前版（现在是第 " + r.version_no + " 版，没有花任何模型调用）。",
-      "ok");
+    const r = await call("restore_version", S.taskId, no);
+    S.viewingVersion = null;
+    $("refine-req").value = "";
+    const task = await call("get_task", S.taskId);
+    renderTask(task);
+    setMsg("refine-hint",
+      "已把第 " + r.restored_from + " 版设为当前版（现在是第 " + r.version_no +
+      " 版，没有花任何模型调用）。", "ok");
   } catch (e) {
-    setMsg("refine-msg", "回退失败：" + e.message, "err");
+    setMsg("refine-hint", "回退失败：" + e.message, "err");
   }
 }
 
-/* 能不能改、为什么不能。判断只认后端给的 can_refine / refine_blocked，
-   前端不自己猜——猜错的表现是"按钮亮着却点不动"。 */
-function applyRefineState(task) {
-  const t = task || state.task || {};
-  state.canRefine = !!t.can_refine;
-  state.refineBlocked = t.refine_blocked || "";
-  state.currentVersion = t.current_version || state.currentVersion;
+/* ------------------------------------------------------------ 提交任务 */
 
-  const blocked = document.getElementById("refine-blocked");
-  if (blocked) {
-    blocked.innerHTML = state.refineBlocked ? "<strong>现在还不能改这一版</strong><br>" + escapeHtml(state.refineBlocked) : "";
-    blocked.style.display = state.refineBlocked ? "block" : "none";
+async function submitTask() {
+  const raw = $("raw-input").value.trim();
+  if (!raw) { setMsg("task-msg", "先粘一条视频链接或 BV 号。", "err"); return; }
+
+  $("run-btn").disabled = true;
+  setMsg("task-msg", "已提交，正在处理…");
+  try {
+    const payload = { raw_input: raw };
+    if (S.subtitleToken) payload.subtitle_token = S.subtitleToken;
+    const r = await call("create_task", payload);
+
+    if (S.subtitleToken) {
+      // 服务端会在任务结束时删掉临时文件。留着这个 token 再提交只会拿到「已过期」。
+      S.subtitleToken = null;
+      $("srt-btn").classList.remove("on");
+      $("srt-btn").textContent = "字幕";
+      setSrtLine("字幕已随本次任务提交（结束后自动删除）。要再用请重新选。", "ok");
+    }
+
+    // 新任务意味着上一轮的一切作废。残留的「等迭代结果」标记会让这一轮的
+    // 第一次推送误判成「迭代还没出结果」，从而永远停在等待里。
+    S.taskId = r.task_id;
+    S.awaitingRefine = null;
+    S.viewingVersion = null;
+    S.versions = [];
+    S.versionTotal = null;
+    S.currentVersion = null;
+    S.task = null;
+    $("comment-box").value = "";
+    $("confirm-box").checked = false;
+    $("refine-req").value = "";
+    renderCounter();
+
+    const task = await call("get_task", S.taskId);
+    renderTask(task);
+    ensurePolling();   // 源码版：这条任务跑完之前得自己问（桌面版不用，Python 会推）
+  } catch (e) {
+    setMsg("task-msg", "提交失败：" + e.message, "err");
+    updateRunBtn();
   }
-  const live = t.live_publish;
-  if (live && !state.refineBlocked) {
-    // 理论上 refine_gate 已经给过原因了，这里是兜底，保证"已发布"这件事一定被说出来。
-    blocked.innerHTML = "<strong>这条视频的总结已经发出去了。</strong><br>评论发出后不能编辑，要改得先撤回。";
-    blocked.style.display = "block";
-  }
-  const req = document.getElementById("refine-req");
-  if (req) req.disabled = !state.canRefine;
-  updateRefineHint();
-  updateRefineButton();
 }
 
-function updateRefineHint() {
-  const el = document.getElementById("refine-hint");
-  if (!el) return;
-  const bits = [];
-  const role = (state.task && state.task.summary_json && state.task.summary_json.role) || "";
-  const info = (state.roles || []).filter(r => r.key === role)[0];
-  if (info) {
-    bits.push("角色保持「" + info.name + "」不变——换角色等于换个人重讲，那得重新提交任务。");
-  }
-  // 手改过下方正文的提醒：迭代基于的是**模型那一版**，不是你在框里改的。
-  // 不说的话，改完发现手改的部分没了，会以为是程序弄丢了。
-  const box = document.getElementById("comment-box");
-  if (state.defaultComment && box && box.value.trim() && box.value !== state.defaultComment) {
-    bits.push("（你在「将发到评论区的文本」里手改过。迭代基于的是模型那一版，改完会覆盖这些手改。）");
-  }
-  el.textContent = bits.join(" ");
-}
-
-function updateRefineButton() {
-  const btn = document.getElementById("refine-btn");
-  if (!btn) return;
-  const req = document.getElementById("refine-req");
-  const text = ((req && req.value) || "").trim();
-  // 看着历史版时不许直接改：要求必须落在某一版上，而界面得让你先确定是哪一版。
-  const blocked = !state.canRefine || !!state.viewingVersion || !state.online;
-  btn.disabled = blocked || !text;
-}
+/* ------------------------------------------------------------ 迭代打磨 */
 
 async function refine() {
-  const req = document.getElementById("refine-req");
-  const text = (req.value || "").trim();
-  if (!text) { setMsg("refine-msg", "先写一句你想怎么改。", "err"); return; }
-  if (!state.canRefine) {
-    setMsg("refine-msg", state.refineBlocked || "现在还不能改这一版。", "err");
-    return;
-  }
-  const btn = document.getElementById("refine-btn");
-  btn.disabled = true;
-  setMsg("refine-msg", "已提交，正在按你的要求改（素材不会重新采集）…");
+  const req = $("refine-req").value.trim();
+  if (!req || !S.taskId) return;
+  $("refine-btn").disabled = true;
   try {
-    const body = { requirement: text };
-    // 带上"我是在看第几版提的要求"。后端会核对它是否仍是当前版，不符就拒绝——
-    // 比默默把你的要求落到别的底稿上强。
-    if (state.currentVersion) body.base_version = state.currentVersion;
-    const r = await api("/api/task/" + state.taskId + "/refine",
-      { method: "POST", body: JSON.stringify(body) });
-    state.awaitingRefine = r.base_version || state.currentVersion || 0;
-    req.value = "";
-    clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(pollTask, 1500);
-    pollTask();
+    const r = await call("refine_task", S.taskId, {
+      requirement: req,
+      base_version: S.currentVersion,
+    });
+    // 记下"提交时是哪一版"。之后看到当前版 <= 这个数，说明新版还没出来。
+    S.awaitingRefine = r.base_version || S.currentVersion || 0;
+    $("refine-req").value = "";
+    $("refine-btn").disabled = true;
+    setMsg("task-msg", "正在按你的要求改…");
+    setMsg("refine-hint", "正在按你的要求改…");
+    renderSegments();
+    ensurePolling();   // 源码版：改完之前要自己盯着
   } catch (e) {
-    setMsg("refine-msg", "没能开始改：" + e.message, "err");
-    btn.disabled = false;
-    // 失败原因可能是界面上还不知道的状态（比如刚在别处发布过），刷新一次任务状态
-    refreshTaskState();
+    setMsg("refine-hint", "提交失败：" + e.message, "err");
+    $("refine-btn").disabled = false;
   }
 }
 
-/* 只刷新"能不能改/发布状态"这类判定，不动已经渲染出来的正文——
-   发布之后调用它，不能把"已发布"的回执和正文一起冲掉。 */
-async function refreshTaskState() {
-  if (!state.taskId || !state.online) return;
-  try {
-    const task = await api("/api/task/" + state.taskId);
-    state.task = task;
-    applyRefineState(task);
-  } catch (e) { /* 刷新失败不影响主流程 */ }
+/* ------------------------------------------------------------ 发布 */
+
+function publishTask() {
+  const text = $("comment-box").value;
+  doPublish(text);
 }
 
-function resetComment() {
-  document.getElementById("comment-box").value = state.defaultComment;
-  updateCounter();
-}
-
-function updateCounter() {
-  const text = document.getElementById("comment-box").value;
-  const limit = (state.cfg && state.cfg.publish && state.cfg.publish.max_comment_chars) || 900;
-  const el = document.getElementById("counter");
-  if (text.length > 1000) {
-    // 超过普通评论上限不是错误——会自动改走笔记通道
-    el.textContent = text.length + " 字 · 超出普通评论上限，将以笔记形式发布";
-    el.className = "counter";
-  } else {
-    el.textContent = text.length + " / " + limit + "（平台上限 1000）";
-    el.className = "counter" + (text.length > limit ? " over" : "");
-  }
-}
-
-function updatePublishButton() {
-  const text = document.getElementById("comment-box").value.trim();
-  const confirmed = document.getElementById("confirm-box").checked;
-  // 超过 1000 字不再禁用发布：长文走笔记通道，这是设计内行为
-  document.getElementById("publish-btn").disabled = !(confirmed && text);
-}
-
-/* -------------------------------------------------------------- 发布 */
-
-async function publish() {
-  const btn = document.getElementById("publish-btn");
-  btn.disabled = true;
+async function doPublish(text) {
+  if (!S.taskId) return;
+  $("publish-btn").disabled = true;
   setMsg("publish-msg", "正在发布…");
   try {
-    const r = await api("/api/publish", {
-      method: "POST",
-      body: JSON.stringify({
-        task_id: state.taskId,
-        text: document.getElementById("comment-box").value,
-        confirm: true,
-        mode: "auto"
-      })
+    const r = await call("publish", {
+      task_id: S.taskId,
+      text,
+      confirm: true,
+      mode: "auto",
     });
     if (r.status === "published") {
-      const viaNote = (r.rpid || "").startsWith("note:");
+      const viaNote = String(r.rpid || "").startsWith("note:");
       setMsg("publish-msg", viaNote ? "已发布为笔记并同步到评论区。" : "已发布到评论区。", "ok");
     } else {
-      setMsg("publish-msg", r.message, "err");
+      setMsg("publish-msg", r.message || "没有发出去。", "err");
     }
     loadPublishes();
-    // 发出去之后打磨入口就该关掉了（评论不能编辑），所以立刻把任务状态拉一遍。
-    // 这里只刷新"能不能改"这类判定、不重渲染正文：重渲染会把上面那句回执冲掉，
-    // 看起来像什么都没发生。
-    await refreshTaskState();
+    // 发出去之后打磨入口就该关了（评论不能编辑）。这里只刷新判定，
+    // 不重渲染正文——重渲染会把上面那句回执冲掉，看起来像什么都没发生。
+    await refreshGates();
   } catch (e) {
     setMsg("publish-msg", "发布失败：" + e.message, "err");
   } finally {
-    btn.disabled = false;
+    renderCounter();
   }
 }
 
-async function withdraw(publishId) {
-  if (!confirm("确认撤回这条评论？撤回后可以重新发布。")) return;
+async function refreshGates() {
+  if (!S.taskId) return;
   try {
-    const r = await api("/api/publish/withdraw", { method: "POST", body: JSON.stringify({ publish_id: publishId }) });
-    alert(r.message);
+    const t = await call("get_task", S.taskId);
+    S.task = t;
+    applyRefineState();
     loadPublishes();
-    // 撤回之后这条视频的打磨入口会重新打开——判定在后端，所以必须重新问一次。
-    await refreshTaskState();
   } catch (e) {
-    alert("撤回失败：" + e.message);
+    /* 刷新失败不影响已发生的事 */
   }
 }
 
 async function loadPublishes() {
   try {
-    const list = await api("/api/publishes?limit=20");
-    const box = document.getElementById("publish-list");
-    if (!list.length) { box.innerHTML = '<li class="m">暂无记录</li>'; return; }
-    box.innerHTML = list.map(p => {
-      const withdrawn = !!p.deleted_at;
-      const label = withdrawn ? "已撤回" : (p.status === "published" ? "已发布" : (p.status === "blocked" ? "已拦截" : "失败"));
-      const color = withdrawn ? "var(--dim)" : (p.status === "published" ? "var(--ok)" : "var(--danger)");
-      const btn = (!withdrawn && p.status === "published" && p.rpid)
-        ? `<button class="danger" onclick="withdraw(${p.id})">撤回</button>` : "";
-      return `<li>
-        <div class="grow">
-          <div class="t clip"><a href="https://www.bilibili.com/video/${p.bvid}" target="_blank" rel="noopener">${p.bvid}</a>
-            <span style="color:${color}"> · ${label}</span></div>
-          <div class="m clip">${escapeHtml((p.content || "").slice(0, 80))}</div>
-          <div class="m">${p.created_at || ""}${p.message ? " · " + escapeHtml(p.message.slice(0, 60)) : ""}</div>
-        </div>${btn}</li>`;
+    const rows = await call("list_publishes", 12);
+    S.publishes = rows || [];
+    const mine = S.task && S.task.bvid
+      ? S.publishes.filter((p) => p.bvid === S.task.bvid && !p.deleted_at)
+      : [];
+    const blk = $("hist-blk");
+    blk.classList.toggle("hidden", !mine.length);
+    $("hist-list").innerHTML = mine.map((p) => {
+      const st = p.status === "published" ? "已发布"
+        : (p.status === "blocked" ? "被拦下" : "失败");
+      const when = String(p.created_at || "").replace("T", " ").slice(0, 16);
+      return '<div class="v" style="cursor:default">' +
+        '<span class="n">' + esc(when.slice(5)) + "</span>" +
+        '<span class="x">' + esc(st) + " · " + esc((p.content || "").slice(0, 48)) + "</span>" +
+        '<button class="act" data-wd="' + p.id + '">撤回</button></div>';
     }).join("");
-  } catch (e) { /* 历史读不到不影响主流程 */ }
-}
-
-/* -------------------------------------------------------------- 设置页 */
-
-/* 设置默认不加载：/api/settings 会返回明文 api_key，
-   不该让每次打开主页面都把它拉一遍。等你切到设置页才取。 */
-function switchView(name) {
-  const settings = name === "settings";
-  document.getElementById("view-main").style.display = settings ? "none" : "grid";
-  document.getElementById("view-settings").style.display = settings ? "grid" : "none";
-  document.getElementById("tab-main").classList.toggle("active", !settings);
-  document.getElementById("tab-settings").classList.toggle("active", settings);
-  if (settings) loadSettings(false);
-}
-
-/* 闸门关闭是个持续性的风险状态，不是一次性提示，
-   所以这条横幅不给关闭按钮，只能回设置里把闸门打开。 */
-function setGateBanner(disabled) {
-  const bar = document.getElementById("gate-banner");
-  if (!disabled) { bar.style.display = "none"; bar.innerHTML = ""; return; }
-  bar.style.display = "block";
-  bar.innerHTML =
-    "<strong>人工确认闸门是关闭的。</strong><br>" +
-    "总结生成后会直接发到对应视频的评论区，中间没有确认环节。" +
-    "误发了只能自己去评论区删。<br>" +
-    '到「设置 → 发布」里可以把闸门重新打开。';
-}
-
-function _val(id) { return document.getElementById(id).value.trim(); }
-function _num(id) { const v = _val(id); return v === "" ? NaN : Number(v); }
-/* 显式转成字符串：input.value 对非字符串赋值会隐式转换，但代码不该依赖这一点 */
-function _set(id, v) {
-  document.getElementById(id).value = v === null || v === undefined ? "" : String(v);
-}
-
-function fillSettingsForm(v) {
-  const llm = v.llm || {}, collect = v.collect || {}, dm = collect.danmaku || {};
-  const pub = v.publish || {}, st = v.storage || {}, srv = v.server || {};
-
-  _set("s-base-url", llm.base_url);
-  _set("s-proxy", llm.proxy);
-  _set("s-api-key", llm.api_key);
-  _set("s-model", llm.model);
-  _set("s-temperature", llm.temperature);
-  _set("s-max-tokens", llm.max_tokens);
-  _set("s-thinking", llm.thinking || "auto");
-  _set("s-role", llm.role || "standard");
-  _set("s-timeout", llm.timeout_seconds);
-  _set("s-max-input", llm.max_input_chars);
-  _set("s-chunk-size", llm.chunk_size);
-  _set("s-chunk-overlap", llm.chunk_overlap);
-
-  _set("s-langs", (collect.prefer_subtitle_lang || []).join(", "));
-  document.getElementById("s-platform-summary").checked = !!collect.include_platform_summary;
-  document.getElementById("s-danmaku-enabled").checked = !!dm.enabled;
-  document.getElementById("s-danmaku-with-sub").checked = !!dm.also_with_subtitle;
-  _set("s-dm-max", dm.max_items);
-  _set("s-dm-hot", dm.hot_items);
-  _set("s-dm-sample", dm.sample_items);
-
-  document.getElementById("s-require-confirm").checked = !!pub.require_confirm;
-  document.getElementById("s-gate-ack").checked = false;
-  document.getElementById("gate-confirm").classList.remove("show");
-  _set("s-interval", pub.min_interval_seconds);
-  _set("s-max-chars", pub.max_comment_chars);
-  document.getElementById("s-disclose").checked = !!pub.disclose_ai;
-  _set("s-disclosure-text", pub.disclosure_text);
-
-  _set("s-db", st.db_path);
-  _set("s-key", st.key_path);
-  _set("s-host", srv.host);
-  _set("s-port", srv.port);
-
-  // 密钥默认掩着，避免你在共享屏幕/有人路过时被直接看到
-  const keyBox = document.getElementById("s-api-key");
-  keyBox.type = "password";
-  document.getElementById("s-key-toggle").textContent = "显示";
-  keyBox.placeholder = llm.api_key ? "" : "（未配置）";
-}
-
-function toggleKey() {
-  const box = document.getElementById("s-api-key");
-  const shown = box.type === "text";
-  box.type = shown ? "password" : "text";
-  document.getElementById("s-key-toggle").textContent = shown ? "显示" : "隐藏";
-}
-
-function onGateToggle() {
-  const on = document.getElementById("s-require-confirm").checked;
-  document.getElementById("gate-confirm").classList.toggle("show", !on);
-  if (on) document.getElementById("s-gate-ack").checked = false;
-}
-
-/* quiet=true 时不碰 settings-msg。
-   保存流程需要它：刷新表单要顺带重填各字段，但回执不能被擦掉。 */
-async function loadSettings(force, quiet) {
-  if (!state.online) {
-    setMsg("settings-msg", "还没连上后端，设置读写都不可用。", "err");
-    return false;
-  }
-  if (state.settingsLoaded && !force) return true;
-  if (!quiet) setMsg("settings-msg", "读取中…");
-  try {
-    const data = await api("/api/settings");
-    state.settings = data;
-    state.settingsLoaded = true;
-    fillSettingsForm(data.values || {});
-
-    document.getElementById("settings-path").textContent = data.config_exists
-      ? "配置文件：" + data.path + "（保存前会自动备份为 .bak）"
-      : "配置文件还不存在，保存时会创建：" + (data.path || "路径未知");
-
-    const restart = data.restart_needed_for || [];
-    document.getElementById("restart-note").textContent = restart.length
-      ? "改动这些段落需要重启程序才生效：" + restart.join("、")
-      : "全部设置都无需重启。";
-    if (data.platform_comment_max) {
-      document.getElementById("s-max-chars").max = data.platform_comment_max;
-    }
-    setGateBanner(!!data.gate_disabled);
-    if (!quiet) setMsg("settings-msg", "");
-    return true;
+    $("hist-list").querySelectorAll("[data-wd]").forEach((b) => {
+      b.onclick = () => withdraw(Number(b.dataset.wd));
+    });
   } catch (e) {
-    setMsg("settings-msg", "读取设置失败：" + e.message, "err");
-    return false;
+    /* 发布记录读不到不影响主流程 */
   }
 }
 
-/* 前端先挡一遍明显的错，省得往返一次；
-   但服务端也会独立校验——前端校验只是提示，不是防线。 */
-function validateSettings() {
-  const ints = [
-    ["s-max-tokens", "max_tokens"],
-    ["s-timeout", "timeout_seconds"],
-    ["s-max-input", "max_input_chars"],
-    ["s-chunk-size", "chunk_size"],
-    ["s-chunk-overlap", "chunk_overlap"],
-    ["s-dm-max", "弹幕 max_items"],
-    ["s-dm-hot", "弹幕 hot_items"],
-    ["s-dm-sample", "弹幕 sample_items"],
-    ["s-interval", "min_interval_seconds"],
-    ["s-max-chars", "max_comment_chars"],
-    ["s-port", "port"],
-  ];
-  for (const [id, label] of ints) {
-    const v = _num(id);
-    if (!Number.isFinite(v)) return label + " 得填一个数字。";
-    if (!Number.isInteger(v)) return label + " 必须是整数。";
+async function withdraw(publishId) {
+  const ok = await ask("撤回这条评论", "撤回后可以重新发布，也可以继续打磨。确认撤回？",
+    { ok: "撤回", danger: true });
+  if (!ok) return;
+  try {
+    const r = await call("withdraw", publishId);
+    await alertBox("撤回", r.message || "已处理。");
+    loadPublishes();
+    await refreshGates();
+  } catch (e) {
+    await alertBox("撤回失败", e.message);
   }
-  const temp = Number(_val("s-temperature"));
-  if (!Number.isFinite(temp) || temp < 0 || temp > 2) return "temperature 得在 0 到 2 之间。";
+}
 
-  if (_num("s-chunk-overlap") >= _num("s-chunk-size")) {
-    return "chunk_overlap 必须小于 chunk_size，否则分块窗口不会向前推进。";
-  }
-  const maxChars = _num("s-max-chars");
-  const platformMax = Number(document.getElementById("s-max-chars").max) || 1000;
-  if (maxChars > platformMax) {
-    return "max_comment_chars 不能超过 " + platformMax + "，这是平台的硬限制。";
-  }
-  for (const [id, label] of [["s-base-url", "base_url"], ["s-model", "model"], ["s-host", "host"]]) {
-    if (!_val(id)) return label + " 不能为空。";
-  }
-  const langs = _val("s-langs").split(",").map(s => s.trim()).filter(Boolean);
-  if (!langs.length) return "字幕语言优先级至少要留一项。";
+/* ------------------------------------------------------------ 字幕文件 */
 
-  // thinking 的错值会被后端当成 422，但报错信息不如这里直白
-  if (!["auto", "off", "on"].includes(_val("s-thinking"))) {
-    return "thinking 只能是 auto / off / on。";
-  }
-  if (_num("s-timeout") < 5) return "timeout_seconds 至少要 5 秒。";
-
-  // 代理写错会连带害到下次启动：它会被写进 config.yaml，而加载时会校验协议前缀。
-  // 保存那一刻不报错、下次启动直接起不来，是最难查的一类。
-  const proxy = _val("s-proxy");
-  if (proxy) {
-    const ok = ["http", "https", "socks4", "socks5", "socks5h"].some(
-      s => proxy.slice(0, s.length + 3).toLowerCase() === s + "://"
+async function pickSubtitle() {
+  const btn = $("srt-btn");
+  btn.disabled = true;
+  btn.textContent = "选择中…";
+  try {
+    const r = await call("pick_subtitle");
+    if (r.cancelled) {
+      btn.textContent = "字幕";
+      btn.disabled = false;
+      return;
+    }
+    S.subtitleToken = r.token;
+    S.subtitleName = r.name || "";
+    btn.classList.add("on");
+    btn.textContent = "已选字幕";
+    btn.disabled = false;
+    setSrtLine(
+      "已选：" + (r.name || "字幕") + " · " + r.segments + " 段 · " +
+      r.chars + " 字 · " + r.encoding + " · " + bytes(r.bytes) +
+      "（" + r.first + " → " + r.last + "）",
+      "ok"
     );
-    if (!ok) return "proxy 要带协议，例如 http://127.0.0.1:7897（留空＝直连）。";
+  } catch (e) {
+    btn.textContent = "字幕";
+    btn.disabled = false;
+    setSrtLine("读不了这个文件：" + e.message, "err");
   }
+}
 
-  const turningOff = !document.getElementById("s-require-confirm").checked
-    && state.settings && state.settings.values
-    && state.settings.values.publish && state.settings.values.publish.require_confirm;
-  if (turningOff && !document.getElementById("s-gate-ack").checked) {
-    return "关闭人工确认闸门需要勾选下面的确认框。";
+async function clearSubtitle() {
+  const token = S.subtitleToken;
+  S.subtitleToken = null;
+  S.subtitleName = "";
+  $("srt-btn").classList.remove("on");
+  $("srt-btn").textContent = "字幕";
+  setSrtLine("已清除，本次将使用平台字幕（如果有的话）。");
+  if (token) {
+    try { await call("discard_subtitle", token); } catch (e) { /* 兜底清理会收走 */ }
   }
-  return "";
+}
+
+/* ------------------------------------------------------------ 账号 */
+
+async function refreshAuth() {
+  try {
+    S.auth = await call("auth_status");
+  } catch (e) {
+    S.auth = null;
+  }
+  renderTop();
+}
+
+function openLogin() {
+  const logged = S.auth && S.auth.logged_in;
+  if (logged) {
+    openModal({
+      title: "账号",
+      bodyHtml: '<p>已登录：' + esc(S.auth.identity.uname || "") +
+        "（UID " + esc(S.auth.identity.mid) + "）</p>",
+      actions: [
+        { label: "关闭", value: false },
+        { label: "退出登录", kind: "dan", onClick: doLogout },
+      ],
+    });
+    return;
+  }
+  const qrOk = S.cfg && S.cfg.features && S.cfg.features.qr_login;
+  openModal({
+    title: "登录 B 站",
+    bodyHtml:
+      '<div class="qrwrap"><div class="im" id="qr-im"><span style="color:#888;font-size:11px">加载中</span></div>' +
+      '<div class="side2"><div class="s1" id="qr-s1">正在获取二维码…</div>' +
+      '<div class="s2">' + (qrOk ? "用 B 站手机客户端扫码，然后确认登录。登录凭据只存在这台机器上。"
+        : "当前环境缺少二维码依赖，请用手动 Cookie 方式登录。") + "</div></div></div>" +
+      '<div class="sep"></div>' +
+      '<div class="s2" style="font-size:11px;color:var(--dim);margin-bottom:8px">或者手动填 Cookie（从浏览器开发者工具里取）</div>' +
+      '<div class="fl"><label>SESSDATA</label><input id="ck-1" placeholder="必填"></div>' +
+      '<div class="fl"><label>bili_jct</label><input id="ck-2" placeholder="必填"></div>' +
+      '<div class="fl"><label>DedeUserID</label><input id="ck-3" placeholder="选填"></div>',
+    actions: [
+      { label: "取消", value: false },
+      { label: "用 Cookie 登录", kind: "pri", onClick: submitCookie },
+    ],
+  });
+  if (qrOk) startQr();
+}
+
+async function startQr() {
+  try {
+    const q = await call("auth_qrcode");
+    S.qrKey = q.key;
+    const im = $("qr-im");
+    if (im) im.innerHTML = '<img alt="二维码" src="' + q.image + '">';
+    $("qr-s1").textContent = "扫码后在手机上点确认";
+    pollQr();
+  } catch (e) {
+    const im = $("qr-im");
+    if (im) im.textContent = "二维码取不到";
+    const s = $("qr-s1");
+    if (s) s.textContent = e.message;
+  }
+}
+
+/* 这个轮询保留：二维码的有效性是 B站 服务端的状态，不是本进程的状态，
+   没有任何本地事件能通知我们"用户刚扫了"。这是唯一必须轮询的地方。 */
+function pollQr() {
+  clearInterval(S.qrTimer);
+  let tries = 0;
+  S.qrTimer = setInterval(async () => {
+    tries++;
+    if (tries > 90) { clearInterval(S.qrTimer); return; }
+    try {
+      const r = await call("auth_poll", S.qrKey);
+      const s = $("qr-s1");
+      if (r.status === 0) {
+        clearInterval(S.qrTimer);
+        if (s) s.textContent = r.error ? ("登录成功但保存失败：" + r.error) : "已登录";
+        await refreshAuth();
+        setTimeout(() => { $("modal").classList.remove("on"); $("mask").classList.remove("on"); }, 700);
+      } else if (r.status === 2 && s) {
+        s.textContent = "已扫码，请在手机上确认";
+      } else if (r.status === 3 && s) {
+        s.textContent = "二维码已过期，关掉重开可以再拿一个";
+        clearInterval(S.qrTimer);
+      }
+    } catch (e) {
+      clearInterval(S.qrTimer);
+    }
+  }, 2000);
+}
+
+async function submitCookie() {
+  const p = {
+    sessdata: $("ck-1").value.trim(),
+    bili_jct: $("ck-2").value.trim(),
+    dedeuserid: $("ck-3").value.trim(),
+  };
+  if (!p.sessdata || !p.bili_jct) {
+    await alertBox("Cookie 不完整", "SESSDATA 和 bili_jct 都必须填。");
+    return;
+  }
+  try {
+    await call("auth_cookie", p);
+    clearInterval(S.qrTimer);
+    $("modal").classList.remove("on");
+    $("mask").classList.remove("on");
+    await refreshAuth();
+  } catch (e) {
+    await alertBox("登录失败", e.message);
+  }
+}
+
+async function doLogout() {
+  try {
+    await call("auth_logout");
+    await refreshAuth();
+    $("modal").classList.remove("on");
+    $("mask").classList.remove("on");
+  } catch (e) {
+    await alertBox("退出失败", e.message);
+  }
+}
+
+/* ------------------------------------------------------------ 设置抽屉 */
+
+function openDrawer() {
+  $("mask").classList.add("on");
+  $("drawer").classList.add("on");
+  if (!S.settingsLoaded) loadSettings();
+}
+
+function closeDrawer() {
+  $("drawer").classList.remove("on");
+  $("mask").classList.remove("on");
+  $("m-body").innerHTML = "";
+  $("modal").classList.remove("on");
+}
+
+function fillSettings(values) {
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const v = getPath(values, el.dataset.path);
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.dataset.kind === "csv") el.value = Array.isArray(v) ? v.join(", ") : (v || "");
+    else el.value = v == null ? "" : v;
+  });
+  syncGateAck();
+  syncDisclose();
 }
 
 function collectSettings() {
-  return {
-    server: { host: _val("s-host"), port: _num("s-port") },
-    llm: {
-      base_url: _val("s-base-url"),
-      api_key: _val("s-api-key"),
-      proxy: _val("s-proxy"),
-      model: _val("s-model"),
-      temperature: Number(_val("s-temperature")),
-      max_tokens: _num("s-max-tokens"),
-      thinking: _val("s-thinking"),
-      role: _val("s-role"),
-      timeout_seconds: _num("s-timeout"),
-      max_input_chars: _num("s-max-input"),
-      chunk_size: _num("s-chunk-size"),
-      chunk_overlap: _num("s-chunk-overlap"),
-    },
-    collect: {
-      prefer_subtitle_lang: _val("s-langs").split(",").map(s => s.trim()).filter(Boolean),
-      include_platform_summary: document.getElementById("s-platform-summary").checked,
-      danmaku: {
-        enabled: document.getElementById("s-danmaku-enabled").checked,
-        also_with_subtitle: document.getElementById("s-danmaku-with-sub").checked,
-        max_items: _num("s-dm-max"),
-        hot_items: _num("s-dm-hot"),
-        sample_items: _num("s-dm-sample"),
-      },
-    },
-    publish: {
-      require_confirm: document.getElementById("s-require-confirm").checked,
-      min_interval_seconds: _num("s-interval"),
-      max_comment_chars: _num("s-max-chars"),
-      disclose_ai: document.getElementById("s-disclose").checked,
-      disclosure_text: _val("s-disclosure-text"),
-    },
-    storage: { db_path: _val("s-db"), key_path: _val("s-key") },
-    confirm_disable_gate: document.getElementById("s-gate-ack").checked,
-  };
+  const out = {};
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const path = el.dataset.path;
+    let v;
+    if (el.type === "checkbox") v = el.checked;
+    else if (el.dataset.kind === "number") v = Number(el.value);
+    else if (el.dataset.kind === "csv") v = el.value.split(/[,，\s]+/).filter(Boolean);
+    else v = el.value;
+    setPath(out, path, v);
+  });
+  // 关闭闸门必须显式带确认位。服务端会查这个字段，前端弹窗拦不住手滑，
+  // 这一位才是"你确实勾了"的凭证。
+  if (out.publish && out.publish.require_confirm === false) out.confirm_disable_gate = true;
+  return out;
+}
+
+function syncGateAck() {
+  const on = $("s-gate").checked;
+  $("gate-ack").classList.toggle("hidden", on);
+  if (on) $("s-gate-ack").checked = false;
+}
+
+function syncDisclose() {
+  const on = $("s-disclose").checked;
+  const el = document.querySelector('[data-path="publish.disclosure_text"]');
+  if (el) el.disabled = !on;
+}
+
+async function loadSettings() {
+  $("d-msg").textContent = "正在读取…";
+  $("d-msg").className = "st-line";
+  try {
+    const d = await call("get_settings");
+    S.settingsLoaded = true;
+    fillSettings(d.values);
+    $("d-msg").textContent = d.config_exists
+      ? "配置文件：" + d.path
+      : "配置文件还没创建，保存时会新建：" + d.path;
+    $("d-msg").className = "st-line";
+
+    // 角色：界面上在顶栏选，抽屉里那个 #s-role 只是跟着同步的隐藏字段。
+    // fillSettings 已经按 data-path 填过它了，这里补一次兜底——值是空的话
+    // collectSettings 会原样交上去，而空串在服务端是"未知角色"、会被 400 挡掉。
+    if (!$("s-role").value) $("s-role").value = currentRole().key;
+
+    loadNotesStats();
+    loadDataDir();
+  } catch (e) {
+    $("d-msg").textContent = "读不到设置：" + e.message;
+    $("d-msg").className = "st-line err";
+  }
+}
+
+async function loadNotesStats() {
+  try {
+    const n = await call("notes_stats");
+    $("notes-info").textContent =
+      n.entries + " 条 · " + bytes(n.bytes) + "（本次命中 " + n.session_hits +
+      " 次 / 未命中 " + n.session_misses + " 次）";
+    $("notes-info").title = n.dir;
+  } catch (e) {
+    $("notes-info").textContent = "读不到";
+  }
+}
+
+async function loadDataDir() {
+  try {
+    const c = await call("get_config");
+    const dbp = (c.storage && c.storage.db_path) || "";
+    $("data-dir").textContent = dbp.replace(/[\\/][^\\/]+$/, "");
+  } catch (e) { /* 忽略 */ }
 }
 
 async function saveSettings() {
-  const bad = validateSettings();
-  if (bad) { setMsg("settings-msg", bad, "err"); return; }
-
-  const btn = document.getElementById("save-btn");
+  const btn = $("d-save");
   btn.disabled = true;
-  setMsg("settings-msg", "保存中…");
+  $("d-msg").textContent = "正在保存…";
+  $("d-msg").className = "st-line";
   try {
-    const res = await api("/api/settings", { method: "PUT", body: JSON.stringify(collectSettings()) });
-    let msg = "已保存。";
-    if (res.written && res.written.backup) msg += " 原配置已备份为 " + res.written.backup + "。";
-    if (res.restart_required) {
-      msg += " 需要重启才生效：" + (res.restart_sections || []).join("、") + "。";
+    const values = collectSettings();
+    const r = await call("save_settings", values);
+    S.cfg = await call("get_config");
+    renderTop();
+    $("d-msg").textContent = "已写入 " + r.written +
+      (r.restart_required ? " · " + (r.restart_sections || []).join("、") + " 段需要重启程序才生效"
+        : " · 全部即时生效");
+    $("d-msg").className = "st-line ok";
+    if (r.gate_disabled) {
+      $("d-msg").textContent += " · 注意：确认闸门仍处于关闭状态";
     }
-    setGateBanner(!!res.gate_disabled);
-    // 模型名、是否已配置 key 都可能变了，让顶部状态条跟上
-    await detectBackend();
-    // 静默重填表单，否则上面这段回执会被 loadSettings 的收尾清空，
-    // 表现为"点了保存什么都没发生"，然后你会反复点。
-    if (await loadSettings(true, true)) setMsg("settings-msg", msg, "ok");
+    updateCounterSafe();
+    loadNotesStats();
   } catch (e) {
-    setMsg("settings-msg", "保存失败：" + e.message, "err");
+    $("d-msg").textContent = "保存失败：" + e.message;
+    $("d-msg").className = "st-line err";
   } finally {
     btn.disabled = false;
   }
 }
 
+function updateCounterSafe() {
+  try { renderCounter(); } catch (e) { /* 没有评论框时忽略 */ }
+}
+
 async function testLlm() {
-  if (!state.online) { setMsg("llm-test-msg", "还没连上后端。", "err"); return; }
-  setMsg("llm-test-msg", "正在测试…");
+  const btn = $("d-test");
+  btn.disabled = true;
+  $("d-msg").textContent = "正在测试连通…";
+  $("d-msg").className = "st-line";
   try {
-    const body = JSON.stringify({
-      base_url: _val("s-base-url"),
-      api_key: _val("s-api-key"),
-      proxy: _val("s-proxy"),
-      model: _val("s-model"),
-      temperature: Number(_val("s-temperature")) || 0,
-      max_tokens: _num("s-max-tokens") || 1024,
-      thinking: _val("s-thinking") || "auto",
-      timeout_seconds: _num("s-timeout") || 300,
-      max_input_chars: _num("s-max-input") || 60000,
-      chunk_size: _num("s-chunk-size") || 12000,
-      chunk_overlap: _num("s-chunk-overlap") || 400,
-    });
-    const res = await api("/api/settings/test-llm", { method: "POST", body });
-    setMsg("llm-test-msg", (res.ok ? "连接正常：" : "连接失败：") + (res.detail || ""), res.ok ? "ok" : "err");
+    // 带上未保存的表单值：先测再存，省得"存了才发现不通"。
+    // 传的是 llm 那一段本身，不是再包一层 `{llm: ...}`——后端的 `LlmPatch`
+    // 就是这一段，包一层会变成"缺 base_url 与 model"的校验失败，而错误信息
+    // 指着字段名，不指着多出来的那层壳，很难看出真正原因。
+    const values = collectSettings();
+    const r = await call("test_llm", values.llm);
+    $("d-msg").textContent = r.ok
+      ? "连通正常 · " + r.model + " @ " + r.base_url
+      : "连不通 · " + r.detail;
+    $("d-msg").className = "st-line " + (r.ok ? "ok" : "err");
   } catch (e) {
-    setMsg("llm-test-msg", "测试失败：" + e.message, "err");
+    $("d-msg").textContent = "测试失败：" + e.message;
+    $("d-msg").className = "st-line err";
+  } finally {
+    btn.disabled = false;
   }
 }
 
-/* -------------------------------------------------------------- 角色 */
+/* ------------------------------------------------------------ 启动 */
 
-/* 角色清单由后端 /api/roles 提供，不在 JS 里抄一份——
-   抄一份的下场是加了新角色前端看不见，而且不会有任何报错提醒。 */
-async function loadRoles() {
+function bootRuler() {
+  const box = $("ruler");
+  for (let i = 0; i < 64; i++) box.appendChild(document.createElement("i"));
+}
+
+/** 后端推送入口。**必须尽早定义**：后端可能在页面脚本跑完之前就来推。 */
+window.__onTaskUpdate = function (task) {
   try {
-    const data = await api("/api/roles");
-    state.roles = data.roles || [];
-    state.roleKey = data.current || "standard";
-    const optionsHtml = state.roles.map(r =>
-      '<option value="' + escapeHtml(r.key) + '">' + escapeHtml(r.name) + "</option>"
-    ).join("");
-    const sel = document.getElementById("task-role");
-    sel.innerHTML = optionsHtml;
-    sel.value = state.roleKey;
-    // 设置页里那个"默认角色"用同一份清单，避免两处列表漂移
-    const sRole = document.getElementById("s-role");
-    if (sRole) sRole.innerHTML = optionsHtml;
-    onRoleChange();
-    return true;
+    if (!task || !task.id) return;
+    if (S.taskId && task.id !== S.taskId) return;   // 不是当前这条，忽略
+    if (!S.task) { renderTask(task); return; }
+    const prevStatus = S.task.status;
+    applyPush(task);
+    if (prevStatus !== task.status) onStatusChange(task, null);
   } catch (e) {
-    setMsg("task-msg", "角色清单读取失败，本次将用标准角色：" + e.message, "err");
-    return false;
+    console.error("[push] 处理失败", e);
+  }
+};
+
+async function boot() {
+  bootRuler();
+  tickClock();
+  setInterval(tickClock, 20000);
+
+  // 先定传输方式，后面所有 call() 都按它走。
+  const bridged = !!(window.pywebview && window.pywebview.api);
+  TRANSPORT = bridged ? "bridge" : "http";
+
+  if (bridged) {
+    // 告诉 Python「页面确实起来了」。**不能靠 pywebviewready 自己判断**：
+    // 那个事件只说明桥挂上了，不代表这个脚本已经跑完、__onTaskUpdate 已经存在。
+    try {
+      await window.pywebview.api.mark_ready();
+    } catch (e) {
+      $("bridge").classList.add("on");
+      return;
+    }
+  }
+
+  try {
+    S.cfg = await call("get_config");
+    S.online = true;
+  } catch (e) {
+    // 两种形态下这句话的意思不一样，分开说。桌面版说重启程序，
+    // 源码版该说去检查 run.py 那个终端——让人重启浏览器是没用的建议。
+    $("bridge").textContent = bridged
+      ? "桥接没有建立起来：界面拿不到本地接口。请关掉窗口重新启动程序；如果一直这样，说明安装不完整。"
+      : "连不上后端：这个页面是从 `python run.py` 起的服务上打开的，但接口没有响应。去那个终端窗口看它在报什么错，或者确认它还在跑。";
+    $("bridge").classList.add("on");
+    return;
+  }
+
+  try { S.roles = (await call("get_roles")).roles || []; } catch (e) { S.roles = []; }
+
+  renderTop();
+  renderCounter();
+  updateRunBtn();
+  await refreshAuth();
+
+  const note = (S.cfg.storage && S.cfg.storage.db_path)
+    ? "DB " + S.cfg.storage.db_path.replace(/^.*[\\/]/, "")
+    : "";
+  $("ft-note").textContent = note;
+  $("ft-mode").textContent = bridged ? "本地 · 无端口" : "本机 · 127.0.0.1";
+
+  // 版本号来自后端，前端不另抄一份——抄一份就会出现过期的数字。
+  // 桌面版的窗口标题里也有，但源码版跑在浏览器标签页里看不见，所以底栏要留一个。
+  $("ft-ver").textContent = S.cfg.version ? "v" + S.cfg.version : "版本未知";
+
+  // 最近一条任务：重启程序后不该从空白开始。
+  try {
+    const rows = await call("list_tasks", 1);
+    if (rows && rows.length) {
+      S.taskId = rows[0].id;
+      const task = await call("get_task", S.taskId);
+      renderTask(task);
+      // 上次关程序时它还在跑（或还在改）——源码版得接着问，否则界面会停在
+      // 当时的进度上，看着像卡住了。终态任务 ensurePolling 会自己返回。
+      if (task.status !== "ready" && task.status !== "failed") ensurePolling();
+    }
+  } catch (e) {
+    /* 没有历史任务不是错误 */
   }
 }
 
-function onRoleChange() {
-  const sel = document.getElementById("task-role");
-  const hint = document.getElementById("role-hint");
-  if (!state.roles || !sel) { if (hint) hint.textContent = ""; return; }
-  const info = state.roles.filter(r => r.key === sel.value)[0];
-  if (!info) { hint.textContent = ""; return; }
-  let text = info.tagline || "";
-  if (info.passes >= 3) text += "　·　三轮回（生成 → 自我批判 → 修订），调用数与耗时为标准角色的约三倍";
-  if (info.note) text += "　·　" + info.note;
-  hint.textContent = text;
-}
+/* ---- 事件绑定（脚本在 body 末尾，元素都已存在） ---- */
 
-/* -------------------------------------------------------------- 启动 */
+$("raw-input").addEventListener("input", updateRunBtn);
+$("raw-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitTask(); }
+});
+$("run-btn").onclick = submitTask;
+$("srt-btn").onclick = () => (S.subtitleToken ? clearSubtitle() : pickSubtitle());
+$("srt-btn").addEventListener("contextmenu", (e) => {
+  if (S.subtitleToken) { e.preventDefault(); clearSubtitle(); }
+});
 
-(async function init() {
-  const online = await detectBackend();
-  if (online) {
-    await checkAuth();
-    await loadRoles();
-    loadPublishes();
-  } else {
-    document.getElementById("auth-dot").className = "dot off";
-    document.getElementById("auth-text").textContent = "未连接后端";
+$("comment-box").addEventListener("input", renderCounter);
+$("confirm-box").addEventListener("change", renderCounter);
+$("publish-btn").onclick = publishTask;
+
+$("refine-req").addEventListener("input", () => {
+  $("refine-btn").disabled = !$("refine-req").value.trim() || !S.task || !S.task.can_refine
+    || !!S.viewingVersion || !S.online;
+});
+$("refine-btn").onclick = refine;
+
+$("chip-auth").onclick = openLogin;
+$("chip-model").onclick = openDrawer;
+$("chip-settings").onclick = openDrawer;
+
+// 角色浮层：点 chip 开关，点 ×、点外面、按 Esc 都关。
+// 不共用 #mask 那层遮罩——遮罩会把整页压暗，对一个"随手换个角色"的小动作太重了。
+$("chip-role").onclick = () => {
+  if ($("role-pop").classList.contains("on")) closeRolePop();
+  else openRolePop();
+};
+$("role-pop-x").onclick = closeRolePop;
+document.addEventListener("click", (e) => {
+  if (!$("role-pop").classList.contains("on")) return;
+  if (e.target.closest("#role-pop") || e.target.closest("#chip-role")) return;
+  closeRolePop();
+});
+
+$("mask").onclick = () => {
+  if ($("modal").classList.contains("on")) closeModal();
+  else closeDrawer();
+};
+$("d-close").onclick = closeDrawer;
+$("d-save").onclick = saveSettings;
+$("d-test").onclick = testLlm;
+
+$("s-key-eye").onclick = () => {
+  const el = $("s-key");
+  const shown = el.type === "text";
+  el.type = shown ? "password" : "text";
+  $("s-key-eye").textContent = shown ? "显示" : "隐藏";
+};
+
+$("s-gate").addEventListener("change", syncGateAck);
+$("s-disclose").addEventListener("change", syncDisclose);
+
+$("notes-clear").onclick = async () => {
+  const ok = await ask("清空预读缓存",
+    "清掉之后，之前总结过的长视频再打磨时要重新预读一遍，那一步是花钱的。\n\n" +
+    "只在缓存占了太多磁盘、或者你想彻底重来时才清。",
+    { ok: "清空", danger: true });
+  if (!ok) return;
+  try {
+    const r = await call("clear_notes");
+    await alertBox("已清空", "删掉了 " + r.removed + " 条缓存。");
+    loadNotesStats();
+  } catch (e) {
+    await alertBox("清空失败", e.message);
   }
-  document.getElementById("raw-input").addEventListener("keydown", e => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitTask();
-  });
-})();
+};
+
+$("open-dir").onclick = async () => {
+  try { await call("open_data_dir"); } catch (e) { await alertBox("打不开", e.message); }
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if ($("role-pop").classList.contains("on")) closeRolePop();
+    else if ($("modal").classList.contains("on")) closeModal();
+    else if ($("drawer").classList.contains("on")) closeDrawer();
+  }
+});
+
+/* 就绪：两种形态的入口。
+
+   桌面版：pywebview 注入 api 后会抛 `pywebviewready`。**必须等它**，
+   直接读 `window.pywebview.api` 会是 undefined。
+   源码版：没有桥，页面是 HTTP 服务自己发出来的，脚本跑完就能开始。 */
+if (window.pywebview && window.pywebview.api) boot();
+else if (location.protocol === "http:" || location.protocol === "https:") boot();
+else window.addEventListener("pywebviewready", boot, { once: true });
 </script>
 </body>
 </html>

@@ -1,0 +1,12 @@
+{
+  "name": "bili-scribe-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "只用来跑前端测试的 jsdom。应用本身不依赖 Node。",
+  "scripts": {
+    "test": "node tests/frontend_test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}

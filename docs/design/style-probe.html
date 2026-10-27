@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>bili-scribe · 风格样张</title>
+<style>
+:root{
+  --void:#070909;
+  --bg:#0B0F0E;
+  --panel:#101615;
+  --panel-2:#141B19;
+  --line:rgba(126,240,200,.13);
+  --line-2:rgba(126,240,200,.30);
+  --mint:#7EF0C8;
+  --mint-dim:#4E9E84;
+  --amber:#E8C547;
+  --danger:#E25555;
+  --text:#DAE4E0;
+  --muted:#78867F;
+  --dim:#47534F;
+  --mono:'Cascadia Mono','Consolas','SF Mono',monospace;
+  --sans:'Segoe UI','Microsoft YaHei',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:13px;
+  line-height:1.6;
+  /* 极细网格 + 顶部微光，像工业仪表台 */
+  background-image:
+    radial-gradient(1200px 500px at 50% -18%, rgba(126,240,200,.055), transparent 70%),
+    linear-gradient(rgba(126,240,200,.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(126,240,200,.022) 1px, transparent 1px);
+  background-size:100% 100%, 44px 44px, 44px 44px;
+  overflow:hidden;
+}
+
+/* ---------- 通用：切角面板 + 角标 ---------- */
+.cut{
+  background:var(--panel);
+  border:1px solid var(--line);
+  clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.cut-sm{
+  clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+/* 角标：只画右上、左下两个 L 形 */
+.brk{position:relative}
+.brk::before,.brk::after{
+  content:'';position:absolute;width:9px;height:9px;pointer-events:none;
+}
+.brk::before{top:-1px;right:-1px;border-top:1px solid var(--mint);border-right:1px solid var(--mint)}
+.brk::after{bottom:-1px;left:-1px;border-bottom:1px solid var(--mint);border-left:1px solid var(--mint)}
+
+/* 微标签：等宽、大字距、全大写 */
+.tag{
+  font-family:var(--mono);
+  font-size:9.5px;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--dim);
+}
+.tag-mint{color:var(--mint-dim)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 布局 ---------- */
+.app{height:100%;display:flex;flex-direction:column}
+
+/* 顶栏 */
+.bar{
+  height:46px;flex:0 0 auto;
+  display:flex;align-items:center;gap:16px;
+  padding:0 18px;
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(126,240,200,.035), transparent);
+}
+.mark{
+  display:flex;align-items:baseline;gap:9px;
+}
+.mark b{
+  font-family:var(--mono);font-size:13px;letter-spacing:.14em;
+  color:var(--mint);font-weight:600;
+}
+.mark span{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--dim)}
+.bar .spacer{flex:1}
+
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  color:var(--muted);
+  border:1px solid var(--line);
+  padding:3px 9px;
+  background:rgba(126,240,200,.03);
+}
+.dot{width:5px;height:5px;background:var(--mint);box-shadow:0 0 6px var(--mint)}
+.dot.amber{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+
+/* 主区 */
+.main{
+  flex:1;min-height:0;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 306px;
+}
+
+/* 左：当前任务 */
+.left{padding:22px 24px;overflow:auto}
+.inputrow{display:flex;gap:10px;align-items:stretch;margin-bottom:20px}
+.field{
+  flex:1;display:flex;align-items:center;gap:10px;
+  background:var(--panel);border:1px solid var(--line);
+  padding:0 14px;height:44px;
+}
+.field .tag{flex:0 0 auto}
+.field input{
+  flex:1;background:none;border:none;outline:none;
+  color:var(--text);font-family:var(--mono);font-size:13px;letter-spacing:.04em;
+}
+.field input::placeholder{color:var(--dim)}
+.btn{
+  height:44px;padding:0 22px;border:1px solid var(--mint-dim);
+  background:rgba(126,240,200,.09);color:var(--mint);
+  font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  cursor:pointer;
+  clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+.btn:hover{background:rgba(126,240,200,.16)}
+
+/* 任务头 */
+.thead{display:flex;align-items:flex-start;gap:14px;margin-bottom:16px}
+.thead h1{
+  font-size:19px;font-weight:600;letter-spacing:.01em;line-height:1.35;flex:1;
+}
+.meta{display:flex;gap:14px;margin-top:7px}
+.meta .tag{letter-spacing:.1em}
+
+/* 分段进度条 */
+.seg{display:flex;gap:3px;margin:16px 0 6px}
+.seg i{flex:1;height:3px;background:rgba(126,240,200,.13)}
+.seg i.on{background:var(--mint);box-shadow:0 0 7px rgba(126,240,200,.55)}
+.segrow{display:flex;justify-content:space-between;margin-bottom:20px}
+
+/* 正文卡片 */
+.doc{padding:20px 22px}
+.doc h2{
+  font-size:13px;font-weight:600;color:var(--mint);
+  letter-spacing:.04em;margin:18px 0 8px;
+  display:flex;align-items:center;gap:9px;
+}
+.doc h2:first-child{margin-top:0}
+.doc h2::before{content:'';width:2px;height:12px;background:var(--mint-dim)}
+.doc p{color:#C3CFCA;font-size:13px;line-height:1.85;margin-bottom:9px}
+.doc .hl{color:var(--mint);border-bottom:1px solid rgba(126,240,200,.35)}
+
+/* 右：侧栏 */
+.side{
+  border-left:1px solid var(--line);
+  padding:22px 18px;overflow:auto;
+  background:linear-gradient(180deg, rgba(126,240,200,.02), transparent 40%);
+}
+.sec{margin-bottom:22px}
+.sec-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;padding-bottom:7px;border-bottom:1px solid rgba(126,240,200,.09);
+}
+.kv{display:flex;justify-content:space-between;padding:5px 0;font-size:12px}
+.kv b{font-family:var(--mono);font-weight:500;color:var(--mint-dim);font-size:11.5px}
+
+.ver{
+  display:flex;gap:9px;padding:8px 10px;margin-bottom:5px;
+  border-left:2px solid transparent;background:rgba(255,255,255,.014);
+  font-size:12px;cursor:pointer;
+}
+.ver.on{border-left-color:var(--mint);background:rgba(126,240,200,.055)}
+.ver .num{color:var(--dim);font-size:11px;flex:0 0 auto;padding-top:1px}
+.ver .txt{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ver.on .txt{color:var(--text)}
+
+textarea{
+  width:100%;height:84px;resize:none;
+  background:var(--void);border:1px solid var(--line);
+  color:var(--text);font-family:var(--sans);font-size:12px;
+  padding:10px 11px;outline:none;line-height:1.7;
+}
+textarea::placeholder{color:var(--dim)}
+textarea:focus{border-color:var(--line-2)}
+.btn-full{width:100%;margin-top:8px;height:38px}
+
+.foot{
+  display:flex;gap:16px;padding:0 18px;height:30px;align-items:center;
+  border-top:1px solid var(--line);flex:0 0 auto;
+  background:rgba(0,0,0,.22);
+}
+.foot .tag{letter-spacing:.14em}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 顶栏 -->
+  <div class="bar">
+    <div class="mark">
+      <b>BILI·SCRIBE</b>
+      <span>视频内容总结</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="chip"><i class="dot"></i>已登录 UID 89421</div>
+    <div class="chip"><i class="dot amber"></i>qwen3.8-omni-flash</div>
+  </div>
+
+  <div class="main">
+
+    <!-- 左：单工作面 -->
+    <div class="left">
+
+      <div class="inputrow">
+        <div class="field">
+          <span class="tag">BV / URL</span>
+          <input value="BV1hBnC6ZEug" spellcheck="false">
+        </div>
+        <button class="btn">开始总结</button>
+      </div>
+
+      <div class="thead">
+        <div style="flex:1">
+          <h1>为什么我们总在重复同一种争论：关于技术中立性的三次误读</h1>
+          <div class="meta">
+            <span class="tag">UP · 沙丘研究所</span>
+            <span class="tag">时长 42:17</span>
+            <span class="tag">8 个版本</span>
+            <span class="tag">文稿编辑</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="seg">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="on"></i><i></i><i></i>
+      </div>
+      <div class="segrow">
+        <span class="tag">已按你的要求改好一版</span>
+        <span class="tag num">83% · 第 8 版</span>
+      </div>
+
+      <div class="cut brk doc">
+        <h2>一句话</h2>
+        <p>把「技术中立」当成挡箭牌的人，往往在替某一方的默认设置说话。</p>
+
+        <h2>主体</h2>
+        <p>讲者从一个具体场景切进去：同一份推荐算法，被问「它偏爱什么」时回答「它谁也不偏爱」，这句话本身就已经是<span class="hl">一个立场</span>。算法的默认值不是空白，是有人写下的初始条件。</p>
+        <p>他把常见反驳拆成三层——第一层说工具无善恶，第二层说善恶在用法，第三层说用法由制度兜底。三层都成立，但三层都在同一个前提上：先把技术从它被造出来的处境里摘出去。</p>
+
+        <h2>局限</h2>
+        <p>全程没有给出反例的量化材料，第三层的制度论证停在原则层面，落到具体监管时缺少可操作的判据。</p>
+      </div>
+    </div>
+
+    <!-- 右：侧栏 -->
+    <div class="side">
+
+      <div class="sec">
+        <div class="sec-head">
+          <span class="tag tag-mint">版本 · VERSION</span>
+          <span class="tag num">8</span>
+        </div>
+        <div class="ver on"><span class="num">08</span><span class="txt">收窄第三部分，去掉重复论证</span></div>
+        <div class="ver"><span class="num">07</span><span class="txt">补上「局限」一段</span></div>
+        <div class="ver"><span class="num">06</span><span class="txt">改成更口语的讲法</span></div>
+        <div class="ver"><span class="num">05</span><span class="txt">初版（文稿编辑 · 3 轮回）</span></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <span class="tag tag-mint">迭代打磨</span>
+        </div>
+        <textarea placeholder="说要改什么，比如「第三部分太绕，压成两段」"></textarea>
+        <button class="btn btn-full">改这一版</button>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <span class="tag tag-mint">本次开销</span>
+        </div>
+        <div class="kv"><span style="color:var(--muted)">输入 tokens</span><b class="num">49,489</b></div>
+        <div class="kv"><span style="color:var(--muted)">输出 tokens</span><b class="num">6,193</b></div>
+        <div class="kv"><span style="color:var(--muted)">调用次数</span><b class="num">3</b></div>
+        <div class="kv"><span style="color:var(--muted)">耗时</span><b class="num">102.1s</b></div>
+        <div class="kv"><span style="color:var(--muted)">预读分片</span><b class="num">1 / 复用</b></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="tag">本地 · 无端口</span>
+    <span class="tag">DB 12.4 MB</span>
+    <span style="flex:1"></span>
+    <span class="tag">2026-10-27 09:14</span>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,1020 +1,1199 @@
-/* 前端回归测试。
+/* ============================================================================
+   前端测试（桌面版）
 
-    node tests/frontend_test.js
+   跑法：  node tests/frontend_test.js            全部
+           node tests/frontend_test.js 状态机      只跑名字含「状态机」的
 
-这个文件存在的理由是一个真实事故：用户打开的是被当成静态文件呈现的页面，
-点"获取登录二维码"没有任何反应，而且界面上看不到任何线索——因为所有接口都不存在，
-失败信息又被压成了一句话。
-
-所以这里用最小 DOM 桩**真实执行** index.html 里的脚本，盯住两件事：
-1. 页面能不能识别出"我没有连上后端"，并说清楚该怎么办；
-2. 各类错误响应能不能变成人能看懂的文字。
-
-不依赖浏览器：改的是纯 JS 逻辑，没有动样式与布局。
-*/
+   设计取舍，都是为了「失败时能说清原因」：
+   1. **jsdom 真跑页面，不抠字符串。** 上一代测试用 `html.match()` 在源码里找
+      片段，结果是 HTML 改一次、142 项全绿或全红，与人看到的行为无关。
+   2. **每个用例一个全新 jsdom。** 约 80ms 的代价，换来用例之间零共享状态。
+   3. **桥必须在脚本执行前注入。** 页面末尾是
+      `if (window.pywebview && window.pywebview.api) boot()`，而 `new JSDOM()`
+      是同步跑完 `<script>` 才返回的。构造后再写 `window.pywebview` 已经晚了，
+      页面既没 boot 也没注册监听器——所以用 `beforeParse` 钩子。
+   4. **页面脚本是顶层 `const S`，它进的是全局词法环境，不是 `window` 属性。**
+      所以 `win.S` 永远是 undefined，要读状态得走 `win.eval("S")`。
+      顶层 `function` 声明会挂到 window 上，那是能直接调的。
+   5. 断言一律看**用户能看见的东西**（DOM 文本、按钮 disabled）或**前端到底向
+      后端要了什么**（假后端记的调用）。不去读内部变量，除非没有别的观测点。
+   ============================================================================ */
 
 const fs = require("fs");
 const path = require("path");
+const { JSDOM, VirtualConsole } = require("jsdom");
 
-const htmlPath = process.argv[2] || path.join(__dirname, "..", "bili_scribe", "app", "static", "index.html");
+const only = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : null;
+const htmlPath = path.join(__dirname, "..", "bili_scribe", "app", "static", "index.html");
 const html = fs.readFileSync(htmlPath, "utf8");
 
-const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
-if (!scriptMatch) {
-  console.log("FAIL: index.html 里找不到 <script> 块");
-  process.exit(1);
-}
-const code = scriptMatch[1];
+/* ============================================================ 断言收集 */
 
 const results = [];
-function assert(name, cond, detail) {
-  results.push({ name, ok: !!cond, detail: detail === undefined ? "" : String(detail) });
+
+/* 分组在**定义时**捕获，不是在执行时读。
+   用例是 async 的，交错执行时读全局 currentGroup 会把所有结果记到最后
+   一个分组名下，失败详情会指错地方。 */
+function group(name) {
+  return name;
 }
 
-/* ------------------------------------------------------------- 静态检查 */
-
-try {
-  new Function(code);
-  assert("静态 1 · JS 语法可编译", true);
-} catch (e) {
-  assert("静态 1 · JS 语法可编译", false, e.message);
-  report();
-  process.exit(1);
+function assert(groupName, name, cond, detail) {
+  results.push({ group: groupName, name, ok: !!cond, detail: cond ? "" : detail || "" });
 }
 
-const structural = [
-  ["静态 2 · 存在离线横幅容器", html.includes('id="backend-banner"')],
-  ["静态 3 · 定义了 showBackendBanner", /function showBackendBanner\s*\(/.test(code)],
-  ["静态 4 · 定义了 detectBackend", /async function detectBackend\s*\(/.test(code)],
-  ["静态 5 · init 先探测后端", /await detectBackend\(\)/.test(code)],
-  ["静态 6 · api() 捕获网络异常并给出启动指引", /连不上后端/.test(code) && /python run\.py/.test(code)],
-  ["静态 7 · api() 保留原始响应正文", /响应无正文/.test(code)],
-  ["静态 8 · startQr 有离线守卫", /async function startQr[\s\S]{0,220}state\.online/.test(code)],
-  ["静态 9 · 二维码不可用时禁用入口", /扫码登录不可用/.test(code)],
-  ["静态 10 · 旧的 loadConfig 已移除", !/function loadConfig\s*\(/.test(code)],
-  // 迭代打磨的内联事件：脚本里定义处理函数，属性里接线。桩跑不到内联事件，
-  // 所以"接线有没有接上"只能在这里查——而它接不上就等于按钮点了没反应。
-  ["静态 11 · 迭代输入框接了 oninput", html.includes('id="refine-req"') && /<textarea[^>]+id="refine-req"[^>]+oninput="updateRefineButton\(\)"/.test(html)],
-  ["静态 12 · 评论框同时刷新计数与手改提醒", html.includes('oninput="updateCounter(); updateRefineHint()"')],
-  ["静态 13 · 再改一版按钮已接线", /<button[^>]+id="refine-btn"[^>]+onclick="refine\(\)"/.test(html)],
-  ["静态 14 · 离线横幅也会禁用「再改一版」", /function showBackendBanner[\s\S]{0,1200}refine-btn/.test(code)],
-  // 「展开全部差异」同理：桩里按钮点了不会触发内联事件，接线只能在源码上查
-  ["静态 15 · 展开差异开关已接线", /<button[^>]+id="diff-toggle"[^>]+onclick="toggleDiffs\(\)"/.test(html)],
-];
-for (const [name, ok] of structural) assert(name, ok);
+function eq(groupName, name, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  assert(groupName, name, ok,
+    "期望 " + JSON.stringify(expected) + "，实际 " + JSON.stringify(actual));
+}
 
-/* ------------------------------------------------------------- 运行桩 */
+/* ============================================================ 假后端 */
 
-function makeDocument() {
-  const cache = Object.create(null);
-  const mk = (id) => {
-    const classes = new Set();
-    let _value = "";
-    return {
-      id,
-      style: {},
-      textContent: "",
-      innerHTML: "",
-      // 真实 DOM 对 input.value 赋值会强制转成字符串，
-      // 桩必须照做，否则"数字赋值后 .trim()"这类真实可跑的逻辑会被误判为错。
-      get value() { return _value; },
-      set value(v) { _value = v === null || v === undefined ? "" : String(v); },
-      href: "",
-      src: "",
-      disabled: false,
-      checked: false,
-      open: false,
-      className: "",
-      // 需要记录状态：设置页要靠 classList.toggle 控制确认区的显隐
-      classList: {
-        add(c) { classes.add(c); },
-        remove(c) { classes.delete(c); },
-        toggle(c, force) {
-          const on = force === undefined ? !classes.has(c) : !!force;
-          if (on) classes.add(c); else classes.delete(c);
-          return on;
-        },
-        has(c) { return classes.has(c); },
-      },
-      addEventListener() {},
-    };
-  };
-  return {
-    cache,
-    getElementById(id) {
-      if (!cache[id]) cache[id] = mk(id);
-      return cache[id];
+/* 一个够用的假桥。形状严格对齐 `bili_scribe/desktop.py` 的 `DesktopApi`
+   —— 每个方法都返回 `{ok:true,data}` 或 `{ok:false,error,status}`，
+   因为前端的 `call()` 就是这么解包的。
+
+   `state` 里的东西可以在用例中途改，用来模拟「后端状态变了」。
+   `calls` 记录每次调用的方法名与参数，用来断言「前端要了什么」。 */
+function makeBackend(overrides) {
+  const calls = [];
+  const state = {
+    config: {
+      version: "0.5.0",
+      llm: { model: "qwen-test", base_url: "https://example.invalid/v1", configured: true, role: "wengao" },
+      storage: { db_path: "/home/u/.bili-scribe/bili-scribe.db" },
+      publish: { require_confirm: true },
+      features: { qr_login: true },
     },
-    // 与 getElementById 共用缓存，保证 querySelector("details") 和
-    // getElementById("__sel_details") 是同一个桩对象。
-    querySelector(sel) {
-      return this.getElementById("__sel_" + sel);
+    auth: { logged_in: false, identity: null },
+    roles: {
+      roles: [
+        { key: "standard", name: "标准", tagline: "", note: "", passes: 1 },
+        { key: "wengao", name: "文稿", tagline: "", note: "", passes: 3 },
+      ],
+      current: "wengao",
     },
-  };
-}
-
-async function boot(fetchStub) {
-  const document = makeDocument();
-  const expose = new Function(
-    "document",
-    "fetch",
-    "setInterval",
-    "clearInterval",
-    "confirm",
-    "alert",
-    "window",
-    "console",
-    code +
-      "\nreturn { state, api, detectBackend, showBackendBanner, switchView, loadSettings," +
-      " fillSettingsForm, collectSettings, validateSettings, saveSettings, testLlm," +
-      " toggleKey, onGateToggle, setGateBanner," +
-      " uploadSrt, clearSrt, onSrtPicked, submitTask, setSrtHint," +
-      " renderPreview, pollTask, refine, updateRefineButton, applyRefineState," +
-      " loadVersions, renderVersionList, renderUsageLine, showVersion, viewCurrent," +
-      " restoreVersion, setVersionBadge, versionCostText, refreshTaskState, updateRefineHint," +
-      " toggleDiffs, versionDiffText, versionDiffExamples };"
-  );
-  const api = expose(
-    document,
-    fetchStub,
-    () => 0,
-    () => {},
-    () => true,
-    () => {},
-    {},
-    { log() {}, warn() {}, error() {} }
-  );
-  await new Promise((r) => setTimeout(r, 80)); // 等 init 的异步链跑完
-  return { document, ...api };
-}
-
-/* 设置页要按路径区分 GET /api/settings 与 PUT /api/settings，
-   单一返回值的桩不够用了，所以加一个路由桩。 */
-function routeFetch(routes) {
-  const seen = [];
-  const fn = async (path, options) => {
-    const method = (options && options.method) || "GET";
-    seen.push({
-      path,
-      method,
-      body: options && options.body,
-      contentType: options && options.headers && options.headers["Content-Type"],
-    });
-    const key = method + " " + path;
-    const hit = routes[key] || routes[path];
-    if (!hit) {
-      return { ok: false, status: 404, text: async () => JSON.stringify({ detail: "no route: " + key }) };
-    }
-    const r = typeof hit === "function" ? hit(options) : hit;
-    return {
-      ok: r.status >= 200 && r.status < 300,
-      status: r.status,
-      text: async () => (typeof r.body === "string" ? r.body : JSON.stringify(r.body)),
-    };
-  };
-  fn.seen = seen;
-  return fn;
-}
-
-const okResponse = (payload) => async () => ({
-  ok: true,
-  status: 200,
-  text: async () => JSON.stringify(payload),
-});
-
-const errResponse = (status, body) => async () => ({
-  ok: false,
-  status,
-  text: async () => body,
-});
-
-const baseCfg = {
-  llm: { model: "deepseek-chat", configured: false },
-  publish: { require_confirm: true, max_comment_chars: 900 },
-  features: { qr_login: true },
-  // 故意用一个不可能存在的版本号：如果前端把它渲染出来了，就证明页脚显示的是
-  // **后端说的**，而不是前端另抄的一份。抄一份的数字会过期，而过期的那个还摆在界面上。
-  version: "9.9.9-探头",
-};
-
-async function main() {
-  // A · 完全没有后端 —— 就是出事故的那个场景
-  {
-    const { document } = await boot(async () => {
-      throw new TypeError("Failed to fetch");
-    });
-    const banner = document.getElementById("backend-banner");
-    assert("A1 离线时横幅可见", banner.style.display === "block", banner.style.display);
-    assert("A2 横幅说明了原因", banner.innerHTML.includes("没有连上后端"));
-    assert(
-      "A7 离线时版本行如实说读不到（不显示一个猜的版本号）",
-      /未连上后端/.test(document.getElementById("app-version").textContent),
-      document.getElementById("app-version").textContent
-    );
-    assert(
-      "A3 横幅给出了启动命令与地址",
-      banner.innerHTML.includes("python run.py") && banner.innerHTML.includes("127.0.0.1:8818")
-    );
-    assert("A4 二维码按钮被禁用", document.getElementById("qr-btn").disabled === true);
-    assert("A5 总结按钮被禁用", document.getElementById("run-btn").disabled === true);
-    assert(
-      "A6 顶部状态显示未连接后端",
-      document.getElementById("auth-text").textContent === "未连接后端",
-      document.getElementById("auth-text").textContent
-    );
-  }
-
-  // B · 后端正常
-  {
-    const { document, state } = await boot(okResponse(baseCfg));
-    assert(
-      "B1 在线时横幅不显示",
-      document.getElementById("backend-banner").style.display !== "block",
-      document.getElementById("backend-banner").style.display || "(未设置)"
-    );
-    assert("B2 识别为在线", state.online === true);
-    assert("B3 二维码按钮可用", document.getElementById("qr-btn").disabled === false);
-    assert(
-      "B4 模型信息已填充",
-      document.getElementById("model-chip").textContent.includes("deepseek-chat"),
-      document.getElementById("model-chip").textContent
-    );
-    assert(
-      "B5 未配置 key 时有标注",
-      document.getElementById("model-chip").textContent.includes("未配置 key")
-    );
-    assert(
-      "B6 页脚显示后端报的版本号（不是前端另抄的一份）",
-      document.getElementById("app-version").textContent.includes("9.9.9-探头"),
-      document.getElementById("app-version").textContent
-    );
-    // 反过来也要守住：前端源码里不许出现写死的版本号，否则页脚会显示一个过期的数字
-    assert(
-      "B7 前端没有硬编码版本号",
-      !/\bbili-scribe\s+\d+\.\d+\.\d+/.test(code),
-      (code.match(/bili-scribe\s+\d+\.\d+\.\d+/) || ["（无）"])[0]
-    );
-  }
-
-  // C · 后端在但缺 qrcode 依赖 —— 应当降级到 Cookie 通道，而不是报错
-  {
-    const cfg = JSON.parse(JSON.stringify(baseCfg));
-    cfg.features.qr_login = false;
-    const { document, state } = await boot(okResponse(cfg));
-    assert("C1 仍识别为在线", state.online === true);
-    assert("C2 二维码按钮被禁用", document.getElementById("qr-btn").disabled === true);
-    assert(
-      "C3 按钮文案改为不可用",
-      document.getElementById("qr-btn").textContent === "扫码登录不可用",
-      document.getElementById("qr-btn").textContent
-    );
-    assert(
-      "C4 提示里给出安装命令",
-      document.getElementById("auth-msg").textContent.includes("qrcode[pil]"),
-      document.getElementById("auth-msg").textContent.slice(0, 56)
-    );
-    assert(
-      "C5 自动展开 Cookie 兜底面板",
-      document.getElementById("__sel_details").open === true
-    );
-  }
-
-  // D · 错误正文为空时可读性
-  {
-    const { api } = await boot(errResponse(500, ""));
-    let message = "";
-    try {
-      await api("/api/auth/qrcode");
-    } catch (e) {
-      message = e.message;
-    }
-    assert("D1 空正文错误带上状态码", message.includes("HTTP 500"), message);
-    assert("D2 空正文错误说明无响应正文", message.includes("响应无正文"), message);
-  }
-
-  // E · 后端给了可操作提示时应当原样透出
-  {
-    const { api } = await boot(
-      errResponse(503, JSON.stringify({ detail: '缺少二维码依赖，请执行：pip install "qrcode[pil]"' }))
-    );
-    let message = "";
-    try {
-      await api("/api/auth/qrcode");
-    } catch (e) {
-      message = e.message;
-    }
-    assert("E1 透出后端给的可操作提示", message.includes("qrcode[pil]"), message);
-  }
-
-  // F · 设置页
-  {
-    // GET /api/settings 的真实响应形状
-    const settingsValues = {
-      server: { host: "127.0.0.1", port: 8818 },
-      llm: {
-        base_url: "https://api.deepseek.com/v1",
-        api_key: "sk-test-abcdef123456",
-        model: "deepseek-chat",
-        temperature: 0.3,
-        max_tokens: 4096,
-        thinking: "off",
-        timeout_seconds: 300,
-        proxy: "http://127.0.0.1:7897",
-        max_input_chars: 60000,
-        chunk_size: 12000,
-        chunk_overlap: 400,
-      },
-      collect: {
-        prefer_subtitle_lang: ["zh-CN", "zh-Hans"],
-        include_platform_summary: false,
-        danmaku: { enabled: true, also_with_subtitle: false, max_items: 3000, hot_items: 200, sample_items: 300 },
-      },
-      publish: {
-        require_confirm: true,
-        min_interval_seconds: 60,
-        max_comment_chars: 900,
-        disclose_ai: true,
-        disclosure_text: "本总结由 AI 生成",
-      },
-      storage: { db_path: "~/.bili-scribe/data.db", key_path: "~/.bili-scribe/key.bin" },
-    };
-    const settingsBody = {
-      values: settingsValues,
-      path: "C:\\tmp\\config.yaml",
+    task: null,
+    versions: { current: null, total: null, versions: [] },
+    publishes: [],
+    notes: { entries: 0, bytes: 0, dir: "/home/u/.bili-scribe/notes", session_hits: 0, session_misses: 0 },
+    settings: {
+      values: { llm: { model: "qwen-test", base_url: "https://example.invalid/v1", api_key: "sk-x", role: "wengao" } },
+      path: "/home/u/.bili-scribe/config.yaml",
       config_exists: true,
       gate_disabled: false,
       restart_needed_for: ["server"],
       platform_comment_max: 1000,
+    },
+  };
+
+  const ok = (v) => ({ ok: true, data: v });
+
+  /* 故意用最简单、最没想象力的写法。所有方法都只是「返回一份数据」，
+     真正的观测点在外面（DOM 与 calls）。 */
+  const base = {
+    mark_ready: () => ok(null),
+    get_config: () => ok(state.config),
+    check_llm: () => ok({ ok: true, detail: "可用", model: "qwen-test" }),
+    get_roles: () => ok(state.roles),
+    /* 切角色。真后端只改 llm.role 这一项并写盘，这里跟着改内存里的两份副本：
+       config.llm.role（顶栏 chip 读它）与 settings.values.llm.role（抽屉隐藏字段读它）。
+       两边都改才能测出"保存设置时不会把角色写回旧值"。 */
+    set_role: (p) => {
+      const key = (p && p.role) || "";
+      const hit = state.roles.roles.find((r) => r.key === key);
+      if (!hit) return { ok: false, error: "未知的总结角色：" + key };
+      state.roles.current = key;
+      state.config.llm.role = key;
+      state.settings.values.llm.role = key;
+      return ok({ role: hit.key, name: hit.name, passes: hit.passes });
+    },
+
+    get_settings: () => ok(state.settings),
+    save_settings: (p) => ok({ written: p, restart_required: false }),
+    test_llm: () => ok({ ok: true, detail: "可用", model: "qwen-test", saved: false }),
+
+    auth_status: () => ok(state.auth),
+    auth_qrcode: () => ok({ key: "k1", url: "https://qr.example/x", image: "data:image/png;base64,AAA" }),
+    auth_poll: () => ok({ status: 2 }),
+    auth_cookie: () => ok({ logged_in: true }),
+    auth_logout: () => ok({ logged_in: false }),
+
+    pick_subtitle: () => ok({ cancelled: true }),
+    discard_subtitle: () => ok({ discarded: true }),
+
+    create_task: (p) => {
+      state.task = sampleTask({ id: "t1", status: "resolving", progress: "解析输入" });
+      return ok({ task_id: "t1", role: "wengao" });
+    },
+    get_task: (id) => ok(state.task || sampleTask({ id })),
+    list_versions: () => ok(state.versions),
+    get_version: (id, n) => ok(versionDetail(n)),
+    restore_version: (id, n) => ok({ restored: n }),
+    refine_task: (id) => ok({ task_id: id, status: "refining", base_version: 1, reused_prepared: true }),
+    list_tasks: () => ok([]),
+    publish: () => ok({ status: "published", publish_id: 9, rpid: "123" }),
+    withdraw: (pid) => ok({ publish_id: pid, withdrawn: true }),
+    list_publishes: () => ok(state.publishes),
+    notes_stats: () => ok(state.notes),
+    clear_notes: () => ok({ removed: 3 }),
+    open_data_dir: () => ok({ opened: true }),
+  };
+
+  /* 自动记录每一次调用。手写 track() 的版本会在"用例用 overrides 换掉了某个
+     方法"时漏记——那个缺陷曾经让两条断言凭空失败，而失败原因指向被测代码。 */
+  const api = {};
+  const impl = Object.assign({}, base, overrides || {});
+  for (const name of Object.keys(impl)) {
+    api[name] = (...args) => {
+      calls.push({ name, args });
+      return impl[name](...args);
     };
-    const routes = {
-      "/api/config": { status: 200, body: baseCfg },
-      "GET /api/settings": { status: 200, body: settingsBody },
-      "PUT /api/settings": {
-        status: 200,
-        body: {
-          ok: true,
-          written: { path: "C:\\tmp\\config.yaml", backup: "config.yaml.bak" },
-          restart_required: false,
-          restart_sections: [],
-          gate_disabled: false,
-        },
-      },
-      "/api/settings/test-llm": { status: 200, body: { ok: true, detail: "连接正常", model: "deepseek-chat" } },
-    };
-
-    assert(
-      "F1 两个视图各自闭合（没有裸露的 </main>）",
-      (html.match(/id="view-main"/g) || []).length === 1 &&
-        (html.match(/id="view-settings"/g) || []).length === 1 &&
-        !/<\/main>/.test(html),
-      "若仍有 </main>，设置视图会被浏览器并进主视图"
-    );
-    assert("F2 两个 tab 都已接线", /id="tab-main"/.test(html) && /id="tab-settings"/.test(html));
-
-    const stub = routeFetch(routes);
-    const { document, state, switchView, collectSettings, validateSettings, saveSettings, onGateToggle, setGateBanner, toggleKey } = await boot(stub);
-
-    assert("F3 初始不加载设置", state.settingsLoaded === false);
-    assert(
-      "F4 首屏没有请求 /api/settings（密钥不进首屏）",
-      !stub.seen.some((s) => s.path === "/api/settings" && s.method === "GET"),
-      JSON.stringify(stub.seen.map((s) => s.method + " " + s.path))
-    );
-
-    switchView("settings");
-    await new Promise((r) => setTimeout(r, 30));
-
-    assert("F5 切到设置页才加载", stub.seen.some((s) => s.path === "/api/settings" && s.method === "GET"));
-    assert("F6 设置视图被显示", document.getElementById("view-settings").style.display === "grid");
-    assert("F7 主视图被隐藏", document.getElementById("view-main").style.display === "none");
-
-    assert(
-      "F8 base_url 已回填",
-      document.getElementById("s-base-url").value === "https://api.deepseek.com/v1",
-      document.getElementById("s-base-url").value
-    );
-    assert(
-      "F9 语言数组转成逗号分隔",
-      document.getElementById("s-langs").value === "zh-CN, zh-Hans",
-      document.getElementById("s-langs").value
-    );
-    assert(
-      "F10 嵌套的 danmaku 已回填",
-      document.getElementById("s-dm-max").value === String(settingsValues.collect.danmaku.max_items) &&
-        document.getElementById("s-dm-hot").value === String(settingsValues.collect.danmaku.hot_items),
-      document.getElementById("s-dm-max").value + "/" + document.getElementById("s-dm-hot").value
-    );
-    assert(
-      "F10b thinking 与超时已回填",
-      document.getElementById("s-thinking").value === "off" &&
-        document.getElementById("s-timeout").value === String(settingsValues.llm.timeout_seconds),
-      document.getElementById("s-thinking").value + "/" + document.getElementById("s-timeout").value
-    );
-    assert(
-      "F11 密钥回显但默认掩着",
-      document.getElementById("s-api-key").value === "sk-test-abcdef123456" &&
-        document.getElementById("s-api-key").type === "password"
-    );
-
-    toggleKey();
-    assert("F12 「显示」切成明文", document.getElementById("s-api-key").type === "text");
-    toggleKey();
-    assert("F13 再点切回掩码", document.getElementById("s-api-key").type === "password");
-
-    // 最关键的一条：前端发出的键名必须与后端 Pydantic 逐个对齐。
-    // 对不上会被 apply_settings 静默忽略——保存"成功"，但配置没生效。
-    const sent = collectSettings();
-    const sameKeys = (got, want, label) => {
-      const g = Object.keys(got).sort().join(",");
-      const w = want.slice().sort().join(",");
-      assert("F14 字段名对齐 · " + label, g === w, "前端=[" + g + "] 后端=[" + w + "]");
-    };
-    sameKeys(sent, ["server", "llm", "collect", "publish", "storage", "confirm_disable_gate"], "顶层");
-    sameKeys(sent.server, ["host", "port"], "server");
-    sameKeys(sent.llm, ["base_url", "api_key", "proxy", "model", "temperature", "max_tokens", "thinking", "role", "timeout_seconds", "max_input_chars", "chunk_size", "chunk_overlap"], "llm");
-    sameKeys(sent.collect, ["prefer_subtitle_lang", "include_platform_summary", "danmaku"], "collect");
-    sameKeys(sent.collect.danmaku, ["enabled", "also_with_subtitle", "max_items", "hot_items", "sample_items"], "collect.danmaku");
-    sameKeys(sent.publish, ["require_confirm", "min_interval_seconds", "max_comment_chars", "disclose_ai", "disclosure_text"], "publish");
-    sameKeys(sent.storage, ["db_path", "key_path"], "storage");
-
-    assert(
-      "F15 数字字段发出的是数字",
-      typeof sent.llm.temperature === "number" && typeof sent.server.port === "number",
-      typeof sent.llm.temperature + "/" + typeof sent.server.port
-    );
-
-    assert("F16 正常值通过校验", validateSettings() === "", validateSettings());
-
-    // 代理：既要能回填，也要能拦住漏了协议的写法。
-    // 放过去的话它会写进 config.yaml，而加载配置时会校验协议前缀——
-    // 保存那一刻不报错、下次启动直接起不来。
-    assert(
-      "F16b 代理地址已回填且原样发出",
-      document.getElementById("s-proxy").value === "http://127.0.0.1:7897" &&
-        sent.llm.proxy === "http://127.0.0.1:7897",
-      document.getElementById("s-proxy").value
-    );
-    document.getElementById("s-proxy").value = "127.0.0.1:7897";
-    assert(
-      "F16c 拦住漏了协议的代理",
-      validateSettings().includes("proxy"),
-      validateSettings()
-    );
-    document.getElementById("s-proxy").value = "";
-    assert("F16d 代理留空即直连，不拦", validateSettings() === "", validateSettings());
-    document.getElementById("s-proxy").value = "http://127.0.0.1:7897";
-
-    document.getElementById("s-chunk-overlap").value = "99999";
-    assert("F17 拦住 overlap >= size", validateSettings().includes("chunk_overlap"), validateSettings());
-    document.getElementById("s-chunk-overlap").value = "400";
-
-    document.getElementById("s-max-chars").value = "5000";
-    assert("F18 拦住超过平台评论上限", validateSettings().includes("1000"), validateSettings());
-    document.getElementById("s-max-chars").value = "900";
-
-    document.getElementById("s-langs").value = "  ,  ";
-    assert("F19 拦住空的字幕语言列表", validateSettings().includes("字幕语言"), validateSettings());
-    document.getElementById("s-langs").value = "zh-CN, zh-Hans";
-
-    document.getElementById("s-thinking").value = "sometimes";
-    assert("F19b 拦住非法的 thinking 值", validateSettings().includes("thinking"), validateSettings());
-    document.getElementById("s-thinking").value = "off";
-
-    document.getElementById("s-require-confirm").checked = false;
-    onGateToggle();
-    assert("F20 取消勾选后展开后果确认区", document.getElementById("gate-confirm").classList.has("show") === true);
-    assert("F21 未勾选确认时拦住保存", validateSettings().includes("闸门"), validateSettings());
-    document.getElementById("s-gate-ack").checked = true;
-    assert("F22 勾选确认后放行", validateSettings() === "", validateSettings());
-    assert("F23 关闭闸门时一并发出确认标志", collectSettings().confirm_disable_gate === true);
-
-    document.getElementById("s-require-confirm").checked = true;
-    onGateToggle();
-    assert("F24 重新勾选后收起确认区", document.getElementById("gate-confirm").classList.has("show") === false);
-
-    const before = stub.seen.length;
-    await saveSettings();
-    const put = stub.seen.slice(before).find((s) => s.method === "PUT" && s.path === "/api/settings");
-    assert(
-      "F25 保存发出了 PUT /api/settings",
-      !!put,
-      JSON.stringify(stub.seen.slice(before).map((s) => s.method + " " + s.path))
-    );
-    let parsed = null;
-    try { parsed = JSON.parse(put.body); } catch (e) { /* 下面会断言出来 */ }
-    assert("F26 请求体是合法 JSON", !!parsed);
-    assert(
-      "F27 请求体带上了模型与密钥",
-      !!parsed && parsed.llm.model === "deepseek-chat" && parsed.llm.api_key === "sk-test-abcdef123456"
-    );
-    assert(
-      "F28 保存成功的提示里带出备份文件名",
-      document.getElementById("settings-msg").textContent.includes("config.yaml.bak"),
-      document.getElementById("settings-msg").textContent
-    );
-    // 保存后会把表单静默重拉一次（各字段要回到服务端的真值）。
-    // 那次重拉曾经把上面这条回执清空——用户点保存看不到任何确认。
-    assert(
-      "F28b 保存后有重拉表单，且回执没被擦掉",
-      stub.seen.slice(before).filter((s) => s.method === "GET" && s.path === "/api/settings").length === 1 &&
-        document.getElementById("settings-msg").textContent !== "",
-      "重拉次数=" + stub.seen.slice(before).filter((s) => s.method === "GET" && s.path === "/api/settings").length +
-        " 回执=[" + document.getElementById("settings-msg").textContent + "]"
-    );
-
-    setGateBanner(true);
-    assert("F29 闸门关闭时横幅可见", document.getElementById("gate-banner").style.display === "block");
-    assert("F30 横幅说明了后果", document.getElementById("gate-banner").innerHTML.includes("没有确认环节"));
-    setGateBanner(false);
-    assert("F31 闸门恢复后横幅消失", document.getElementById("gate-banner").style.display === "none");
   }
 
-  // G · 自己上传 srt 字幕
-  {
-    const TOKEN = "tok_abcdefghijklmnopqr";
-    const routes = {
-      "/api/config": { status: 200, body: baseCfg },
-      "/api/auth/status": { status: 200, body: {} },
-      "/api/publishes": { status: 200, body: [] },
-      "/api/tasks": { status: 200, body: [] },
-      "/api/roles": { status: 200, body: { roles: [{ key: "standard", name: "标准" }] } },
-      "POST /api/subtitle/parse": {
-        status: 200,
-        body: {
-          token: TOKEN,
-          segments: 717,
-          encoding: "utf-8-sig",
-          first: "00:00:01",
-          last: "01:59:23",
-          chars: 12345,
-          bytes: 45678,
-        },
-      },
-      "POST /api/task": { status: 200, body: { task_id: "t-1", role: "standard" } },
-      "GET /api/task/t-1": { status: 200, body: { status: "resolving", progress: "解析输入" } },
-    };
-    routes["DELETE /api/subtitle/" + TOKEN] = { status: 200, body: { removed: 1 } };
+  return { api, calls, state, ok, base };
+}
 
-    const stub = routeFetch(routes);
-    const { document, state, uploadSrt, clearSrt, submitTask } = await boot(stub);
-    const fakeFile = (name) => ({
-      name,
-      size: 45678,
-      async arrayBuffer() { return new ArrayBuffer(45678); },
-    });
+/* 一条完整的任务。字段对齐 `service.get_task()` 的注入结果：
+   `summary_json`（不是 summary）、`publish_document`、`can_refine`、
+   `refine_blocked`、`refining`、`version_count`、`current_version`、`live_publish`。 */
+let TASK_SEQ = 0;
+function sampleTask(patch) {
+  TASK_SEQ++;
+  const t = {
+    id: "tk" + TASK_SEQ,
+    bvid: "BV1xx411c7mD",
+    aid: 1,
+    title: "一个用于测试的视频标题",
+    up_name: "某UP",
+    duration: 600,
+    status: "ready",
+    progress: "",
+    raw_input: "BV1xx411c7mD",
+    source_kind: "subtitle",
+    source_label: "字幕（人工）",
+    source_trust: "高",
+    warnings: [],
+    candidates: [],
+    summary_json: {
+      one_line: "一句话结论。",
+      summary_md: "## 第一节\n\n正文第一段。\n\n## 第二节\n\n正文第二段。",
+      key_points: ["要点一", "要点二"],
+      caution: "",
+      comment_short: "短评。",
+      role: "wengao",
+    },
+    preview_md: "# 预览",
+    platform_summary: "",
+    comment_text: "",
+    error: null,
+    created_at: "2026-10-27 10:00",
+    updated_at: "2026-10-27 10:05",
+    publish_document: "这是要发到评论区的完整文本。",
+    can_refine: true,
+    refine_blocked: "",
+    refining: false,
+    version_count: 1,
+    current_version: 1,
+    live_publish: null,
+  };
+  return Object.assign(t, patch || {});
+}
 
-    await uploadSrt(fakeFile("lecture.srt"));
-    assert("G1 上传成功后拿到 token", state.subtitleToken === TOKEN, String(state.subtitleToken));
-    assert(
-      "G2 回执显示了段数与覆盖范围",
-      /717 段/.test(document.getElementById("srt-hint").textContent) &&
-        /01:59:23/.test(document.getElementById("srt-hint").textContent),
-      document.getElementById("srt-hint").textContent
-    );
-    assert(
-      "G3 上传发的是原始字节（octet-stream），不是 JSON",
-      stub.seen.some(
-        (s) =>
-          s.method === "POST" &&
-          s.path === "/api/subtitle/parse" &&
-          s.contentType === "application/octet-stream"
-      ),
-      JSON.stringify(stub.seen.filter((s) => s.path === "/api/subtitle/parse").map((s) => s.contentType))
-    );
-    assert(
-      "G11 选完文件后按钮上显示文件名（否则使用者会怀疑没选上）",
-      document.getElementById("srt-btn").textContent === "lecture.srt",
-      document.getElementById("srt-btn").textContent
-    );
+function versionDetail(n) {
+  return {
+    version_no: n,
+    source: n === 1 ? "initial" : "refine",
+    requirement: "",
+    role: "wengao",
+    created_at: "2026-10-27 10:00",
+    one_line: "第 " + n + " 版的一句话",
+    revise_note: "",
+    changed_fields: null,
+    summary_json: { one_line: "第 " + n + " 版的一句话", summary_md: "第 " + n + " 版正文" },
+    preview_md: "",
+    comment_text: "",
+    publish_document: "第 " + n + " 版的发布文本",
+    metrics: {},
+    current: true,
+  };
+}
 
-    await clearSrt();
-    assert("G4 清除后 token 归 null", state.subtitleToken === null, String(state.subtitleToken));
-    assert(
-      "G5 清除会通知服务端真删掉",
-      stub.seen.some((s) => s.method === "DELETE" && s.path === "/api/subtitle/" + TOKEN),
-      JSON.stringify(stub.seen.map((s) => s.method + " " + s.path))
-    );
-    assert(
-      "G12 清除后按钮回到默认文字",
-      document.getElementById("srt-btn").textContent === "选择字幕文件",
-      document.getElementById("srt-btn").textContent
-    );
+/* ============================================================ 载入页面 */
 
-    // 再传一次，这次走完整提交：token 要进请求体，提交完要忘掉它
-    await uploadSrt(fakeFile("lecture.srt"));
-    document.getElementById("raw-input").value = "BV1smoke";
-    await submitTask();
-    const posts = stub.seen.filter((s) => s.method === "POST" && s.path === "/api/task");
-    let sentBody = null;
-    try {
-      sentBody = JSON.parse(posts[posts.length - 1].body);
-    } catch (e) {
-      /* 由下面的断言暴露 */
+async function loadPage(opts) {
+  const o = opts || {};
+  const be = o.backend || makeBackend();
+
+  const vc = new VirtualConsole();
+  const errors = [];
+  vc.on("jsdomError", (e) => errors.push(String(e && e.message ? e.message : e)));
+  vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
+
+  const dom = new JSDOM(html, {
+    runScripts: "dangerously",
+    url: "http://localhost/index.html",
+    pretendToBeVisual: true,
+    virtualConsole: vc,
+    /* 关键：桥必须在页面脚本执行**之前**挂好，否则页面末尾那句
+       `if (window.pywebview && window.pywebview.api) boot()` 走 else 分支。 */
+    beforeParse(window) {
+      window.pywebview = { api: be.api };
+    },
+  });
+  const win = dom.window;
+
+  await settle(win, o.settleMs);
+
+  return {
+    dom,
+    win,
+    doc: win.document,
+    backend: be,
+    errors,
+    /* 顶层的 `const S` 不在 window 上，只能通过 eval 读。
+       返回的是同一个对象引用，改它等于改页面状态。 */
+    S: () => win.eval("S"),
+    $: (id) => win.document.getElementById(id),
+    text: (id) => {
+      const el = win.document.getElementById(id);
+      return el ? el.textContent : null;
+    },
+    close: () => {
+      try {
+        const s = win.eval("S");
+        if (s && s.qrTimer) win.clearInterval(s.qrTimer);
+      } catch (e) { /* 已经关了 */ }
+      try { win.close(); } catch (e) { /* 同上 */ }
+    },
+  };
+}
+
+/* boot() 里有多层 await。用 10ms 的宏任务循环推进，直到页面进入
+   「配置已拿到」或超时。比固定 sleep 既快又稳。 */
+function settle(win, maxMs) {
+  const limit = Date.now() + (maxMs || 3000);
+  return new Promise((resolve) => {
+    function tick() {
+      let online = false;
+      try { online = !!win.eval("typeof S !== 'undefined' && S.online"); } catch (e) { /* 脚本还没跑 */ }
+      if (online || Date.now() > limit) return resolve();
+      setTimeout(tick, 10);
     }
-    assert("G6 提交任务时带上了字幕 token", !!sentBody && sentBody.subtitle_token === TOKEN, JSON.stringify(sentBody));
-    assert("G7 提交成功后忘掉 token", state.subtitleToken === null, String(state.subtitleToken));
+    tick();
+  });
+}
+
+/* 派发真实事件。只改 value 不派 input 事件，监听器不会被触发。 */
+function typeInto(p, el, value) {
+  el.value = value;
+  el.dispatchEvent(new p.win.Event("input", { bubbles: true }));
+}
+
+function click(p, el) {
+  el.dispatchEvent(new p.win.MouseEvent("click", { bubbles: true }));
+}
+
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/* ============================================================ 用例表 */
+
+const CASES = [];
+function test(name, fn) {
+  CASES.push({ name, fn });
+}
+
+/* 提交一条任务。多个用例都要这几步。 */
+async function submitTask(p, raw) {
+  typeInto(p, p.$("raw-input"), raw || "BV1xx411c7mD");
+  click(p, p.$("run-btn"));
+  await wait(60);
+}
+
+/* 让页面手上有一条「已完成」的任务，用于测版本/发布/打磨。
+   走真实路径：提交 → 后端推送 ready。
+
+   `state.versions` 必须跟着设：`loadVersions()` 会用 `d.current` **覆盖**
+   `S.currentVersion`，这是有意的——版本列表才是版号的权威来源。假后端如果
+   在这里留 `current: null`，页面就会认为当前没有版号，打磨也就不会带底稿。 */
+async function readyTask(p, patch) {
+  await submitTask(p);
+  const t = sampleTask(Object.assign({ id: "t1", status: "ready" }, patch || {}));
+  if (p.backend.state) {
+    p.backend.state.task = t;
+    p.backend.state.versions = {
+      current: t.current_version,
+      total: null,
+      versions: [{ version_no: t.current_version, source: "initial", one_line: "第一版", metrics: {}, changed_fields: null }],
+    };
   }
+  p.win.__onTaskUpdate(t);
+  await wait(60);
+}
 
-  // G2 · 解析失败时不能留下残状态
-  {
-    const stub = routeFetch({
-      "/api/config": { status: 200, body: baseCfg },
-      "POST /api/subtitle/parse": { status: 400, body: { detail: "读不了这个文件：认不出编码" } },
-    });
-    const { document, state, uploadSrt } = await boot(stub);
-    await uploadSrt({ name: "bad.srt", size: 12, async arrayBuffer() { return new ArrayBuffer(12); } });
-    assert("G8 解析失败时不留 token", state.subtitleToken === null, String(state.subtitleToken));
-    assert(
-      "G9 失败原因显示出来了",
-      /读不了/.test(document.getElementById("srt-hint").textContent),
-      document.getElementById("srt-hint").textContent
-    );
-    assert("G10 失败时清除按钮不出现", document.getElementById("srt-clear").style.display === "none");
-    assert(
-      "G13 解析失败后按钮也回到默认文字",
-      document.getElementById("srt-btn").textContent === "选择字幕文件",
-      document.getElementById("srt-btn").textContent
-    );
+/* ============================================================ 一、启动 */
+
+const G1 = group("启动");
+
+test("页面加载后从后端拿到配置与角色，界面进入在线状态", async () => {
+  const p = await loadPage();
+  try {
+    assert(G1, "在线状态已置位", p.S().online === true, "boot() 没有跑完，S.online = " + p.S().online);
+    assert(G1, "模型名进了顶栏", /qwen-test/.test(p.text("chip-model")), "chip-model = " + p.text("chip-model"));
+    assert(G1, "角色表已载入", p.S().roles.length === 2, JSON.stringify(p.S().roles));
+    assert(G1, "断桥横幅没有出现", !p.$("bridge").classList.contains("on"), "横幅说明 boot 失败了");
+    eq(G1, "没有 jsdom 级异常", p.errors, []);
+  } finally { p.close(); }
+});
+
+test("没有桥的时候，页面明说连不上接口，而不是静默失效", async () => {
+  /* 传一个空 api：mark_ready 不存在 → call() 抛错 → boot 走失败分支。 */
+  const p = await loadPage({ backend: { api: {} }, settleMs: 500 });
+  try {
+    const banner = p.$("bridge");
+    assert(G1, "断桥横幅出现", banner.classList.contains("on"), "bridge 没有 .on");
+    assert(G1, "横幅文案告诉人怎么办", /重启|退出|重新/.test(banner.textContent), banner.textContent);
+  } finally { p.close(); }
+});
+
+test("顶栏时钟按 YYYY-MM-DD HH:MM 显示", async () => {
+  const p = await loadPage();
+  try {
+    const t = p.text("ft-clock");
+    assert(G1, "时钟格式正确", /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(t), "实际：" + t);
+  } finally { p.close(); }
+});
+
+test("刻度尺建出 64 根刻度", async () => {
+  const p = await loadPage();
+  try {
+    eq(G1, "刻度数", p.$("ruler").children.length, 64);
+  } finally { p.close(); }
+});
+
+test("底栏只显示数据库文件名，不泄露完整路径", async () => {
+  const p = await loadPage();
+  try {
+    const t = p.text("ft-note");
+    assert(G1, "显示文件名", /bili-scribe\.db/.test(t), t);
+    assert(G1, "不含目录分隔符", !/[\\/]/.test(t), "泄露了路径：" + t);
+  } finally { p.close(); }
+});
+
+test("底栏版本号来自后端，后端给什么就显示什么", async () => {
+  /* 夹具故意用一个不存在的版本号：前端要是自己抄了一份（比如写死成 0.4.2），
+     对它自己那一份和这里都对不上，这条就会红。 */
+  const p = await loadPage();
+  try {
+    eq(G1, "显示后端报的版本号", p.text("ft-ver"), "v0.5.0");
+  } finally { p.close(); }
+});
+
+test("启动时自动恢复最近一条任务，而不是从空白开始", async () => {
+  const be = makeBackend({
+    list_tasks: () => ({ ok: true, data: [{ id: "recent1", title: "最近的", status: "ready" }] }),
+    get_task: () => ({ ok: true, data: sampleTask({ id: "recent1", title: "最近的视频" }) }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    assert(G1, "任务标题已显示", /最近的视频/.test(p.text("t-title")), p.text("t-title"));
+    const lt = p.backend.calls.filter((c) => c.name === "list_tasks");
+    eq(G1, "只问 1 条", lt.length ? lt[0].args : null, [1]);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 二、提交 */
+
+const G2 = group("提交任务");
+
+test("输入为空时提交按钮禁用，输入后解禁", async () => {
+  const p = await loadPage();
+  try {
+    const btn = p.$("run-btn");
+    assert(G2, "空输入 → 禁用", btn.disabled === true, "没有禁用");
+
+    typeInto(p, p.$("raw-input"), "https://www.bilibili.com/video/BV1xx411c7mD");
+    assert(G2, "有输入 → 解禁", btn.disabled === false, "仍然禁用");
+  } finally { p.close(); }
+});
+
+test("点开始总结，把输入原样交给后端", async () => {
+  const p = await loadPage();
+  try {
+    const raw = "https://www.bilibili.com/video/BV1xx411c7mD?p=2";
+    await submitTask(p, raw);
+
+    const c = p.backend.calls.find((x) => x.name === "create_task");
+    assert(G2, "确实调了 create_task", !!c, "没调用");
+    eq(G2, "输入原样传过去（不截断 query）", c ? c.args[0].raw_input : null, raw);
+  } finally { p.close(); }
+});
+
+test("回车键等同于点按钮", async () => {
+  const p = await loadPage();
+  try {
+    const inp = p.$("raw-input");
+    typeInto(p, inp, "BV1xx411c7mD");
+    inp.dispatchEvent(new p.win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await wait(80);
+    assert(G2, "回车也调了 create_task",
+      !!p.backend.calls.find((x) => x.name === "create_task"), "回车无效");
+  } finally { p.close(); }
+});
+
+test("任务在跑的时候不能再提交一次", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    p.win.__onTaskUpdate(sampleTask({ id: "t1", status: "resolving", progress: "解析输入" }));
+    /* isRunning 是顶层 function，挂在 window 上，可以直接调。 */
+    assert(G2, "isRunning 为真", p.win.isRunning() === true, "状态没推上来");
+    assert(G2, "按钮被禁用", p.$("run-btn").disabled === true, "还能再点");
+  } finally { p.close(); }
+});
+
+test("后端报错时把原因显示出来，而不是静默失败", async () => {
+  const be = makeBackend({
+    create_task: () => ({ ok: false, error: "链接里没有 BV 号", status: 400 }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    await submitTask(p, "随便一段话");
+    await wait(60);
+    const msg = p.text("task-msg") || "";
+    assert(G2, "错误文案可见", /BV 号/.test(msg), "task-msg = " + JSON.stringify(msg));
+  } finally { p.close(); }
+});
+
+/* ============================================================ 三、状态机 */
+
+const G3 = group("状态机");
+
+test("推送的进度驱动分段刻度条，而不是整条进度条", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    p.win.__onTaskUpdate(sampleTask({ id: "t1", status: "fetching_subtitle", progress: "取字幕" }));
+    /* STAGES 有 12 项，renderSegments() 懒建 12 根 <i>。 */
+    eq(G3, "分段刻度是 12 根（对齐 STAGES）", p.$("seg").children.length, 12);
+    assert(G3, "有百分比读数", /%/.test(p.text("seg-pct") || ""), p.text("seg-pct"));
+    assert(G3, "已走过的段被点亮",
+      p.$("seg").children[0].className === "on",
+      "第 0 段 class = " + p.$("seg").children[0].className);
+    assert(G3, "当前段被标出来",
+      Array.from(p.$("seg").children).some((el) => el.className === "cur"),
+      "没有任何一段是 cur");
+  } finally { p.close(); }
+});
+
+test("准备就绪后界面显示正文，并按 01/02 分块", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    const body = p.$("body-inner").innerHTML;
+    assert(G3, "渲染了一句话", /一句话结论/.test(body), "没找到一句话");
+    assert(G3, "渲染了正文小节", /第一节/.test(body), "没找到正文");
+    assert(G3, "有一句话的编号", /01/.test(body), "没有 01");
+    assert(G3, "有主体的编号", /02/.test(body), "没有 02");
+    assert(G3, "进度读数到 100%", p.text("seg-pct") === "100%", p.text("seg-pct"));
+  } finally { p.close(); }
+});
+
+test("「上次改到一半程序退出了」必须明说，不能装作正常", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    /* status 说还在改，但 refining=false —— 这是进程被杀留下的状态。 */
+    p.win.__onTaskUpdate(sampleTask({
+      id: "t1", status: "refining", refining: false, can_refine: true, current_version: 1,
+    }));
+    const msg = (p.text("task-msg") || "") + " " + (p.text("refine-hint") || "");
+    assert(G3, "给出了中断提示", /退出|中断|没改完/.test(msg), "提示文案：" + JSON.stringify(msg));
+  } finally { p.close(); }
+});
+
+test("迭代失败时上一版还在，要说成失败而不是成功", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    p.win.__onTaskUpdate(sampleTask({
+      id: "t1", status: "ready", refining: false, error: "模型超时", current_version: 1,
+    }));
+    const msg = p.text("task-msg") || "";
+    assert(G3, "把失败说出来", /超时|失败/.test(msg), "task-msg = " + JSON.stringify(msg));
+  } finally { p.close(); }
+});
+
+test("版号没涨的时候继续等，不会把半成品当成新版", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    p.win.__onTaskUpdate(sampleTask({ id: "t1", status: "ready", current_version: 1 }));
+    /* 模拟「刚提交了打磨，等第 2 版」，然后再推一条仍是第 1 版的 ready。 */
+    p.S().awaitingRefine = 2;
+    p.win.__onTaskUpdate(sampleTask({ id: "t1", status: "ready", current_version: 1 }));
+    eq(G3, "仍在等第 2 版", p.S().awaitingRefine, 2);
+  } finally { p.close(); }
+});
+
+test("不是当前任务的推送被忽略", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    const before = p.text("t-title");
+    p.win.__onTaskUpdate(sampleTask({ id: "别的任务", title: "不该出现的标题" }));
+    eq(G3, "标题没被改掉", p.text("t-title"), before);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 四、版本 */
+
+const G4 = group("版本与打磨");
+
+test("版本列表把当前版标出来", async () => {
+  const be = makeBackend({
+    list_versions: () => ({
+      ok: true, data: {
+        current: 2,
+        total: { calls: 6, prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+        versions: [
+          { version_no: 1, one_line: "第一版", role: "wengao", created_at: "2026-10-27 09:00", metrics: {}, changed_fields: null },
+          { version_no: 2, one_line: "第二版", role: "wengao", created_at: "2026-10-27 10:00", metrics: {}, changed_fields: [] },
+        ],
+      },
+    }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    await readyTask(p, { current_version: 2, version_count: 2 });
+    await wait(80);
+    const list = p.$("v-list").innerHTML;
+    assert(G4, "列出第一版", /第一版/.test(list), list.slice(0, 160));
+    assert(G4, "列出第二版", /第二版/.test(list), list.slice(0, 160));
+    assert(G4, "当前版有 on 标记", /class="v on"/.test(list), "没有当前版标记");
+    eq(G4, "版本计数两位补零", p.text("v-count"), "02");
+  } finally { p.close(); }
+});
+
+test("「没比过」和「一个字没变」必须区别对待", async () => {
+  /* changed_fields 三态：null=没比过（不显示）、[]=比过但没变（要明说）、
+     非空=逐字段列。混起来会把"没比过"读成"没改动"。 */
+  const be = makeBackend({
+    list_versions: () => ({
+      ok: true, data: {
+        current: 2, total: null,
+        versions: [
+          { version_no: 1, source: "initial", one_line: "第一版", metrics: {}, changed_fields: null },
+          { version_no: 2, source: "refine", one_line: "第二版", metrics: {}, changed_fields: [] },
+        ],
+      },
+    }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    await readyTask(p, { current_version: 2, version_count: 2 });
+    await wait(80);
+    const list = p.$("v-list").innerHTML;
+    assert(G4, "「没变」被明说出来", /逐字相同|没被落实|一个字没变/.test(list), list);
+    assert(G4, "「没变」用警示样式而非普通样式", /class="w"/.test(list), "没有 .w 标记");
+  } finally { p.close(); }
+});
+
+test("打磨按钮在没填要求时禁用", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p, { can_refine: true });
+    assert(G4, "空要求 → 禁用", p.$("refine-btn").disabled === true, "没有禁用");
+    typeInto(p, p.$("refine-req"), "把第三节压成两段");
+    assert(G4, "有要求 → 解禁", p.$("refine-btn").disabled === false, "仍然禁用");
+  } finally { p.close(); }
+});
+
+test("点打磨把要求原样交给后端，并带上当前版号", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p, { can_refine: true, current_version: 1 });
+    typeInto(p, p.$("refine-req"), "把第三节压成两段");
+    click(p, p.$("refine-btn"));
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "refine_task");
+    assert(G4, "调了 refine_task", !!c, "没调用");
+    eq(G4, "要求原样传过去", c ? c.args[1].requirement : null, "把第三节压成两段");
+    eq(G4, "带上底稿版号", c ? c.args[1].base_version : null, 1);
+  } finally { p.close(); }
+});
+
+test("正在改的时候不让人再点一次", async () => {
+  const p = await loadPage();
+  try {
+    await submitTask(p);
+    p.win.__onTaskUpdate(sampleTask({ id: "t1", status: "refining", refining: true, can_refine: false }));
+    assert(G4, "打磨按钮禁用", p.$("refine-btn").disabled === true, "还能点");
+    assert(G4, "打磨输入框禁用", p.$("refine-req").disabled === true, "还能填");
+  } finally { p.close(); }
+});
+
+test("后台不能改的时候，说清为什么不能改", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p, { can_refine: false, refine_blocked: "这条视频的总结已经发布过了" });
+    const hint = p.text("refine-hint") || "";
+    assert(G4, "把阻塞原因说出来", /发布过/.test(hint), "refine-hint = " + JSON.stringify(hint));
+    assert(G4, "打磨按钮禁用", p.$("refine-btn").disabled === true, "还能点");
+  } finally { p.close(); }
+});
+
+/* ============================================================ 五、发布 */
+
+const G5 = group("发布");
+
+test("评论超过 1000 字时改走笔记通道，而不是禁掉发布", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    typeInto(p, p.$("comment-box"), "字".repeat(1200));
+    /* 勾了确认才该启用——这是防止「内容变了还沿用上一版授权」的闸门。 */
+    p.$("confirm-box").checked = true;
+    p.$("confirm-box").dispatchEvent(new p.win.Event("change", { bubbles: true }));
+
+    const counter = p.text("counter") || "";
+    assert(G5, "计数说明改走笔记", /笔记/.test(p.text("via-hint") || ""), "via-hint = " + p.text("via-hint"));
+    assert(G5, "计数本身显示字数", /1200/.test(counter), "counter = " + counter);
+    assert(G5, "发布按钮仍可用（不是禁用）", p.$("publish-btn").disabled === false, "被禁用了");
+  } finally { p.close(); }
+});
+
+test("没勾确认就不给发", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    typeInto(p, p.$("comment-box"), "一段正常的短评");
+    assert(G5, "有内容但没勾 → 禁用", p.$("publish-btn").disabled === true, "竟然能发");
+
+    p.$("confirm-box").checked = true;
+    p.$("confirm-box").dispatchEvent(new p.win.Event("change", { bubbles: true }));
+    assert(G5, "勾了 → 解禁", p.$("publish-btn").disabled === false, "还是禁用");
+  } finally { p.close(); }
+});
+
+test("换了一版就要求重新勾确认，不能沿用上一版的授权", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p, { current_version: 1 });
+    p.$("confirm-box").checked = true;
+
+    /* 推一条新版：current_version 从 1 变 2。 */
+    p.win.__onTaskUpdate(sampleTask({
+      id: "t1", status: "ready", current_version: 2, version_count: 2,
+      publish_document: "这是第 2 版的发布文本。",
+      summary_json: { one_line: "换了", summary_md: "新正文", key_points: [], role: "wengao" },
+    }));
+    await wait(60);
+
+    assert(G5, "确认框被清掉", p.$("confirm-box").checked === false, "还勾着上一版的确认");
+    assert(G5, "评论框换成了新版内容", /第 2 版/.test(p.$("comment-box").value), p.$("comment-box").value);
+  } finally { p.close(); }
+});
+
+test("点发布把任务、正文、确认位一起交给后端", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    typeInto(p, p.$("comment-box"), "我要发这段。");
+    p.$("confirm-box").checked = true;
+    p.$("confirm-box").dispatchEvent(new p.win.Event("change", { bubbles: true }));
+    click(p, p.$("publish-btn"));
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "publish");
+    assert(G5, "调了 publish", !!c, "没调用");
+    eq(G5, "带上 task_id", c ? c.args[0].task_id : null, "t1");
+    eq(G5, "带上正文", c ? c.args[0].text : null, "我要发这段。");
+    eq(G5, "带上确认位", c ? c.args[0].confirm : null, true);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 六、设置 */
+
+const G6 = group("设置");
+
+test("打开抽屉会去读设置，并填进表单", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    assert(G6, "抽屉已打开", p.$("drawer").classList.contains("on"), "抽屉没开");
+    assert(G6, "读了 get_settings",
+      !!p.backend.calls.find((c) => c.name === "get_settings"), "没调用");
+
+    const out = p.win.collectSettings();
+    assert(G6, "收集出对象", out && typeof out === "object", String(out));
+    eq(G6, "model 值被填进表单", out.llm && out.llm.model, "qwen-test");
+  } finally { p.close(); }
+});
+
+test("关掉发布前确认时，自动带上「我确认要关」的标志", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    p.$("s-gate").checked = false;
+    p.$("s-gate").dispatchEvent(new p.win.Event("change", { bubbles: true }));
+
+    const real = p.win.collectSettings();
+    eq(G6, "带上了 confirm_disable_gate", real.confirm_disable_gate, true);
+    assert(G6, "确认勾选框露出来了", !p.$("gate-ack").classList.contains("hidden"), "还藏着");
+  } finally { p.close(); }
+});
+
+test("保存设置把收集到的对象原样交给后端", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    p.win.saveSettings();
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "save_settings");
+    assert(G6, "调了 save_settings", !!c, "没调用");
+    eq(G6, "带上 llm.model", c ? c.args[0].llm.model : null, "qwen-test");
+  } finally { p.close(); }
+});
+
+test("测试连通性发的是 llm 那一段本身，不再多包一层", async () => {  // 这条来自一个真实 bug：原来是 `call("test_llm", {llm: <那一段>})`，多包了一层。
+  // 后端的 `LlmPatch` 收的就是那一段本身，于是校验报"缺 base_url 与 model"，
+  // 而错误信息指着字段名、不指着多出来的壳，看着像配置写错了。
+  // 当时前端测试一条都没碰过 testLlm，所以 87 项全绿也没发现。
+  const p = await loadPage();
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    await p.win.testLlm();
+    await wait(120);
+
+    const c = p.backend.calls.find((x) => x.name === "test_llm");
+    assert(G6, "调了 test_llm", !!c, "没调用");
+    const arg = c ? c.args[0] : null;
+    assert(G6, "顶层就是 base_url", !!(arg && arg.base_url), "没传 base_url：" + JSON.stringify(arg));
+    assert(G6, "没有多包一层 llm", !(arg && arg.llm), "还带着 llm 这层壳");
+    eq(G6, "模型名跟着一起发了", arg ? arg.model : null, "qwen-test");
+    eq(G6, "结果显示在抽屉里", p.$("d-msg").className.includes("ok"), true);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 六·五、角色选择 */
+
+const G65 = group("角色选择");
+
+test("顶栏有角色 chip，显示的是当前角色名", async () => {
+  const p = await loadPage();
+  try {
+    const chip = p.$("chip-role");
+    assert(G65, "chip 存在", !!chip, "找不到 #chip-role");
+    // 顶栏里跟「设置」并排，顺序在它前面。
+    eq(G65, "chip 的父节点是顶栏", chip.parentElement.className, "top");
+    assert(G65, "显示当前角色名（文稿）",
+      chip.textContent.includes("文稿"), "实际：" + chip.textContent);
+  } finally { p.close(); }
+});
+
+test("点 chip 弹出角色清单，全部角色都在里面", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    assert(G65, "浮层打开了", p.$("role-pop").classList.contains("on"), "没打开");
+
+    const items = p.$("role-list").querySelectorAll("[data-role]");
+    eq(G65, "条目数与角色数一致", items.length, p.backend.state.roles.roles.length);
+    eq(G65, "第一条是 standard", items[0].dataset.role, "standard");
+    // 当前角色那一项要有标记，否则用户看不出自己在哪一档。
+    eq(G65, "当前项被标出来", p.$("role-list").querySelectorAll(".role.on").length, 1);
+    eq(G65, "标的是 wengao",
+      p.$("role-list").querySelector(".role.on").dataset.role, "wengao");
+  } finally { p.close(); }
+});
+
+test("选一个角色：调 set_role、chip 跟着变、浮层关掉", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    p.doc.querySelector('#role-list [data-role="standard"]').click();
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "set_role");
+    assert(G65, "调了 set_role", !!c, "没调用");
+    eq(G65, "传的是对象而不是裸字符串", c ? typeof c.args[0] : "", "object");
+    eq(G65, "带上了 role", c ? c.args[0].role : null, "standard");
+
+    assert(G65, "chip 显示新角色（标准）",
+      p.$("chip-role").textContent.includes("标准"), "实际：" + p.$("chip-role").textContent);
+    assert(G65, "浮层关掉了", !p.$("role-pop").classList.contains("on"), "还开着");
+    assert(G65, "给了提示", p.$("task-msg").className.includes("ok"), "没有成功提示");
+  } finally { p.close(); }
+});
+
+test("选当前那个角色：不白跑一趟后端", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    p.doc.querySelector('#role-list [data-role="wengao"]').click();  // 当前就是 wengao
+    await wait(70);
+    eq(G65, "没有发 set_role",
+      p.backend.calls.filter((x) => x.name === "set_role").length, 0);
+    assert(G65, "浮层还是关掉了", !p.$("role-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+test("换了角色之后保存设置，不会把角色重置回旧值", async () => {
+  /* 这条守的是一个很容易踩的坑：角色选择器搬去顶栏之后，设置抽屉里只剩一个
+     隐藏的 data-path="llm.role"。如果那个隐藏字段没跟着更新，collectSettings()
+     交上去的就是旧值——而 LlmPatch.role 有默认值 "standard"，一旦字段缺席，
+     保存任何别的设置都会把角色悄悄重置。 */
+  const p = await loadPage();
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    p.doc.querySelector('#role-list [data-role="standard"]').click();
+    await wait(90);
+
+    eq(G65, "隐藏字段跟上了", p.$("s-role").value, "standard");
+
+    p.win.openDrawer();
+    await wait(80);
+    p.win.saveSettings();
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "save_settings");
+    assert(G65, "调了 save_settings", !!c, "没调用");
+    eq(G65, "llm.role 是新选的那个", c ? c.args[0].llm.role : null, "standard");
+  } finally { p.close(); }
+});
+
+test("抽屉里已经没有角色下拉框了", async () => {
+  const p = await loadPage();
+  try {
+    // 搬家要搬干净：留一个看得见的下拉框在抽屉里，会出现两个地方都能改角色的局面。
+    eq(G65, "抽屉里没有 select#s-role",
+      p.doc.querySelectorAll('select#s-role').length, 0);
+    eq(G65, "只留一个隐藏字段",
+      p.doc.querySelectorAll('[data-path="llm.role"]').length, 1);
+    eq(G65, "它是 hidden 的",
+      p.$("s-role").type, "hidden");
+  } finally { p.close(); }
+});
+
+test("Esc 与点外面都能关掉角色浮层", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    assert(G65, "先确认开着", p.$("role-pop").classList.contains("on"), "没打开");
+
+    p.doc.dispatchEvent(new p.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(30);
+    assert(G65, "Esc 关掉了", !p.$("role-pop").classList.contains("on"), "还开着");
+
+    p.$("chip-role").click();
+    await wait(40);
+    p.doc.body.click();
+    await wait(30);
+    assert(G65, "点外面也关掉了", !p.$("role-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+/* ============================================================ 七、登录 */
+
+const G7 = group("登录");
+
+test("未登录时点账号位，走二维码流程", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openLogin();
+    await wait(100);
+
+    assert(G7, "弹了登录框", p.$("modal").classList.contains("on"), "没弹");
+    const q = p.backend.calls.find((c) => c.name === "auth_qrcode");
+    assert(G7, "要了二维码", !!q, "没调用 auth_qrcode");
+    assert(G7, "记下了 key", p.S().qrKey === "k1", "qrKey = " + p.S().qrKey);
+    assert(G7, "二维码轮询起了定时器", !!p.S().qrTimer, "没有定时器");
+  } finally { p.close(); }
+});
+
+test("Cookie 不完整时明确拒绝，不发请求", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openLogin();
+    await wait(100);
+    /* 二维码框里还有 Cookie 入口；只填一半就该被拦。 */
+    const ck1 = p.$("ck-1");
+    const ck2 = p.$("ck-2");
+    if (!ck1 || !ck2) return;                       // 这个版本没有 Cookie 入口就跳过
+    const before = p.backend.calls.filter((c) => c.name === "auth_cookie").length;
+
+    ck1.value = "只有 sessdata";
+    ck2.value = "";
+    p.win.submitCookie();
+    await wait(90);
+
+    const after = p.backend.calls.filter((c) => c.name === "auth_cookie").length;
+    eq(G7, "没有发出无效请求", after, before);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 八、字幕 */
+
+const G8 = group("字幕");
+
+test("选字幕后行内显示文件信息，再点一次清掉", async () => {
+  const be = makeBackend({
+    pick_subtitle: () => ({
+      ok: true, data: {
+        cancelled: false, name: "我的字幕.srt", token: "tok1",
+        segments: 128, chars: 2048, encoding: "utf-8", bytes: 4096,
+        first: "00:00:01,000", last: "00:12:30,000",
+      },
+    }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    click(p, p.$("srt-btn"));
+    await wait(90);
+
+    const line = p.text("srt-line") || "";
+    assert(G8, "显示文件名", /我的字幕\.srt/.test(line), "srt-line = " + JSON.stringify(line));
+    assert(G8, "显示段数与字数", /128 段/.test(line) && /2048 字/.test(line), line);
+    eq(G8, "记下 token", p.S().subtitleToken, "tok1");
+
+    /* 再点一次是"清掉"，不该再弹对话框。 */
+    click(p, p.$("srt-btn"));
+    await wait(90);
+    eq(G8, "token 已清", p.S().subtitleToken, null);
+    assert(G8, "给了清除提示", /清除|平台字幕/.test(p.text("srt-line") || ""), p.text("srt-line"));
+  } finally { p.close(); }
+});
+
+/* ============================================================ 九、结构 */
+
+const G9 = group("结构与契约");
+
+test("页面里没有 <input type=file>：桌面版走原生对话框", async () => {
+  const p = await loadPage();
+  try {
+    eq(G9, "没有 file input", p.doc.querySelectorAll('input[type="file"]').length, 0);
+  } finally { p.close(); }
+});
+
+test("每个 call() 用到的名字，后端都必须提供", async () => {
+  const names = new Set();
+  const re = /\bcall\(\s*"([a-z_]+)"/g;
+  let m;
+  while ((m = re.exec(html))) names.add(m[1]);
+
+  const be = makeBackend();
+  const missing = [];
+  for (const n of names) {
+    if (typeof be.api[n] !== "function") missing.push(n);
   }
+  eq(G9, "没有缺失的接口", missing, []);
+  assert(G9, "至少调用了 15 个接口", names.size >= 15, "只找到 " + names.size + " 个");
+});
 
-  // H · 迭代打磨：能不能改、改完确认要不要重来、翻历史版会不会发错东西
-  {
-    const versionRow = (no, source, extra) => Object.assign({
-      version_no: no,
-      source: source,
-      requirement: source === "initial" ? "" : "把第三节展开",
-      role: "standard",
-      created_at: "2026-09-30T21:00:0" + no + "+08:00",
-      one_line: "第 " + no + " 版的一句话",
-      revise_note: source === "refine" ? "展开了第三节，删掉了两处比喻" : "",
-      // 「实际改动」＝本地比对算出来的，和上面那句模型自述是两回事。
-      // 三种状态：null = 没比过（初版 / 回退版）；[] = 比过没变；非空 = 逐字段变了。
-      changed_fields: (source === "initial" || source === "restore") ? null : [{
-        field: "one_line", label: "一句话结论", kind: "text",
-        detail: "47 → 37 字", ratio: 0.48, example: "「分」→「剖」",
-      }],
-      metrics: source === "restore" ? {} : { usage: { calls: no + 1, prompt_tokens: 1000 * no, completion_tokens: 100 * no, total_tokens: 1100 * no, unpriced: 0 }, elapsed: 30 + no, chunks: 2, frames: 12 },
-      current: false,
-    }, extra || {});
+test("HTTP 路由表里的每条路径，后端都真的注册了", async () => {
+  // 桌面版走桥，源码版走这张表。名字拼错在桌面版永远暴露不出来（那条路根本不经过它），
+  // 而源码版会安静地 404 或者更糟——退成默认值（比如 auth_status 坏掉就显示"未登录"）。
+  // 这条把表和后端路由表对起来，改一边忘另一边时当场红。
+  const mainPy = fs.readFileSync(
+    path.join(__dirname, "..", "bili_scribe", "app", "main.py"), "utf8");
 
-    const taskWith = (extra) => Object.assign({
-      id: "t1",
-      bvid: "BV1probe",
-      status: "ready",
-      title: "探针",
-      source_label: "平台 AI 字幕",
-      source_trust: "中",
-      warnings: [],
-      preview_md: "当前版的预览",
-      publish_document: "当前版要发出去的正文",
-      comment_text: "当前版要发出去的正文",
-      current_version: 2,
-      version_count: 2,
-      can_refine: true,
-      refine_blocked: "",
-      live_publish: null,
-      summary_json: { one_line: "当前版一句话", role: "standard", revise_note: "展开了第三节" },
-    }, extra || {});
+  // 后端注册的路由，把 {task_id} 这类占位符换成 `*` 以便比对。
+  const declared = new Set();
+  const routeRe = /@app\.(get|post|put|delete)\("([^"]+)"\)/g;
+  let rm;
+  while ((rm = routeRe.exec(mainPy))) {
+    declared.add(rm[1].toUpperCase() + " " + rm[2].replace(/\{[^}]+\}/g, "*"));
+  }
+  assert(G9, "读到了后端路由", declared.size >= 20, "只读到 " + declared.size + " 条");
 
-    const versionsBody = {
-      current: 2,
-      total: { calls: 5, prompt_tokens: 4000, completion_tokens: 400, reasoning_tokens: 0, total_tokens: 4400, unpriced: 0, untracked: 0 },
-      versions: [versionRow(1, "initial"), versionRow(2, "refine", { current: true })],
+  /* 不解析源码文本，**直接跑表里的 `p(...)` 拿真路径**。
+     用正则猜 '" + encodeURIComponent(x) + "' 拼出来长什么样，改一次写法就得改一次正则，
+     而且猜错了会假绿。这里传几个哑参数（同样是数字 1）调用，把拿到的路径归一化——
+     有几个参数不重要，多传的会被 JS 忽略。 */
+  const p = await loadPage();
+  try {
+    const rows = p.win.eval(`Object.keys(HTTP_ROUTES).map(function (k) {
+      var r = HTTP_ROUTES[k];
+      var path;
+      try { path = r.p(1, 1, 1); } catch (e) { path = "(抛错: " + e.message + ")"; }
+      return { name: k, method: r.m, path: path };
+    })`);
+
+    assert(G9, "表里读到足够多的接口", rows.length >= 20, "只读到 " + rows.length + " 条");
+
+    // 归一化：去掉查询串、把哑参数那几段换成 `*`。
+    const norm = (s) => String(s)
+      .split("?")[0]
+      .replace(/\/(1|undefined|null|NaN)(?=\/|$)/g, "/*");
+
+    const missing = [];
+    for (const e of rows) {
+      if (String(e.path).startsWith("(抛错")) {
+        missing.push(e.name + " 的 p() 跑不起来：" + e.path);
+        continue;
+      }
+      const key = e.method + " " + norm(e.path);
+      if (!declared.has(key)) missing.push(e.name + " → " + key);
+    }
+    eq(G9, "路由表里没有对不上的路径", missing, []);
+
+    // 反向也要查：后端有、表里没有，说明源码版少了一条能力。
+    // `/` 是页面本身，`/api/subtitle/parse` 走裸字节特例（不在表里，但源码版用得到）。
+    const covered = new Set(rows.map((e) => e.method + " " + norm(e.path)));
+    const skip = new Set(["GET /", "POST /api/subtitle/parse"]);
+    const onlyBackend = [...declared].filter((k) => !covered.has(k) && !skip.has(k)).sort();
+    eq(G9, "后端没有漏在表外的接口", onlyBackend, []);
+  } finally { p.close(); }
+});
+
+test("页面里没有内联事件处理器", async () => {
+  const hits = html.match(/\son[a-z]+\s*=\s*"/g) || [];
+  eq(G9, "内联事件处理器数量", hits.length, 0);
+});
+
+test("颜色对比度：正文至少 4.5:1，弱化文字至少 3:1", async () => {
+  const p = await loadPage();
+  try {
+    const cs = p.win.getComputedStyle(p.doc.documentElement);
+    const rgb = (hex) => {
+      const h = hex.replace("#", "");
+      return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    };
+    const lum = (c) => {
+      const a = c.map((v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+    };
+    const ratio = (fg, bg) => {
+      const l1 = lum(rgb(fg)), l2 = lum(rgb(bg));
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
     };
 
-    const makeRoutes = (task, versions) => ({
-      "/api/config": { status: 200, body: baseCfg },
-      "GET /api/task/t1": { status: 200, body: task },
-      "GET /api/task/t1/versions": { status: 200, body: versions || versionsBody },
-      "POST /api/task/t1/refine": { status: 200, body: { task_id: "t1", status: "refining", base_version: 2, reused_prepared: true } },
-      "GET /api/task/t1/versions/1": {
-        status: 200,
-        body: Object.assign(versionRow(1, "initial"), { preview_md: "第 1 版的预览", comment_text: "第1版正文", publish_document: "**第 1 版**" }),
-      },
-      "POST /api/task/t1/versions/1/restore": { status: 200, body: { ok: true, version_no: 3, restored_from: 1, can_refine: true, refine_blocked: "" } },
-    });
+    const text = cs.getPropertyValue("--text").trim();
+    const muted = cs.getPropertyValue("--muted").trim();
+    const bg = cs.getPropertyValue("--bg").trim();
+    assert(G9, "取到了三个颜色变量", !!text && !!muted && !!bg, [text, muted, bg].join(","));
+    if (!text || !muted || !bg) return;
 
-    // H1–H5 · 提交一次迭代
-    {
-      const task = taskWith();
-      const stub = routeFetch(makeRoutes(task));
-      const { document, state, refine, pollTask, renderPreview, updateRefineButton } = await boot(stub);
+    const r1 = ratio(text, bg);
+    assert(G9, "正文对比度 ≥ 4.5", r1 >= 4.5, r1.toFixed(2) + ":1（" + text + " on " + bg + "）");
+    const r2 = ratio(muted, bg);
+    assert(G9, "弱化文字对比度 ≥ 3", r2 >= 3, r2.toFixed(2) + ":1（" + muted + " on " + bg + "）");
 
-      state.taskId = "t1";
-      renderPreview(task);
-      await new Promise((r) => setTimeout(r, 20));
-
-      const btn = document.getElementById("refine-btn");
-      assert("H1 没写要求时按钮是禁用的", btn.disabled === true, String(btn.disabled));
-      document.getElementById("refine-req").value = "把第三节展开";
-      updateRefineButton();
-      assert("H2 写了要求就能改", btn.disabled === false, String(btn.disabled));
-
-      // 模拟"上一版已经过目并勾了确认"——迭代结束后这个勾必须被清掉
-      document.getElementById("confirm-box").checked = true;
-      await refine();
-
-      const posts = stub.seen.filter((s) => s.method === "POST" && s.path === "/api/task/t1/refine");
-      let body = null;
-      try { body = JSON.parse(posts[0].body); } catch (e) { /* 下面的断言会暴露 */ }
-      assert(
-        "H3 提交时带上「我在看第几版」",
-        !!body && body.base_version === 2 && body.requirement === "把第三节展开",
-        JSON.stringify(body)
-      );
-      assert("H4 提交后记下了这一版的底稿版本", state.awaitingRefine === 2, String(state.awaitingRefine));
-      assert(
-        "H5 提交后清空了输入框（否则会以为没提交上，反复点）",
-        document.getElementById("refine-req").value === "",
-        document.getElementById("refine-req").value
-      );
-
-      // 还没出结果时轮询读到的还是旧的 ready：不能就此收工，否则新版永远取不回来
-      const stale = taskWith({ current_version: 2 });
-      stub.seen.length = 0;
-      const fresh = taskWith({ current_version: 3, version_count: 3, publish_document: "改后要发出去的正文", preview_md: "改后的预览", summary_json: { role: "standard", revise_note: "展开了第三节，删掉了两处比喻" } });
-      let served = stale;
-      const fetch2 = async (path, options) => {
-        const method = (options && options.method) || "GET";
-        if (method === "GET" && path === "/api/task/t1") {
-          return { ok: true, status: 200, text: async () => JSON.stringify(served) };
-        }
-        if (method === "GET" && path === "/api/task/t1/versions") {
-          return { ok: true, status: 200, text: async () => JSON.stringify({ current: served.current_version, total: versionsBody.total, versions: versionsBody.versions }) };
-        }
-        return { ok: false, status: 404, text: async () => JSON.stringify({ detail: "no route" }) };
-      };
-      const boot2 = await boot(fetch2);
-      boot2.state.taskId = "t1";
-      boot2.state.awaitingRefine = 2;
-      boot2.state.currentVersion = 2;
-      boot2.document.getElementById("confirm-box").checked = true;
-      await boot2.pollTask();
-      assert(
-        "H6 新那版还没出来时继续等，不当作已完成",
-        boot2.state.awaitingRefine === 2 && boot2.document.getElementById("confirm-box").checked === true,
-        "awaitingRefine=" + boot2.state.awaitingRefine
-      );
-
-      served = fresh;
-      await boot2.pollTask();
-      assert(
-        "H7 新版出来后确认勾选被重置（内容变了，旧确认不作数）",
-        boot2.document.getElementById("confirm-box").checked === false,
-        String(boot2.document.getElementById("confirm-box").checked)
-      );
-      assert(
-        "H8 发布框换成新版正文",
-        boot2.document.getElementById("comment-box").value === "改后要发出去的正文",
-        boot2.document.getElementById("comment-box").value
-      );
-      assert(
-        "H9 把模型说的改动说明摆出来",
-        /展开了第三节/.test(boot2.document.getElementById("refine-msg").textContent),
-        boot2.document.getElementById("refine-msg").textContent
-      );
-      assert("H10 收工后清掉等待标记", boot2.state.awaitingRefine === null);
+    // --dim 是第三档，用在底栏、说明文字上。曾经是 #4A5250，对 bg 只有 2.39:1，
+    // 在深色底上基本看不见（用户报的「这一行字可见度太低」就是它）。
+    // 原来这条测试只查 --text 和 --muted，所以一直没拦住。
+    const dim = cs.getPropertyValue("--dim").trim();
+    const panel = cs.getPropertyValue("--panel").trim();
+    assert(G9, "取到了 --dim 与 --panel", !!dim && !!panel, [dim, panel].join(","));
+    if (dim && panel) {
+      const r3 = ratio(dim, bg);
+      assert(G9, "最弱一档文字对比度 ≥ 3（bg 上）", r3 >= 3,
+        r3.toFixed(2) + ":1（" + dim + " on " + bg + "）");
+      const r4 = ratio(dim, panel);
+      assert(G9, "最弱一档文字对比度 ≥ 3（panel 上）", r4 >= 3,
+        r4.toFixed(2) + ":1（" + dim + " on " + panel + "）");
     }
 
-    // H11–H14 · 不能改的时候要说清为什么
-    {
-      const reasons = [
-        ["已发布", "这条视频的总结已经发出去了（撤回前不能再改）。要改得先撤回。"],
-        ["缓存失效", "这条视频的素材缓存已经失效（程序重启过就会这样）。重新跑一次。"],
-      ];
-      for (const [label, why] of reasons) {
-        const stub = routeFetch(makeRoutes(taskWith({ can_refine: false, refine_blocked: why })));
-        const { document, state, renderPreview } = await boot(stub);
-        state.taskId = "t1";
-        renderPreview(taskWith({ can_refine: false, refine_blocked: why }));
-        await new Promise((r) => setTimeout(r, 20));
-
-        assert("H11 " + label + "时按钮禁用", document.getElementById("refine-btn").disabled === true);
-        assert(
-          "H12 " + label + "时把原因显示出来",
-          document.getElementById("refine-blocked").style.display === "block" &&
-            document.getElementById("refine-blocked").innerHTML.includes(why.slice(0, 12)),
-          document.getElementById("refine-blocked").innerHTML
-        );
-        assert("H13 " + label + "时输入框也禁用", document.getElementById("refine-req").disabled === true);
+    // 光把 --dim 调亮还不够：如果某个该读的类仍然直接用 var(--dim)，
+    // 它就永远停在最低那一档。这里逐条确认哪些类不许用它。
+    const mustNotUseDim = [".c", ".vd", ".ft .t", ".v .act"];
+    const offenders = [];
+    for (const sheet of Array.from(p.doc.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules || [])) {
+        const sel = rule.selectorText || "";
+        const decl = rule.style && rule.style.getPropertyValue("color");
+        if (!decl || !/var\(\s*--dim\s*\)/.test(decl)) continue;
+        for (const banned of mustNotUseDim) {
+          if (sel.split(",").map((s) => s.trim()).includes(banned)) {
+            offenders.push(banned + " → " + decl.trim());
+          }
+        }
       }
     }
+    eq(G9, "该读的类没有用最弱那一档颜色", offenders, []);
+  } finally { p.close(); }
+});
 
-    // H15–H19 · 版本列表与翻看历史版
-    {
-      const stub = routeFetch(makeRoutes(taskWith()));
-      const { document, state, renderPreview, showVersion, viewCurrent, restoreVersion } = await boot(stub);
-      state.taskId = "t1";
-      renderPreview(taskWith());
-      await new Promise((r) => setTimeout(r, 30));
+test("超限提示不只靠颜色，有文字说明", async () => {
+  const p = await loadPage();
+  try {
+    await readyTask(p);
+    typeInto(p, p.$("comment-box"), "字".repeat(1200));
+    const via = p.text("via-hint") || "";
+    assert(G9, "有文字说明走笔记通道", /笔记|超/.test(via), "via-hint = " + JSON.stringify(via));
+  } finally { p.close(); }
+});
 
-      assert(
-        "H15 版本列表把两版都列出来",
-        document.getElementById("version-list").innerHTML.includes("第 1 版") &&
-          document.getElementById("version-list").innerHTML.includes("第 2 版"),
-        document.getElementById("version-list").innerHTML.slice(0, 80)
-      );
-      assert(
-        "H16 当前版有标记、历史版有入口",
-        document.getElementById("version-list").innerHTML.includes("当前") &&
-          document.getElementById("version-list").innerHTML.includes("showVersion(1)"),
-        document.getElementById("version-list").innerHTML.slice(0, 160)
-      );
-      assert(
-        "H17 累计消耗显示在最上面那行",
-        /合计 4,400 tokens/.test(document.getElementById("usage-line").textContent),
-        document.getElementById("usage-line").textContent
-      );
-      assert(
-        "H18 版本号显示出来了",
-        /第 2 版/.test(document.getElementById("version-badge").textContent),
-        document.getElementById("version-badge").textContent
-      );
+/* ============================================================ 执行 */
 
-      await showVersion(1);
-      assert(
-        "H19 翻历史版只读：发布区被收起来",
-        document.getElementById("publish-block").style.display === "none" &&
-          document.getElementById("refine-block").style.display === "none",
-        document.getElementById("publish-block").style.display + "/" + document.getElementById("refine-block").style.display
-      );
-      assert("H20 历史版预览换成了那一版", document.getElementById("preview-md").textContent === "第 1 版的预览");      assert(
-        "H21 历史版有回到当前的出口，也说清了发出去的永远是当前版",
-        document.getElementById("history-note").innerHTML.includes("viewCurrent()") &&
-          document.getElementById("history-note").innerHTML.includes("永远是当前版"),
-        document.getElementById("history-note").innerHTML.slice(0, 120)
-      );
-      assert("H22 翻历史版时不能再改", document.getElementById("refine-btn").disabled === true);
+(async function main() {
+  const t0 = Date.now();
+  let lastGroup = "";
 
-      viewCurrent();
-      assert(
-        "H23 回到当前版后发布区恢复、预览回到当前版",
-        document.getElementById("publish-block").style.display === "" &&
-          document.getElementById("preview-md").textContent === "当前版的预览",
-        document.getElementById("preview-md").textContent
-      );
-
-      // 回退：追加一版，不动已有版本
-      await restoreVersion(1);
-      const restorePosts = stub.seen.filter((s) => s.path === "/api/task/t1/versions/1/restore");
-      assert("H24 回退走的是 restore 接口", restorePosts.length === 1, JSON.stringify(stub.seen.map((s) => s.method + " " + s.path)));
-      assert(
-        "H25 回退的回执说明了没有消耗",
-        /没有花任何模型调用/.test(document.getElementById("refine-msg").textContent),
-        document.getElementById("refine-msg").textContent
-      );
+  for (const c of CASES) {
+    if (only && !c.name.includes(only)) continue;
+    const before = results.length;
+    try {
+      await c.fn();
+    } catch (e) {
+      const g = results.length > before ? results[results.length - 1].group : "(未分组)";
+      results.push({
+        group: g, name: c.name, ok: false,
+        detail: (e && e.stack) || String(e),
+      });
     }
-
-    // H26–H27 · 离线与"手改过正文"的提醒
-    {
-      const { document } = await boot(async () => { throw new TypeError("Failed to fetch"); });
-      assert("H26 离线时再改一版也是禁用的", document.getElementById("refine-btn").disabled === true);
-    }
-    {
-      const stub = routeFetch(makeRoutes(taskWith()));
-      const { document, state, renderPreview, updateRefineHint } = await boot(stub);
-      state.taskId = "t1";
-      renderPreview(taskWith());
-      await new Promise((r) => setTimeout(r, 20));
-      document.getElementById("comment-box").value = "我自己手改过的正文";
-      // 桩里没有内联事件（oninput 是 HTML 属性，不由脚本定义），所以直接调它的处理函数。
-      // 属性本身是否接线由下面的静态断言看着。
-      updateRefineHint();
-      assert(
-        "H27 手改过正文时提醒会被覆盖（迭代基于的是模型那一版）",
-        /手改/.test(document.getElementById("refine-hint").textContent),
-        document.getElementById("refine-hint").textContent
-      );
-    }
-
-    // H28–H32 · 「实际改动」：本地比对的结果，和模型自述并排显示
-    //
-    // 这条守的是一个真实事故：模型写着"其余部分一个字都别动"（说明里也这么写），
-    // 而 key_points 六条里有一条被实质改写了。自述不可靠，所以界面上必须同时有
-    // 一行**算出来的**东西。三种状态要分得开，混了就等于替模型圆谎。
-    {
-      const { document, state, renderPreview } = await boot(routeFetch(makeRoutes(taskWith())));
-      state.taskId = "t1";
-      renderPreview(taskWith());
-      await new Promise((r) => setTimeout(r, 30));
-      const html = document.getElementById("version-list").innerHTML;
-
-      assert(
-        "H28 改动版把「实际改动」逐字段列出来（带相似度）",
-        html.includes("实际改动：一句话结论（47 → 37 字，相似度 0.48）"),
-        html.slice(0, 260)
-      );
-      assert(
-        "H29 具体差异放在 title 里（鼠标停上去能看到）",
-        html.includes('title="一句话结论：「分」→「剖」"'),
-        (html.match(/title="[^"]*"/) || ["（没有 title）"])[0]
-      );
-      assert(
-        "H30 没比过的不显示这一行（初版只有一条实际改动）",
-        (html.split("实际改动").length - 1) === 1,
-        "出现次数 " + (html.split("实际改动").length - 1)
-      );
-      assert(
-        "H31 模型自述与本地比对并排显示，谁也不冒充谁",
-        html.includes("改动说明：展开了第三节") && html.includes("实际改动："),
-        html.slice(0, 320)
-      );
-    }
-    {
-      // 单独一版：逐字相同（[]）与回退（null）必须说不同的话
-      const versions = {
-        current: 3,
-        total: versionsBody.total,
-        versions: [
-          versionRow(1, "initial"),
-          versionRow(2, "refine", { changed_fields: [] }),          // 比过：一个字没变
-          versionRow(3, "restore", { current: true }),              // 没比：回退不是"改"
-        ],
-      };
-      const { document, state, renderPreview } = await boot(routeFetch(makeRoutes(taskWith(), versions)));
-      state.taskId = "t1";
-      renderPreview(taskWith());
-      await new Promise((r) => setTimeout(r, 30));
-      const html = document.getElementById("version-list").innerHTML;
-
-      assert(
-        "H32 逐字相同时说清是「要求没被落实」",
-        html.includes("无 —— 和上一版逐字相同（要求没被落实）"),
-        html.slice(0, 260)
-      );
-      assert(
-        "H33 回退版不显示字段级 diff（它没有「改」这回事）",
-        (html.split("实际改动").length - 1) === 1,
-        "出现次数 " + (html.split("实际改动").length - 1)
-      );
-      assert(
-        "H34 没有差异可展开时，那个开关根本不出现（不给假入口）",
-        document.getElementById("diff-toggle-row").style.display === "none",
-        document.getElementById("diff-toggle-row").style.display
-      );
-    }
-
-    // H35–H38 · 「展开全部差异」开关
-    //
-    // 为什么要有这个开关：具体差异默认只放在 title 里（列表才好扫），但**悬停是个
-    // 极容易被忽略的交互**——而"改成了什么"恰恰是判断这次改动能不能接受的唯一依据。
-    // 只放 title 就等于这个功能对不悬停的人不存在。
-    {
-      const stub = routeFetch(makeRoutes(taskWith()));
-      const { document, state, renderPreview, toggleDiffs, renderVersionList } = await boot(stub);
-      state.taskId = "t1";
-      renderPreview(taskWith());
-      await new Promise((r) => setTimeout(r, 30));
-      const html = () => document.getElementById("version-list").innerHTML;
-      const btn = () => document.getElementById("diff-toggle");
-
-      assert(
-        "H35 有差异时出现开关，默认收起（细节不铺在列表里）",
-        document.getElementById("diff-toggle-row").style.display !== "none" &&
-          btn().textContent === "展开全部差异" &&
-          !html().includes("例 · "),
-        btn().textContent + " / 例出现 " + (html().split("例 · ").length - 1) + " 次"
-      );
-
-      toggleDiffs();
-      assert(
-        "H36 点开后把具体差异铺进列表",
-        html().includes("例 · 一句话结论：「分」→「剖」"),
-        html().slice(0, 300)
-      );
-      assert("H37 按钮文字跟着改成「收起差异」", btn().textContent === "收起差异", btn().textContent);
-
-      toggleDiffs();
-      assert(
-        "H38 再点一下收回去，回到只看字段名",
-        !html().includes("例 · ") && btn().textContent === "展开全部差异",
-        btn().textContent
-      );
-
-      // 每迭代一版都会重新拉一次版本列表。开关状态存在 state 里，所以刷新不该把它
-      // 打回去——否则每次改完一版都得重新点开，等于没有这个开关。
-      toggleDiffs();
-      renderVersionList();
-      assert(
-        "H39 刷新版本列表后仍保持展开（不然每改一版就白展开了）",
-        html().includes("例 · ") && btn().textContent === "收起差异",
-        btn().textContent + " / 例出现 " + (html().split("例 · ").length - 1) + " 次"
-      );
+    if (results.length === before) {
+      results.push({ group: "(未分组)", name: c.name, ok: false, detail: "用例没有产生任何断言" });
     }
   }
 
-  report();
-}
+  let pass = 0, fail = 0;
+  const failures = [];
 
-function report() {
-  let bad = 0;
   for (const r of results) {
-    if (!r.ok) bad++;
-    console.log((r.ok ? "[OK ] " : "[FAIL] ") + r.name + (r.detail ? "  → " + r.detail : ""));
+    if (r.group !== lastGroup) {
+      console.log("\n── " + r.group + " " + "─".repeat(Math.max(0, 50 - r.group.length)));
+      lastGroup = r.group;
+    }
+    if (r.ok) {
+      pass++;
+      console.log("  ✓ " + r.name);
+    } else {
+      fail++;
+      failures.push(r);
+      console.log("  ✗ " + r.name);
+    }
   }
-  console.log("-".repeat(58));
-  console.log(`前端测试 ${results.length - bad}/${results.length} 通过`);
-  process.exit(bad ? 1 : 0);
-}
 
-main();
+  if (failures.length) {
+    console.log("\n失败详情：");
+    for (const f of failures) {
+      console.log("\n  [" + f.group + "] " + f.name);
+      console.log("    " + String(f.detail).split("\n").join("\n    "));
+    }
+  }
+
+  console.log("\n" + "═".repeat(58));
+  console.log("前端测试：" + pass + " 通过 / " + fail + " 失败 / 共 " + results.length
+    + " 项 · " + (Date.now() - t0) + "ms");
+  console.log("═".repeat(58));
+  process.exit(fail ? 1 : 0);
+})();

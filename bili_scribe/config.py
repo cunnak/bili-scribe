@@ -158,6 +158,16 @@ class AppConfig:
     def key_path(self) -> str:
         return _expand(self.storage.key_path)
 
+    @property
+    def notes_dir(self) -> str:
+        """预读笔记缓存目录。
+
+        挂在数据库旁边而不是数据库里：缓存可以整个删掉，任务历史不可以，两者的
+        生命周期不该绑在一起。用 db_path 的父目录推导而不是新增配置项——多一个
+        配置键就多一处「改了一个忘了另一个」的机会，而这里没有需要可调的理由。
+        """
+        return str(Path(self.db_path).parent / "notes-cache")
+
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> "AppConfig":
         """从 YAML 装载配置。字段缺失时退回 dataclass 默认值。

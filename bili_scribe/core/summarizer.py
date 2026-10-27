@@ -13,7 +13,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..config import AppConfig
 from ..infra.llm import LlmClient
@@ -21,6 +21,9 @@ from . import frames as frames_mod
 from . import roles
 from .collector import Bundle
 from .resolver import format_duration
+
+if TYPE_CHECKING:  # pragma: no cover - 只为类型标注，运行时不导入
+    from ..infra.notecache import NoteCache
 
 MAX_CHUNKS = 8
 
@@ -187,10 +190,15 @@ class PreparedMaterial:
     单独成对象，是为了让「预读」成为一次**可缓存、可复用的独立步骤**。
     迭代打磨时把它喂回去，就能跳过整段预读——实测它占一次 4 小时视频总结
     38% 的输入（32,663 / 86,428 tokens）。
+
+    `cached` 记的是「这份笔记是不是从磁盘缓存里拿的」。它只影响账单上怎么写，
+    不影响产出——但必须记，否则「这一版为什么只花了 55k」在数据里看不出来，
+    会被误当成模型变便宜了。
     """
 
     body: str
     chunks: int = 1
+    cached: bool = False
 
 
 @dataclass
@@ -377,19 +385,41 @@ def prepare_material(
     llm: LlmClient,
     cfg: AppConfig,
     progress=None,
+    cache: "NoteCache | None" = None,
 ) -> PreparedMaterial:
     """把素材整理成「可以直接喂给归约」的正文。长素材在这里做分段预读。
 
     这一步被单独抽出来，是因为它同时满足两个条件：**最贵**、**最值得复用**。
     4 小时视频的 7 段预读占一次总结 38% 的输入；而它只依赖素材，不依赖角色或
     修改要求——也就是说，同一份素材迭代多少次，它就只需要跑一次。
+
+    传了 cache 就先查磁盘：命中直接返回，一次模型调用都不发。命中的场景是
+    「同一个视频重开了一个任务」——账本里同一个 bvid 被跑两遍时，第二遍的
+    13 万 prompt tokens 全是白付的。
     """
     notify = progress or (lambda _stage, _message: None)
     llm_cfg = cfg.llm
     body = bundle.body or ""
 
     if len(body) <= llm_cfg.max_input_chars:
+        # 短素材不做预读：这就是恒等变换，缓存它只会把整段素材抄一份到磁盘上。
         return PreparedMaterial(body=body, chunks=1)
+
+    recipe = {
+        "max_input_chars": llm_cfg.max_input_chars,
+        "chunk_size": llm_cfg.chunk_size,
+        "chunk_overlap": llm_cfg.chunk_overlap,
+    }
+
+    key = ""
+    if cache is not None:
+        key = cache.make_key(body, bundle.source_label, recipe, MAP_SYSTEM)
+        hit = cache.get(key)
+        if hit is not None:
+            notify("mapping", f"复用已存的预读笔记（{hit['chunks']} 段，跳过预读）")
+            return PreparedMaterial(
+                body=hit["body"], chunks=hit["chunks"], cached=True
+            )
 
     pieces = _split(body, llm_cfg.chunk_size, llm_cfg.chunk_overlap)
     chunks = len(pieces)
@@ -417,6 +447,16 @@ def prepare_material(
     budget = llm_cfg.max_input_chars * 2
     if len(merged) > budget:
         merged = merged[:budget] + "\n…（笔记已截断）"
+
+    if cache is not None and key:
+        # 只有真的跑了预读才写。走到这里说明上面没命中，所以写进去的一定是
+        # 这次新付过钱的东西。
+        cache.put(
+            key,
+            merged,
+            chunks,
+            meta={"source_label": bundle.source_label, "title": bundle.title[:120]},
+        )
     return PreparedMaterial(body=merged, chunks=chunks)
 
 
@@ -429,6 +469,7 @@ def summarize(
     frameset: frames_mod.FrameSet | None = None,
     prepared: PreparedMaterial | None = None,
     refinement: Refinement | None = None,
+    cache: "NoteCache | None" = None,
 ) -> Summary:
     """role_key 为单次任务覆盖角色；不传则用配置里的默认角色。
 
@@ -461,7 +502,9 @@ def summarize(
     # 一些笔记就会超限，于是被当成新素材**又预读一遍**。那是二次压缩，信息会在
     # 没人察觉的情况下再掉一层。所以这里只认「有没有传 prepared」。
     material = (
-        prepared if prepared is not None else prepare_material(bundle, llm, cfg, progress)
+        prepared
+        if prepared is not None
+        else prepare_material(bundle, llm, cfg, progress, cache=cache)
     )
     body = material.body
     chunks = material.chunks

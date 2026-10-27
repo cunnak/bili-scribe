@@ -12,6 +12,8 @@ __pycache__/
 .venv/
 venv/
 uvicorn.log
+# 桌面版 --windowed 下没有控制台，日志写在 exe 旁边（或临时目录）
+bili-scribe.log
 
 # 打包产物与编辑器目录
 dist/
@@ -19,8 +21,14 @@ build/
 *.spec
 .idea/
 .vscode/
+node_modules/
 .pytest_cache/
 
 # 在仓库目录里运行 gh 时它会把自己的状态写到这里（device-id 之类）。
 # 不是项目内容，但会一直挂在 git status 里，所以挡掉。
 .local/
+
+# 实机截图里有真实 UID、用户名和观看记录，不进仓库。
+# 验收照常生成本地文件，只是不提交——样张（docs/design/style-probe*）用的是虚构数据，可以留。
+docs/design/app-exe.png
+docs/design/app-shot-*.png

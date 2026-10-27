@@ -1246,10 +1246,20 @@ def _subtitle_parse_offload() -> str:
     我把话说明白——它测的是**实现方式**，不是行为。原因是「事件循环有没有
     被阻塞」在单进程测试里很难稳定观测（要精确构造并发与时序，容易 flaky），
     而源码守卫能挡住大部分退化场景：有人为了简洁把它改回直接调用。
+
+    ⚠️ 2026-10-27 更新断言：业务逻辑搬进 `service.py` 之后，线程池包的是
+    **整个 `service.parse_subtitle`**（解析 + 落盘一次切换），而不是分别包两步。
+    这比原来更保险——中间那次 await 会让出事件循环，而现在是零个 await。
+    所以断言从「匹配 srt_mod.parse_bytes」改成「匹配 service.parse_subtitle」，
+    并补一条：它必须是**同步**函数。如果哪天有人把它写成 `async def`，
+    `run_in_threadpool` 会立刻返回一个协程、真正的解析跑在事件循环线程上，
+    阻塞照旧——而那一步从源码上看是看不出来的，所以必须显式钉住。
     """
+    import inspect as _inspect
     import re as _re
     import time
 
+    from bili_scribe.app.service import Service
     from bili_scribe.core import srt as srt_mod
 
     src = (PROJECT / "bili_scribe" / "app" / "main.py").read_text(encoding="utf-8")
@@ -1257,11 +1267,16 @@ def _subtitle_parse_offload() -> str:
     assert m, "找不到 api_parse_subtitle —— 接口改名了？这条守卫需要跟着更新"
     body = m.group(0)
 
-    assert "run_in_threadpool(srt_mod.parse_bytes" in body, (
-        "解析没有走线程池：它会阻塞事件循环，让其他请求（含任务进度轮询）一起卡住"
+    assert "run_in_threadpool(service.parse_subtitle" in body, (
+        "解析没有整体交给线程池：它会阻塞事件循环，让其他请求（含任务进度轮询）一起卡住"
     )
-    assert "run_in_threadpool(uploads.save" in body, "落盘没有走线程池（同样是同步 IO）"
-    assert "= srt_mod.parse_bytes(raw)" not in body, "存在绕过线程池的同步直调"
+    assert "parse_bytes(" not in body and "uploads.save(" not in body, (
+        "路由里直接调了解析或落盘——它们必须留在被线程池包住的那一侧"
+    )
+    assert not _inspect.iscoroutinefunction(Service.parse_subtitle), (
+        "Service.parse_subtitle 不能是 async：run_in_threadpool 会把协程原样返回，"
+        "真正的同步解析于是在事件循环线程上跑，阻塞照旧且看不出来"
+    )
 
     # 复杂度守卫：解析应当是线性的。造 4 万条，上界给得很宽——
     # 这条防的是「有人引入 O(n^2) 写法」，不是卡性能指标。
@@ -1326,40 +1341,42 @@ def _upload_entry_visible() -> str:
         la, lb = lum(a), lum(b)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
-    # 1) 入口必须是 label.file-btn 的按钮形态，且配套的 input 还在（点了要有用）
-    label = re.search(r"<label[^>]*for=\"srt-file\"[^>]*>", html)
-    assert label, "找不到关联 srt-file 的 label —— 上传入口没了"
-    assert "file-btn" in label.group(0), (
-        "上传入口退回了原生控件形态（缺 file-btn）——"
-        "那正是上次「看不见」的成因"
+    # 1) 入口必须是真按钮，不是原生控件
+    btn = re.search(r"<button[^>]*id=\"srt-btn\"[^>]*>", html)
+    assert btn, "找不到 id=srt-btn 的按钮 —— 上传入口没了"
+    assert "onclick" not in btn.group(0), (
+        "按钮不该用内联 onclick 接线（脚本在末尾统一绑定），"
+        "两处都接会让一次点击触发两次"
     )
-    assert re.search(r"<input[^>]*id=\"srt-file\"", html), "文件 input 丢了，点按钮也没用"
 
-    # 2) 按钮自身必须与页面底色拉开差距，字也要看得清
-    rule = re.search(r"\.file-btn\s*\{([^}]*)\}", html)
-    assert rule, "缺 .file-btn 的样式规则"
+    # 2) 桌面端走的是原生文件对话框，所以页面上不该再有 <input type=file>：
+    #    留着它等于留着一个点了没用、或者走另一套代码的假入口。
+    assert not re.search(r"<input[^>]*type=\"file\"", html), (
+        "页面里还有原生 file input —— 桌面端选文件走的是 pick_subtitle 的"
+        "系统对话框，两套入口并存会有一套是坏的"
+    )
+    assert "pick_subtitle" in html, "按钮没有接到 pick_subtitle，点了不会有反应"
+
+    # 3) 按钮的字必须与页面底色拉开差距，否则「在但看不见」会重演
+    rule = re.search(r"\.btn2\s*\{([^}]*)\}", html)
+    assert rule, "缺 .btn2 的样式规则"
     body = rule.group(1)
-    bg = re.search(r"background:\s*([^;]+);", body)
     fg = re.search(r"color:\s*([^;]+);", body)
-    assert bg and fg, f".file-btn 必须显式写 background 与 color：{body.strip()}"
+    assert fg, f".btn2 必须显式写 color：{body.strip()}"
 
-    c_page = contrast(bg.group(1), "var(--bg)")
-    c_text = contrast(fg.group(1), bg.group(1))
+    c_page = contrast(fg.group(1), "var(--bg)")
     assert c_page >= 3, (
-        f"上传按钮与页面底色的对比度只有 {c_page:.2f}:1，低于 3:1 —— 会看不见。"
+        f"字幕入口与页面底色的对比度只有 {c_page:.2f}:1，低于 3:1 —— 会看不见。"
         f"（上次就是这个数太低导致的反馈）"
     )
-    assert c_text >= 3, f"按钮文字对比度只有 {c_text:.2f}:1，偏低"
 
-    # 3) 原生控件不该再拿"接近底色"的变量去描边（防回归）
-    legacy = re.search(r"input\[type=file\]\s*\{([^}]*)\}", html)
-    if legacy:
-        assert "border" not in legacy.group(1), (
-            "原生 file input 又被上了边框样式 —— 它现在是视觉隐藏的，"
-            "给它上样式会让「看不见」的问题以另一种形式回来"
-        )
+    # 4) 页面不能自己再维护一份「在跑」状态：多一份就多一处会不一致
+    assert "isRunning()" in html and "function isRunning" in html, (
+        "提交按钮没有用 isRunning() 从任务状态推「在跑」，"
+        "说明又另外存了一份状态"
+    )
 
-    return f"入口为按钮形态；对比度 页面 {c_page:.2f}:1、文字 {c_text:.2f}:1"
+    return f"入口为按钮形态且接 pick_subtitle；按钮文字对比度 {c_page:.2f}:1"
 
 
 def _refine_reuses_prepared() -> str:
@@ -1694,6 +1711,153 @@ def _llm_usage() -> str:
     return (
         f"两次调用记 {u['calls']} 次、输入 {u['prompt_tokens']} / 输出 {u['completion_tokens']} "
         f"tokens，{u['unpriced']} 次无用量被单列；实例之间互不污染；汇总跳过回退版"
+    )
+
+
+def _llm_transient_retry() -> str:
+    """瞬时断链要重试，真故障不该重试。
+
+    这是这条线路上的真实故障：走代理请求 aihubmix 时，对端在 TLS 握手或读响应
+    的中途直接把连接掐掉，报
+        SSLError: SSL: UNEXPECTED_EOF_WHILE_READING EOF occurred in violation of protocol
+    或 ProxyError('Unable to connect to proxy', RemoteEndClosed(...))
+    抖动时长只有 0.1–0.3 秒，但一次就足以让一整版素材白跑几万 token。
+
+    边界的另一半同样重要：**只有"下一轮可能不一样"的错误才值得重试**。
+      · 超时——已经等满一整轮 timeout_seconds，再等两轮只是把 5 分钟变成 15 分钟；
+      · HTTP 4xx/5xx——响应体里已经写明原因，盲目重试是白烧额度；
+      · 代理端口没开（连接被拒）——重试一百次也一样，该做的是让人去改配置。
+    所以这里把"重试"和"不重试"两侧都钉住，而不是只测能救回来的那一半。
+    """
+    import requests
+
+    from bili_scribe.config import LlmConfig
+    from bili_scribe.infra import llm as llm_mod
+    from bili_scribe.infra.llm import LlmClient, LlmError
+
+    # 把退避压到近乎 0：这条用例要测的是"重试了几次"，不是"等了多久"。
+    saved_backoff = llm_mod.RETRY_BACKOFF
+    llm_mod.RETRY_BACKOFF = (0.0, 0.0)
+    msgs = [{"role": "user", "content": "hi"}]
+
+    def make() -> LlmClient:
+        return LlmClient(
+            LlmConfig(
+                api_key="k",
+                model="m",
+                base_url="https://api.example.com/v1",
+                proxy="http://127.0.0.1:7897",
+            )
+        )
+
+    def ssl_eof() -> Exception:
+        # 现场捞回来的原文，不是编的
+        return requests.exceptions.SSLError(
+            "SSL: UNEXPECTED_EOF_WHILE_READING EOF occurred in violation of protocol"
+        )
+
+    class Ok:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "好"}}]}
+
+    try:
+        # ---------- 1. 抖两下、第三次通了：这一版不该报废 ----------
+        calls = {"n": 0}
+
+        def flaky(*args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise ssl_eof()
+            return Ok()
+
+        c = make()
+        c.session.post = flaky
+        notes: list[str] = []
+        assert c.chat(msgs, note=notes.append) == "好", "重试后应当拿到正文"
+        assert calls["n"] == 3, f"应当打 3 次，实际 {calls['n']} 次"
+        assert len(notes) == 2, f"每次重试都该出现在进度里，实际 {notes}"
+        assert "重试" in notes[0], notes
+
+        # ---------- 2. 一直断：报错，并且说清已经重试过 ----------
+        c = make()
+        c.session.post = lambda *a, **k: (_ for _ in ()).throw(ssl_eof())  # noqa: ARG005
+        try:
+            c.chat(msgs)
+        except LlmError as exc:
+            text = str(exc)
+            assert "已自动重试" in text, f"得让人知道不是没努力过：{text}"
+            assert "127.0.0.1:7897" in text, f"得带上当前代理，才改得动：{text}"
+        else:
+            raise AssertionError("一直断还不报错，界面会永远停在'正在改'")
+
+        # ---------- 3. 代理端口没开：一次就够，别假装是抖动 ----------
+        refused = {"n": 0}
+
+        def reject(*args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            refused["n"] += 1
+            raise requests.exceptions.ProxyError(
+                "Cannot connect to proxy.", OSError("Connection refused")
+            )
+
+        c = make()
+        c.session.post = reject
+        try:
+            c.chat(msgs)
+        except LlmError as exc:
+            assert "llm.proxy" in str(exc), f"该让人去改配置：{exc}"
+        else:
+            raise AssertionError("代理连不上还不报错")
+        assert refused["n"] == 1, f"连接被拒重试是白费力气，实际打了 {refused['n']} 次"
+
+        # ---------- 4. 超时不重试 ----------
+        slow = {"n": 0}
+
+        def timeout(*args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            slow["n"] += 1
+            raise requests.exceptions.ReadTimeout("read timed out")
+
+        c = make()
+        c.session.post = timeout
+        try:
+            c.chat(msgs)
+        except LlmError:
+            pass
+        else:
+            raise AssertionError("超时还不报错")
+        assert slow["n"] == 1, f"超时已经很慢了，不该再等两轮，实际打了 {slow['n']} 次"
+
+        # ---------- 5. HTTP 500 不重试（响应体已经说明原因） ----------
+        class Boom:
+            status_code = 500
+            text = "boom"
+
+            def json(self):
+                return {}
+
+        broken = {"n": 0}
+
+        def post_500(*args, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            broken["n"] += 1
+            return Boom()
+
+        c = make()
+        c.session.post = post_500
+        try:
+            c.chat(msgs)
+        except LlmError as exc:
+            assert "500" in str(exc), str(exc)[:120]
+        else:
+            raise AssertionError("HTTP 500 还不报错")
+        assert broken["n"] == 1, f"状态码错误重试也不会变，实际打了 {broken['n']} 次"
+    finally:
+        llm_mod.RETRY_BACKOFF = saved_backoff
+
+    return (
+        "TLS 抖动重试 3 次后成功且进度可见；一直断报错并说明已重试；"
+        "连接被拒 / 超时 / HTTP 500 一律不重试"
     )
 
 
@@ -2072,6 +2236,215 @@ def _prepared_cache_eviction() -> str:
     return "满了先淘汰最久没用的；重存会挪到队尾（不是先进先出）；读不删除"
 
 
+def _note_cache() -> str:
+    """预读笔记的磁盘缓存：地址算得对不对，坏了会不会连累任务。
+
+    这个东西的全部价值在**地址**上。地址漏了某个会影响产出输入的变量，就会
+    「素材没变、配置变了，却拿到旧笔记」——产物静默变形，而且没人会怀疑到缓存
+    头上。反过来，地址里塞多了不影响笔记的变量，本该命中的场合会全部落空，
+    等于白做。两头都要钉住。
+
+    真实账本说明了它存在的理由：`BV1hBnC6ZEug` 被重开成两个独立任务，两次各付
+    约 13 万 prompt tokens 的完整预读，而第二遍本可以一分不花。
+    """
+    import tempfile
+
+    from bili_scribe.infra.notecache import CACHE_VERSION, NoteCache
+
+    tmp = Path(tempfile.mkdtemp())
+    cache = NoteCache(tmp / "notes")
+    body = "第一段笔记" * 200
+    recipe = {"max_input_chars": 24000, "chunk_size": 6000, "chunk_overlap": 400}
+    prompt = "你是素材预读员。"
+
+    # ---------- 1. 地址：该变的必须变 ----------
+    key = NoteCache.make_key(body, "人工字幕", recipe, prompt)
+    assert key == NoteCache.make_key(body, "人工字幕", dict(recipe), prompt), "同样的输入算出了两个地址"
+    assert key != NoteCache.make_key(body, "弹幕", recipe, prompt), (
+        "素材类型没进地址——同一段文字标成弹幕还是字幕，会拿到同一份笔记"
+    )
+    assert key != NoteCache.make_key(body, "人工字幕", dict(recipe, chunk_size=8000), prompt), (
+        "分块大小没进地址——分段边界变了，笔记却还是旧的"
+    )
+    assert key != NoteCache.make_key(body, "人工字幕", recipe, prompt + "补充一句要求"), (
+        "预读提示词没进地址——指令变了还吃旧笔记，产物会静默按旧指令生成"
+    )
+    assert key != NoteCache.make_key(body + "多一个字", "人工字幕", recipe, prompt), "素材内容没进地址"
+
+    # ---------- 2. 地址：不该变的必须不变 ----------
+    # 模型的加入是最容易犯的错：换了模型确实会得到不同笔记，但那是「换模型后
+    # 重新预读」本身该付的钱。把它写进 key 只会让复用率归零。
+    assert NoteCache.make_key(body, "人工字幕", recipe, prompt) == key, "地址不稳定"
+    assert "qwen" not in key and "model" not in key, "地址里混进了模型信息"
+
+    # ---------- 3. 往返 ----------
+    assert cache.get(key) is None, "空缓存不该命中"
+    assert cache.misses == 1 and cache.hits == 0, (cache.hits, cache.misses)
+    cache.put(key, "笔记正文", 7)
+    got = cache.get(key)
+    assert got == {"body": "笔记正文", "chunks": 7}, got
+    assert cache.hits == 1, f"命中没被记上：{cache.hits}"
+    assert (tmp / "notes" / f"{key}.json").exists(), "笔记没落盘"
+
+    # ---------- 4. 坏条目只算未命中，不能让任务挂 ----------
+    (tmp / "notes" / f"{key}.json").write_text("{ 不是 json", encoding="utf-8")
+    assert cache.get(key) is None, "坏掉的条目被当成命中了"
+    (tmp / "notes" / f"{key}.json").write_text('{"v": 1, "body": "x", "chunks": 2}', encoding="utf-8")
+    assert cache.get(key) is None, "格式版本对不上却命中了——旧笔记会污染新产物"
+    (tmp / "notes" / f"{key}.json").write_text(
+        json.dumps({"v": CACHE_VERSION, "body": "", "chunks": 2}), encoding="utf-8"
+    )
+    assert cache.get(key) is None, "空正文被当成有效笔记"
+
+    # ---------- 5. 淘汰：先扔最久没用的，读一次就算「用过」 ----------
+    cache2 = NoteCache(tmp / "evict")
+    for name in ("a", "b", "c"):
+        cache2.put(name, "正文" + name, 2)
+    # 手工把 mtime 拉开：a 最旧，c 最新
+    base = time.time() - 1000
+    for offset, name in enumerate(("a", "b", "c")):
+        path = tmp / "evict" / f"{name}.json"
+        os.utime(path, (base + offset * 100, base + offset * 100))
+    assert cache2.get("a") is not None, "读一次应当让它变成最近用过的"
+    import bili_scribe.infra.notecache as nc
+
+    saved = nc.MAX_ENTRIES
+    nc.MAX_ENTRIES = 2
+    try:
+        cache2.put("d", "正文d", 2)
+    finally:
+        nc.MAX_ENTRIES = saved
+    assert cache2.get("b") is None, "该扔的是最久没用的 b（a 刚被读过）"
+    assert cache2.get("a") is not None and cache2.get("d") is not None
+
+    # ---------- 6. 运维：统计与清空 ----------
+    stats = cache2.stats()
+    assert stats["entries"] == 2, stats
+    assert stats["bytes"] > 0 and stats["dir"].endswith("evict"), stats
+    assert cache2.clear() == 2, "清空应当返回删掉的条数"
+    assert cache2.stats()["entries"] == 0 and cache2.clear() == 0, "清空空目录应当返回 0 而不是报错"
+    assert list((tmp / "evict").glob("*.json")) == [], "清完还有残留"
+
+    return "地址覆盖素材/类型/分块参数/提示词、不含模型；坏条目只算未命中；淘汰按最近使用"
+
+
+def _note_cache_really_saves_tokens() -> str:
+    """端到端：同一份素材跑两次，第二次不该再调预读。
+
+    这条比上面那组更接近它存在的理由。上面测地址算得对，这条测**省下来的钱
+    确实进了口袋**：第一次要 N 次预读调用，第二次一次都不该有。
+    """
+    import tempfile
+
+    from bili_scribe.config import AppConfig
+    from bili_scribe.core import collector, summarizer
+    from bili_scribe.infra.notecache import NoteCache
+
+    tmp = Path(tempfile.mkdtemp())
+    cfg = AppConfig()
+    # 把阈值压小，让素材「显得很长」，从而真的踩到预读分支
+    cfg.llm.max_input_chars = 600
+    cfg.llm.chunk_size = 300
+    cfg.llm.chunk_overlap = 20
+
+    bundle = collector.Bundle(
+        bvid="BVprobe", aid=1, cid=2, page=1, page_count=1,
+        title="探针", desc="", up_name="UP", up_mid=3, duration=600, tname="知识",
+        source_label="人工字幕", source_kind="subtitle", source_trust="human",
+        body="这是一段素材。" * 200,
+    )
+
+    class CountingLlm:
+        """只认预读提示词；别的一律报错——这条不该走到主生成。"""
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            return "笔记" + str(self.calls) + "：" + "摘" * 50
+
+    cache = NoteCache(tmp / "notes")
+
+    first_llm = CountingLlm()
+    first = summarizer.prepare_material(bundle, first_llm, cfg, cache=cache)
+    assert first_llm.calls > 1, f"素材没被切成多段，这条测不到东西：{first_llm.calls}"
+    assert first.chunks == first_llm.calls, (first.chunks, first_llm.calls)
+    assert first.body, "预读没产出正文"
+
+    second_llm = CountingLlm()
+    second = summarizer.prepare_material(bundle, second_llm, cfg, cache=cache)
+    assert second_llm.calls == 0, f"第二次仍然调了 {second_llm.calls} 次预读，笔记没被复用"
+    assert second.body == first.body, "命中缓存拿到的笔记和原来不一致"
+    assert second.chunks == first.chunks, (second.chunks, first.chunks)
+
+    # 短素材不预读，也就不该写缓存（写进去只是占地方）
+    cfg.llm.max_input_chars = 100000
+    short = collector.Bundle(
+        bvid="BVshort", aid=1, cid=2, page=1, page_count=1,
+        title="短", desc="", up_name="UP", up_mid=3, duration=10, tname="知识",
+        source_label="人工字幕", source_kind="subtitle", source_trust="human",
+        body="很短。",
+    )
+    short_llm = CountingLlm()
+    got = summarizer.prepare_material(short, short_llm, cfg, cache=cache)
+    assert short_llm.calls == 0 and got.chunks == 1, (short_llm.calls, got.chunks)
+    assert len(list((tmp / "notes").glob("*.json"))) == 1, "短素材也写了缓存"
+
+    return f"第一次 {first_llm.calls} 次预读 → 第二次 0 次，产物一致"
+
+
+def _shell_settings() -> str:
+    """桌面窗口的 WebView2 开关：右键菜单 + 浏览器快捷键都要打开。
+
+    这是一条**真实用户报障换来的用例**：反馈「粘贴链接无法右键选择粘贴」。
+    查下去是 pywebview 把两样都关了，都在
+    `webview/platforms/edgechromium.py:287-288`，而且都是 `= _state['debug']`：
+
+        settings.AreBrowserAcceleratorKeysEnabled = _state['debug']
+        settings.AreDefaultContextMenusEnabled = _state['debug']
+
+    第一版只补了第二行（右键菜单），用户回来说"还是粘不进去"——因为
+    `AreBrowserAcceleratorKeysEnabled` 是 Ctrl+V 的总开关，漏了它连键盘快捷键
+    都不响应。**这两条必须一起测，只测一条的话，漏掉另一条同样能全绿。**
+
+    这里用假对象记赋值，不启动 GUI：能这样测才可能进常态回归。
+    """
+
+    from bili_scribe.desktop import _apply_shell_settings
+
+    class Recorder:
+        def __init__(self) -> None:
+            object.__setattr__(self, "log", {})
+
+        def __setattr__(self, key: str, value: object) -> None:
+            object.__getattribute__(self, "log")[key] = value
+
+    rec = Recorder()
+    done = _apply_shell_settings(rec)
+    log = rec.log
+
+    # 右键菜单：没有它，右键一片空白，用户以为输入框坏了
+    assert log.get("AreDefaultContextMenusEnabled") is True, "右键菜单没开"
+    # Ctrl+V / Ctrl+C / Ctrl+A 的总开关：漏了这条，粘不进去
+    assert log.get("AreBrowserAcceleratorKeysEnabled") is True, (
+        "浏览器快捷键没开 —— Ctrl+V 会完全没反应，用户报的『粘不进去』就是这个"
+    )
+    # 状态栏留着会在左下角浮出 javascript:void(0) 之类的地址条，不是应用该有的
+    assert log.get("IsStatusBarEnabled") is False, "不该打开状态栏"
+
+    # 打开右键菜单不能顺带放出开发者工具：那是两回事，放出来就等于给窗口
+    # 装了个"查看网页源码/改样式"的后门，对最终用户没有意义。
+    assert "AreDevToolsEnabled" not in log, "不该碰开发者工具开关"
+    assert "IsScriptEnabled" not in log, "不该碰脚本开关"
+    assert "AreDefaultScriptDialogsEnabled" not in log, "不该碰脚本对话框开关"
+
+    # 返回的项名要如实反映设了什么：调用方靠它打日志，日志是打包后唯一的证据
+    assert set(done) == {"AreDefaultContextMenusEnabled", "AreBrowserAcceleratorKeysEnabled"}, done
+
+    return f"设 {len(done)} 项：{' / '.join(done)}；未触碰 DevTools 与脚本开关"
+
+
 def _publish_document() -> str:
     """发布版长文与 Delta 转换。
 
@@ -2137,6 +2510,7 @@ check("二维码缺依赖时的提示", _qr_missing_message)
 check("敏感文件被排除", _sensitive_files_excluded)
 check("思考模型输出预算与自动降级", _llm_thinking)
 check("代理只来自配置、不来自环境变量", _llm_proxy)
+check("瞬时断链重试、真故障不重试", _llm_transient_retry)
 check("全片抽帧", _frames_module)
 check("画面文件的生死", _frames_own_their_dir)
 check("画面接进了总结请求", _frames_wired)
@@ -2147,6 +2521,8 @@ check("上传入口可辨识", _upload_entry_visible)
 check("迭代复用预读", _refine_reuses_prepared)
 check("字段级 diff", _field_diff)
 check("预读缓存的淘汰顺序", _prepared_cache_eviction)
+check("预读笔记的磁盘缓存", _note_cache)
+check("同一份素材跑两次只付一次预读", _note_cache_really_saves_tokens)
 check("版本史落库与回退", _version_history)
 check("token 记账与汇总", _llm_usage)
 check("迭代落库成新一版", _refine_writes_version)
@@ -2154,6 +2530,68 @@ check("迭代要求穿过三轮回", _refine_survives_three_passes)
 check("角色注册表", _roles_registry)
 check("超强思考模式总结的四问与文体纪律", _role_shensi)
 check("发布长文与 Delta 转换", _publish_document)
+check("桌面窗口的右键与快捷键开关", _shell_settings)
+
+
+def _desktop_role_bridge() -> str:
+    """桌面桥要暴露 set_role，且行为与 HTTP 那条路一致。
+
+    网页版和桌面版共用同一份 `index.html`，前端都写 `call("set_role", {...})`：
+    网页版打到 `POST /api/role`，桌面版落到 `DesktopApi.set_role`。**只做一边的话，
+    另一个形态点了没反应，而且从界面上完全看不出来**——这正是"两套入口必须一起测"
+    的典型场合（和右键菜单那两个开关同一类问题）。
+
+    顺带钉住两条：
+    - 未知角色返回 400 且**不**改动配置文件（半路失败不能留下半个状态）
+    - 空请求体走 Pydantic 校验返回 422，而不是炸成 500
+    """
+    import shutil
+    import tempfile
+
+    from bili_scribe.app.service import Service
+    from bili_scribe.config import AppConfig
+    from bili_scribe.desktop import DesktopApi
+
+    tmp = Path(tempfile.mkdtemp(prefix="bs-desk-role-"))
+    try:
+        cfg_path = tmp / "config.yaml"
+        shutil.copy2(PROJECT / "config.example.yaml", cfg_path)
+        cfg = AppConfig.load(cfg_path)
+        cfg.source_path = str(cfg_path)
+        cfg.storage.db_path = str(tmp / "t.db")
+        cfg.storage.key_path = str(tmp / "k.bin")
+        api = DesktopApi(Service(cfg))
+
+        assert hasattr(api, "set_role"), (
+            "DesktopApi 没有 set_role —— 桌面版点角色没反应，网页版却正常"
+        )
+        # 名字以下划线开头的话 pywebview 不会把它暴露给 JS
+        assert not "set_role".startswith("_"), "pywebview 不会暴露下划线开头的方法"
+
+        ok = api.set_role({"role": "xueshu"})
+        assert ok["ok"] is True, ok
+        assert ok["data"]["role"] == "xueshu", ok["data"]
+        assert ok["data"]["passes"] == 3, ok["data"]
+        # 必须真的落盘：只改内存的话重启又变回去，用户会以为选择器是摆设
+        assert AppConfig.load(cfg_path).llm.role == "xueshu", "桌面版没把角色写进配置文件"
+
+        bad = api.set_role({"role": "bogus"})
+        assert bad["ok"] is False, bad
+        assert bad.get("status") == 400, bad
+        assert "bogus" in bad["error"], bad["error"]
+        assert AppConfig.load(cfg_path).llm.role == "xueshu", "被拒绝的请求把角色改坏了"
+
+        empty = api.set_role({})
+        assert empty["ok"] is False, empty
+        assert empty.get("status") == 422, empty
+        assert "role" in empty["error"], f"422 的提示要点出是哪个字段：{empty['error']}"
+
+        return "桌面桥 set_role 可用：写盘 / 400 不改状态 / 422 点出字段"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+check("桌面桥暴露 set_role", _desktop_role_bridge)
 check("报错指出出错的那一行", _error_detail_points_at_the_frame)
 
 
@@ -2513,6 +2951,86 @@ def _settings_api() -> None:
             return "确认后关闭，状态同步到 /api/config"
 
         run("确认后可关闭闸门", _gate_can_be_disabled)
+
+        # —— 角色切换（顶栏那个独立选择器） ——
+        #
+        # 它走的是 POST /api/role，而不是复用 PUT /api/settings：改一个下拉框不该
+        # 让明文 api_key 再在请求体里走一遍。所以这条链路要单独验，包括"真的写盘"
+        # ——只改内存的话，重启后会悄悄变回旧角色，用户会以为选择器坏了。
+
+        def _role_switch() -> str:
+            before = requests.get(base + "/api/config", timeout=10).json()["llm"]["role"]
+            r = requests.post(base + "/api/role", json={"role": "xueshu"}, timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            body = r.json()
+            assert body["role"] == "xueshu", body
+            assert body["name"], f"没返回可读名字：{body}"
+            assert body["passes"] == 3, f"xueshu 是三轮回，实际 passes={body['passes']}"
+
+            pub = requests.get(base + "/api/config", timeout=10).json()
+            assert pub["llm"]["role"] == "xueshu", pub["llm"]["role"]
+            # 关键：必须落到磁盘上。AppConfig.load 是全新解析一遍文件。
+            reloaded = AppConfig.load(cfg_path)
+            assert reloaded.llm.role == "xueshu", (
+                f"角色没有写进配置文件，重新装载得到 {reloaded.llm.role!r}"
+            )
+            return f"{before} → xueshu（{body['passes']} 轮），已写盘"
+
+        run("POST /api/role 切换并写盘", _role_switch)
+
+        def _role_unknown() -> str:
+            r = requests.post(base + "/api/role", json={"role": "bogus"}, timeout=15)
+            assert r.status_code == 400, f"期望 400，实际 {r.status_code}"
+            detail = r.json()["detail"]
+            assert "bogus" in detail, f"错误信息没点出是哪个值：{detail}"
+            # 报错时要给出可选清单，否则用户只知道"错了"、不知道能填什么。
+            for key in ("wengao", "standard"):
+                assert key in detail, f"错误信息里缺可选项 {key}：{detail}"
+            # 被拒绝的请求不能把已有角色改坏。
+            still = requests.get(base + "/api/config", timeout=10).json()
+            assert still["llm"]["role"] == "xueshu", still["llm"]["role"]
+            return "400 · " + detail[:44] + "…"
+
+        run("POST /api/role 拒绝未知角色并列出可选项", _role_unknown)
+
+        def _role_empty() -> str:
+            r = requests.post(base + "/api/role", json={"role": ""}, timeout=15)
+            assert r.status_code == 422, f"期望 422，实际 {r.status_code}"
+            r2 = requests.post(base + "/api/role", json={}, timeout=15)
+            assert r2.status_code == 422, f"缺字段也应当 422，实际 {r2.status_code}"
+            return "422 · 空角色与缺字段都被挡在字段校验"
+
+        run("POST /api/role 空值/缺字段返回 422", _role_empty)
+
+        def _role_survives_settings_save() -> str:
+            # 用户在顶栏换了角色，随后进设置页改别的项。保存提交的是整份设置，
+            # 只要前端把 llm.role 带上了，角色就不该被重置。
+            cur = requests.get(base + "/api/settings", timeout=15).json()["values"]
+            assert cur["llm"]["role"] == "xueshu", (
+                f"/api/settings 读到的角色是 {cur['llm']['role']!r}，"
+                "与刚设的 xueshu 不一致 —— 设置页会把它写回旧值"
+            )
+            cur["confirm_disable_gate"] = False
+            cur["llm"]["timeout_seconds"] = 111
+            r = requests.put(base + "/api/settings", json=cur, timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            pub = requests.get(base + "/api/config", timeout=10).json()
+            assert pub["llm"]["role"] == "xueshu", pub["llm"]["role"]
+            assert pub["llm"]["timeout_seconds"] == 111, pub["llm"]["timeout_seconds"]
+            return "改别的设置不影响角色"
+
+        run("改别的设置不会把角色重置", _role_survives_settings_save)
+
+        def _role_in_config_public() -> str:
+            # 顶栏 chip 靠 /api/config 里的 llm.role 显示当前角色。
+            # 它必须在这个"公开"视图里，同时又不能把 api_key 带出来。
+            pub = requests.get(base + "/api/config", timeout=10).json()
+            assert "role" in pub["llm"], f"公开视图里没有 role：{sorted(pub['llm'])}"
+            assert "api_key" not in pub["llm"], "公开视图泄露了 api_key"
+            return f"llm.role={pub['llm']['role']} 可见，api_key 不可见"
+
+        run("公开视图带 role 且不带 api_key", _role_in_config_public)
+
 
         def _untouched() -> str:
             now = real_config.read_bytes() if real_config.exists() else None
