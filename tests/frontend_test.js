@@ -60,7 +60,7 @@ function makeBackend(overrides) {
   const calls = [];
   const state = {
     config: {
-      version: "0.5.0",
+      version: "0.6.0",
       llm: { model: "qwen-test", base_url: "https://example.invalid/v1", configured: true, role: "wengao" },
       storage: { db_path: "/home/u/.bili-scribe/bili-scribe.db" },
       publish: { require_confirm: true },
@@ -77,6 +77,7 @@ function makeBackend(overrides) {
     task: null,
     versions: { current: null, total: null, versions: [] },
     publishes: [],
+    history: [],
     notes: { entries: 0, bytes: 0, dir: "/home/u/.bili-scribe/notes", session_hits: 0, session_misses: 0 },
     settings: {
       values: { llm: { model: "qwen-test", base_url: "https://example.invalid/v1", api_key: "sk-x", role: "wengao" } },
@@ -133,6 +134,7 @@ function makeBackend(overrides) {
     restore_version: (id, n) => ok({ restored: n }),
     refine_task: (id) => ok({ task_id: id, status: "refining", base_version: 1, reused_prepared: true }),
     list_tasks: () => ok([]),
+    list_history: () => ok(state.history),
     publish: () => ok({ status: "published", publish_id: 9, rpid: "123" }),
     withdraw: (pid) => ok({ publish_id: pid, withdrawn: true }),
     list_publishes: () => ok(state.publishes),
@@ -388,7 +390,7 @@ test("底栏版本号来自后端，后端给什么就显示什么", async () =>
      对它自己那一份和这里都对不上，这条就会红。 */
   const p = await loadPage();
   try {
-    eq(G1, "显示后端报的版本号", p.text("ft-ver"), "v0.5.0");
+    eq(G1, "显示后端报的版本号", p.text("ft-ver"), "v0.6.0");
   } finally { p.close(); }
 });
 
@@ -908,7 +910,234 @@ test("Esc 与点外面都能关掉角色浮层", async () => {
   } finally { p.close(); }
 });
 
-/* ============================================================ 七、登录 */
+/* ============================================================ 七、历史总结 */
+
+const G66 = group("历史总结");
+
+/* 造几条历史索引。字段必须跟后端 list_task_index 的输出一致——
+   测试里少一个字段，前端就不会踩到那条分支，等于没测。 */
+function histRow(over) {
+  return Object.assign({
+    id: "t1", title: "第一个视频", bvid: "BV1xx411c7mD", up_name: "某UP",
+    status: "ready", created_at: "2026-10-01T10:00:00+08:00",
+    updated_at: "2026-10-01T10:05:00+08:00",
+    one_line: "一句话结论甲", role: "wengao",
+    version_count: 2, current_version: 2, has_summary: true, error: null,
+  }, over || {});
+}
+
+test("顶栏有历史 chip，条数来自后端", async () => {
+  const be = makeBackend();
+  be.state.history = [histRow(), histRow({ id: "t2", title: "第二个视频" })];
+  const p = await loadPage({ backend: be });
+  try {
+    const chip = p.$("chip-history");
+    assert(G66, "chip 存在", !!chip, "找不到 #chip-history");
+    eq(G66, "父节点是顶栏", chip.parentElement.className, "top");
+    // 启动时就该取好：等点开再取会先显示「历史」再跳成「历史 · 2」。
+    assert(G66, "显示条数", chip.textContent.includes("2"), "实际：" + chip.textContent);
+  } finally { p.close(); }
+});
+
+test("点开历史：列出全部记录，标题与一句话结论都在", async () => {
+  const be = makeBackend();
+  be.state.history = [
+    histRow(),
+    histRow({ id: "t2", title: "第二个视频", one_line: "结论乙", status: "failed", error: "字幕拿不到" }),
+  ];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    assert(G66, "浮层打开了", p.$("hist-pop").classList.contains("on"), "没打开");
+
+    const rows = p.$("hist-list2").querySelectorAll("[data-hid]");
+    eq(G66, "条数对得上", rows.length, 2);
+    assert(G66, "标题渲染了", rows[0].textContent.includes("第一个视频"), "实际：" + rows[0].textContent);
+    assert(G66, "一句话结论渲染了", rows[0].textContent.includes("一句话结论甲"), "没有结论");
+    // 失败的任务更要留在列表里——用户常常正是回去看「上次为什么没成」。
+    assert(G66, "失败的那条也在", rows[1].textContent.includes("第二个视频"), "失败了就被藏了");
+    assert(G66, "失败有标记", rows[1].querySelector(".bad") !== null, "没标失败");
+  } finally { p.close(); }
+});
+
+test("搜索能按标题、UP、BV 号、结论过滤", async () => {
+  const be = makeBackend();
+  be.state.history = [
+    histRow({ id: "a", title: "聊经济", up_name: "甲UP", bvid: "BV1aa", one_line: "通胀那段" }),
+    histRow({ id: "b", title: "聊历史", up_name: "乙UP", bvid: "BV1bb", one_line: "朝代更替" }),
+  ];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+
+    const hit = (kw) => {
+      p.$("hist-q").value = kw;
+      p.$("hist-q").dispatchEvent(new p.win.Event("input", { bubbles: true }));
+      return p.$("hist-list2").querySelectorAll("[data-hid]").length;
+    };
+
+    eq(G66, "搜标题", hit("历史"), 1);
+    eq(G66, "搜 UP 名", hit("甲UP"), 1);
+    eq(G66, "搜 BV 号", hit("BV1bb"), 1);
+    eq(G66, "搜一句话结论", hit("通胀"), 1);
+    eq(G66, "搜不中给 0 条", hit("完全不存在的词"), 0);
+    eq(G66, "清空恢复全部", hit(""), 2);
+  } finally { p.close(); }
+});
+
+test("选中一条，右侧给出摘要和两个动作", async () => {
+  const be = makeBackend();
+  be.state.history = [histRow({ id: "a", title: "选中我", one_line: "这条的结论" })];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    p.doc.querySelector('#hist-list2 [data-hid="a"]').click();
+    await wait(40);
+
+    const pv = p.$("hist-preview");
+    assert(G66, "预览显示了标题", pv.textContent.includes("选中我"), "实际：" + pv.textContent);
+    assert(G66, "预览显示了结论", pv.textContent.includes("这条的结论"), "没有结论");
+    assert(G66, "有「在工作区打开」", !!pv.querySelector("[data-open]"), "没有打开按钮");
+    assert(G66, "有「重新总结」", !!pv.querySelector("[data-reuse]"), "没有复用按钮");
+
+    // 点行会重绘整个列表，被点的按钮随即脱离文档。全局那个「点外面就关」的
+    // 监听器如果只按 closest() 判断，会把它当成外点，面板刚点开就关掉。
+    // 这一条曾经在真机上出现而 161 项测试全绿——因为它只发生在「点第二行」时。
+    assert(G66, "点完行面板还开着",
+      p.$("hist-pop").classList.contains("on"), "面板被自己的重绘关掉了");
+  } finally { p.close(); }
+});
+
+test("点列表里任意一行都不会把面板关掉", async () => {
+  const be = makeBackend();
+  be.state.history = [
+    histRow({ id: "a", title: "第一" }), histRow({ id: "b", title: "第二" }),
+    histRow({ id: "c", title: "第三" }),
+  ];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    // 逐行点一遍。第一行是默认选中的，点它不会改状态；真正触发重绘的是第二、三行。
+    for (const id of ["a", "b", "c"]) {
+      p.doc.querySelector('#hist-list2 [data-hid="' + id + '"]').click();
+      await wait(40);
+      assert(G66, "点 " + id + " 之后还开着",
+        p.$("hist-pop").classList.contains("on"), "点 " + id + " 把面板关了");
+      eq(G66, "选中的是 " + id, p.S().histPick, id);
+      eq(G66, "预览跟着换了 " + id,
+        p.$("hist-preview").textContent.includes({ a: "第一", b: "第二", c: "第三" }[id]), true);
+    }
+  } finally { p.close(); }
+});
+
+test("「在工作区打开」会拉全文并渲染，浮层关掉", async () => {
+  const be = makeBackend({
+    // 走 overrides 而不是事后改 be.api：事后赋值会绕过调用记录，
+    // 于是「有没有按 id 拉全文」这条断言永远看不到调用，看起来像被测代码没调用。
+    // 另外 `ok()` 是 makeBackend 内部的局部函数，用例里拿不到，这里直接写字面量。
+    get_task: (id) => ({ ok: true, data: sampleTask({ id: id, title: "要打开的" }) }),
+  });
+  be.state.history = [histRow({ id: "a", title: "要打开的" })];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    p.doc.querySelector('#hist-list2 [data-hid="a"]').click();
+    await wait(40);
+    p.$("hist-preview").querySelector("[data-open]").click();
+    await wait(120);
+
+    const c = p.backend.calls.find((x) => x.name === "get_task" && x.args[0] === "a");
+    assert(G66, "按 id 拉了全文", !!c, "没调用 get_task");
+    eq(G66, "浮层关了", p.$("hist-pop").classList.contains("on"), false);
+    // 打开之后当前任务要跟着换，否则「迭代打磨」会打到上一条任务上。
+    eq(G66, "当前任务切过去了", p.S().taskId, "a");
+  } finally { p.close(); }
+});
+
+test("「重新总结」把 BV 号填进输入框，不发请求", async () => {
+  const be = makeBackend();
+  be.state.history = [histRow({ id: "a", bvid: "BV1reuse" })];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    p.doc.querySelector('#hist-list2 [data-hid="a"]').click();
+    await wait(40);
+    p.$("hist-preview").querySelector("[data-reuse]").click();
+    await wait(60);
+
+    eq(G66, "输入框填上了 BV 号", p.$("raw-input").value, "BV1reuse");
+    eq(G66, "浮层关了", p.$("hist-pop").classList.contains("on"), false);
+    eq(G66, "没有偷偷发任务", p.backend.calls.filter((c) => c.name === "create_task").length, 0);
+  } finally { p.close(); }
+});
+
+test("Esc 关历史浮层，搜索框里的 Esc 先清词", async () => {
+  const be = makeBackend();
+  be.state.history = [histRow()];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-history").click();
+    await wait(80);
+    p.$("hist-q").value = "关键词";
+    p.$("hist-q").dispatchEvent(new p.win.Event("input", { bubbles: true }));
+
+    // 第一次 Esc：只清词，面板留着。否则「我只是想清掉刚打的字」变成
+    // 「面板没了，还得重新打开」。
+    p.$("hist-q").dispatchEvent(new p.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(30);
+    eq(G66, "Esc 先清空搜索词", p.$("hist-q").value, "");
+    assert(G66, "面板还开着", p.$("hist-pop").classList.contains("on"), "被关掉了");
+
+    p.doc.dispatchEvent(new p.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(30);
+    assert(G66, "再按一次才关", !p.$("hist-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+test("两个浮层不会同时开着", async () => {
+  const be = makeBackend();
+  be.state.history = [histRow()];
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-role").click();
+    await wait(40);
+    p.$("chip-history").click();
+    await wait(80);
+    assert(G66, "历史开了", p.$("hist-pop").classList.contains("on"), "没开");
+    assert(G66, "角色浮层被关掉", !p.$("role-pop").classList.contains("on"), "两个都开着");
+
+    p.$("chip-role").click();
+    await wait(80);
+    assert(G66, "反过来也一样", !p.$("hist-pop").classList.contains("on"), "两个都开着");
+  } finally { p.close(); }
+});
+
+test("历史读取失败不会影响总结本身", async () => {
+  const be = makeBackend({ list_history: () => ({ ok: false, error: "库文件损坏" }) });
+  const p = await loadPage({ backend: be });
+  try {
+    // 读不到历史是「少了个功能」，不是「程序坏了」：输入框还能用。
+    eq(G66, "历史为空", p.S().history.length, 0);
+    eq(G66, "记住了失败原因", p.S().histError, "库文件损坏");
+    assert(G66, "chip 还在", !!p.$("chip-history"), "chip 没了");
+    eq(G66, "输入框仍可用", p.$("raw-input").disabled, false);
+
+    // 但点开要说出原因，不能一声不响给个空列表——那看着像记录丢了。
+    p.$("chip-history").click();
+    await wait(80);
+    assert(G66, "点开时说明失败原因",
+      p.$("hist-list2").textContent.includes("库文件损坏"),
+      "实际：" + p.$("hist-list2").textContent);
+  } finally { p.close(); }
+});
+
+/* ============================================================ 八、登录 */
 
 const G7 = group("登录");
 
@@ -1197,3 +1426,4 @@ test("超限提示不只靠颜色，有文字说明", async () => {
   console.log("═".repeat(58));
   process.exit(fail ? 1 : 0);
 })();
+

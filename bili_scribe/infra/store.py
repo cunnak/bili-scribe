@@ -271,6 +271,40 @@ class Store:
             ).fetchall()
         return [t for t in (self._decode_task(r) for r in rows) if t]
 
+    def list_task_index(self, limit: int = 100) -> list[dict[str, Any]]:
+        """历史列表用的精简查询：在 SQL 层就把正文挡在外面。
+
+        `list_tasks` 会把 `summary_json` 整份解出来——那是几千字的正文加要点，
+        一百条就是几百 KB。历史列表只显示标题、时间和一句话结论，所以这里
+        **不取 summary_json 整列**，只用 `json_extract` 挖一个字段出来。
+
+        版本数用子查询算。不能 `JOIN ... GROUP BY`：那样要额外 GROUP BY 一遍
+        全部列，而且一旦某个任务没有版本，JOIN 会把它整条丢掉——初版还没落库的
+        任务恰恰是最需要出现在列表里的（用户刚点完，想回去看）。
+
+        `current_version` 取最大版本号。版本史是只增不改的（restore 也是新增一版），
+        所以 MAX(version_no) 就是"当前是第几版"。
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.id, t.title, t.bvid, t.up_name, t.status, t.created_at,
+                       t.updated_at, t.error,
+                       json_extract(t.summary_json, '$.one_line')   AS one_line,
+                       json_extract(t.summary_json, '$.role')       AS role,
+                       CASE WHEN t.summary_json IS NULL THEN 0 ELSE 1 END AS has_summary,
+                       (SELECT COUNT(*)  FROM summary_version v WHERE v.task_id = t.id)
+                           AS version_count,
+                       (SELECT MAX(version_no) FROM summary_version v WHERE v.task_id = t.id)
+                           AS current_version
+                  FROM task t
+                 ORDER BY t.created_at DESC
+                 LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def _decode_task(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
             return None

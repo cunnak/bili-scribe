@@ -137,6 +137,73 @@ input,textarea,select{font:inherit}
   font-size:10.5px;line-height:1.6;color:var(--muted);
 }
 
+/* 历史浮层：比角色浮层宽得多，左边列表右边预览。
+   宽度按 720px 起，但不写死——窄窗口下用 min() 收回来，不然会顶出屏幕右边。 */
+.pop.wide{width:min(760px,calc(100vw - 40px));right:20px}
+.pop.wide .ph{gap:10px}
+.pop .ph .cnt{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--muted);text-transform:none;
+}
+.pop .ph .q{
+  flex:1;min-width:0;height:22px;margin-left:4px;
+  background:var(--void);border:1px solid var(--line);color:var(--text);
+  font-family:var(--mono);font-size:10px;letter-spacing:.04em;
+  padding:0 8px;outline:none;
+}
+.pop .ph .q:focus{border-color:rgba(216,242,75,.45)}
+.pop .ph .q::placeholder{color:var(--dim)}
+.hb{display:grid;grid-template-columns:minmax(0,1fr) 290px;grid-template-rows:minmax(0,1fr);max-height:min(62vh,520px);min-height:0;overflow:hidden}
+/* 容器名不能叫 .hl——那个类是正文里的高亮 span，两者会互相污染：
+   列表会继承 color:var(--acid) 和一条 border-bottom。 */
+.hlist{overflow-y:auto;border-right:1px solid var(--line);min-height:0}
+.hl .e,.hp .e{
+  padding:22px 14px;font-size:11px;line-height:1.7;color:var(--muted);text-align:center;
+}
+.hrow{
+  display:block;width:100%;text-align:left;background:none;border:0;
+  border-left:2px solid transparent;padding:9px 12px;cursor:pointer;
+}
+.hrow:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
+.hrow.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.hrow .ht{
+  display:block;font-size:12px;line-height:1.5;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hrow.on .ht{color:var(--acid)}
+.hrow .hm{
+  display:flex;align-items:baseline;gap:7px;margin-top:3px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--dim);
+}
+.hrow .hm .bad{color:var(--ember)}
+.hrow .hm .ok{color:var(--acid-d)}
+.hrow .ho{
+  display:block;margin-top:3px;font-size:10.5px;line-height:1.55;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hp{padding:12px 14px;overflow-y:auto;min-height:0}
+.hp h4{
+  margin:0 0 8px;font-size:12.5px;font-weight:600;line-height:1.5;color:var(--text);
+}
+.hp .kv{
+  display:flex;gap:8px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.08em;color:var(--dim);margin-bottom:10px;
+}
+.hp .kv b{font-weight:400;color:var(--muted)}
+.hp .sum{
+  font-size:11px;line-height:1.75;color:var(--muted);
+  border-top:1px solid var(--line-s);padding-top:10px;
+  white-space:pre-wrap;word-break:break-word;
+}
+.hp .acts{display:flex;gap:8px;margin-top:12px}
+.hp .acts button{
+  flex:1;height:28px;background:none;border:1px solid var(--line);cursor:pointer;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--muted);
+}
+.hp .acts button:hover{border-color:rgba(216,242,75,.45);color:var(--acid)}
+.hp .acts button.pri{border-color:rgba(216,242,75,.45);color:var(--acid)}
+.hp .acts button.pri:hover{background:rgba(216,242,75,.1)}
+
 /* ============ 主体 ============ */
 .wrap{height:100%;display:flex;flex-direction:column;background:var(--bg)}
 .main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 322px}
@@ -566,6 +633,7 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
     <div class="sp"></div>
     <button class="st off" id="chip-auth" title="点这里登录 / 退出"><i></i><span>未连接</span></button>
     <button class="st warn" id="chip-model" title="点这里打开设置"><i></i><span>—</span></button>
+    <button class="st" id="chip-history" title="历史总结"><i></i><span>历史</span></button>
     <button class="st" id="chip-role" title="选择总结角色"><i></i><span>角色</span></button>
     <button class="st" id="chip-settings" title="设置"><i></i><span>设置</span></button>
   </div>
@@ -574,6 +642,25 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
     <div class="ph"><span>总结角色</span><span class="x" id="role-pop-x" title="关闭">×</span></div>
     <div class="pl" id="role-list"></div>
     <div class="pn" id="role-note"></div>
+  </div>
+
+  <!-- 历史总结：一个宽一点的浮层，左边是列表、右边是选中那条的摘要预览。
+       刻意不做成抽屉：翻历史是"扫一眼、点一下"的动作，抽屉那种整块遮罩
+       每次都把工作面盖住，看完还得关一次。 -->
+  <div class="pop wide" id="hist-pop">
+    <div class="ph">
+      <span>历史总结</span>
+      <span class="cnt" id="hist-count"></span>
+      <input class="q" id="hist-q" placeholder="搜标题、UP、BV 或一句话结论" autocomplete="off">
+      <span class="x" id="hist-pop-x" title="关闭">×</span>
+    </div>
+    <div class="hb">
+      <div class="hlist" id="hist-list2"></div>
+      <div class="hp" id="hist-preview">
+        <div class="e">选一条看摘要</div>
+      </div>
+    </div>
+    <div class="pn" id="hist-note"></div>
   </div>
 
   <div id="bridge">桥接没有建立起来：界面拿不到本地接口。请关掉窗口重新启动程序；如果一直这样，说明安装不完整。</div>
@@ -864,6 +951,9 @@ const S = {
   subtitleToken: null,
   subtitleName: "",
   publishes: [],
+  history: [],
+  histPick: null,
+  histError: null,
   settingsLoaded: false,
   showDiffs: false,
   online: false,
@@ -920,6 +1010,7 @@ const HTTP_ROUTES = {
   restore_version:  { m: "POST",   p: (id, n) => "/api/task/" + encodeURIComponent(id) + "/versions/" + n + "/restore" },
   refine_task:      { m: "POST",   p: (id) => "/api/task/" + encodeURIComponent(id) + "/refine", b: (id, v) => v },
   list_tasks:       { m: "GET",    p: (lim) => "/api/tasks?limit=" + (lim || 20) },
+  list_history:     { m: "GET",    p: (lim) => "/api/history?limit=" + (lim || 100) },
 
   publish:          { m: "POST",   p: () => "/api/publish", b: (v) => v },
   withdraw:         { m: "POST",   p: () => "/api/publish/withdraw", b: (pid) => ({ publish_id: pid }) },
@@ -1271,6 +1362,198 @@ async function pickRole(key) {
     setMsg("task-msg", "角色已切到「" + r.name + "」，下一次总结生效。", "ok");
   } catch (e) {
     setMsg("task-msg", "切换角色失败：" + e.message, "err");
+  }
+}
+
+/* ------------------------------------------------------------ 历史总结
+
+   后端只给索引（标题 / 时间 / 一句话结论 / 版本数），不给全文。翻一条点一条，
+   全文由 get_task 单独取——历史可能有几百条，一次全搬过来会让浮层打开要等好几秒，
+   而其中 99% 你根本不会点。 */
+
+function renderHistChip() {
+  const n = S.history.length;
+  const el = $("chip-history");
+  el.innerHTML = "<i></i><span>历史" + (n ? " · <b>" + n + "</b>" : "") + "</span>";
+  el.title = n ? "共 " + n + " 条历史总结" : "还没有历史总结";
+}
+
+function histFiltered() {
+  const q = ($("hist-q").value || "").trim().toLowerCase();
+  if (!q) return S.history;
+  return S.history.filter((h) =>
+    (h.title || "").toLowerCase().includes(q) ||
+    (h.up_name || "").toLowerCase().includes(q) ||
+    (h.bvid || "").toLowerCase().includes(q) ||
+    (h.one_line || "").toLowerCase().includes(q)
+  );
+}
+
+function histTime(s) {
+  // 后端给的是 ISO 带时区。只显示「月-日 时:分」，列表里不需要年份；
+  // 但跨年的记录要能看出来，所以不是今年的补上年份。
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s || "").slice(5, 16).replace("T", " ");
+  const p = (n) => String(n).padStart(2, "0");
+  const md = p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  return d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + "-" + md;
+}
+
+function renderHistList() {
+  const rows = histFiltered();
+  $("hist-count").textContent = rows.length === S.history.length
+    ? "共 " + S.history.length + " 条"
+    : rows.length + " / " + S.history.length + " 条";
+
+  const box = $("hist-list2");
+  if (!rows.length) {
+    // 读失败和「还没总结过」是两件事，必须分开说。混成一句「还没有历史总结」
+    // 会让人以为记录丢了，然后去翻数据库——实际上只是这次请求没成功。
+    box.innerHTML = '<div class="e">' +
+      (S.histError
+        ? "历史读取失败：" + esc(S.histError)
+        : (S.history.length ? "没有匹配的记录" : "还没有历史总结。总结完第一条就会出现在这里。")) +
+      "</div>";
+    renderHistPreview(null);
+    return;
+  }
+
+  box.innerHTML = rows.map((h) => {
+    const on = h.id === S.histPick;
+    // 状态只在两种情况下值得占位置：失败、以及正在跑。ready 是常态，不写反而清爽。
+    const st = h.status === "failed"
+      ? '<span class="bad">失败</span>'
+      : (h.status === "ready" ? "" : '<span class="ok">' + esc(h.status) + "</span>");
+    return '<button class="hrow' + (on ? " on" : "") + '" data-hid="' + esc(h.id) + '">' +
+      '<span class="ht">' + esc(h.title || h.bvid || h.id) + "</span>" +
+      '<span class="hm">' + st +
+        "<span>" + esc(histTime(h.created_at)) + "</span>" +
+        (h.version_count > 1 ? "<span>v" + h.version_count + "</span>" : "") +
+        (h.role ? "<span>" + esc(roleName(h.role)) + "</span>" : "") +
+      "</span>" +
+      (h.one_line ? '<span class="ho">' + esc(h.one_line) + "</span>" : "") +
+      "</button>";
+  }).join("");
+
+  box.querySelectorAll("[data-hid]").forEach((b) => {
+    b.onclick = () => {
+      S.histPick = b.dataset.hid;
+      // 列表和预览是两半，点行必须同时更新右边——只重画列表会出现
+      // 「左边高亮第二条、右边还写着第一条的摘要」，那比不显示更糟。
+      renderHistList();
+      renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+    };
+    // 双击直接打开。单击只是选中，因为翻历史时多半只是想看看摘要；
+    // 双击是「就它了」，不该还要再挪到右边点一次按钮。
+    b.ondblclick = () => openHistory(b.dataset.hid);
+  });
+
+  // 列表比预览区高的时候，选中项可能滚出视野。这里是"点谁就保证谁可见"，
+  // 不是每次都滚——用户自己滚上去看别的条目时不该被拽回来。
+  const hit = box.querySelector(".hrow.on");
+  if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: "nearest" });
+}
+
+function roleName(key) {
+  const hit = (S.roles || []).find((r) => r.key === key);
+  return hit ? hit.name : key;
+}
+
+function renderHistPreview(h) {
+  const box = $("hist-preview");
+  if (!h) {
+    box.innerHTML = '<div class="e">选一条看摘要</div>';
+    return;
+  }
+  const failed = h.status === "failed";
+  const meta = [
+    h.bvid ? "<span><b>BV</b> " + esc(h.bvid) + "</span>" : "",
+    h.up_name ? "<span><b>UP</b> " + esc(h.up_name) + "</span>" : "",
+    h.version_count ? "<span><b>版本</b> " + h.version_count + "</span>" : "",
+  ].filter(Boolean).join("");
+
+  const body = failed
+    ? '<div class="sum">' + esc(h.error || "这条任务失败了，没有留下原因。") + "</div>"
+    : (h.one_line
+        ? '<div class="sum">' + esc(h.one_line) + "</div>"
+        : '<div class="sum">这条还没有生成正文。</div>');
+
+  box.innerHTML =
+    "<h4>" + esc(h.title || h.bvid || h.id) + "</h4>" +
+    (meta ? '<div class="kv">' + meta + "</div>" : "") +
+    '<div class="kv"><span><b>时间</b> ' + esc(histTime(h.created_at)) + "</span>" +
+      (h.role ? "<span><b>角色</b> " + esc(roleName(h.role)) + "</span>" : "") +
+    "</div>" +
+    body +
+    '<div class="acts">' +
+      '<button class="pri" data-open="' + esc(h.id) + '">在工作区打开</button>' +
+      (h.bvid ? '<button data-reuse="' + esc(h.bvid) + '">重新总结</button>' : "") +
+    "</div>";
+
+  const open = box.querySelector("[data-open]");
+  if (open) open.onclick = () => openHistory(open.dataset.open);
+  const reuse = box.querySelector("[data-reuse]");
+  if (reuse) {
+    reuse.onclick = () => {
+      $("raw-input").value = reuse.dataset.reuse;
+      updateRunBtn();
+      closeHistPop();
+      $("raw-input").focus();
+    };
+  }
+}
+
+async function loadHistory() {
+  try {
+    const rows = await call("list_history", 200);
+    S.history = rows || [];
+    S.histError = null;
+    renderHistChip();
+    if ($("hist-pop").classList.contains("on")) renderHistList();
+  } catch (e) {
+    // 读不到历史不该影响总结本身。但也不能一声不响给个空列表——
+    // 空列表的意思是「你还没总结过」，跟「库读不出来」完全是两件事，
+    // 混在一起会让人以为记录丢了。
+    S.history = [];
+    S.histError = e.message || String(e);
+    renderHistChip();
+    if ($("hist-pop").classList.contains("on")) renderHistList();
+  }
+}
+
+function openHistPop() {
+  $("hist-pop").classList.add("on");
+  $("hist-q").value = "";
+  // 写在这里而不是写死在 HTML 里：以后要按状态改文案（比如加上"只显示最近
+  // 300 条"）时只改一处，不会出现两处说法不一致。
+  $("hist-note").textContent =
+    "历史存在本地数据库里，换机器时连同 ~/.bili-scribe 一起搬走即可。" +
+    "「重新总结」只把 BV 号填回输入框，不会立刻重跑——同一支视频再跑一次是要花钱的。";
+  // 默认选中当前正在看的那条，省得每次打开都要重新找一遍。
+  S.histPick = (S.task && S.task.id) || (S.history[0] && S.history[0].id) || null;
+  renderHistList();
+  renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+  $("hist-q").focus();
+}
+
+function closeHistPop() {
+  $("hist-pop").classList.remove("on");
+}
+
+async function openHistory(taskId) {
+  closeHistPop();
+  try {
+    const task = await call("get_task", taskId);
+    S.taskId = taskId;
+    S.viewingVersion = null;
+    S.awaitingRefine = null;
+    renderTask(task);
+    // 非终态说明它还在跑（或者上次关程序时还在跑）。源码版得接着问，
+    // 否则界面会停在当时的进度上，看着像卡住了。
+    if (task.status !== "ready" && task.status !== "failed") ensurePolling();
+    loadHistory();  // 重算 chip 上的条数（可能有新任务）
+  } catch (e) {
+    setMsg("task-msg", "打开这条历史失败：" + e.message, "err");
   }
 }
 
@@ -1683,6 +1966,9 @@ function renderTask(task) {
   else if (prevVer !== S.currentVersion) loadVersions();
 
   loadPublishes();
+  // 一条任务刚跑完（或者刚被打开）时重取历史索引：否则新建的总结不会出现在
+  // 历史列表里，得等下次启动程序才看得见——那看起来就像"记录没保存"。
+  loadHistory();
 }
 
 /* 轻量更新：推进度用。只碰进度、标题和右侧判定，不重排正文。 */
@@ -2429,6 +2715,10 @@ async function boot() {
   } catch (e) {
     /* 没有历史任务不是错误 */
   }
+
+  // 历史索引在启动时就取一次：顶栏 chip 上要显示条数，等用户点开再取会先闪一下
+  // 「历史」再变成「历史 · 78」，看起来像加载失败又好了。
+  await loadHistory();
 }
 
 /* ---- 事件绑定（脚本在 body 末尾，元素都已存在） ---- */
@@ -2466,8 +2756,47 @@ $("chip-role").onclick = () => {
 $("role-pop-x").onclick = closeRolePop;
 document.addEventListener("click", (e) => {
   if (!$("role-pop").classList.contains("on")) return;
+  // 重绘过的元素会脱离文档，这时 closest() 找不到任何祖先，看起来就像
+  // "点了外面"。凡是点击过程中被重绘掉的，一律不算外点。
+  if (!document.contains(e.target)) return;
   if (e.target.closest("#role-pop") || e.target.closest("#chip-role")) return;
   closeRolePop();
+});
+
+// 历史浮层：跟角色浮层同一套开关方式，但它是独立的一层——
+// 两个浮层都开着的时候点另一个 chip，得把前一个关掉，否则会叠在一起。
+$("chip-history").onclick = () => {
+  if ($("hist-pop").classList.contains("on")) {
+    closeHistPop();
+  } else {
+    closeRolePop();
+    loadHistory().then(openHistPop);
+  }
+};
+$("hist-pop-x").onclick = closeHistPop;
+$("hist-q").addEventListener("input", () => {
+  renderHistList();
+  renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+});
+// 搜索框里的 Esc 先清空关键词，再按一次才关浮层——一次按键关掉整个面板
+// 会让"我只是想清掉刚打的字"变成"面板没了，还得重新打开"。
+$("hist-q").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ($("hist-q").value) {
+    e.stopPropagation();
+    $("hist-q").value = "";
+    renderHistList();
+    renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+  }
+});
+document.addEventListener("click", (e) => {
+  if (!$("hist-pop").classList.contains("on")) return;
+  // 点列表行会重绘整个列表，被点的那个按钮已经不在文档里了。
+  // 这时候 closest() 一路找不到祖先，会被误判成"点了外面"——面板刚点开
+  // 就关掉。凡是重绘掉的节点，一律不算外点。
+  if (!document.contains(e.target)) return;
+  if (e.target.closest("#hist-pop") || e.target.closest("#chip-history")) return;
+  closeHistPop();
 });
 
 $("mask").onclick = () => {
@@ -2509,7 +2838,10 @@ $("open-dir").onclick = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if ($("role-pop").classList.contains("on")) closeRolePop();
+    // 浮层在最上面，所以先关浮层。历史面板里的搜索框自己会拦一次 Esc（先清词），
+    // 它拦下来的时候这里不会收到，剩下的情况就是直接关面板。
+    if ($("hist-pop").classList.contains("on")) closeHistPop();
+    else if ($("role-pop").classList.contains("on")) closeRolePop();
     else if ($("modal").classList.contains("on")) closeModal();
     else if ($("drawer").classList.contains("on")) closeDrawer();
   }

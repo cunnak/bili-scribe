@@ -3031,6 +3031,112 @@ def _settings_api() -> None:
 
         run("公开视图带 role 且不带 api_key", _role_in_config_public)
 
+        # —— 历史总结索引 ——
+        #
+        # 这个接口存在的唯一理由是**不要正文**。拿 list_tasks 当历史列表用，
+        # 一百条就是近 1 MB 的载荷，而其中 99% 的正文用户根本不会点开。
+        # 所以这里要钉住的不是「能返回」，而是「返回的东西里没有正文」。
+
+        def _history_shape() -> str:
+            r = requests.get(base + "/api/history?limit=5", timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            rows = r.json()
+            assert isinstance(rows, list), type(rows)
+            need = {"id", "title", "bvid", "up_name", "status", "created_at",
+                    "updated_at", "one_line", "role", "version_count",
+                    "current_version", "has_summary", "error"}
+            if rows:
+                got = set(rows[0])
+                assert need <= got, f"缺字段：{sorted(need - got)}"
+                # 正文与其它重字段都不该出现。summary_json 一旦混进来，
+                # 这个接口就退化成 list_tasks 了。
+                for bad in ("summary_json", "preview_md", "comment_text", "platform_summary"):
+                    assert bad not in got, f"索引里混进了 {bad}"
+            return f"{len(rows)} 条，字段齐全且不含正文"
+
+        run("GET /api/history 只给索引，不给正文", _history_shape)
+
+        def _history_cheaper() -> str:
+            # 用真实库量一次：同样的条数下，索引接口的载荷必须更小。
+            # 这条会随数据增长而变化，所以只断言比例，不断言绝对字节。
+            idx = requests.get(base + "/api/history?limit=50", timeout=20).content
+            full = requests.get(base + "/api/tasks?limit=50", timeout=20).content
+            assert len(idx) < len(full), (
+                f"索引 {len(idx)}B 竟然不比全文 {len(full)}B 小，说明没起到作用"
+            )
+            return f"索引 {len(idx) // 1024}KB vs 全文 {len(full) // 1024}KB"
+
+        run("历史索引的载荷小于任务全文", _history_cheaper)
+
+        def _history_version_counts() -> str:
+            # 版本数用子查询而不是 JOIN：JOIN 会让「还没有任何版本」的任务
+            # 整条从列表里消失，而那恰恰是最需要被看见的（刚跑完、初版还没落库）。
+            rows = requests.get(base + "/api/history?limit=300", timeout=20).json()
+            if not rows:
+                return "库是空的，跳过"
+            bad = [r for r in rows if r["version_count"] < 0]
+            assert not bad, f"版本数是负数：{bad[:2]}"
+            nover = [r for r in rows if r["version_count"] == 0]
+            assert len(rows) > len(nover), "所有任务都没有版本，这条断言失去意义"
+            for r in rows:
+                if r["version_count"]:
+                    assert r["current_version"] is not None, f"{r['id']} 有版本却算不出当前版"
+                    assert r["current_version"] >= 1, r["current_version"]
+                else:
+                    assert r["current_version"] is None, f"{r['id']} 没有版本却给了当前版"
+            return f"{len(rows)} 条里 {len(nover)} 条还没有版本，仍留在列表里"
+
+        run("版本数用子查询算，没有版本的任务不会消失", _history_version_counts)
+
+        def _history_failed_kept() -> str:
+            # 失败的任务必须留在历史里。用户回去翻历史的动机里，
+            # 「上次为什么没成」占很大一部分，藏起来等于逼人查日志。
+            rows = requests.get(base + "/api/history?limit=300", timeout=20).json()
+            failed = [r for r in rows if r["status"] == "failed"]
+            if not failed:
+                return "库里没有失败记录，跳过"
+            assert all(r["id"] for r in failed), "失败记录缺 id"
+            return f"{len(failed)} 条失败记录仍在列表里"
+
+        run("失败的任务留在历史里", _history_failed_kept)
+
+        def _history_limit_clamped() -> str:
+            # limit 要夹住：不夹的话 ?limit=100000 就是一次全库扫描。
+            # 服务层把上限设在 300。
+            big = requests.get(base + "/api/history?limit=100000", timeout=20)
+            assert big.status_code == 200, big.status_code
+            n_big = len(big.json())
+            assert n_big <= 300, f"limit 没夹住，返回了 {n_big} 条"
+            # limit=0 走 max(1, ...) 那条路，应当返回至少 1 条而不是空列表。
+            zero = requests.get(base + "/api/history?limit=0", timeout=15)
+            assert zero.status_code == 200, f"limit=0 不该报错：{zero.status_code}"
+            assert len(zero.json()) >= 1, "limit=0 被当成 0 条了，应当是至少 1 条"
+            return f"limit=100000 → {n_big} 条（上限 300）；limit=0 → {len(zero.json())} 条"
+
+        run("limit 被夹在合理区间", _history_limit_clamped)
+
+        def _history_store_layer() -> str:
+            # 直接打 store：确认 SQL 层就没把 summary_json 读出来，
+            # 而不是靠上层 pop 掉——pop 掉的话磁盘 IO 和解析开销照付。
+            store = app.state.service.state.store
+
+            rows = store.list_task_index(limit=5)
+            if not rows:
+                return "库是空的，跳过"
+            for r in rows:
+                assert "summary_json" not in r, "store 层把正文读出来了"
+            # 对照：list_tasks 是带正文的，两条路径必须真的不同。
+            full = store.list_tasks(limit=1)
+            if full:
+                assert "summary_json" in full[0], (
+                    "list_tasks 居然不带正文了——那「索引载荷更小」那条断言就失去意义"
+                )
+            return f"索引 {len(rows)} 条无正文，list_tasks 仍带正文"
+
+        run("store 层就没读正文", _history_store_layer)
+
+
+
 
         def _untouched() -> str:
             now = real_config.read_bytes() if real_config.exists() else None

@@ -1363,6 +1363,43 @@ class Service:
     def list_tasks(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.state.store.list_tasks(limit=max(1, min(limit, 100)))
 
+    @_api
+    def list_history(self, limit: int = 100) -> list[dict[str, Any]]:
+        """历史总结的索引：只给列表要用的字段，不搬全文。
+
+        `list_tasks` 会把 `summary_json`（含 2000 字正文）整份读出来。拿它当
+        历史列表用，一百条就是几百 KB 的无用载荷，而列表上只显示标题、时间和
+        一句话结论。这里在 SQL 层就只取需要的列，正文一个字都不碰。
+
+        失败的任务也留在列表里，但要能一眼看出来——它同样是历史的一部分，
+        用户往往正是要回去看"上次为什么没成"。
+        """
+        rows = self.state.store.list_task_index(limit=max(1, min(limit, 300)))
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            one_line = (row.get("one_line") or "").strip()
+            out.append(
+                {
+                    "id": row.get("id"),
+                    "title": row.get("title") or "",
+                    "bvid": row.get("bvid") or "",
+                    "up_name": row.get("up_name") or "",
+                    "status": row.get("status") or "",
+                    "created_at": row.get("created_at") or "",
+                    "updated_at": row.get("updated_at") or "",
+                    "one_line": one_line,
+                    "role": row.get("role") or "",
+                    "version_count": row.get("version_count") or 0,
+                    # 没有版本时保持 None，不要 `or 0`——「还没有版本」和
+                    # 「第 0 版」是两件事，前端要靠这个区分「初版还没落库」
+                    # 和「已经有版本了」。get_task 里也是同样的口径。
+                    "current_version": row.get("current_version"),
+                    "has_summary": bool(row.get("has_summary")),
+                    "error": row.get("error") or "",
+                }
+            )
+        return out
+
     # ------------------------------------------------------------ 发布
 
     @_api

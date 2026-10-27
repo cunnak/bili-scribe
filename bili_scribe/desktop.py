@@ -563,6 +563,9 @@ class DesktopApi:
     def list_tasks(self, limit=20):
         return self._wrap(self._service.list_tasks, limit)
 
+    def list_history(self, limit=100):
+        return self._wrap(self._service.list_history, limit)
+
     # 发布
     def publish(self, payload):
         return self._wrap(self._service.publish, payload)

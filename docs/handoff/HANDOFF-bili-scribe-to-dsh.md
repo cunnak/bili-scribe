@@ -25,8 +25,8 @@
 | 本地路径 | `C:/Users/b1596/Desktop/视频内容总结`（2026-10-27 从 WorkBuddy 工作区迁入，venv 已按新路径重建） |
 | 版本 | `0.5.0`（唯一来源：`bili_scribe/__init__.py::__version__`） |
 | 仓库 | `https://github.com/cunnak/bili-scribe`（公开） |
-| 代码量 | 7,835 行 Python + 2,208 行单页 HTML + 4,222 行测试 |
-| 测试 | 37 离线 + 35 HTTP + 100 前端 = **172 项**，另有 `probe_http.js`（源码版端到端）与 `probe_exe.py`（打包产物实机验收） |
+| 代码量 | 8,171 行 Python + 2,860 行单页 HTML + 5,601 行测试 |
+| 测试 | 38 离线 + 46 HTTP + 171 前端 = **255 项**，另有 `probe_http.js`（源码版端到端）与 `probe_exe.py`（打包产物实机验收） |
 | 交付形态 | 单文件 exe（`dist/bili-scribe.exe`，约 28 MB，PyInstaller）+ 可跑源码（HTTP 版） |
 | 用户数据 | `~/.bili-scribe/`（`bili-scribe.db` + `key.bin` + `frames/` + `notes-cache/`） |
 | 技术栈 | Python 3.14 / pywebview(WebView2) 桌面壳 / FastAPI（可选 HTTP 壳）/ SQLite(WAL) / 原生 JS 单页 / 无构建步骤 |
@@ -64,7 +64,7 @@ bili_scribe/
 ├── desktop.py                桌面外壳：pywebview 窗口 + 进程内 API 桥（**无端口**）
 ├── app/
 │   ├── service.py            业务层：Service + AppState。桌面与 HTTP 共用这一份
-│   ├── main.py               FastAPI 薄壳：26 个路由，只做传输，不含业务
+│   ├── main.py               FastAPI 薄壳：28 个路由，只做传输，不含业务
 │   └── static/index.html     单页前端（原生 JS，无框架、无构建，直调 api 桥）
 ├── core/                     领域层：业务规则，不发 HTTP 以外的事
 │   ├── resolver.py           输入 → 稿件 + 分P（链接/BV/分享文本/短链）
@@ -388,7 +388,7 @@ dsh 有 `present` 工具。让 agent 把版本史渲染成一份 HTML（三栏�
 
 | 阶段 | 做什么 | 验收 |
 |---|---|---|
-| **S0 接手** | 读这份文档 + `README.md` + `roles.py`；跑一遍 172 项测试 + `probe_http.js` + `probe_exe.py`；确认桌面版能开窗 | 测试全绿，底栏版本号 = `0.5.0` |
+| **S0 接手** | 读这份文档 + `README.md` + `roles.py`；跑一遍 255 项测试 + `probe_http.js` + `probe_exe.py`；确认桌面版能开窗 | 测试全绿，底栏版本号 = `0.5.0` |
 | **S1 MCP 桥** | 写 `scripts/mcp_server.py`（6 个工具），配 `dsh-mcp-client` | agent 能完成"总结一条视频 → 改一版 → 取版本"三段，不用手工拼 URL |
 | **S2 会话化** | 把轮询、重试、进度播报收进工具；加 `list_recent_tasks` | 一条 4 小时视频在对话里跑完，中途不超时、不丢进度 |
 | **S3 面板（轻）** | 版本史 → HTML → `present` | 用户能在预览里看清"这一版实际改了哪些字段、改成什么" |

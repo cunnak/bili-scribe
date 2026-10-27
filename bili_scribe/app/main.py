@@ -197,6 +197,10 @@ def create_app(cfg: AppConfig) -> FastAPI:
     def api_list_tasks(limit: int = 20) -> list[dict[str, Any]]:
         return service.list_tasks(limit)
 
+    @app.get("/api/history")
+    def api_list_history(limit: int = 100) -> list[dict[str, Any]]:
+        return service.list_history(limit)
+
     # -------------------------------------------------------------------- 发布
 
     @app.post("/api/publish")
