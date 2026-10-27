@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import os
 import sys
 import threading
 import time
@@ -94,16 +95,54 @@ def _config_candidates() -> list[Path]:
     return [local, Path(DEFAULT_HOME) / "config.yaml"]
 
 
+def _can_write_near(path: Path) -> bool:
+    """这一份配置以后**存得下去**吗？只看它所在的目录。
+
+    判据是"目录存在且可写"，不是"文件可写"——文件此刻还不存在，而
+    `_default_config()` 选它的意义就是"以后往这里写"。
+
+    为什么必须查这个：exe 被拖进 `Program Files\\`、或者从压缩包里直接双击
+    （解压到 `%TEMP%` 下一个只读的临时目录）时，exe 旁边根本写不进去。不查的话
+    程序会优先选中那个位置，用户认真填完 api_key 点保存，收到的是一句
+    `配置写入失败：[Errno 13] Permission denied: '...config.yaml.tmp'`——
+    看着像程序坏了，其实只是选错了落脚点。
+
+    目录不存在也算不可写：不替用户凭空建一个 `Program Files\\xxx` 出来。
+    """
+    parent = path.parent
+    if not parent.is_dir():
+        return False
+    try:
+        # 真的试着建一个文件再删掉。`os.access` 在 Windows 上对 ACL 不可靠
+        # （它主要看只读属性），这里要的是"到底能不能落盘"。
+        probe = parent / f".bili-scribe-write-test-{os.getpid()}"
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def _default_config() -> Path:
-    """配置文件位置：取第一个存在的；都不存在则取首选位置作为"以后保存到哪里"。
+    """配置文件位置：取第一个存在的；都不存在则取**第一个写得进去的**。
 
     返回的路径会写进 `cfg.source_path`，设置页保存时就写它。所以"现在没有配置"
-    这个状态是安全的——首次在设置页点保存，文件就创建在首选位置。
+    这个状态是安全的——首次在设置页点保存，文件就创建在这个位置。
+
+    都不存在时的取舍（这就是"只发一个 exe 给对方"的场景）：优先 exe 旁边，
+    便携版的心智模型成立；但那地方写不进去时**必须退到用户目录**，否则对方
+    填完 key 会撞上一个自己没法处理的权限错误。宁可配置落在用户目录里，
+    也不要让人以为程序是坏的。
     """
     candidates = _config_candidates()
     for path in candidates:
         if path.exists():
             return path
+    for path in candidates:
+        if _can_write_near(path):
+            return path
+    # 两个都写不进去（理论上不该发生：用户目录一定可写）。退回首选位置，
+    # 让保存时的错误至少指出一个具体路径，而不是在这里编一个新位置。
     return candidates[0]
 
 

@@ -2591,7 +2591,83 @@ def _desktop_role_bridge() -> str:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _desktop_config_falls_back_when_exe_dir_readonly() -> str:
+    """exe 旁边写不进去时，配置必须退到用户目录。
+
+    `_default_config()` 原本的规则是"取第一个存在的，都不存在则取第一个候选"。
+    便携版没问题，但**装机版会踩坑**：把 exe 拖进 `Program Files\\`、或者从压缩包
+    里直接双击（解压在 `%TEMP%` 下的临时目录），exe 旁边就是不可写的。程序照旧
+    选中那个位置，用户认真填完 api_key 点保存，拿到的是
+
+        配置写入失败：[Errno 13] Permission denied: '...\\config.yaml.tmp'
+
+    看着像程序坏了，其实只是落脚点选错了——而这恰好是"只发一个 exe 给对方"
+    最常见的用法，所以必须钉住。
+
+    测法是替换 `_config_candidates()`：不依赖这台机器的实际权限（以管理员身份
+    跑测试时 `Program Files` 也能写，靠真实权限判会时灵时不灵），直接给一个
+    必然不可写的目录——它是**文件占位**，`is_dir()` 为假。
+    """
+    import tempfile
+
+    from bili_scribe import desktop
+
+    tmp = Path(tempfile.mkdtemp(prefix="bs-desk-cfg-"))
+    saved = desktop._config_candidates
+    saved_frozen = desktop._frozen
+    saved_default_home = desktop.DEFAULT_HOME
+    try:
+        # 占位文件冒充"只读目录"：路径存在，但不是目录，往里写必然失败
+        readonly = tmp / "ProgramFiles-as-file"
+        readonly.write_bytes(b"")
+        writable = tmp / "home"
+        writable.mkdir()
+
+        desktop._config_candidates = lambda: [
+            readonly / "config.yaml",
+            writable / "config.yaml",
+        ]
+        got = desktop._default_config()
+        assert got == writable / "config.yaml", (
+            f"exe 旁边写不进去时没退到用户目录，而是选了 {got} —— "
+            "对方填完 key 会撞上 PermissionError"
+        )
+
+        # 反过来：exe 旁边可写时仍要优先它，便携版的心智模型不能丢
+        desktop._config_candidates = lambda: [
+            writable / "config.yaml",
+            writable / "sub" / "config.yaml",
+        ]
+        got2 = desktop._default_config()
+        assert got2 == writable / "config.yaml", (
+            f"可写时没优先 exe 旁边：{got2} —— 便携版拷走 exe 就该能带走配置"
+        )
+
+        # 已有的文件优先于"可写性"：用户明确放在 exe 旁边那份不能被忽略。
+        # 注意这份要真的能存在——把父路径做成文件的话，路径本身就不可能存在，
+        # 测到的就不是"已存在优先"而是"路径非法"了。
+        existing_dir = tmp / "exe-dir"
+        existing_dir.mkdir()
+        existing = existing_dir / "config.yaml"
+        existing.write_text("llm:\n  model: demo\n", encoding="utf-8")
+        desktop._config_candidates = lambda: [existing, writable / "config.yaml"]
+        got3 = desktop._default_config()
+        assert got3 == existing, (
+            f"已存在的配置没被优先采用：{got3} —— 会读不到用户自己写的那份"
+        )
+
+        return "配置落脚点：只读退用户目录 / 可写优先 exe 旁 / 已存在优先"
+    finally:
+        desktop._config_candidates = saved
+        desktop._frozen = saved_frozen
+        desktop.DEFAULT_HOME = saved_default_home
+        import shutil
+
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 check("桌面桥暴露 set_role", _desktop_role_bridge)
+check("exe 旁不可写时配置退到用户目录", _desktop_config_falls_back_when_exe_dir_readonly)
 check("报错指出出错的那一行", _error_detail_points_at_the_frame)
 
 
