@@ -2,6 +2,12 @@
 
     python scripts/package.py
 
+**包的内容以 `git ls-files` 为准**，不是遍历整个目录。原因很实际：这个仓库的
+工作区里长期堆着调试脚本、抓下来的截图、跑测试留下的 json/txt——它们只对当下
+这一次调试有意义，却会被 `rglob` 一起打进包里。v0.7.0 第一次就是这么打出来的：
+386 个文件、57 MB，而上一版是 86 个文件、1.2 MB。发布包里混着调试中间产物，
+对方解压后看到一堆 `poll_task.py`、`sub_body.txt`，只会觉得这东西没收拾干净。
+
 排除两类东西，理由不同：
 
 - **机器相关**：`.venv/`、`__pycache__/`、`dist/`、`build/`。它们只对生成它们的
@@ -16,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -76,6 +83,32 @@ def should_skip(rel: Path) -> bool:
     return False
 
 
+def tracked_files() -> list[Path]:
+    """仓库里被 git 跟踪的文件，这才是发布包的内容边界。
+
+    用 `git ls-files -z` 而不是 `rglob`：未跟踪的东西（调试脚本、抓图、临时 json）
+    属于工作区噪声，不该出现在发给别人的包里。`-z` 是为了中文文件名不被转义。
+
+    不在 git 仓库里跑时（比如对方拿到的 zip 解压后想重打一个包）直接报错，
+    而不是悄悄退化成遍历目录——那正是打出一个 57 MB 脏包的路径。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(
+            "打包中止：这个目录不是 git 仓库（或 git 不可用），无法确定该打哪些文件。\n"
+            f"  {exc}\n"
+            "  发布包的内容以 git 跟踪清单为准；脱离仓库时请先把要发的东西整理成仓库。"
+        ) from exc
+    names = [n for n in out.decode("utf-8", "replace").split("\0") if n]
+    return [ROOT / n for n in names]
+
+
 def build(version: str, out_dir: Path) -> tuple[Path, int]:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"bili-scribe-{version}.zip"
@@ -84,7 +117,7 @@ def build(version: str, out_dir: Path) -> tuple[Path, int]:
     count = 0
     skipped: list[str] = []
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for path in sorted(ROOT.rglob("*")):
+        for path in sorted(tracked_files()):
             if not path.is_file():
                 continue
             rel = path.relative_to(ROOT)
