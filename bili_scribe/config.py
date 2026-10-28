@@ -31,6 +31,12 @@ DEFAULT_SUBTITLE_LANGS = ["zh-CN", "zh-Hans", "zh-Hant", "ai-zh"]
 # 改了之后需要重启才生效的段落
 NEEDS_RESTART = ("server",)
 
+# 可选皮肤。前端 index.html 里的 SKINS 数组与这里是同一份清单的两端：
+# 加一套皮肤要同时改 CSS（[data-skin="xxx"] 变量块）、前端清单和这里。
+# 后端的校验只认这份清单——不能让一个手写的请求把 data-skin 写成任意值，
+# 那样 CSS 里没有对应变量块，界面会变成"所有颜色都取不到"的白板。
+SKIN_KEYS = ("ark", "exhibition")
+
 
 def _expand(path: str) -> str:
     return os.path.expanduser(str(path))
@@ -140,12 +146,23 @@ class StorageConfig:
 
 
 @dataclass
+class UiConfig:
+    """界面偏好。跟 server/llm 那些不同，这里的每一项都不影响处理结果，
+    只影响"看起来是什么样"——所以它不参与 NEEDS_RESTART，改完立刻生效。"""
+
+    # 皮肤：ark = 深色（默认，明日方舟 / 终末地取色），exhibition = 浅色（异客巡展）。
+    # 刻意存字符串而不是布尔：以后加第三套皮肤时不用改配置结构，也不用做迁移。
+    skin: str = "ark"
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     collect: CollectConfig = field(default_factory=CollectConfig)
     publish: PublishConfig = field(default_factory=PublishConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    ui: UiConfig = field(default_factory=UiConfig)
     # 配置文件的实际路径。不属于配置内容，由 run.py 装载后写入，
     # 供设置页面知道该回写到哪。故意不参与 asdict()/比较。
     source_path: str | None = field(default=None, repr=False, compare=False)
@@ -231,6 +248,15 @@ class AppConfig:
                 f"collect.frames.quality 必须在 1–100，收到：{frames_cfg.quality}"
             )
 
+        ui_cfg = section(UiConfig, raw.get("ui"))
+        # 皮肤名写错时必须当场报错，不能默默用默认值：
+        # CSS 里没有对应的变量块时，界面会变成"所有颜色都取不到"的白板，
+        # 而配置文件本身看起来完全正常 —— 那种问题排查起来最费时间。
+        if ui_cfg.skin not in SKIN_KEYS:
+            raise ValueError(
+                f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{ui_cfg.skin!r}"
+            )
+
         return cls(
             server=section(ServerConfig, raw.get("server")),
             llm=llm_cfg,
@@ -246,6 +272,7 @@ class AppConfig:
             ),
             publish=section(PublishConfig, raw.get("publish")),
             storage=section(StorageConfig, raw.get("storage")),
+            ui=ui_cfg,
         )
 
     def public_view(self) -> dict[str, Any]:
@@ -283,7 +310,10 @@ def apply_settings(cfg: AppConfig, values: dict[str, Any]) -> list[str]:
     嵌套的 dataclass（如 collect.danmaku）递归下去改，不整段替换。
     """
     restarted: list[str] = []
-    for section_name in ("server", "llm", "collect", "publish", "storage"):
+    # 校验失败要能回退。这里改的是共享的 cfg 对象（AppState、采集器都持有它），
+    # 抛异常时若已写进去一半，界面会变成"报错说没改成，实际却改了一半"。
+    previous_skin = cfg.ui.skin
+    for section_name in ("server", "llm", "collect", "publish", "storage", "ui"):
         incoming = values.get(section_name)
         if not isinstance(incoming, dict):
             continue
@@ -300,6 +330,15 @@ def apply_settings(cfg: AppConfig, values: dict[str, Any]) -> list[str]:
                         setattr(current, sub_key, sub_value)
             else:
                 setattr(section, key, value)
+    # 皮肤名经 apply_settings 也要挡一次：设置页那条 PUT 是通用通道，
+    # 它不认 SKIN_KEYS，一个手写的请求就能把 skin 改成 CSS 里不存在的名字。
+    # 那条路径不经过 `Service.set_skin`，所以校验不能只放在那里。
+    if cfg.ui.skin not in SKIN_KEYS:
+        bad = cfg.ui.skin
+        cfg.ui.skin = previous_skin
+        raise ValueError(
+            f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{bad!r}"
+        )
     return restarted
 
 
@@ -404,6 +443,11 @@ def render_config_yaml(cfg: AppConfig) -> str:
             f"  db_path: {q(cfg.storage.db_path)}",
             "  # 凭据加密密钥，单独存放",
             f"  key_path: {q(cfg.storage.key_path)}",
+            "",
+            "ui:",
+            "  # 界面皮肤。可选：ark（深色，默认）/ exhibition（浅色，异客巡展）。",
+            "  # 只影响配色，不影响任何处理逻辑；改完立刻生效，不需要重启。",
+            f"  skin: {q(cfg.ui.skin)}",
             "",
         ]
     )

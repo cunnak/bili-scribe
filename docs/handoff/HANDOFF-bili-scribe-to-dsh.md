@@ -26,7 +26,7 @@
 | 版本 | `0.5.0`（唯一来源：`bili_scribe/__init__.py::__version__`） |
 | 仓库 | `https://github.com/cunnak/bili-scribe`（公开） |
 | 代码量 | 8,171 行 Python + 2,860 行单页 HTML + 5,601 行测试 |
-| 测试 | 38 离线 + 46 HTTP + 171 前端 = **255 项**，另有 `probe_http.js`（源码版端到端）与 `probe_exe.py`（打包产物实机验收） |
+| 测试 | 40 离线 + 49 HTTP + 210 前端 = **299 项**，另有 `probe_http.js`（源码版端到端）与 `probe_exe.py`（打包产物实机验收） |
 | 交付形态 | 单文件 exe（`dist/bili-scribe.exe`，约 28 MB，PyInstaller）+ 可跑源码（HTTP 版） |
 | 用户数据 | `~/.bili-scribe/`（`bili-scribe.db` + `key.bin` + `frames/` + `notes-cache/`） |
 | 技术栈 | Python 3.14 / pywebview(WebView2) 桌面壳 / FastAPI（可选 HTTP 壳）/ SQLite(WAL) / 原生 JS 单页 / 无构建步骤 |

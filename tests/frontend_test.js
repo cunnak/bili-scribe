@@ -64,6 +64,7 @@ function makeBackend(overrides) {
       llm: { model: "qwen-test", base_url: "https://example.invalid/v1", configured: true, role: "wengao" },
       storage: { db_path: "/home/u/.bili-scribe/bili-scribe.db" },
       publish: { require_confirm: true },
+      ui: { skin: "ark" },
       features: { qr_login: true },
     },
     auth: { logged_in: false, identity: null },
@@ -109,6 +110,17 @@ function makeBackend(overrides) {
       state.config.llm.role = key;
       state.settings.values.llm.role = key;
       return ok({ role: hit.key, name: hit.name, passes: hit.passes });
+    },
+
+    /* 切皮肤。真后端只改 ui.skin 这一项并写盘；顶栏 chip 读的是 config.ui.skin，
+       所以这里也要把 config 里那份改掉，否则 chip 文案不会跟着变。 */
+    set_skin: (p) => {
+      const key = (p && p.skin) || "";
+      if (key !== "ark" && key !== "exhibition") {
+        return { ok: false, error: "未知的皮肤：" + key };
+      }
+      state.config.ui.skin = key;
+      return ok({ skin: key });
     },
 
     get_settings: () => ok(state.settings),
@@ -907,6 +919,229 @@ test("Esc 与点外面都能关掉角色浮层", async () => {
     p.doc.body.click();
     await wait(30);
     assert(G65, "点外面也关掉了", !p.$("role-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+/* ============================================================ 六点五、皮肤选择 */
+
+const G67 = group("皮肤选择");
+
+test("顶栏有皮肤 chip，显示的是当前皮肤名", async () => {
+  const p = await loadPage();
+  try {
+    const chip = p.$("chip-skin");
+    assert(G67, "chip 存在", !!chip, "找不到 #chip-skin");
+    eq(G67, "父节点是顶栏", chip.parentElement.className, "top");
+    // 默认配置 ui.skin = ark，对应「终末地」。
+    assert(G67, "显示当前皮肤名（终末地）",
+      chip.textContent.includes("终末地"), "实际：" + chip.textContent);
+  } finally { p.close(); }
+});
+
+test("点 chip 弹出皮肤清单，两套皮肤都在里面", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-skin").click();
+    await wait(40);
+    assert(G67, "浮层打开了", p.$("skin-pop").classList.contains("on"), "没打开");
+
+    const items = p.$("skin-list").querySelectorAll("[data-skin]");
+    eq(G67, "条目数与皮肤数一致", items.length, 2);
+    eq(G67, "第一套是 ark", items[0].dataset.skin, "ark");
+    eq(G67, "第二套是 exhibition", items[1].dataset.skin, "exhibition");
+    eq(G67, "当前项被标出来", p.$("skin-list").querySelectorAll(".sk.on").length, 1);
+    eq(G67, "标的是 ark",
+      p.$("skin-list").querySelector(".sk.on").dataset.skin, "ark");
+  } finally { p.close(); }
+});
+
+test("切到浅色皮肤：调 set_skin、<html> 上写 data-skin、chip 跟着变、浮层关掉", async () => {
+  const p = await loadPage();
+  try {
+    eq(G67, "切换前没有 data-skin", p.doc.documentElement.getAttribute("data-skin"), null);
+
+    p.$("chip-skin").click();
+    await wait(40);
+    p.doc.querySelector('#skin-list [data-skin="exhibition"]').click();
+    await wait(90);
+
+    const c = p.backend.calls.find((x) => x.name === "set_skin");
+    assert(G67, "调了 set_skin", !!c, "没调用");
+    eq(G67, "传的是对象而不是裸字符串", c ? typeof c.args[0] : "", "object");
+    eq(G67, "带上了 skin", c ? c.args[0].skin : null, "exhibition");
+
+    // 换肤的全部实现就是这一个属性。CSS 那边 [data-skin="exhibition"] 块负责配色。
+    eq(G67, "<html> 上写上了 data-skin",
+      p.doc.documentElement.getAttribute("data-skin"), "exhibition");
+
+    assert(G67, "chip 显示新皮肤（异客巡展）",
+      p.$("chip-skin").textContent.includes("异客巡展"),
+      "实际：" + p.$("chip-skin").textContent);
+    assert(G67, "浮层关掉了", !p.$("skin-pop").classList.contains("on"), "还开着");
+    assert(G67, "给了提示", p.$("task-msg").className.includes("ok"), "没有成功提示");
+  } finally { p.close(); }
+});
+
+test("切回深色皮肤：把 data-skin 摘掉，而不是留一个 ark 值", async () => {
+  /* 默认皮肤不靠 [data-skin="ark"] 那条规则，靠的是 :root 本身。
+     如果这里写成 data-skin="ark"，两套配色就会同时命中，谁赢取决于选择器优先级——
+     这种"看起来能用、换一台机器就乱"的写法不能留。 */
+  const be = makeBackend();
+  be.state.config.ui.skin = "exhibition";
+  const p = await loadPage({ backend: be });
+  try {
+    eq(G67, "启动时按配置应用了浅色皮肤",
+      p.doc.documentElement.getAttribute("data-skin"), "exhibition");
+
+    p.$("chip-skin").click();
+    await wait(40);
+    p.doc.querySelector('#skin-list [data-skin="ark"]').click();
+    await wait(90);
+
+    eq(G67, "data-skin 被摘掉了",
+      p.doc.documentElement.getAttribute("data-skin"), null);
+    assert(G67, "chip 回到终末地",
+      p.$("chip-skin").textContent.includes("终末地"),
+      "实际：" + p.$("chip-skin").textContent);
+  } finally { p.close(); }
+});
+
+test("选当前那套皮肤：不白跑一趟后端", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-skin").click();
+    await wait(40);
+    p.doc.querySelector('#skin-list [data-skin="ark"]').click();  // 当前就是 ark
+    await wait(70);
+    eq(G67, "没有发 set_skin",
+      p.backend.calls.filter((x) => x.name === "set_skin").length, 0);
+    assert(G67, "浮层还是关掉了", !p.$("skin-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+test("回写失败时皮肤照切，但明确告诉人没存住", async () => {
+  /* 换肤是纯前端动作，不该等一次网络往返才生效。但"这次生效、下次退回"
+     是用户必须知道的——静默失败会让人以为配置坏了。 */
+  const be = makeBackend({
+    set_skin: () => ({ ok: false, error: "配置写入失败：磁盘满了", status: 500 }),
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    p.$("chip-skin").click();
+    await wait(40);
+    p.doc.querySelector('#skin-list [data-skin="exhibition"]').click();
+    await wait(120);
+
+    eq(G67, "皮肤仍然切了",
+      p.doc.documentElement.getAttribute("data-skin"), "exhibition");
+    const msg = p.$("task-msg").textContent || "";
+    assert(G67, "提示里说明了没存住", /没存住|写入失败/.test(msg),
+      "task-msg = " + JSON.stringify(msg));
+    assert(G67, "提示是错误样式", p.$("task-msg").className.includes("err"),
+      "className = " + p.$("task-msg").className);
+  } finally { p.close(); }
+});
+
+test("Esc 与点外面都能关掉皮肤浮层", async () => {
+  const p = await loadPage();
+  try {
+    p.$("chip-skin").click();
+    await wait(40);
+    assert(G67, "先确认开着", p.$("skin-pop").classList.contains("on"), "没打开");
+
+    p.doc.dispatchEvent(new p.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(30);
+    assert(G67, "Esc 关掉了", !p.$("skin-pop").classList.contains("on"), "还开着");
+
+    p.$("chip-skin").click();
+    await wait(40);
+    p.doc.body.click();
+    await wait(30);
+    assert(G67, "点外面也关掉了", !p.$("skin-pop").classList.contains("on"), "还开着");
+  } finally { p.close(); }
+});
+
+test("两套皮肤各自有一套完整的颜色变量，没有一个是空的", async () => {
+  /* 换肤最容易出的问题是"换了一半"：某个变量在新皮肤块里漏了，
+     它就静默回落到 :root 的深色值，在白底上变成一块看不见或刺眼的颜色。
+     所以逐个变量比，而不是只挑几个看。 */
+  const p = await loadPage();
+  try {
+    const names = ["--bg", "--panel", "--panel-2", "--text", "--text-2",
+      "--muted", "--dim", "--acid", "--acid-tx", "--acid-d", "--acid-hover",
+      "--on-acid", "--ember", "--paper", "--line", "--line-s", "--foot",
+      "--void", "--strong", "--acid-rgb", "--ink-rgb"];
+    const rootCs = p.win.getComputedStyle(p.doc.documentElement);
+    const dark = {};
+    for (const n of names) dark[n] = rootCs.getPropertyValue(n).trim();
+
+    const missingDark = names.filter((n) => !dark[n]);
+    eq(G67, "深色皮肤没有缺变量", missingDark, []);
+
+    p.doc.documentElement.setAttribute("data-skin", "exhibition");
+    const exCs = p.win.getComputedStyle(p.doc.documentElement);
+    const light = {};
+    for (const n of names) light[n] = exCs.getPropertyValue(n).trim();
+
+    const missingLight = names.filter((n) => !light[n]);
+    eq(G67, "浅色皮肤没有缺变量", missingLight, []);
+
+    /* 这几项在两套皮肤里**本来就该一样**，不能当缺陷：
+       --on-acid  主按钮上压在荧光块上的字。荧光黄绿在两种底色上都很亮，
+                  压在上面的字只能是深色 —— 两套取同一个值是正确的。
+       --line / --line-s  取值是 `rgba(var(--ink-rgb),.10)`，是**间接引用**。
+                  getComputedStyle 读自定义属性只返回这串原文，不做变量展开，
+                  所以两边文本相同，但真正解析出来的颜色（白 10% vs 黑 10%）
+                  是不同的。它们是否真的反过来了，由下面那条单独查。 */
+    const legitSame = new Set(["--on-acid", "--line", "--line-s"]);
+
+    const same = names.filter((n) => !legitSame.has(n) && dark[n] === light[n]);
+    eq(G67, "除已知同值项外，没有变量在两套皮肤里取同一个值", same, []);
+
+    // 叠层反转：--ink-rgb 必须从白翻成黑，否则网格、刻度尺、行悬停全消失。
+    eq(G67, "深色皮肤的叠层是白的", dark["--ink-rgb"], "255,255,255");
+    eq(G67, "浅色皮肤的叠层是黑的", light["--ink-rgb"], "0,0,0");
+  } finally { p.close(); }
+});
+
+test("浅色皮肤下正文与弱化文字的对比度也达标", async () => {
+  const p = await loadPage();
+  try {
+    p.doc.documentElement.setAttribute("data-skin", "exhibition");
+    const cs = p.win.getComputedStyle(p.doc.documentElement);
+    const rgb = (hex) => {
+      const h = hex.replace("#", "");
+      return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    };
+    const lum = (c) => {
+      const a = c.map((v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+    };
+    const ratio = (fg, bg) => {
+      const l1 = lum(rgb(fg)), l2 = lum(rgb(bg));
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    };
+
+    const g = (n) => cs.getPropertyValue(n).trim();
+    const bg = g("--bg"), panel = g("--panel");
+
+    assert(G67, "正文 ≥ 4.5", ratio(g("--text"), bg) >= 4.5,
+      ratio(g("--text"), bg).toFixed(2) + ":1");
+    assert(G67, "次要正文 ≥ 4.5", ratio(g("--text-2"), panel) >= 4.5,
+      ratio(g("--text-2"), panel).toFixed(2) + ":1");
+    assert(G67, "弱化文字 ≥ 3", ratio(g("--muted"), bg) >= 3,
+      ratio(g("--muted"), bg).toFixed(2) + ":1");
+    assert(G67, "最弱一档 ≥ 3（bg 上）", ratio(g("--dim"), bg) >= 3,
+      ratio(g("--dim"), bg).toFixed(2) + ":1");
+    // --acid 在白底上只有 1.5:1，当底色用没问题，当文字必须走 --acid-tx。
+    assert(G67, "强调色文字 ≥ 4.5", ratio(g("--acid-tx"), panel) >= 4.5,
+      ratio(g("--acid-tx"), panel).toFixed(2) + ":1");
+    // 主按钮是 acid 底 + on-acid 字，这对必须够。
+    assert(G67, "主按钮文字 ≥ 4.5", ratio(g("--on-acid"), g("--acid")) >= 4.5,
+      ratio(g("--on-acid"), g("--acid")).toFixed(2) + ":1");
   } finally { p.close(); }
 });
 

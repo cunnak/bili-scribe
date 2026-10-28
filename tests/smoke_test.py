@@ -2666,7 +2666,166 @@ def _desktop_config_falls_back_when_exe_dir_readonly() -> str:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _skin_switch() -> str:
+    """换肤必须是"真的换了一套"，而且三个副本必须一致。
+
+    这件事的失败方式很阴：换肤代码本身没 bug，是**同一个事实被抄在了三个地方**——
+    CSS 变量块（`[data-skin="exhibition"]`）、前端清单（`SKINS`）、后端白名单
+    （`SKIN_KEYS`）、窗口底色（`SKIN_BG`）。少改一处，症状分别是：
+
+    - 后端白名单漏了 → 点皮肤报 400，看着像"这个皮肤不存在"
+    - CSS 漏一个变量 → 那处颜色**静默**退回上一层的值，肉眼看只是"有点不对"
+    - 窗口底色漏了 → 启动瞬间闪一下另一种底色
+    - 前端清单漏了 → 皮肤在 CSS 里能用，但界面上点不到
+
+    四种都不会报错，所以只能靠这条测试钉住。检查项：
+
+    1. 两个变量块都存在，且 exhibition 覆盖的变量在 `:root` 里**都有定义**
+       （反过来就是拼错变量名——CSS 里拼错不报错，只是那行失效）
+    2. 每套皮肤的文字色 `--text` / `--text-2` / `--acid-tx` 对它自己的 `--bg`
+       都 ≥4.5:1。这是换肤最容易翻车的地方：荧光黄绿在近白底上只有 1.54:1，
+       直接把 `--acid` 当文字用，换过去就是一整屏读不出来的字
+    3. 后端 `SKIN_KEYS`、窗口 `SKIN_BG`、前端 `SKINS` 三份清单的键集合完全相同
+    4. 桌面桥暴露 `set_skin`（否则桌面版点皮肤没反应，网页版正常）
+    5. `<head>` 里那段预置脚本在 `<body>` **之前**，否则浅色皮肤会先画一帧深色
+    """
+    import re
+
+    from bili_scribe import desktop
+    from bili_scribe.config import SKIN_KEYS
+    from bili_scribe.desktop import DesktopApi
+
+    html = (PROJECT / "bili_scribe" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+
+    def var_block(selector: str) -> dict[str, str]:
+        m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", html)
+        assert m, f"找不到 {selector} 变量块 —— 这套皮肤不存在"
+        out: dict[str, str] = {}
+        for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", m.group(1)):
+            out[name] = value.strip()
+        return out
+
+    root = var_block(":root")
+    light = var_block('[data-skin="exhibition"]')
+    assert light, "浅色皮肤变量块是空的"
+
+    # 1) 覆盖的每个变量都得在 :root 里有定义，否则就是拼错了名字
+    stray = sorted(set(light) - set(root))
+    assert not stray, (
+        f"浅色皮肤里这些变量在 :root 中不存在：{stray} —— "
+        "CSS 变量拼错不会报错，只是那处样式静默失效"
+    )
+    # 换肤必须翻的几档，漏一个就是"只换了一半"
+    must_flip = [
+        "--void", "--bg", "--panel", "--panel-2",
+        "--acid", "--acid-d", "--ember", "--paper",
+        "--text", "--muted", "--dim", "--ink-rgb",
+    ]
+    missing = [v for v in must_flip if v not in light]
+    assert not missing, f"浅色皮肤没覆盖这些必须反相的变量：{missing}"
+
+    # 2) 每套皮肤自己的文字对比度
+    def rgb(token: str, table: dict[str, str]) -> tuple[int, int, int]:
+        token = token.strip()
+        m = re.fullmatch(r"var\((--[\w-]+)\)", token)
+        if m:
+            token = table.get(m.group(1), "")
+            assert token, f"变量 {m.group(1)} 在这套皮肤里取不到值"
+            m2 = re.fullmatch(r"#([0-9a-fA-F]{6})", token.strip())
+            assert m2, f"变量 {m.group(1)} 的值 {token!r} 不是六位色值，算不了对比度"
+        short = re.fullmatch(r"#([0-9a-fA-F]{3})", token)
+        if short:
+            token = "#" + "".join(c * 2 for c in short.group(1))
+        m3 = re.fullmatch(r"#([0-9a-fA-F]{6})", token)
+        assert m3, f"认不出的颜色写法：{token!r}"
+        h = m3.group(1)
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    def lum(token: str, table: dict[str, str]) -> float:
+        def ch(v: int) -> float:
+            s = v / 255
+            return s / 12.92 if s <= 0.03928 else ((s + 0.055) / 1.055) ** 2.4
+
+        r, g, b = rgb(token, table)
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+    def contrast(fg: str, bg: str, table: dict[str, str]) -> float:
+        a, b = lum(fg, table), lum(bg, table)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+    report_lines = []
+    for label, table in (("ark", root), ("exhibition", {**root, **light})):
+        bg = table["--bg"]
+        for name in ("--text", "--text-2", "--acid-tx"):
+            c = contrast(table[name], bg, table)
+            assert c >= 4.5, (
+                f"{label} 皮肤的 {name}（{table[name]}）压在 --bg（{bg}）上只有 "
+                f"{c:.2f}:1，正文读不清。换肤最常见的翻车就是把实心色块用的荧光色"
+                f"直接拿去当文字色——它在浅底上只有 1.5:1"
+            )
+        report_lines.append(f"{label} 正文 {contrast(table['--text'], bg, table):.1f}:1")
+
+    # 3) 三份清单必须是同一个集合
+    # 只从 SKINS 数组里取，不全文找 `key:`——那样会把无关对象也算进来，
+    # 以后随手加个 {key: "..."} 的配置项就会让这条测试假红。
+    skins_src = re.search(r"const SKINS\s*=\s*\[(.*?)\n\];", html, re.S)
+    assert skins_src, "前端 SKINS 数组读不出来"
+    front = set(re.findall(r'\bkey:\s*"([\w-]+)"', skins_src.group(1)))
+    assert front, "前端 SKINS 清单是空的"
+    assert front == set(SKIN_KEYS), (
+        f"前端皮肤清单 {sorted(front)} 与后端 SKIN_KEYS {sorted(SKIN_KEYS)} 不一致 —— "
+        "后端多一个会点了报 400，前端多一个会点了没反应"
+    )
+    assert set(desktop.SKIN_BG) == set(SKIN_KEYS), (
+        f"窗口底色 SKIN_BG {sorted(desktop.SKIN_BG)} 与 SKIN_KEYS "
+        f"{sorted(SKIN_KEYS)} 不一致 —— 缺的那套皮肤启动时会闪一下别的底色"
+    )
+    # 底色还得和 CSS 里那套皮肤的 --bg 逐字相同，否则就是上面那个"闪一下"
+    for key in SKIN_KEYS:
+        table = root if key == "ark" else {**root, **light}
+        assert desktop.SKIN_BG[key].upper() == table["--bg"].upper(), (
+            f"{key} 的窗口底色 {desktop.SKIN_BG[key]} 与 CSS 的 --bg "
+            f"{table['--bg']} 不同 —— 窗口出现到页面画完之间会闪一下"
+        )
+
+    # 4) 桌面桥
+    assert hasattr(DesktopApi, "set_skin"), (
+        "DesktopApi 没有 set_skin —— 桌面版点皮肤没反应，网页版却正常"
+    )
+
+    # 5) 预置脚本必须在 <body> 之前：晚一步就要先画一帧默认皮肤
+    head_end = html.find("</head>")
+    assert head_end > 0, "找不到 </head>"
+    # 从 head 结束处往后找 body：CSS/JS 的注释里会出现 "<body>" 字样，
+    # 全局 find 会命中注释而不是真标签（这条测试第一版就是这么假红的）。
+    body_start = html.find("<body", head_end)
+    assert body_start > head_end, "找不到 </head> 之后的 <body>"
+    head = html[:head_end]
+    assert 'data-skin' in head, (
+        "`<head>` 里没有设置 data-skin 的同步脚本 —— 浅色皮肤会先按深色画一帧再跳"
+    )
+    assert "skin=" in head and "URLSearchParams" in head, (
+        "`<head>` 的预置脚本没有读 skin —— 桌面版拿不到配置里存的皮肤，"
+        "只能等一次接口往返，那一瞬就是启动闪动"
+    )
+    # 6) 桌面版必须走 hash 而不是查询串。
+    #    `file://...index.html?skin=ark` 里的 `?skin=ark` 会被 WebView2 当成文件名
+    #    的一部分，窗口里直接是 ERR_FILE_NOT_FOUND —— 而那张报错页颜色数上万，
+    #    probe_exe 的"颜色数够多"判据会心安理得地放它过去。这个坑真踩过。
+    assert "location.hash" in head, (
+        "`<head>` 没有读 location.hash —— 桌面版加载的是 file:// URI，"
+        "查询串会被当成文件名，窗口里只会显示 ERR_FILE_NOT_FOUND"
+    )
+    assert "#skin=" in (PROJECT / "bili_scribe" / "desktop.py").read_text(encoding="utf-8"), (
+        "desktop.py 没有用 `#skin=` 传皮肤 —— 用 `?skin=` 会让 file:// 加载失败，"
+        "窗口里是一张白底报错页"
+    )
+
+    return "两套皮肤变量齐备；" + " / ".join(report_lines) + "；三份清单一致；预置脚本在 head 内"
+
+
 check("桌面桥暴露 set_role", _desktop_role_bridge)
+check("换肤：变量齐备、对比度达标、三份清单一致", _skin_switch)
 check("exe 旁不可写时配置退到用户目录", _desktop_config_falls_back_when_exe_dir_readonly)
 check("报错指出出错的那一行", _error_detail_points_at_the_frame)
 
@@ -3106,6 +3265,65 @@ def _settings_api() -> None:
             return f"llm.role={pub['llm']['role']} 可见，api_key 不可见"
 
         run("公开视图带 role 且不带 api_key", _role_in_config_public)
+
+        # —— 皮肤切换 ——
+        #
+        # 跟「总结角色」同一条路子，所以这里要验的也是同一件事：**真的写盘了**。
+        # 只改内存的话，界面当场换了、下次启动又变回去，会被当成玄学 bug。
+        # 另外两条是这条链路特有的：皮肤名写错必须 400 并列出可选项（默默退回
+        # 默认值会让界面变成一片白板而配置看着正常），以及保存整份设置时不能
+        # 把刚选的皮肤带成旧值。
+
+        def _skin_switch() -> str:
+            before = requests.get(base + "/api/config", timeout=10).json()["ui"]["skin"]
+            r = requests.post(base + "/api/skin", json={"skin": "exhibition"}, timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            body = r.json()
+            assert body["ok"] is True, body
+            assert body["skin"] == "exhibition", body
+            assert body["path"], f"没返回写到了哪个文件：{body}"
+
+            pub = requests.get(base + "/api/config", timeout=10).json()
+            assert pub["ui"]["skin"] == "exhibition", pub["ui"]
+            reloaded = AppConfig.load(cfg_path)
+            assert reloaded.ui.skin == "exhibition", (
+                f"皮肤没有写进配置文件，重新装载得到 {reloaded.ui.skin!r} —— "
+                "界面当场换了但重启会变回去"
+            )
+            return f"{before} → exhibition，已写盘"
+
+        run("POST /api/skin 切换并写盘", _skin_switch)
+
+        def _skin_unknown() -> str:
+            r = requests.post(base + "/api/skin", json={"skin": "exibition"}, timeout=15)
+            assert r.status_code == 400, f"期望 400，实际 {r.status_code}"
+            detail = r.json()["detail"]
+            assert "exibition" in detail, f"错误信息没点出是哪个值：{detail}"
+            # 拼错一个字母是最常见的情形，报错必须给出可选清单。
+            for key in ("ark", "exhibition"):
+                assert key in detail, f"错误信息里缺可选项 {key}：{detail}"
+            still = requests.get(base + "/api/config", timeout=10).json()
+            assert still["ui"]["skin"] == "exhibition", still["ui"]["skin"]
+            return "400 · " + detail[:44] + "…"
+
+        run("POST /api/skin 拒绝未知皮肤并列出可选项", _skin_unknown)
+
+        def _skin_survives_settings_save() -> str:
+            cur = requests.get(base + "/api/settings", timeout=15).json()["values"]
+            assert cur.get("ui", {}).get("skin") == "exhibition", (
+                f"/api/settings 读到的皮肤是 {cur.get('ui')!r}，与刚设的不一致 —— "
+                "设置页会把它写回旧值"
+            )
+            cur["confirm_disable_gate"] = False
+            cur["llm"]["timeout_seconds"] = 222
+            r = requests.put(base + "/api/settings", json=cur, timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            pub = requests.get(base + "/api/config", timeout=10).json()
+            assert pub["ui"]["skin"] == "exhibition", pub["ui"]["skin"]
+            assert pub["llm"]["timeout_seconds"] == 222, pub["llm"]["timeout_seconds"]
+            return "改别的设置不影响皮肤"
+
+        run("改别的设置不会把皮肤重置", _skin_survives_settings_save)
 
         # —— 历史总结索引 ——
         #

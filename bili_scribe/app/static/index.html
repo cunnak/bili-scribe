@@ -13,8 +13,8 @@
   --bg:#0D0F10;
   --panel:#131617;
   --panel-2:#191D1E;
-  --line:rgba(255,255,255,.10);
-  --line-s:rgba(255,255,255,.055);
+  --line:rgba(var(--ink-rgb),.10);
+  --line-s:rgba(var(--ink-rgb),.055);
 
   --acid:#D8F24B;
   --acid-d:#8A9B22;
@@ -23,16 +23,93 @@
 
   --text:#F2F4F2;
   --muted:#8B9490;
-  /* 第三档灰。**别再调暗。** 原来这里是 #4A5250，对 --bg 的对比度只有
-     2.39:1——设计上想靠"更暗"来分层，实际结果是那几行字在深色底上根本读不出来
-     （实测反馈：标题下面那行元信息、版本面板里的差异说明，都要凑近看）。
-     现在 #6B7672 = 4.08:1，过 WCAG AA 的 4.5 还差一点，但它是"辅助信息"档，
-     正文与关键信息一律用 --muted。改前请先算对比度，别凭感觉。 */
   --dim:#6B7672;
+
+  /* ================= 换肤用的语义层 =================
+     这一层存在的唯一理由是**同一个颜色在不同底色上必须换写法**。
+     酸性黄绿在近黑底上是 15.3:1（当文字很舒服），在近白底上只有 1.54:1
+     （当文字直接读不出来）。所以拆成三类：
+
+       --acid       实心色块：顶栏斜块、主按钮、圆点、输入光标 —— 浅色皮肤照样用荧光色
+       --acid-tx    文字与 1px 细线 —— 浅色皮肤换成深橄榄
+       --acid-rgb   半透明强调的 RGB 三元组 —— alpha 由调用处决定，一位都不变
+
+     `--ink-rgb` 是**叠层**：深色皮肤叠白（提亮），浅色皮肤必须叠黑（压暗）。
+     若把它写死成 255,255,255，换肤后网格、刻度尺、行悬停会集体消失 ——
+     那正是"只换了一半"的典型症状。
+
+     `--shade-rgb` 给阴影与遮罩用；浅色底上 0.62 的黑影会脏成一片。 */
+  --acid-rgb:216,242,75;
+  --ember-rgb:255,107,53;
+  --ink-rgb:255,255,255;
+  --shade-rgb:0,0,0;
+  --scrim-rgb:4,5,6;
+
+  --acid-tx:#D8F24B;
+  --acid-hover:#E4FA6B;
+  --on-acid:#0A0B08;
+
+  --strong:#FFFFFF;
+  --text-2:#C8CFCB;
+  --foot:#0A0C0D;
+  --stripe:rgba(0,0,0,.9);
+  --pop-shadow:0 18px 48px rgba(0,0,0,.62);
 
   --mono:'Cascadia Mono','Consolas','SF Mono',monospace;
   --sans:'Segoe UI','Microsoft YaHei',sans-serif;
   --cn:'Microsoft YaHei','PingFang SC',sans-serif;
+}
+
+/* ===================================================================
+   皮肤二：异客巡展 / INTERACTIVE EXHIBITION（浅色）
+
+   取色与形态来自明日方舟 × INTERACTIVE EXHIBITION 巡展海报：
+   近白纸底 + 细黑描边 + 荧光黄绿 / 青 / 洋红三色小面积强调。
+
+   它与默认皮肤是**反相**关系，不是换几个颜色：
+     1. 明度阶梯反转。默认皮肤越往里的层越亮（void < bg < panel < panel-2），
+        浅色皮肤必须越往里的层越白，否则卡片会陷进背景里、看不出层次。
+     2. 叠层反转。`--ink-rgb` 在默认皮肤是白色（往黑底上提亮），
+        在这里必须是黑色（往白底上压暗）。网格、刻度尺、行悬停全靠它。
+     3. 强调色三分。荧光黄绿 `#C5D622` 在近白底上当**色块**很醒目（顶栏斜块、
+        主按钮、勾选、光标），但当**文字**只有 1.54:1 —— 所以文字与细线
+        一律走 `--acid-tx`（深橄榄 #5F6E00，5.4:1）。
+     4. `--paper` 与 `--ember` 同理：原值在浅底上分别只有 1.24:1 与 2.71:1，
+        换成本族海报里的墨黑 #2A3134（12.7:1）与洋红 #C4186F（5.4:1）。
+
+   挂载方式：`<html data-skin="exhibition">`。由 JS 写入，持久化在 ui.skin，
+   刷新时在首帧前应用，避免启动瞬间闪一下白/黑。
+   =================================================================== */
+[data-skin="exhibition"]{
+  --void:#E9E7DF;
+  --bg:#F7F6F1;
+  --panel:#FFFFFF;
+  --panel-2:#FBFAF6;
+
+  --acid:#C5D622;
+  --acid-d:#4A6B12;
+  --ember:#C4186F;
+  --paper:#2A3134;
+
+  --text:#14181A;
+  --muted:#5E6866;
+  --dim:#6B7573;
+
+  --acid-rgb:197,214,34;
+  --ember-rgb:196,24,111;
+  --ink-rgb:0,0,0;
+  --shade-rgb:0,0,0;
+  --scrim-rgb:20,22,24;
+
+  --acid-tx:#5F6E00;
+  --acid-hover:#B4C41A;
+  --on-acid:#0A0B08;
+
+  --strong:#0E1214;
+  --text-2:#3C4448;
+  --foot:#E8E6DE;
+  --stripe:rgba(10,11,8,.82);
+  --pop-shadow:0 18px 48px rgba(0,0,0,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -43,27 +120,27 @@ body{
 }
 button{font:inherit;color:inherit}
 input,textarea,select{font:inherit}
-::selection{background:rgba(216,242,75,.28);color:#fff}
+::selection{background:rgba(var(--acid-rgb),.28);color:var(--strong)}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}
-::-webkit-scrollbar-thumb:hover{background:rgba(216,242,75,.35)}
+::-webkit-scrollbar-thumb{background:rgba(var(--ink-rgb),.10)}
+::-webkit-scrollbar-thumb:hover{background:rgba(var(--acid-rgb),.35)}
 
 /* ============ 刻度尺 ============ */
 .ruler{
   height:9px;flex:0 0 auto;display:flex;align-items:flex-end;
   border-bottom:1px solid var(--line-s);background:var(--bg);
 }
-.ruler i{flex:1;height:3px;background:rgba(255,255,255,.13)}
-.ruler i:nth-child(5n+1){height:8px;background:rgba(255,255,255,.30)}
+.ruler i{flex:1;height:3px;background:rgba(var(--ink-rgb),.13)}
+.ruler i:nth-child(5n+1){height:8px;background:rgba(var(--ink-rgb),.30)}
 
 /* ============ 顶栏 ============ */
 .top{
   height:52px;flex:0 0 auto;display:flex;align-items:center;
   padding:0 20px;position:relative;
   background:
-    linear-gradient(90deg, rgba(216,242,75,.06), transparent 32%),
-    linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+    linear-gradient(90deg, rgba(var(--acid-rgb),.06), transparent 32%),
+    linear-gradient(180deg, rgba(var(--ink-rgb),.035), transparent);
   border-bottom:1px solid var(--line);
 }
 .top::before{
@@ -73,11 +150,11 @@ input,textarea,select{font:inherit}
 }
 .top::after{
   content:'';position:absolute;left:0;top:0;width:34px;height:52px;
-  background:repeating-linear-gradient(115deg, rgba(0,0,0,.9) 0 3px, transparent 3px 7px);
+  background:repeating-linear-gradient(115deg, rgba(var(--shade-rgb),.9) 0 3px, transparent 3px 7px);
   clip-path:polygon(0 0, 100% 0, 44% 100%, 0 100%);
 }
 .brand{display:flex;align-items:baseline;gap:11px;padding-left:16px;z-index:1}
-.brand b{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.16em;color:var(--acid)}
+.brand b{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.16em;color:var(--acid-tx)}
 .brand .cn{font-family:var(--cn);font-size:12px;font-weight:600;letter-spacing:.30em;color:var(--muted)}
 .top .sp{flex:1}
 
@@ -85,9 +162,9 @@ input,textarea,select{font:inherit}
   display:inline-flex;align-items:center;gap:7px;margin-left:9px;cursor:pointer;
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   color:var(--muted);border:1px solid var(--line);
-  padding:4px 10px;background:rgba(255,255,255,.02);
+  padding:4px 10px;background:rgba(var(--ink-rgb),.02);
 }
-.st:hover{border-color:rgba(216,242,75,.4);color:var(--text)}
+.st:hover{border-color:rgba(var(--acid-rgb),.4);color:var(--text)}
 .st i{width:4px;height:4px;background:var(--acid);flex:0 0 auto}
 .st.warn i{background:var(--ember)}
 .st.off i{background:var(--dim)}
@@ -99,7 +176,7 @@ input,textarea,select{font:inherit}
 .pop{
   position:fixed;top:58px;right:20px;width:360px;z-index:39;
   background:var(--panel);border:1px solid var(--line);
-  box-shadow:0 18px 48px rgba(0,0,0,.62);
+  box-shadow:var(--pop-shadow);
   opacity:0;pointer-events:none;transform:translateY(-6px);
   transition:opacity .14s ease,transform .14s ease;
 }
@@ -108,33 +185,54 @@ input,textarea,select{font:inherit}
   display:flex;align-items:center;padding:9px 14px;
   border-bottom:1px solid var(--line);
   font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;
-  color:var(--acid);text-transform:uppercase;
+  color:var(--acid-tx);text-transform:uppercase;
 }
 .pop .ph .x{
   margin-left:auto;cursor:pointer;color:var(--muted);
   font-size:15px;line-height:1;letter-spacing:0;text-transform:none;
 }
-.pop .ph .x:hover{color:var(--acid)}
+.pop .ph .x:hover{color:var(--acid-tx)}
 .pop .pl{max-height:min(58vh,420px);overflow-y:auto}
 .role{
   display:block;width:100%;text-align:left;background:none;border:0;
   border-left:2px solid transparent;padding:9px 14px;cursor:pointer;
 }
-.role:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
-.role.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.role:hover{background:rgba(var(--ink-rgb),.035);border-left-color:var(--line)}
+.role.on{background:rgba(var(--acid-rgb),.07);border-left-color:var(--acid-tx)}
 .role .rn{display:flex;align-items:baseline;gap:8px}
 .role .rn b{font-size:12.5px;font-weight:600;color:var(--text);letter-spacing:.02em}
-.role.on .rn b{color:var(--acid)}
+.role.on .rn b{color:var(--acid-tx)}
 .role .rn .p{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--muted)}
 .role .rn .cur{
   margin-left:auto;font-family:var(--mono);font-size:9px;
-  letter-spacing:.1em;color:var(--acid);
+  letter-spacing:.1em;color:var(--acid-tx);
 }
 .role .rt{display:block;font-size:11px;line-height:1.6;color:var(--muted);margin-top:2px}
 .role.on .rt{color:var(--text)}
 .pop .pn{
   padding:9px 14px;border-top:1px solid var(--line);
   font-size:10.5px;line-height:1.6;color:var(--muted);
+}
+
+/* 皮肤选择器。结构复用上面那套 .pop / .ph / .pl / .pn，
+   每项多一块 12×12 的双色样片——皮肤是"看一眼就知道选哪个"的东西，
+   纯文字的「深色 / 浅色」还不如直接给色块。 */
+.sk{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  background:none;border:0;border-left:2px solid transparent;
+  padding:10px 14px;cursor:pointer;
+}
+.sk:hover{background:rgba(var(--ink-rgb),.035);border-left-color:var(--line)}
+.sk.on{background:rgba(var(--acid-rgb),.07);border-left-color:var(--acid-tx)}
+.sk .sw{display:flex;flex:0 0 auto;border:1px solid rgba(var(--ink-rgb),.22)}
+.sk .sw i{display:block;width:11px;height:22px}
+.sk .tx{min-width:0}
+.sk .tx b{display:block;font-size:12.5px;font-weight:600;color:var(--text);letter-spacing:.02em}
+.sk.on .tx b{color:var(--acid-tx)}
+.sk .tx span{display:block;font-size:10.5px;line-height:1.55;color:var(--muted);margin-top:1px}
+.sk .cur{
+  margin-left:auto;flex:0 0 auto;font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;color:var(--acid-tx);
 }
 
 /* 历史浮层：比角色浮层宽得多，左边列表右边预览。
@@ -151,11 +249,11 @@ input,textarea,select{font:inherit}
   font-family:var(--mono);font-size:10px;letter-spacing:.04em;
   padding:0 8px;outline:none;
 }
-.pop .ph .q:focus{border-color:rgba(216,242,75,.45)}
+.pop .ph .q:focus{border-color:rgba(var(--acid-rgb),.45)}
 .pop .ph .q::placeholder{color:var(--dim)}
 .hb{display:grid;grid-template-columns:minmax(0,1fr) 290px;grid-template-rows:minmax(0,1fr);max-height:min(62vh,520px);min-height:0;overflow:hidden}
 /* 容器名不能叫 .hl——那个类是正文里的高亮 span，两者会互相污染：
-   列表会继承 color:var(--acid) 和一条 border-bottom。 */
+   列表会继承 color:var(--acid-tx) 和一条 border-bottom。 */
 .hlist{overflow-y:auto;border-right:1px solid var(--line);min-height:0}
 .hl .e,.hp .e{
   padding:22px 14px;font-size:11px;line-height:1.7;color:var(--muted);text-align:center;
@@ -164,13 +262,13 @@ input,textarea,select{font:inherit}
   display:block;width:100%;text-align:left;background:none;border:0;
   border-left:2px solid transparent;padding:9px 12px;cursor:pointer;
 }
-.hrow:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
-.hrow.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.hrow:hover{background:rgba(var(--ink-rgb),.035);border-left-color:var(--line)}
+.hrow.on{background:rgba(var(--acid-rgb),.07);border-left-color:var(--acid-tx)}
 .hrow .ht{
   display:block;font-size:12px;line-height:1.5;color:var(--text);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.hrow.on .ht{color:var(--acid)}
+.hrow.on .ht{color:var(--acid-tx)}
 .hrow .hm{
   display:flex;align-items:baseline;gap:7px;margin-top:3px;
   font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--dim);
@@ -200,9 +298,9 @@ input,textarea,select{font:inherit}
   flex:1;height:28px;background:none;border:1px solid var(--line);cursor:pointer;
   font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--muted);
 }
-.hp .acts button:hover{border-color:rgba(216,242,75,.45);color:var(--acid)}
-.hp .acts button.pri{border-color:rgba(216,242,75,.45);color:var(--acid)}
-.hp .acts button.pri:hover{background:rgba(216,242,75,.1)}
+.hp .acts button:hover{border-color:rgba(var(--acid-rgb),.45);color:var(--acid-tx)}
+.hp .acts button.pri{border-color:rgba(var(--acid-rgb),.45);color:var(--acid-tx)}
+.hp .acts button.pri:hover{background:rgba(var(--acid-rgb),.1)}
 
 /* ============ 主体 ============ */
 .wrap{height:100%;display:flex;flex-direction:column;background:var(--bg)}
@@ -212,8 +310,8 @@ input,textarea,select{font:inherit}
 .left::before{
   content:'';position:absolute;inset:0;pointer-events:none;
   background-image:
-    linear-gradient(rgba(255,255,255,.016) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.016) 1px, transparent 1px);
+    linear-gradient(rgba(var(--ink-rgb),.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ink-rgb),.016) 1px, transparent 1px);
   background-size:38px 38px;
   mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
   -webkit-mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
@@ -225,7 +323,7 @@ input,textarea,select{font:inherit}
   flex:1;display:flex;align-items:center;gap:12px;height:46px;cursor:text;
   background:var(--panel);border:1px solid var(--line);padding:0 15px;
 }
-.fld:focus-within{border-color:rgba(216,242,75,.45)}
+.fld:focus-within{border-color:rgba(var(--acid-rgb),.45)}
 .fld .k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--acid-d);flex:0 0 auto}
 .fld .v{
   flex:1;background:none;border:none;outline:none;
@@ -237,22 +335,22 @@ input,textarea,select{font:inherit}
 
 .btn{
   height:46px;padding:0 26px;border:none;cursor:pointer;
-  background:var(--acid);color:#0A0B08;
+  background:var(--acid);color:var(--on-acid);
   font-family:var(--mono);font-size:11px;font-weight:700;
   letter-spacing:.18em;text-transform:uppercase;
   clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
 }
-.btn:hover{background:#E4FA6B}
-.btn:disabled{background:rgba(255,255,255,.10);color:var(--dim);cursor:not-allowed}
+.btn:hover{background:var(--acid-hover)}
+.btn:disabled{background:rgba(var(--ink-rgb),.10);color:var(--dim);cursor:not-allowed}
 .btn2{
   height:46px;padding:0 18px;cursor:pointer;flex:0 0 auto;
   background:transparent;border:1px solid var(--line);color:var(--muted);
   font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
   clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
-.btn2:hover{border-color:rgba(216,242,75,.42);color:var(--acid)}
+.btn2:hover{border-color:rgba(var(--acid-rgb),.42);color:var(--acid-tx)}
 .btn2:disabled{opacity:.4;cursor:not-allowed}
-.btn2.on{border-color:rgba(216,242,75,.55);color:var(--acid);background:rgba(216,242,75,.07)}
+.btn2.on{border-color:rgba(var(--acid-rgb),.55);color:var(--acid-tx);background:rgba(var(--acid-rgb),.07)}
 
 /* 状态行 */
 .line{
@@ -278,38 +376,38 @@ input,textarea,select{font:inherit}
 .c:last-child{border:none}
 .c em{color:var(--acid-d);font-style:normal}
 .c a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
-.c a:hover{color:var(--acid)}
+.c a:hover{color:var(--acid-tx)}
 
 /* 进度 */
 .prog{position:relative;z-index:1;margin-bottom:16px}
 .seg{display:flex;gap:2px;margin-bottom:7px}
-.seg i{flex:1;height:5px;background:rgba(255,255,255,.075)}
+.seg i{flex:1;height:5px;background:rgba(var(--ink-rgb),.075)}
 .seg i.on{background:var(--acid)}
 .seg i.cur{background:var(--ember);animation:pl 1.4s ease-in-out infinite}
-.seg i.bad{background:rgba(255,107,53,.72)}
+.seg i.bad{background:rgba(var(--ember-rgb),.72)}
 .seg.anim i{background:var(--ember);animation:pl 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * 80ms)}
 @keyframes pl{50%{opacity:.30}}
 .prow{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
 .prow .l{font-family:var(--cn);font-size:11.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.prow .r{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--acid);flex:0 0 auto;font-variant-numeric:tabular-nums}
+.prow .r{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--acid-tx);flex:0 0 auto;font-variant-numeric:tabular-nums}
 
 /* 提示块 */
 .wblock{
-  border-left:2px solid var(--ember);background:rgba(255,107,53,.05);
+  border-left:2px solid var(--ember);background:rgba(var(--ember-rgb),.05);
   padding:9px 12px;margin-bottom:14px;position:relative;z-index:1;
 }
 .wblock .wt{
   font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ember);
   text-transform:uppercase;margin-bottom:5px;
 }
-.wblock li{list-style:none;font-size:11.5px;color:#C8CFCB;line-height:1.75;padding-left:11px;position:relative}
+.wblock li{list-style:none;font-size:11.5px;color:var(--text-2);line-height:1.75;padding-left:11px;position:relative}
 .wblock li::before{content:'·';position:absolute;left:2px;color:var(--ember)}
 .cand{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;position:relative;z-index:1}
 .cand span{
   font-family:var(--mono);font-size:9px;letter-spacing:.1em;
   border:1px solid var(--line);padding:2px 7px;color:var(--dim);
 }
-.cand span.yes{color:var(--acid-d);border-color:rgba(216,242,75,.28)}
+.cand span.yes{color:var(--acid-d);border-color:rgba(var(--acid-rgb),.28)}
 .cand span.no{color:var(--dim);text-decoration:line-through}
 
 /* ============ 正文卡 ============ */
@@ -320,8 +418,8 @@ input,textarea,select{font:inherit}
   clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
 }
 .card::before,.card::after{content:'';position:absolute;width:12px;height:12px}
-.card::before{top:0;right:0;border-top:2px solid var(--acid);border-right:2px solid var(--acid)}
-.card::after{bottom:0;left:0;border-bottom:2px solid var(--acid);border-left:2px solid var(--acid)}
+.card::before{top:0;right:0;border-top:2px solid var(--acid-tx);border-right:2px solid var(--acid-tx)}
+.card::after{bottom:0;left:0;border-bottom:2px solid var(--acid-tx);border-left:2px solid var(--acid-tx)}
 .card .idx{
   position:absolute;top:10px;right:26px;
   font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);
@@ -335,28 +433,28 @@ h2.s{
 }
 h2.s:first-of-type{margin-top:0}
 h2.s .n{
-  font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.14em;
-  border:1px solid rgba(216,242,75,.32);padding:1px 5px;flex:0 0 auto;
+  font-family:var(--mono);font-size:9px;color:var(--acid-tx);letter-spacing:.14em;
+  border:1px solid rgba(var(--acid-rgb),.32);padding:1px 5px;flex:0 0 auto;
 }
 h2.s::after{content:'';flex:1;height:1px;background:var(--line-s)}
-p.tx{color:#C8CFCB;font-size:13px;line-height:1.95;margin-bottom:10px}
+p.tx{color:var(--text-2);font-size:13px;line-height:1.95;margin-bottom:10px}
 p.tx:last-child{margin-bottom:0}
-strong{color:#fff;font-weight:700}
-.hl{color:var(--acid);border-bottom:1px solid rgba(216,242,75,.4)}
+strong{color:var(--strong);font-weight:700}
+.hl{color:var(--acid-tx);border-bottom:1px solid rgba(var(--acid-rgb),.4)}
 .warn-tx{color:var(--ember)}
 .ic{
   font-family:var(--mono);font-size:11.5px;color:var(--acid-d);
-  background:rgba(216,242,75,.07);padding:1px 5px;
+  background:rgba(var(--acid-rgb),.07);padding:1px 5px;
 }
 .tx-h{
   font-family:var(--cn);font-size:12px;font-weight:700;color:var(--paper);
   letter-spacing:.08em;margin:16px 0 8px;padding-left:9px;
-  border-left:2px solid rgba(216,242,75,.42);
+  border-left:2px solid rgba(var(--acid-rgb),.42);
 }
 .tx-h:first-child{margin-top:0}
 .tx-ul{list-style:none;margin:0 0 10px}
 .tx-ul li{
-  font-size:12.5px;color:#C8CFCB;line-height:1.85;padding-left:15px;position:relative;
+  font-size:12.5px;color:var(--text-2);line-height:1.85;padding-left:15px;position:relative;
 }
 .tx-ul li::before{
   content:'';position:absolute;left:0;top:.72em;width:5px;height:1px;background:var(--acid-d);
@@ -364,13 +462,13 @@ strong{color:#fff;font-weight:700}
 
 /* 时间轴 */
 .tl{list-style:none;margin:2px 0 0}
-.tl li{display:flex;gap:13px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.tl li{display:flex;gap:13px;padding:5px 0;border-bottom:1px solid rgba(var(--ink-rgb),.035)}
 .tl li:last-child{border:none}
 .tl .t{
-  font-family:var(--mono);font-size:10.5px;color:var(--acid);letter-spacing:.06em;
+  font-family:var(--mono);font-size:10.5px;color:var(--acid-tx);letter-spacing:.06em;
   flex:0 0 62px;padding-top:2px;font-variant-numeric:tabular-nums;
 }
-.tl .x{flex:1;font-size:12.5px;color:#C8CFCB;line-height:1.72}
+.tl .x{flex:1;font-size:12.5px;color:var(--text-2);line-height:1.72}
 
 /* 空态 */
 .empty{
@@ -379,10 +477,10 @@ strong{color:#fff;font-weight:700}
   padding:40px 0;
 }
 .empty .mark{
-  width:66px;height:66px;border:1px solid rgba(216,242,75,.20);
+  width:66px;height:66px;border:1px solid rgba(var(--acid-rgb),.20);
   display:flex;align-items:center;justify-content:center;position:relative;
   clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
-  background:rgba(216,242,75,.03);
+  background:rgba(var(--acid-rgb),.03);
 }
 .empty .mark::before,.empty .mark::after{content:'';position:absolute;background:var(--acid)}
 .empty .mark::before{width:16px;height:1px}
@@ -406,24 +504,24 @@ strong{color:#fff;font-weight:700}
   color:var(--muted);text-transform:uppercase;flex:0 0 auto;
 }
 .bh .ln{flex:1;height:1px;background:var(--line-s)}
-.bh .c{font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.1em;flex:0 0 auto}
+.bh .c{font-family:var(--mono);font-size:9px;color:var(--acid-tx);letter-spacing:.1em;flex:0 0 auto}
 
 /* 版本条目 */
-.v{display:flex;gap:10px;padding:8px 9px;margin-bottom:3px;border-left:2px solid transparent;background:rgba(255,255,255,.012)}
-.v:hover{background:rgba(255,255,255,.035)}
-.v.on{border-left-color:var(--acid);background:rgba(216,242,75,.055)}
+.v{display:flex;gap:10px;padding:8px 9px;margin-bottom:3px;border-left:2px solid transparent;background:rgba(var(--ink-rgb),.012)}
+.v:hover{background:rgba(var(--ink-rgb),.035)}
+.v.on{border-left-color:var(--acid-tx);background:rgba(var(--acid-rgb),.055)}
 .v .n{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 18px;padding-top:1px;font-variant-numeric:tabular-nums}
-.v.on .n{color:var(--acid)}
+.v.on .n{color:var(--acid-tx)}
 .v .x{flex:1;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .v.on .x{color:var(--text)}
 .v .act{
   flex:0 0 auto;font-family:var(--mono);font-size:9px;letter-spacing:.1em;
   color:var(--muted);background:none;border:none;cursor:pointer;padding:0 2px;
 }
-.v .act:hover{color:var(--acid)}
-.v .cur{flex:0 0 auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--acid);padding-top:2px}
+.v .act:hover{color:var(--acid-tx)}
+.v .cur{flex:0 0 auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--acid-tx);padding-top:2px}
 .vd{font-size:10.5px;color:var(--muted);line-height:1.7;padding:0 9px 7px 37px}
-.vd .k{color:var(--acid)}
+.vd .k{color:var(--acid-tx)}
 .vd .w{color:var(--ember)}
 
 textarea{
@@ -432,32 +530,32 @@ textarea{
   font-family:var(--cn);font-size:12px;padding:10px 11px;line-height:1.7;outline:none;
 }
 textarea::placeholder{color:var(--dim)}
-textarea:focus{border-color:rgba(216,242,75,.45)}
+textarea:focus{border-color:rgba(var(--acid-rgb),.45)}
 textarea:disabled{opacity:.45;cursor:not-allowed}
 .b2{
   width:100%;height:38px;margin-top:7px;cursor:pointer;
-  background:transparent;border:1px solid rgba(216,242,75,.42);color:var(--acid);
+  background:transparent;border:1px solid rgba(var(--acid-rgb),.42);color:var(--acid-tx);
   font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
   clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
 }
-.b2:hover{background:rgba(216,242,75,.10)}
+.b2:hover{background:rgba(var(--acid-rgb),.10)}
 .b2:disabled{border-color:var(--line);color:var(--dim);cursor:not-allowed;background:none}
 
 /* 开销表 */
-.kt{display:flex;justify-content:space-between;gap:12px;padding:5.5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.kt{display:flex;justify-content:space-between;gap:12px;padding:5.5px 0;border-bottom:1px solid rgba(var(--ink-rgb),.035)}
 .kt:last-child{border:none}
 .kt .k{font-size:11.5px;color:var(--muted);flex:0 0 auto}
 .kt .v2{
   font-family:var(--mono);font-size:11.5px;color:var(--text);
   font-variant-numeric:tabular-nums;text-align:right;
 }
-.kt .v2.a{color:var(--acid)}
+.kt .v2.a{color:var(--acid-tx)}
 .kt .v2.e{color:var(--ember)}
 
 /* ============ 底栏 ============ */
 .ft{
   flex:0 0 auto;height:28px;display:flex;align-items:center;gap:14px;
-  padding:0 18px;border-top:1px solid var(--line);background:#0A0C0D;position:relative;
+  padding:0 18px;border-top:1px solid var(--line);background:var(--foot);position:relative;
 }
 .ft::before{
   content:'';position:absolute;left:0;top:0;bottom:0;width:56px;
@@ -470,7 +568,7 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
 
 /* ============ 抽屉（设置） ============ */
 .mask{
-  position:fixed;inset:0;background:rgba(4,5,6,.72);opacity:0;pointer-events:none;
+  position:fixed;inset:0;background:rgba(var(--scrim-rgb),.72);opacity:0;pointer-events:none;
   transition:opacity .2s;z-index:40;
 }
 .mask.on{opacity:1;pointer-events:auto}
@@ -484,21 +582,21 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
 .dh{
   flex:0 0 auto;height:52px;display:flex;align-items:center;gap:12px;padding:0 20px;
   border-bottom:1px solid var(--line);
-  background:linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+  background:linear-gradient(180deg, rgba(var(--ink-rgb),.035), transparent);
 }
-.dh .t{font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--acid);text-transform:uppercase}
+.dh .t{font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--acid-tx);text-transform:uppercase}
 .dh .sp{flex:1}
 .dh button{
   background:none;border:1px solid var(--line);color:var(--muted);cursor:pointer;
   font-family:var(--mono);font-size:9px;letter-spacing:.14em;padding:4px 10px;text-transform:uppercase;
 }
-.dh button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.dh button:hover{border-color:rgba(var(--acid-rgb),.4);color:var(--acid-tx)}
 .db{flex:1;overflow:auto;padding:18px 20px 40px}
 
 .grp{margin-bottom:26px}
 .gt{
   display:flex;align-items:center;gap:10px;margin-bottom:12px;
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid-tx);
   text-transform:uppercase;
 }
 .gt::after{content:'';flex:1;height:1px;background:var(--line-s)}
@@ -513,7 +611,7 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
   width:100%;height:32px;background:var(--void);border:1px solid var(--line);
   color:var(--text);font-family:var(--mono);font-size:11.5px;padding:0 9px;outline:none;
 }
-.f input:focus,.f select:focus{border-color:rgba(216,242,75,.45)}
+.f input:focus,.f select:focus{border-color:rgba(var(--acid-rgb),.45)}
 .f input::placeholder{color:var(--dim);font-family:var(--cn)}
 .f select{cursor:pointer}
 .f .u{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 auto}
@@ -521,7 +619,7 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
   flex:0 0 auto;background:none;border:1px solid var(--line);color:var(--dim);cursor:pointer;
   font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:5px 8px;
 }
-.f .mini:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.f .mini:hover{border-color:rgba(var(--acid-rgb),.4);color:var(--acid-tx)}
 
 .sw{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
 .sw input{display:none}
@@ -533,20 +631,20 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
   content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;
   background:var(--dim);transition:transform .15s,background .15s;
 }
-.sw input:checked + .tb{border-color:rgba(216,242,75,.5)}
+.sw input:checked + .tb{border-color:rgba(var(--acid-rgb),.5)}
 .sw input:checked + .tb::after{transform:translateX(16px);background:var(--acid)}
 .sw .tx{font-size:11.5px;color:var(--muted)}
 .sw input:checked ~ .tx{color:var(--text)}
 
 .gate{
-  border:1px solid rgba(255,107,53,.42);background:rgba(255,107,53,.055);
+  border:1px solid rgba(var(--ember-rgb),.42);background:rgba(var(--ember-rgb),.055);
   padding:12px 14px;margin-top:10px;
 }
 .gate .t{
   font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--ember);
   text-transform:uppercase;margin-bottom:8px;
 }
-.gate p{font-size:11.5px;color:#C8CFCB;line-height:1.8;margin-bottom:9px}
+.gate p{font-size:11.5px;color:var(--text-2);line-height:1.8;margin-bottom:9px}
 .chk{display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:11.5px;color:var(--muted);line-height:1.7}
 .chk input{
   appearance:none;-webkit-appearance:none;width:13px;height:13px;flex:0 0 auto;margin-top:3px;
@@ -555,13 +653,13 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
 .chk input:checked{border-color:var(--acid);background:var(--acid)}
 .chk input:checked::after{
   content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;
-  border-right:2px solid #0A0B08;border-bottom:2px solid #0A0B08;transform:rotate(42deg);
+  border-right:2px solid var(--on-acid);border-bottom:2px solid var(--on-acid);transform:rotate(42deg);
 }
-.chk:hover input{border-color:rgba(216,242,75,.5)}
+.chk:hover input{border-color:rgba(var(--acid-rgb),.5)}
 
 .dfoot{
   flex:0 0 auto;border-top:1px solid var(--line);padding:14px 20px;
-  display:flex;align-items:center;gap:12px;background:#0A0C0D;
+  display:flex;align-items:center;gap:12px;background:var(--foot);
 }
 .dfoot .sp{flex:1}
 .dfoot .st-line{font-size:11px;color:var(--muted);min-width:0;line-height:1.6}
@@ -577,21 +675,21 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
 }
 .modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
 .modal .mt{
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid-tx);
   text-transform:uppercase;margin-bottom:12px;
 }
-.modal p{font-size:12.5px;color:#C8CFCB;line-height:1.85;margin-bottom:14px;white-space:pre-wrap}
+.modal p{font-size:12.5px;color:var(--text-2);line-height:1.85;margin-bottom:14px;white-space:pre-wrap}
 .modal .acts{display:flex;gap:9px;justify-content:flex-end}
 .modal .acts button{
   height:34px;padding:0 18px;cursor:pointer;background:none;
   border:1px solid var(--line);color:var(--muted);
   font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
 }
-.modal .acts button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
-.modal .acts button.pri{background:var(--acid);border-color:var(--acid);color:#0A0B08;font-weight:700}
-.modal .acts button.pri:hover{background:#E4FA6B;color:#0A0B08}
-.modal .acts button.dan{border-color:rgba(255,107,53,.5);color:var(--ember)}
-.modal .acts button.dan:hover{background:rgba(255,107,53,.12);color:var(--ember)}
+.modal .acts button:hover{border-color:rgba(var(--acid-rgb),.4);color:var(--acid-tx)}
+.modal .acts button.pri{background:var(--acid);border-color:var(--acid);color:var(--on-acid);font-weight:700}
+.modal .acts button.pri:hover{background:var(--acid-hover);color:var(--on-acid)}
+.modal .acts button.dan{border-color:rgba(var(--ember-rgb),.5);color:var(--ember)}
+.modal .acts button.dan:hover{background:rgba(var(--ember-rgb),.12);color:var(--ember)}
 
 /* 二维码 */
 .qrwrap{display:flex;gap:18px;align-items:flex-start;margin-bottom:14px}
@@ -611,18 +709,48 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
   flex:1;height:30px;background:var(--void);border:1px solid var(--line);
   color:var(--text);font-family:var(--mono);font-size:11px;padding:0 8px;outline:none;
 }
-.modal .fl input:focus{border-color:rgba(216,242,75,.45)}
+.modal .fl input:focus{border-color:rgba(var(--acid-rgb),.45)}
 
 /* 断桥横幅 */
 #bridge{
-  display:none;flex:0 0 auto;padding:8px 18px;background:rgba(255,107,53,.10);
-  border-bottom:1px solid rgba(255,107,53,.35);
+  display:none;flex:0 0 auto;padding:8px 18px;background:rgba(var(--ember-rgb),.10);
+  border-bottom:1px solid rgba(var(--ember-rgb),.35);
   font-family:var(--cn);font-size:11.5px;color:var(--ember);
 }
 #bridge.on{display:block}
 
 .hidden{display:none !important}
 </style>
+<script>
+/* 皮肤预置：必须在 <body> 之前同步跑完，否则浅色皮肤会先按深色画一帧再跳。
+   为什么不放在 app.js 里等配置：拿配置要一次接口往返，那时第一帧早画完了。
+   桌面版从 URL 读（desktop.py 建窗口时拼上去的，来源是配置文件）；
+   网页版从 localStorage 读（服务端渲染不出查询串，只能用上次留下的痕迹）。
+   两处都读不到就用默认皮肤——那只是"没记住"，不是错误，不需要报出来。
+
+   **读 hash 而不只是 search，是踩出来的。** 桌面版加载的是 `file://` URI，
+   而 `file://...index.html?skin=ark` 里的 `?skin=ark` 会被 WebView2 当成**文件名
+   的一部分**，于是去找一个叫 `index.html?skin=ark` 的文件，窗口里直接是
+   `ERR_FILE_NOT_FOUND`。片段（`#`）不参与文件解析，`file://...#skin=ark` 是合法的，
+   所以桌面版改走 hash；HTTP 版仍然支持 `?skin=`，两条都认。 */
+(function () {
+  var skin = "";
+  try {
+    var q = new URLSearchParams(location.search);
+    skin = q.get("skin") || "";
+  } catch (e) {}
+  if (!skin) {
+    try {
+      var h = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
+      skin = h.get("skin") || "";
+    } catch (e) {}
+  }
+  if (!skin) {
+    try { skin = localStorage.getItem("bili-scribe.skin") || ""; } catch (e) {}
+  }
+  if (skin === "exhibition") document.documentElement.setAttribute("data-skin", skin);
+})();
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -635,6 +763,7 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
     <button class="st warn" id="chip-model" title="点这里打开设置"><i></i><span>—</span></button>
     <button class="st" id="chip-history" title="历史总结"><i></i><span>历史</span></button>
     <button class="st" id="chip-role" title="选择总结角色"><i></i><span>角色</span></button>
+    <button class="st" id="chip-skin" title="切换界面皮肤"><i></i><span>皮肤</span></button>
     <button class="st" id="chip-settings" title="设置"><i></i><span>设置</span></button>
   </div>
 
@@ -642,6 +771,12 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
     <div class="ph"><span>总结角色</span><span class="x" id="role-pop-x" title="关闭">×</span></div>
     <div class="pl" id="role-list"></div>
     <div class="pn" id="role-note"></div>
+  </div>
+
+  <div class="pop" id="skin-pop">
+    <div class="ph"><span>界面皮肤</span><span class="x" id="skin-pop-x" title="关闭">×</span></div>
+    <div class="pl" id="skin-list"></div>
+    <div class="pn">皮肤只影响配色，不改任何功能。选完立刻生效，下次启动还是这个。</div>
   </div>
 
   <!-- 历史总结：一个宽一点的浮层，左边是列表、右边是选中那条的摘要预览。
@@ -959,6 +1094,7 @@ const S = {
   online: false,
   qrTimer: null,
   qrKey: null,
+  skin: "ark",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -990,6 +1126,7 @@ const HTTP_ROUTES = {
   check_llm:        { m: "GET",    p: () => "/api/llm/check" },
   get_roles:        { m: "GET",    p: () => "/api/roles" },
   set_role:         { m: "POST",   p: () => "/api/role", b: (v) => v },
+  set_skin:         { m: "POST",   p: () => "/api/skin", b: (v) => v },
 
   get_settings:     { m: "GET",    p: () => "/api/settings" },
   save_settings:    { m: "PUT",    p: () => "/api/settings", b: (v) => v },
@@ -1297,6 +1434,99 @@ function renderTop() {
   const g = S.cfg && S.cfg.publish && S.cfg.publish.require_confirm === false;
   $("ft-gate").classList.toggle("hidden", !g);
   renderRoleChip();
+  renderSkinChip();
+}
+
+/* ============ 皮肤 ============
+   两套：ark（默认，深色，明日方舟 / 终末地取色）与 exhibition（浅色，异客巡展）。
+   实现方式只有一件事：往 <html> 上写 data-skin。所有颜色都在 CSS 变量里，
+   这里不碰任何样式规则——换肤要是靠改规则，迟早会出现"换了颜色没换字号"。
+
+   持久化落在 ui.skin（配置文件），**不用 localStorage**：
+   桌面版是 file:// 页面，localStorage 在某些 pywebview 版本下不持久；
+   而且用户换台机器、把配置一起搬走时，皮肤该跟着走。 */
+const SKINS = [
+  {
+    key: "ark",
+    name: "终末地",
+    note: "深色。工业黄绿 + 橙红，默认皮肤。",
+    sw: ["#0D0F10", "#D8F24B"],
+  },
+  {
+    key: "exhibition",
+    name: "异客巡展",
+    note: "浅色。纸白底 + 荧光黄绿 / 洋红，取自巡展海报。",
+    sw: ["#F7F6F1", "#C5D622"],
+  },
+];
+
+function currentSkin() {
+  const k = (S.cfg && S.cfg.ui && S.cfg.ui.skin) || S.skin || "ark";
+  return SKINS.find((s) => s.key === k) || SKINS[0];
+}
+
+/* 把皮肤写到 <html>。必须在第一帧之前生效，否则启动时会闪一下默认皮肤。
+   真正保证这件事的是 <head> 里那段同步脚本（读 ?skin= 或 localStorage）；
+   这里只是把当前值再写一遍，并把 hint 记进 localStorage，供网页版下次启动用。
+   桌面版的权威来源永远是配置文件——localStorage 只是"上一帧画什么"的提示。 */
+function applySkin(key) {
+  const k = key === "exhibition" ? "exhibition" : "ark";
+  S.skin = k;
+  const root = document.documentElement;
+  if (k === "ark") root.removeAttribute("data-skin");
+  else root.setAttribute("data-skin", k);
+  try { localStorage.setItem("bili-scribe.skin", k); } catch (e) {}
+}
+
+function renderSkinChip() {
+  const el = $("chip-skin");
+  const s = currentSkin();
+  el.innerHTML = "<i></i><span>皮肤 · <b>" + esc(s.name) + "</b></span>";
+  el.title = "界面皮肤：" + s.name + "。点这里切换";
+}
+
+function renderSkinList() {
+  const cur = currentSkin().key;
+  $("skin-list").innerHTML = SKINS.map((s) => {
+    const on = s.key === cur;
+    return '<button class="sk' + (on ? " on" : "") + '" data-skin="' + esc(s.key) + '">' +
+      '<span class="sw"><i style="background:' + esc(s.sw[0]) + '"></i>' +
+      '<i style="background:' + esc(s.sw[1]) + '"></i></span>' +
+      '<span class="tx"><b>' + esc(s.name) + "</b>" +
+      "<span>" + esc(s.note) + "</span></span>" +
+      (on ? '<span class="cur">当前</span>' : "") +
+      "</button>";
+  }).join("");
+  $("skin-list").querySelectorAll("[data-skin]").forEach((b) => {
+    b.onclick = () => pickSkin(b.dataset.skin);
+  });
+}
+
+function openSkinPop() {
+  renderSkinList();
+  $("skin-pop").classList.add("on");
+}
+
+function closeSkinPop() {
+  $("skin-pop").classList.remove("on");
+}
+
+async function pickSkin(key) {
+  if (key === currentSkin().key) { closeSkinPop(); return; }
+  closeSkinPop();
+  // 先应用再回写：换肤是纯前端动作，不该等一次网络往返才生效。
+  applySkin(key);
+  // 内存里那份配置也要先跟上。chip 读的是 S.cfg.ui.skin，不是 S.skin——
+  // 顺序写反了 chip 会停在旧名字上，而界面已经换过了（自相矛盾的状态）。
+  if (S.cfg) S.cfg.ui = Object.assign({}, S.cfg.ui, { skin: key });
+  renderSkinChip();
+  try {
+    await call("set_skin", { skin: key });
+    setMsg("task-msg", "皮肤已切到「" + currentSkin().name + "」。", "ok");
+  } catch (e) {
+    // 回写失败不影响这次显示，但下次启动会退回旧皮肤 —— 必须说清楚。
+    setMsg("task-msg", "皮肤切了，但没存住：" + e.message, "err");
+  }
 }
 
 /* 顶栏的角色 chip。
@@ -2684,6 +2914,10 @@ async function boot() {
     return;
   }
 
+  // 皮肤：拿到配置就立刻应用。正常情况下 <head> 那段同步脚本已经设好了，
+  // 这里是把"配置说了算"落实——URL 提示和 localStorage 都可能过期。
+  applySkin((S.cfg.ui && S.cfg.ui.skin) || "ark");
+
   try { S.roles = (await call("get_roles")).roles || []; } catch (e) { S.roles = []; }
 
   renderTop();
@@ -2751,9 +2985,17 @@ $("chip-settings").onclick = openDrawer;
 // 不共用 #mask 那层遮罩——遮罩会把整页压暗，对一个"随手换个角色"的小动作太重了。
 $("chip-role").onclick = () => {
   if ($("role-pop").classList.contains("on")) closeRolePop();
-  else openRolePop();
+  else { closeSkinPop(); openRolePop(); }
 };
 $("role-pop-x").onclick = closeRolePop;
+
+// 皮肤浮层：跟角色浮层完全同一套开关方式。
+// 两个浮层共用右上角同一个位置，必须互斥——否则会叠在一起，上面那个把下面那个挡住。
+$("chip-skin").onclick = () => {
+  if ($("skin-pop").classList.contains("on")) closeSkinPop();
+  else { closeRolePop(); openSkinPop(); }
+};
+$("skin-pop-x").onclick = closeSkinPop;
 document.addEventListener("click", (e) => {
   if (!$("role-pop").classList.contains("on")) return;
   // 重绘过的元素会脱离文档，这时 closest() 找不到任何祖先，看起来就像
@@ -2761,6 +3003,12 @@ document.addEventListener("click", (e) => {
   if (!document.contains(e.target)) return;
   if (e.target.closest("#role-pop") || e.target.closest("#chip-role")) return;
   closeRolePop();
+});
+document.addEventListener("click", (e) => {
+  if (!$("skin-pop").classList.contains("on")) return;
+  if (!document.contains(e.target)) return;
+  if (e.target.closest("#skin-pop") || e.target.closest("#chip-skin")) return;
+  closeSkinPop();
 });
 
 // 历史浮层：跟角色浮层同一套开关方式，但它是独立的一层——
@@ -2841,6 +3089,7 @@ document.addEventListener("keydown", (e) => {
     // 浮层在最上面，所以先关浮层。历史面板里的搜索框自己会拦一次 Esc（先清词），
     // 它拦下来的时候这里不会收到，剩下的情况就是直接关面板。
     if ($("hist-pop").classList.contains("on")) closeHistPop();
+    else if ($("skin-pop").classList.contains("on")) closeSkinPop();
     else if ($("role-pop").classList.contains("on")) closeRolePop();
     else if ($("modal").classList.contains("on")) closeModal();
     else if ($("drawer").classList.contains("on")) closeDrawer();

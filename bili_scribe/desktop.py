@@ -30,6 +30,7 @@ import time
 import traceback
 from pathlib import Path
 from typing import Any, get_args, get_type_hints
+from urllib.parse import quote
 
 import webview
 from pydantic import BaseModel, ValidationError
@@ -43,9 +44,27 @@ WINDOW_TITLE = f"bili-scribe {__version__}"
 # 最小尺寸卡在 1100×720：再窄右栏就会被压成一条缝，那还不如让窗口拒绝缩小。
 WINDOW_SIZE = (1360, 860)
 MIN_SIZE = (1100, 720)
-# 窗口背景色，同时也是标题栏的颜色。必须和界面的 `--bg`（`#0D0F10`）一致：
+# 窗口背景色，同时也是标题栏的颜色。必须和界面当前皮肤的 `--bg` 一致：
 # 窗口出现到页面画完之间有一段空白，底色对不上就会闪一下；标题栏也一样。
+# 两套皮肤的取值必须和 index.html 里 `:root` / `[data-skin="exhibition"]` 的
+# `--bg` 逐字相同 —— 这三处是同一个数字的三个副本，改一处就要改三处。
 WINDOW_BG = "#0D0F10"
+SKIN_BG = {"ark": "#0D0F10", "exhibition": "#F7F6F1"}
+
+# 当前窗口底色。用模块级可变容器而不是挂在 window 对象上：
+# pywebview 的 Window 不一定允许随便加属性，挂失败会让标题栏静默退回默认色，
+# 而那种"颜色不对但没报错"的问题最难查。
+_CURRENT_BG = [WINDOW_BG]
+
+
+def skin_window_bg(skin: str) -> str:
+    """皮肤对应的窗口底色。未知皮肤一律退回默认——宁可闪一下，
+    也不要因为一个手改的配置值让窗口变成透明的。"""
+    return SKIN_BG.get(skin, WINDOW_BG)
+
+
+def _current_window_bg() -> str:
+    return _CURRENT_BG[0]
 
 
 def _frozen() -> bool:
@@ -147,21 +166,22 @@ def _default_config() -> Path:
 
 
 def _dark_title_bar(window: webview.Window) -> None:
-    """把系统标题栏刷成深色，让窗口顶端和界面连成一片。
+    """把系统标题栏刷成和界面底色一致，让窗口顶端和界面连成一片。
 
     **不能让标题栏跟着系统走。** pywebview 的 winforms 后端会读
     `AppsUseLightTheme` 决定标题栏深浅（winforms.py: `is_dark_theme`），
     所以系统用浅色主题的人装这个程序，会得到一条**白色标题栏压在近黑界面上**：
-    截图里那一截白边看起来就像程序没渲染完。这个界面从头到尾只有深色一套，
-    标题栏没理由跟随系统。
+    截图里那一截白边看起来就像程序没渲染完。反过来也一样——浅色皮肤 + 深色系统
+    主题会得到一条黑边压在纸白界面上，同样刺眼。所以标题栏必须跟着**皮肤**走，
+    而不是跟着系统走。
 
     `DWMWA_USE_IMMERSIVE_DARK_MODE` 的属性号在 20H1 之前是 19、之后是 20，
     两个都设一遍最省事（设错的那个返回非 0，无副作用）。
 
-    光是转深色还不够：系统给的深色标题栏是**纯黑 `#000000`**，而这个界面的底
+    光是转深色还不够：系统给的深色标题栏是**纯黑 `#000000`**，而默认皮肤的底
     是 `#0D0F10`。两个深色挨在一起，那点差值反而更显眼——一眼能看出来顶上那条
     不是界面的一部分。所以再用 `DWMWA_CAPTION_COLOR`（35）直接指定成界面底色，
-    颜色从 `WINDOW_BG` 一个来源取，改主题不会漏掉这处。
+    颜色和 `background_color` 取同一个来源（`skin_window_bg()`），改皮肤不会漏掉这处。
 
     失败就算了：这只是配色，标题栏白一点也不该让程序起不来。
     """
@@ -177,16 +197,21 @@ def _dark_title_bar(window: webview.Window) -> None:
             hwnd = handle.ToInt32()
         if not hwnd:
             return
+
+        bg = _current_window_bg()
+        r = int(bg[1:3], 16)
+        g = int(bg[3:5], 16)
+        b = int(bg[5:7], 16)
+        # 感知亮度：判断该给深色还是浅色标题栏。浅色皮肤用深色标题栏会像条黑边。
+        dark_skin = (0.299 * r + 0.587 * g + 0.114 * b) < 128
+
         dwm = ctypes.windll.dwmapi
         for attr in (20, 19):
-            value = ctypes.c_int(1)
+            value = ctypes.c_int(1 if dark_skin else 0)
             dwm.DwmSetWindowAttribute(
                 hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
             )
         # COLORREF 是 0x00BBGGRR，和 CSS 的 #RRGGBB 反着来。
-        r = int(WINDOW_BG[1:3], 16)
-        g = int(WINDOW_BG[3:5], 16)
-        b = int(WINDOW_BG[5:7], 16)
         color = ctypes.c_int(r | (g << 8) | (b << 16))
         dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(color), ctypes.sizeof(color))
     except Exception:
@@ -512,6 +537,23 @@ class DesktopApi:
         """
         return self._wrap(self._service.set_role, payload)
 
+    def set_skin(self, payload):
+        """顶栏的皮肤选择器走这里。理由同 `set_role`：桌面版没这个方法，
+        网页版能换肤、桌面版点了没反应，而两边共用同一个 index.html。
+
+        服务层只管存配置，窗口这边要跟着换的还有两处：记下新的底色，以及
+        立刻重刷一次标题栏（不然换成浅色皮肤后，顶上还压着一条深色标题栏，
+        看起来像界面没铺满）。窗口本体的 `background_color` 改不了——那是
+        建窗口时定死的，只能等下次启动生效。
+        """
+        result = self._wrap(self._service.set_skin, payload)
+        skin = result.get("skin") if isinstance(result, dict) else None
+        if skin:
+            _CURRENT_BG[0] = skin_window_bg(skin)
+            if self._window is not None:
+                _dark_title_bar(self._window)
+        return result
+
     # 设置
     def get_settings(self):
         return self._wrap(self._service.get_settings)
@@ -721,9 +763,21 @@ def main() -> int:
     # HTTP 模式下 on_task_change 是 None，所以 main.py 那边完全不受影响。
     service.state.on_task_change = api.on_task_change
 
+    # 皮肤要在建窗口之前定下来：窗口底色、标题栏、首帧都要用它。
+    # 这里从配置里读一次，之后 set_skin 只更新 _CURRENT_BG 与标题栏，
+    # 窗口那层底色要等下次启动才换（pywebview 没有运行中改背景色的 API）。
+    _CURRENT_BG[0] = skin_window_bg(cfg.ui.skin)
+    # 皮肤提示走 **hash 而不是查询串**，这一步是踩出来的：
+    # 桌面版加载的是 `file://` URI，而 `file://...index.html?skin=ark` 里的
+    # `?skin=ark` 会被 WebView2 当成文件名的一部分，去找一个叫
+    # `index.html?skin=ark` 的文件——窗口里直接显示 ERR_FILE_NOT_FOUND，
+    # 而 probe_exe 只数颜色数，把那张报错页当成"渲染成功"放过去了。
+    # 片段（`#`）不参与文件解析，`file://...#skin=ark` 是合法的。
+    url = index.as_uri() + "#skin=" + quote(cfg.ui.skin, safe="")
+
     window = webview.create_window(
         WINDOW_TITLE,
-        url=index.as_uri(),
+        url=url,
         js_api=api,
         width=WINDOW_SIZE[0],
         height=WINDOW_SIZE[1],
@@ -731,9 +785,9 @@ def main() -> int:
         # 这窗口是应用本体，不是浏览器标签页。关掉就等于退出程序——
         # 默认的 confirm_close=True 会弹一次"确定关闭？"，对单窗口应用是纯噪音。
         confirm_close=False,
-        # 背景色和界面底色一致。不设的话窗口出现的一瞬间是白的，
-        # 深色界面会闪一下白——那种闪烁看起来像 bug。
-        background_color=WINDOW_BG,
+        # 背景色和界面当前皮肤的底色一致。不设的话窗口出现的一瞬间是白的，
+        # 深色皮肤会闪一下白；设成固定深色则浅色皮肤会闪一下黑。两边都得对。
+        background_color=_CURRENT_BG[0],
         text_select=True,
     )
     api.attach(window)

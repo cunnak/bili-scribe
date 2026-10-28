@@ -290,18 +290,55 @@ def shoot(hwnd: int, out: Path) -> tuple[int, int] | None:
     img = ImageGrab.grab(bbox=(rect.left, rect.top, rect.right, rect.bottom), all_screens=True)
     img = img.convert("RGB")
 
-    # 截下来的图里有多少"不是我们界面"的东西？判据很粗但够用：
-    # 界面本身是近黑 + 酸性黄绿的极窄色域，被别的窗口压住时会突然冒出大片
-    # 中间调。数一数近黑像素占比——正常界面绝大多数像素落在最暗的一档。
+    # 截下来的图里有多少"不是我们界面"的东西？
+    # 判据：界面本身是**近单色底 + 极窄强调色**——两套皮肤都成立，一套近黑
+    # （#0D0F10），一套近白（#FAFAF7）。被别的窗口压住时会突然冒出大片中间调。
+    # 所以数"极暗或极亮"的像素占比，而不是只数暗像素。
+    #
+    # **原来只数暗像素（`dark < 0.55` 就报警），这是深色皮肤时代的遗留。**
+    # 浅色皮肤下这条必然报警（白底上暗像素接近 0），而报警文案是"窗口可能被
+    # 别的程序盖住了"——完全指错方向，会把人带去查遮挡而不是查配色。
     hist = img.convert("L").histogram()
     total = sum(hist) or 1
-    dark = sum(hist[:48]) / total
-    if dark < 0.55:
-        print(f"[!] 只有 {dark:.0%} 的像素是暗底，窗口可能被别的程序盖住了")
+    flat = (sum(hist[:48]) + sum(hist[208:])) / total
+    if flat < 0.55:
+        print(f"[!] 只有 {flat:.0%} 的像素是极暗或极亮的底色，窗口可能被别的程序盖住了")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
     return (w, h)
+
+
+def brand_pixels(img) -> float:
+    """这张图里有多少比例的像素是**我们这个界面的品牌色**。
+
+    提出这个检查，是因为「颜色数够多」这条判据被一张报错页骗过去了：
+    `file://...index.html?skin=ark` 里的查询串会被 WebView2 当成文件名，窗口里
+    显示的是 Edge 的「未找到文件 / ERR_FILE_NOT_FOUND」——白底、蓝紫大叉、
+    彩色 Edge 徽标，**颜色数上万**，`wait_painted` 和数颜色两条判据全都通过，
+    探针还打印了一句"exe 能启动、能开窗、能渲染"。
+
+    所以判据必须换成"有没有**我们自己的**东西"。取的是顶栏那块 `--acid`
+    荧光黄绿斜块：面积不小、色相极独特，报错页里不可能出现。
+
+    **不能按 RGB 逐通道比。** 第一版写死了 `#D8F24B` 容差 ±26，结果真截图里
+    那块是 `(214, 253, 2)`——蓝通道从 75 掉到 2。DWM 合成叠了色彩管理，
+    通道值会被改写，硬比会假红。改判色相：高饱和的黄绿（R 和 G 都很高、
+    B 很低、G 明显压过 B）。两套皮肤的 acid 都落在这个锥里。
+    """
+    small = img
+    if max(img.size) > 900:  # 缩小再数，够用且快
+        small = img.resize((img.width // 2, img.height // 2))
+    px = small.load()
+    hit = 0
+    for y in range(small.height):
+        for x in range(small.width):
+            r, g, b = px[x, y][:3]
+            # 荧光黄绿：G 最亮，R 也高，B 被压到很低
+            if g >= 170 and r >= 140 and b <= 130 and (g - b) >= 80 and (r - b) >= 60:
+                hit += 1
+    total = small.width * small.height or 1
+    return hit / total
 
 
 def kill_all() -> int:
@@ -337,9 +374,10 @@ def cleanup() -> None:
 def wait_painted(hwnd: int, timeout: float = 15.0, need: int = 200) -> int:
     """等到窗口真的画出东西，返回看到的颜色数；超时返回 0。
 
-    判据是"颜色数"而不是"有没有变化"：深色主题的底本来就接近纯黑，
-    白屏和黑屏在"非白即黑"这个层面完全一样，只有颜色**种类**能把它们分开。
-    实测正常渲出来的界面有 5000+ 种颜色，纯底色的空白窗口不到 10 种。
+    判据是"颜色数"而不是"有没有变化"：底色本来就接近纯色（深色皮肤近黑、
+    浅色皮肤近白），白屏和纯底色在"非白即黑"这个层面完全一样，只有颜色
+    **种类**能把它们分开。实测正常渲出来的界面有 5000+ 种颜色，纯底色的
+    空白窗口不到 10 种。
 
     **颜色数不区分"我们的内容"和"盖在上面的窗口"。** 一开始没意识到这点：
     另一个程序压在上面时颜色数照样几万，这条判据心安理得地通过。所以**用
@@ -427,6 +465,12 @@ def main() -> int:
     else:
         print("[!] 截图失败")
 
+    # **颜色数不是"我们的界面"的判据。** 这一条被一张 Edge 报错页骗过：
+    # `file://...index.html?skin=ark` 的查询串会被 WebView2 当成文件名，
+    # 窗口里是「未找到文件 / ERR_FILE_NOT_FOUND」，白底 + 蓝紫大叉 + 彩色徽标，
+    # 颜色数上万，前面两条判据全部通过，探针还打印了"能渲染"。
+    # 换成查品牌色：两套皮肤的顶栏斜块都用 --acid，那块荧光黄绿报错页里不会有。
+    brand = 0.0
     if SHOT.exists():
         try:
             from PIL import Image
@@ -434,13 +478,19 @@ def main() -> int:
             img = Image.open(SHOT).convert("RGB")
             colors = img.getcolors(maxcolors=1_000_000) or []
             uniq = len(colors)
-            print(f"[i] 截图里有 {uniq} 种颜色", end="")
-            if uniq < 200:
-                print(" —— 偏少，界面可能没画全")
-            else:
-                print(" —— 有内容")
+            brand = brand_pixels(img)
+            print(f"[i] 截图里有 {uniq} 种颜色，品牌色占 {brand * 100:.2f}%")
         except Exception as exc:  # noqa: BLE001
-            print(f"[!] 数颜色失败：{exc}")
+            print(f"[!] 读截图失败：{exc}")
+    # 阈值 0.05%：顶栏那个斜块只有 34px 宽，缩一半后占比本来就很小；
+    # 而报错页是 0。这个量级足以把两者分开，又不至于因为窗口大小浮动而假红。
+    if brand < 0.0005:
+        print("[x] 截图里找不到界面自己的品牌色（--acid 斜块）——")
+        print("    窗口里画的很可能不是我们的界面，而是 WebView2 的错误页。")
+        print("    桌面版加载的是 file:// URI：查询串 `?skin=` 会被当成文件名的一部分，")
+        print("    必须改用 `#skin=`。先看下面这张截图确认。")
+        cleanup()
+        return 1
 
     # 收尾必须清干净：两层进程，只 kill 外层会留下一个占着 exe 的孤儿。
     cleanup()

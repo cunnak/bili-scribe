@@ -36,6 +36,7 @@ from .service import (
     RefineRequest,
     QrUnavailable,
     RoleRequest,
+    SkinRequest,
     Service,
     ServiceError,
     SettingsPayload,
@@ -108,6 +109,11 @@ def create_app(cfg: AppConfig) -> FastAPI:
         # 顶栏的角色选择器走这条，而不是复用 PUT /api/settings——理由见
         # Service.set_role 的注释（只为改一个字段，不必让 api_key 再走一遍请求体）。
         return _call(service.set_role, payload)
+
+    @app.post("/api/skin")
+    def api_set_skin(payload: SkinRequest) -> dict[str, Any]:
+        # 同 set_role：皮肤是一个字段，不该让整份设置（含明文密钥）跟着走一遍。
+        return _call(service.set_skin, payload)
 
     # ---------------------------------------------------------------- 设置页面
 

@@ -37,6 +37,7 @@ from .. import __version__
 from ..config import (
     NEEDS_RESTART,
     PROXY_SCHEMES,
+    SKIN_KEYS,
     AppConfig,
     LlmConfig,
     apply_settings,
@@ -236,6 +237,12 @@ class RoleRequest(BaseModel):
     """切换默认角色。只带一个字段，见 `Service.set_role` 的说明。"""
 
     role: str = Field(min_length=1, max_length=100)
+
+
+class SkinRequest(BaseModel):
+    """切换界面皮肤。见 `Service.set_skin`。"""
+
+    skin: str = Field(min_length=1, max_length=40)
 
 
 # --------------------------------------------------------------------- 状态
@@ -917,6 +924,40 @@ class Service:
             "passes": info.passes,
             "path": cfg.source_path,
         }
+
+    @_api
+    def set_skin(self, payload: SkinRequest) -> dict[str, Any]:
+        """切换界面皮肤，并立刻写盘。
+
+        跟 `set_role` 同一个套路、同一个理由：不让顶栏为了一件"只影响外观"的事
+        去走 `put_settings`（那条路要提交整份设置，含明文 api_key）。
+
+        与角色的差别在失败语义：角色是"下一次总结生效"，写盘失败必须报错；
+        皮肤是"这一次就已经换好了"——界面早已由前端应用，所以写盘失败时
+        前端会收到错误、但仍保留新皮肤，只提示"没存住，下次启动会退回旧的"。
+        """
+        skin = payload.skin
+        if skin not in SKIN_KEYS:
+            raise ServiceError(
+                400, f"未知的皮肤：{skin}。可选：" + "、".join(SKIN_KEYS)
+            )
+
+        cfg = self.state.cfg
+        if not cfg.source_path:
+            raise ServiceError(
+                500,
+                "配置没有来源路径，无法回写。请通过 run.py 启动，而不是直接起 uvicorn。",
+            )
+
+        previous = cfg.ui.skin
+        cfg.ui.skin = skin
+        try:
+            save_config(cfg, cfg.source_path)
+        except OSError as exc:
+            cfg.ui.skin = previous
+            raise ServiceError(500, f"配置写入失败：{exc}") from exc
+
+        return {"ok": True, "skin": cfg.ui.skin, "path": cfg.source_path}
 
     # ---------------------------------------------------------- 设置页面
 
