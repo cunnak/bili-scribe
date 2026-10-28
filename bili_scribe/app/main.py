@@ -218,8 +218,8 @@ def create_app(cfg: AppConfig) -> FastAPI:
         return _call(service.withdraw, payload.publish_id)
 
     @app.get("/api/publishes")
-    def api_list_publishes(limit: int = 20) -> list[dict[str, Any]]:
-        return service.list_publishes(limit)
+    def api_list_publishes(limit: int = 20, bvid: str = "") -> list[dict[str, Any]]:
+        return service.list_publishes(limit, bvid)
 
     # ------------------------------------------------------- 预读缓存（桌面端用）
 

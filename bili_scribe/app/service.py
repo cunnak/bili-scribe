@@ -536,7 +536,9 @@ def refine_gate(state: AppState, task: dict[str, Any]) -> tuple[bool, str]:
             # 这时候再改只能是为了撤回重发，性质变了，所以要先把话说清楚。
             return False, (
                 "这条视频的总结已经发出去了（撤回前不能再改）。B站 的评论发出去不能编辑，"
-                "要改得先到左边「历史发布」里把那条撤回，这里就会重新可用。"
+                # 界面上那块叫「发布记录」，不叫「历史发布」——原来这里写的名字
+                # 在界面上根本找不到，等于把人支使去一个不存在的地方。
+                "要改得先到左下「发布记录」里把那条撤回，这里就会重新可用。"
             )
     if state.is_refining(task_id):
         return False, "正在改这一版，等它出结果再提新要求。"
@@ -1497,8 +1499,12 @@ class Service:
         return publisher.withdraw(publish_id).to_dict()
 
     @_api
-    def list_publishes(self, limit: int = 20) -> list[dict[str, Any]]:
-        return self.state.store.list_publishes(limit=max(1, min(limit, 100)))
+    def list_publishes(self, limit: int = 20, bvid: str = "") -> list[dict[str, Any]]:
+        """发布记录。给了 `bvid` 就只回这条视频的——见 store 里那句注释，
+        取全局窗口再筛会让老视频的记录凭空消失。"""
+        return self.state.store.list_publishes(
+            limit=max(1, min(limit, 100)), bvid=(bvid or "").strip()
+        )
 
     # ------------------------------------------------------------ 缓存
 

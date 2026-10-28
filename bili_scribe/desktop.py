@@ -654,8 +654,8 @@ class DesktopApi:
     def withdraw(self, publish_id):
         return self._wrap(self._service.withdraw, publish_id)
 
-    def list_publishes(self, limit=20):
-        return self._wrap(self._service.list_publishes, limit)
+    def list_publishes(self, limit=20, bvid=""):
+        return self._wrap(self._service.list_publishes, limit, bvid)
 
     # 预读缓存
     def notes_stats(self):

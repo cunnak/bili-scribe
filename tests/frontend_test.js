@@ -731,6 +731,52 @@ test("点发布把任务、正文、确认位一起交给后端", async () => {
   } finally { p.close(); }
 });
 
+test("发布记录按当前这条视频去查，老视频也拿得到撤回按钮", async () => {
+  /* 这条来自一个真实 bug：loadPublishes() 原来只传条数，接口回的是
+     「全局最近 12 条」，再由前端按 bvid 筛。库里攒到 38 条发布记录之后，
+     老视频的记录被后来别的视频挤出窗口，「发布记录」整块隐藏——撤回按钮
+     跟着一起消失，用户看到的就是「撤回按钮没了」。 */
+  const be = makeBackend();
+  const asked = [];
+  be.api.list_publishes = (...args) => {
+    asked.push(args);
+    const bvid = args[1];
+    return Promise.resolve({
+      ok: true,
+      data: bvid === "BV1xx411c7mD"
+        ? [{ id: 5, task_id: "t1", bvid, status: "published", content: "上个月发的那条",
+             created_at: "2026-09-01T10:00:00+08:00", deleted_at: null }]
+        : [],
+    });
+  };
+  const p = await loadPage({ backend: be });
+  try {
+    await readyTask(p);
+
+    assert(G5, "查发布记录时带上了当前视频的 bvid",
+      asked.length > 0 && asked[0][1] === "BV1xx411c7mD",
+      "实际参数：" + JSON.stringify(asked[0] || null));
+
+    const blk = p.$("hist-blk");
+    assert(G5, "发布记录块显示出来了", !blk.classList.contains("hidden"), "块被 hidden 了");
+    const btns = p.$("hist-list").querySelectorAll("[data-wd]");
+    eq(G5, "撤回按钮有一个", btns.length, 1);
+    eq(G5, "撤回按钮的文案", btns[0] ? btns[0].textContent.trim() : null, "撤回");
+    eq(G5, "撤回按钮指向那条记录", btns[0] ? btns[0].dataset.wd : null, "5");
+  } finally { p.close(); }
+});
+
+test("这条视频没发过：不显示发布记录块，也不留一个点不动的按钮", async () => {
+  const be = makeBackend();
+  be.api.list_publishes = () => Promise.resolve({ ok: true, data: [] });
+  const p = await loadPage({ backend: be });
+  try {
+    await readyTask(p);
+    assert(G5, "发布记录块是隐藏的", p.$("hist-blk").classList.contains("hidden"), "块没隐藏");
+    eq(G5, "列表里没有按钮", p.$("hist-list").querySelectorAll("[data-wd]").length, 0);
+  } finally { p.close(); }
+});
+
 /* ============================================================ 六、设置 */
 
 const G6 = group("设置");

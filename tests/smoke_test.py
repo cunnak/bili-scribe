@@ -225,9 +225,19 @@ def _store() -> str:
     pid = st.add_publish(task_id, "BV1xx411c7mD", 1, "999", "内容", "published")
     assert st.find_live_publish("BV1xx411c7mD") is not None, "去重查询失败"
     assert st.last_publish_at() is not None
+
+    # 发布记录必须能按视频查。只回「全局最近 N 条」再让调用方自己筛，老视频的
+    # 记录会被后来别的视频挤出窗口——界面上就是「发布记录一片空白，撤回按钮没了」。
+    other_task = st.create_task("BV1other0001")
+    st.add_publish(other_task, "BV1other0001", 1, "888", "别的视频的内容", "published")
+    mine = st.list_publishes(limit=12, bvid="BV1xx411c7mD")
+    assert [r["id"] for r in mine] == [pid], f"按 bvid 过滤失败：{mine}"
+    assert all(r["bvid"] == "BV1xx411c7mD" for r in mine), "结果里混进了别的视频"
+    assert len(st.list_publishes(limit=12)) == 2, "不带 bvid 时应当返回全局记录"
+
     st.mark_publish_deleted(pid)
     assert st.find_live_publish("BV1xx411c7mD") is None, "撤回后去重未解除"
-    return "凭据加密落盘，任务/去重/撤回往返均正常"
+    return "凭据加密落盘，任务/去重/撤回往返均正常，发布记录可按视频过滤"
 
 
 def _publisher_gates() -> str:

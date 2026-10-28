@@ -584,11 +584,22 @@ class Store:
                 (_now(), message, publish_id),
             )
 
-    def list_publishes(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_publishes(self, limit: int = 20, bvid: str = "") -> list[dict[str, Any]]:
+        """发布记录，新的在前。
+
+        `bvid` 给了就只查这条视频的。**必须在 SQL 里过滤，不能取「全局最近
+        N 条」再让调用方自己筛**——那样一条老视频的发布记录会被后来别的视频
+        挤出窗口，界面上表现为「这条视频明明发过，发布记录却是空的」。
+        """
+        sql = "SELECT * FROM publish"
+        args: list[Any] = []
+        if bvid:
+            sql += " WHERE bvid = ?"
+            args.append(bvid)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM publish ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
+            rows = conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
     def get_publish(self, publish_id: int) -> dict[str, Any] | None:

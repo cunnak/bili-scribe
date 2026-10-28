@@ -1151,7 +1151,8 @@ const HTTP_ROUTES = {
 
   publish:          { m: "POST",   p: () => "/api/publish", b: (v) => v },
   withdraw:         { m: "POST",   p: () => "/api/publish/withdraw", b: (pid) => ({ publish_id: pid }) },
-  list_publishes:   { m: "GET",    p: (lim) => "/api/publishes?limit=" + (lim || 20) },
+  list_publishes:   { m: "GET",    p: (lim, bvid) => "/api/publishes?limit=" + (lim || 20) +
+                                       (bvid ? "&bvid=" + encodeURIComponent(bvid) : "") },
 
   notes_stats:      { m: "GET",    p: () => "/api/notes/stats" },
   clear_notes:      { m: "POST",   p: () => "/api/notes/clear" },
@@ -2501,13 +2502,22 @@ async function refreshGates() {
 }
 
 async function loadPublishes() {
+  const bvid = (S.task && S.task.bvid) || "";
+  const blk = $("hist-blk");
+  if (!bvid) {
+    // 没有任务就没有"这条视频的发布记录"可言，别去要一份全局列表。
+    S.publishes = [];
+    blk.classList.add("hidden");
+    $("hist-list").innerHTML = "";
+    return;
+  }
   try {
-    const rows = await call("list_publishes", 12);
+    /* bvid 必须一起传。只传条数的话接口回的是「全局最近 12 条」，
+       这条视频的记录会被后来别的视频挤出窗口，块就整块隐藏——
+       连里面的撤回按钮一起消失，看起来像"这个功能没了"。 */
+    const rows = await call("list_publishes", 12, bvid);
     S.publishes = rows || [];
-    const mine = S.task && S.task.bvid
-      ? S.publishes.filter((p) => p.bvid === S.task.bvid && !p.deleted_at)
-      : [];
-    const blk = $("hist-blk");
+    const mine = S.publishes.filter((p) => p.bvid === bvid && !p.deleted_at);
     blk.classList.toggle("hidden", !mine.length);
     $("hist-list").innerHTML = mine.map((p) => {
       const st = p.status === "published" ? "已发布"
@@ -2516,7 +2526,10 @@ async function loadPublishes() {
       return '<div class="v" style="cursor:default">' +
         '<span class="n">' + esc(when.slice(5)) + "</span>" +
         '<span class="x">' + esc(st) + " · " + esc((p.content || "").slice(0, 48)) + "</span>" +
-        '<button class="act" data-wd="' + p.id + '">撤回</button></div>';
+        /* 只有真发出去的那条才撤得动。被拦下/失败的行没有 rpid，
+           给个「撤回」按钮点了只会弹一句「无法撤回」——那是在骗人点。 */
+        (p.status === "published" ? '<button class="act" data-wd="' + p.id + '">撤回</button>' : "") +
+        "</div>";
     }).join("");
     $("hist-list").querySelectorAll("[data-wd]").forEach((b) => {
       b.onclick = () => withdraw(Number(b.dataset.wd));

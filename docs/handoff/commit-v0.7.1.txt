@@ -1,0 +1,45 @@
+v0.7.1：修「发布记录」整块不显示，bvid 进 SQL
+
+反馈是「历史发布功能里没有撤回按钮了」。先翻 git：按钮从 v0.6.0 引入这块起就没动过，
+一行没改。所以不是按钮没了，是**整块没画出来**——`loadPublishes()` 拿到的列表里没有
+这条视频的记录，`hist-blk` 被 `hidden`，按钮跟着一起消失。
+
+## 根因：窗口按时间截断，过滤按内容
+
+    const rows = await call("list_publishes", 12);          // 后端回「全局最近 12 条」
+    const mine = S.publishes.filter(p => p.bvid === S.task.bvid && !p.deleted_at);
+
+后端 `list_publishes(limit)` 只有 `ORDER BY id DESC LIMIT ?`，不分视频。前 12 条是
+全局窗口，前端再按 bvid 筛。别的视频一发得多，这条视频的旧记录就被挤出窗口，筛完是
+空数组——静默消失，不报错。
+
+本地库 38 条记录的实测（全局 top-12 只覆盖 6 个 bvid）：
+
+    BV1kPau6VEWb    旧：可见 0 条 → 整块隐藏      新：id 11
+    BV1v5eM6vELt    旧：可见 0 条 → 整块隐藏      新：id 5、1
+    BV1hBnC6ZEug    旧：id 33                     新：id 33
+
+所以表现是「越用越没有」：早发的先掉出去。也不是 v0.7.0 改坏的，v0.6.0 起就这样，
+只是那时记录还没到 12 条。
+
+## 改法
+
+`store.list_publishes(limit, bvid)` 把 bvid 写进 SQL 的 WHERE，不再「取全局窗口再
+前端筛」——窗口按时间截断、条件按内容，两者不对齐，窗口一满必然丢东西。
+
+四层透传：`index.html` → `main.py:/api/publishes` → `service.list_publishes` →
+`store.list_publishes`；桌面版 `desktop.py` 的同名方法一起补。界面另加一条：没有任务
+就不请求，不再白拿一份全局列表筛成空。
+
+顺手两处：
+1. 咬合闸门提示写着「到左边『历史发布』里撤回」——界面上那块叫**发布记录**，这四个字
+   在 UI 里搜不到，照着找只会找到「历史总结」。已改。
+2. 被拦下/失败的记录也有「撤回」按钮，但它们没有 rpid，点了只弹「无法撤回」——骗人
+   点。现在只有 status=published 才给按钮。
+
+## 验证
+
+- 前端 217 通过 / 0 失败
+- 后端离线 40/40、HTTP 49/49
+- 新增 6 条 HTTP 断言；**红绿对照**：撤掉 bvid 参数，新断言立刻红
+- 真实库跑新旧两套口径，上表数字是跑出来的
