@@ -247,92 +247,82 @@ def _apply_shell_settings(settings: Any) -> list[str]:
     return ["AreDefaultContextMenusEnabled", "AreBrowserAcceleratorKeysEnabled"]
 
 
-def _enable_context_menu(window: webview.Window) -> None:
-    """打开 WebView2 的原生右键菜单与浏览器快捷键（复制 / 粘贴 / 全选）。
+def _read_shell_settings(settings: Any) -> dict[str, bool]:
+    """把三个开关的**当前实际值**读回来。
 
-    **pywebview 默认把这两样都关掉了。** `.venv/Lib/site-packages/webview/
-    platforms/edgechromium.py:287-288`：
-
-        settings.AreBrowserAcceleratorKeysEnabled = _state['debug']
-        settings.AreDefaultContextMenusEnabled = _state['debug']
-
-    只有带 `--debug` 启动才有。从"这是个应用"的角度看禁掉是合理的（不是网页，
-    不需要"查看源代码"）；但**输入框里粘贴是刚需**：从别处复制一个 BV 号，
-    右键想粘、Ctrl+V 想粘，两样都不响应，会以为程序卡了或输入框坏了。
-
-    曾经只设了 `AreDefaultContextMenusEnabled` 一条，用户反馈"还是粘不进去"——
-    因为真正的拦路虎是另一条：`AreBrowserAcceleratorKeysEnabled` 是 Ctrl+V 的
-    总开关。**两个都要设**，缺一个就还是不能用。
-
-    **`shown` 事件触发时 `CoreWebView2` 还不存在。** 实测那一刻
-    `native.webview.CoreWebView2` 是 None，大约 **1.2 秒之后**才拿到实例
-    (`on_webview_ready` 回调是异步的)。所以这里轮询等待，而不是设一次就完事。
-
-    轮询放在独立线程里跑，因为 `shown` 回调是同步执行的——在里面 sleep 会把
-    窗口初始化流程一起堵住。失败就算了，少了这些不影响主流程。
+    存在的理由：`settings.X = True` 这行不报错，不代表值就是 True。
+    pywebview 自己在 `on_webview_ready` 里还会再写一遍（`= _state['debug']`，
+    即 False），谁先谁后取决于 CoreWebView2 就绪与回调的时序——写过就完事，
+    等于把结果交给运气。
     """
 
-    def wait_and_enable() -> None:
-        deadline = time.time() + 15.0
-        while time.time() < deadline:
-            try:
-                form = getattr(window, "native", None)
-            except Exception as exc:
-                print(f"[ctx] 拿不到窗口对象：{exc!r}", flush=True)
-                return
-            if form is None:
-                time.sleep(0.15)
-                continue
+    out: dict[str, bool] = {}
+    for name in ("AreDefaultContextMenusEnabled", "AreBrowserAcceleratorKeysEnabled"):
+        try:
+            out[name] = bool(getattr(settings, name))
+        except Exception:  # noqa: BLE001 —— 读不到就当没开
+            out[name] = False
+    return out
 
-            # **必须把活送回 UI 线程做。** BrowserForm 是 WinForms 控件，任何
-            # 属性读取都要在该控件自己的线程上；从后台线程直接摸
-            # `form.webview.CoreWebView2` 会**永久阻塞**（不是抛异常，是卡死）。
-            # 这个坑实测踩过两次：日志里只有"已挂上 shown 事件"，后面既没有
-            # 成功那行、也没有 15 秒超时那行，线程就那么僵在那儿——看起来像
-            # "开关设了但没效果"，实际是那行代码根本没跑到。
-            #
-            # winforms 后端自己也是这么干的（`webview/platforms/winforms.py:398`
-            # 起 `self.Invoke(Func[Type](_shutdown))`），照它的做法来。
-            outcome: list[Any] = []
 
-            def on_ui_thread() -> None:
-                try:
-                    webview2 = getattr(form, "webview", None)
-                    core = getattr(webview2, "CoreWebView2", None)
-                    if core is None:
-                        outcome.append(None)  # 还没初始化好，下一轮再来
-                        return
-                    outcome.append(_apply_shell_settings(core.Settings))
-                except Exception as exc:  # noqa: BLE001 —— 记下来，不吞
-                    outcome.append(exc)
+def _patch_webview_settings_hook() -> None:
+    """把开关挂到 pywebview 自己的 `on_webview_ready` 之后，用它的 `sender`。
 
-            try:
-                from System import Action  # 只有加载了 CLR 才有
+    **这是三轮实验换来的结论，不是猜的。** 前两轮我们拿 `form.webview.CoreWebView2`
+    写开关，读回全是 True（还加了 45 秒看守、`loaded` 再补一轮），可打出来的 exe
+    右键依旧没菜单；而 `--debug` 启动（pywebview 自己写 True）就正常。
 
-                form.Invoke(Action(on_ui_thread))
-            except Exception as exc:  # noqa: BLE001
-                print(f"[ctx] Invoke 到 UI 线程失败：{exc!r}", flush=True)
-                return
+    `webview/platforms/edgechromium.py:283` 的 `on_webview_ready(self, sender, args)`
+    里，`sender` 才是**真正在渲染页面的那个 WebView2 控件**。同一个 `form` 上，
+    `form.webview.CoreWebView2` 读到的未必是它——属性读回 True、界面却没变化，
+    正说明写进了另一个实例。源码直接跑时两者恰好是同一个，所以这个问题只在
+    打包成 exe 之后才露出来，坑就坑在这儿。
 
-            if not outcome:
-                time.sleep(0.15)
-                continue
-            got = outcome[0]
-            if got is None:
-                time.sleep(0.15)
-                continue
-            if isinstance(got, Exception):
-                print(f"[ctx] 设开关时出错：{got!r}", flush=True)
-                return
-            # 打一行日志：打包成 exe 之后没有控制台，验证「到底开没开」
-            # 只能靠 exe 旁边那份 bili-scribe.log。少了这行，用户报
-            # 「还是粘不进去」时无从判断是没走到这儿、还是走到了但
-            # WebView2 没理。
-            print(f"[ctx] 已打开：{' / '.join(got)}", flush=True)
+    包一层原方法：先让它把该做的都做完（含它自己的赋值），再在同一个 sender 上
+    把我们要的两项盖成 True。
+    """
+
+    try:
+        from webview.platforms import edgechromium
+
+        original = edgechromium.EdgeChrome.on_webview_ready
+        if getattr(original, "_bili_patched", False):
             return
-        print("[ctx] 等了 15 秒还没拿到 CoreWebView2，这次没打开", flush=True)
 
-    threading.Thread(target=wait_and_enable, daemon=True).start()
+        def patched(self, sender, args):  # noqa: ANN001 —— 跟着 pywebview 的签名
+            original(self, sender, args)
+            try:
+                settings = sender.CoreWebView2.Settings
+                _apply_shell_settings(settings)
+                state = _read_shell_settings(settings)
+                print(
+                    "[ctx] sender 上已设并读回："
+                    + " / ".join(k for k, v in state.items() if v),
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[ctx] sender 上设开关失败：{exc!r}", flush=True)
+
+        patched._bili_patched = True  # type: ignore[attr-defined]
+        edgechromium.EdgeChrome.on_webview_ready = patched
+        print("[ctx] 已接管 on_webview_ready（用 sender 写）", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ctx] 接管 on_webview_ready 失败：{exc!r}", flush=True)
+
+
+def _enable_context_menu(window: webview.Window) -> None:
+    """右键菜单与浏览器快捷键的总开关。
+
+    **真正的修复在 `_patch_webview_settings_hook()` 里**，这里只负责把它挂上。
+    早期版本是在 `shown` 之后轮询 `form.webview.CoreWebView2` 去写——三轮
+    实测证明那条路在打包后的 exe 里无效：属性读回 True，右键依旧没菜单。
+    原因是那个对象不是真正渲染页面的 WebView2 实例（详见补丁函数的注释）。
+
+    留着这个函数是因为 `attach()` 里已经挂了 `shown` 事件，且 ID 幂等；
+    以后要加别的窗口级开关，这里是合适的落点。
+    """
+    _patch_webview_settings_hook()
+    print("[ctx] 右键菜单开关已挂上（sender 版）", flush=True)
 
 
 def _model_of(annotation: Any) -> type[BaseModel] | None:
@@ -442,6 +432,9 @@ class DesktopApi:
         # 那时才存在（`shown` 事件里两者都就绪）。
         window.events.shown += _dark_title_bar
         window.events.shown += _enable_context_menu
+        # 必须在 `webview.start()` 之前打补丁：窗口一创建，`on_webview_ready`
+        # 就已经在跑了，等 `shown` 再挂就漏掉第一轮。
+        _patch_webview_settings_hook()
         print("[ctx] 已挂上 shown 事件（标题栏配色 + 右键菜单）", flush=True)
 
     def mark_ready(self) -> None:

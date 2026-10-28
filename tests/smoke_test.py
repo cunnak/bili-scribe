@@ -2452,7 +2452,79 @@ def _shell_settings() -> str:
     # 返回的项名要如实反映设了什么：调用方靠它打日志，日志是打包后唯一的证据
     assert set(done) == {"AreDefaultContextMenusEnabled", "AreBrowserAcceleratorKeysEnabled"}, done
 
-    return f"设 {len(done)} 项：{' / '.join(done)}；未触碰 DevTools 与脚本开关"
+    # ---- 读回：赋值成功 ≠ 值还在 -------------------------------------
+    # 真实事故：日志写了「已打开」，右键还是没菜单。因为 pywebview 的
+    # `on_webview_ready` 随后又用 `_state['debug']`(=False) 写了一遍，
+    # 谁先谁后看时序。所以必须能读回**当前实际值**，否则日志本身就是假的。
+    from bili_scribe.desktop import _read_shell_settings
+
+    class Sticky:
+        def __init__(self) -> None:
+            self.AreDefaultContextMenusEnabled = True
+            self.AreBrowserAcceleratorKeysEnabled = True
+            self.IsStatusBarEnabled = False
+
+    assert _read_shell_settings(Sticky()) == {
+        "AreDefaultContextMenusEnabled": True,
+        "AreBrowserAcceleratorKeysEnabled": True,
+    }, "读回没拿到实际值"
+
+    class Swallowed:
+        """写进去被吞掉、读出来永远是 False —— 模拟被后写的一方盖回去。"""
+
+        def __init__(self) -> None:
+            self._flag = False
+
+        @property
+        def AreDefaultContextMenusEnabled(self) -> bool:
+            return self._flag
+
+        @AreDefaultContextMenusEnabled.setter
+        def AreDefaultContextMenusEnabled(self, value: object) -> None:
+            pass
+
+        @property
+        def AreBrowserAcceleratorKeysEnabled(self) -> bool:
+            return self._flag
+
+        @AreBrowserAcceleratorKeysEnabled.setter
+        def AreBrowserAcceleratorKeysEnabled(self, value: object) -> None:
+            pass
+
+        @property
+        def IsStatusBarEnabled(self) -> bool:
+            return self._flag
+
+        @IsStatusBarEnabled.setter
+        def IsStatusBarEnabled(self, value: object) -> None:
+            pass
+
+    swallowed = Swallowed()
+    _apply_shell_settings(swallowed)
+    state = _read_shell_settings(swallowed)
+    assert not any(state.values()), (
+        "被盖回去的情况没被识别出来 —— 调用方会以为开好了，日志会撒谎"
+    )
+
+    # ---- 接管 on_webview_ready：exe 里唯一真正生效的写法 ----------------
+    # 上面两条只是「设了、读回 True」。实测 0.7.3 前三轮：读回真、右键假。
+    # 真正让 exe 出菜单的是把开关写进 pywebview 自己的 `sender`（= 真在渲染
+    # 页面的那个控件）。这条用例守的是「补丁装上了、且能重复调用不出错」，
+    # 防止以后重构把这行悄悄删掉——删了它测试照样全绿，但用户右键照样没菜单。
+    try:
+        from webview.platforms import edgechromium
+
+        from bili_scribe.desktop import _patch_webview_settings_hook
+
+        _patch_webview_settings_hook()
+        _patch_webview_settings_hook()  # 幂等：第二次应直接返回
+        hooked = edgechromium.EdgeChrome.on_webview_ready
+        assert getattr(hooked, "_bili_patched", False), "on_webview_ready 没被接管"
+        assert hooked.__name__ == "patched", "接管后应指向包装函数"
+    except ImportError:  # 非 Windows / 没装 pywebview 的环境跳过
+        pass
+
+    return f"设 {len(done)} 项：{' / '.join(done)}；读回能识别「写了但没留住」；已接管 sender"
 
 
 def _publish_document() -> str:
