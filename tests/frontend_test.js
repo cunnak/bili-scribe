@@ -766,6 +766,59 @@ test("发布记录按当前这条视频去查，老视频也拿得到撤回按�
   } finally { p.close(); }
 });
 
+test("发布记录的字比版本列表大，撤回是红字压红底", async () => {
+  /* 需求原话：「增大这部分的字体，把撤回两个字进行变红和高亮」。
+     这里钉的是**渲染出来的结果**，不是源码里写了什么 —— 改一个 CSS 变量的
+     名字或者被后面的规则覆盖掉，只有读 computedStyle 才看得见。 */
+  const be = makeBackend();
+  be.api.list_publishes = () => Promise.resolve({
+    ok: true,
+    data: [{ id: 7, task_id: "t1", bvid: "BV1xx411c7mD", status: "published",
+             content: "发过的那条", created_at: "2026-10-27T18:00:00+08:00", deleted_at: null }],
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    await readyTask(p);
+    const btn = p.$("hist-list").querySelector("[data-wd]");
+    assert(G5, "撤回按钮在", !!btn, "没渲染出来");
+
+    const cs = p.win.getComputedStyle(btn);
+    /* jsdom 不展开自定义属性：`color:var(--danger)` 读回来就是这串原文。
+       所以分两步钉：①按钮的颜色必须走 --danger 这个口子；②--danger 本身是红的。
+       两步都成立，屏幕上才是红的 —— 只钉其中一步都能被「变量改错但照样引用」骗过去。 */
+    assert(G5, "撤回的颜色走 --danger", /var\(--danger\)/.test(cs.color), "color=" + cs.color);
+
+    const rootCs = p.win.getComputedStyle(p.doc.documentElement);
+    const token = rootCs.getPropertyValue("--danger").trim();
+    const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(token);
+    assert(G5, "--danger 是个十六进制色值", !!hex, "token=" + token);
+    const [r, g, b] = [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16)];
+    assert(G5, "--danger 是红色（红通道明显压过绿和蓝）",
+      r >= 150 && r > g * 1.5 && r > b * 1.5, token);
+
+    const size = parseFloat(cs.fontSize);
+    assert(G5, "撤回的字号不小于 12px", size >= 12, size + "px");
+
+    assert(G5, "撤回有一层高亮底色，不是透明的",
+      /var\(--danger-rgb\)/.test(cs.backgroundColor) || cs.backgroundColor !== "transparent",
+      "bg=" + cs.backgroundColor);
+
+    const row = p.$("hist-list").querySelector(".x");
+    const rowSize = parseFloat(p.win.getComputedStyle(row).fontSize);
+    assert(G5, "记录正文不小于 13px", rowSize >= 13, rowSize + "px");
+
+    /* 版本列表用的是同一条 .v 规则，这里临时插一个进去量它的字号 ——
+       发版记录不该把左边那块也一起放大，两边必须有区别。 */
+    const probe = p.doc.createElement("div");
+    probe.className = "v";
+    probe.innerHTML = '<span class="x">x</span>';
+    p.$("v-list").appendChild(probe);
+    const verSize = parseFloat(p.win.getComputedStyle(probe.querySelector(".x")).fontSize);
+    probe.remove();
+    assert(G5, "发布记录比版本列表大", rowSize > verSize, `记录 ${rowSize} vs 版本 ${verSize}`);
+  } finally { p.close(); }
+});
+
 test("这条视频没发过：不显示发布记录块，也不留一个点不动的按钮", async () => {
   const be = makeBackend();
   be.api.list_publishes = () => Promise.resolve({ ok: true, data: [] });
@@ -1115,8 +1168,8 @@ test("两套皮肤各自有一套完整的颜色变量，没有一个是空的",
   try {
     const names = ["--bg", "--panel", "--panel-2", "--text", "--text-2",
       "--muted", "--dim", "--acid", "--acid-tx", "--acid-d", "--acid-hover",
-      "--on-acid", "--ember", "--paper", "--line", "--line-s", "--foot",
-      "--void", "--strong", "--acid-rgb", "--ink-rgb"];
+      "--on-acid", "--ember", "--danger", "--paper", "--line", "--line-s", "--foot",
+      "--void", "--strong", "--acid-rgb", "--ink-rgb", "--danger-rgb"];
     const rootCs = p.win.getComputedStyle(p.doc.documentElement);
     const dark = {};
     for (const n of names) dark[n] = rootCs.getPropertyValue(n).trim();

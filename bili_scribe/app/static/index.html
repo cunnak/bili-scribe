@@ -20,6 +20,7 @@
   --acid-d:#8A9B22;
   --ember:#FF6B35;
   --paper:#E8E2D4;
+  --danger:#FF6B6B;
 
   --text:#F2F4F2;
   --muted:#8B9490;
@@ -38,9 +39,14 @@
      若把它写死成 255,255,255，换肤后网格、刻度尺、行悬停会集体消失 ——
      那正是"只换了一半"的典型症状。
 
-     `--shade-rgb` 给阴影与遮罩用；浅色底上 0.62 的黑影会脏成一片。 */
+     `--shade-rgb` 给阴影与遮罩用；浅色底上 0.62 的黑影会脏成一片。
+
+     `--danger` 给撤回这类**不可逆操作**。两套皮肤都用红，但红得换写法：
+     近黑底上要提亮（#FF6B6B，压在 14% 红底上是 5.41:1），近白底上要压深
+     （#B42318，5.20:1）——同一个红在这两种底上，不是发闷就是刺眼。 */
   --acid-rgb:216,242,75;
   --ember-rgb:255,107,53;
+  --danger-rgb:255,107,107;
   --ink-rgb:255,255,255;
   --shade-rgb:0,0,0;
   --scrim-rgb:4,5,6;
@@ -90,6 +96,7 @@
   --acid-d:#4A6B12;
   --ember:#C4186F;
   --paper:#2A3134;
+  --danger:#B42318;
 
   --text:#14181A;
   --muted:#5E6866;
@@ -97,6 +104,7 @@
 
   --acid-rgb:197,214,34;
   --ember-rgb:196,24,111;
+  --danger-rgb:180,35,24;
   --ink-rgb:0,0,0;
   --shade-rgb:0,0,0;
   --scrim-rgb:20,22,24;
@@ -520,6 +528,25 @@ strong{color:var(--strong);font-weight:700}
 }
 .v .act:hover{color:var(--acid-tx)}
 .v .cur{flex:0 0 auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--acid-tx);padding-top:2px}
+
+/* 发布记录条目：比左边的版本列表大一号。
+   版本列表是「扫一眼挑一版」，字小无所谓；这里是「我到底发过什么、要不要撤回」，
+   字小到要看两遍就等于没写。日期原来被 18px 的固定宽度挤成两行（10-27 / 18:00），
+   字号一大更难看，所以改成按内容取宽、不换行。 */
+#hist-blk .bh .t{font-size:10.5px}
+#hist-list .v{padding:9px 10px;margin-bottom:4px;align-items:center}
+#hist-list .v .n{flex:0 0 auto;white-space:nowrap;font-size:11.5px;padding-top:0;color:var(--muted)}
+#hist-list .v .x{font-size:13.5px;color:var(--text-2);line-height:1.5}
+#hist-list .v .act{
+  font-family:var(--cn);font-size:12px;font-weight:700;letter-spacing:.08em;
+  color:var(--danger);
+  background:rgba(var(--danger-rgb),.14);
+  border:1px solid rgba(var(--danger-rgb),.55);
+  padding:4px 10px 5px;cursor:pointer;
+  clip-path:polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+  transition:background .14s,border-color .14s;
+}
+#hist-list .v .act:hover{background:rgba(var(--danger-rgb),.26);border-color:var(--danger)}
 .vd{font-size:10.5px;color:var(--muted);line-height:1.7;padding:0 9px 7px 37px}
 .vd .k{color:var(--acid-tx)}
 .vd .w{color:var(--ember)}
