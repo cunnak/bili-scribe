@@ -2019,6 +2019,51 @@ async function main() {
     }
   });
 
+  await check("设置页：额外请求头按「名字: 值」填，存成对象", async () => {
+    // 有些网关要私有请求头（opencode 的 x-opencode-session、Azure 的 api-version）。
+    // 界面上是一行一个，配置里必须是对象——两边都要转对。
+    WB.router.go("settings", { section: "llm" });
+    await tick(100);
+    const body = window.document.querySelector("#settings-body");
+    const labels = [...body.querySelectorAll(".field__label")].map((n) => n.textContent.trim());
+    assert.ok(labels.indexOf("额外请求头") >= 0, "模型分区里没有「额外请求头」，现有字段：" + labels.join("/"));
+
+    const field = [...body.querySelectorAll(".field")].find((f) => {
+      const l = f.querySelector(".field__label");
+      return l && l.textContent.trim() === "额外请求头";
+    });
+    const area = field.querySelector("textarea");
+    assert.ok(area, "额外请求头不是一个多行输入框");
+
+    area.value = "x-opencode-session: wb-test{0}api-version: 2024-02-01".replace("{0}", String.fromCharCode(10));
+    area.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(40);
+
+    const bar = window.document.querySelector(".settings__bar");
+    assert.ok(bar && bar.textContent.indexOf("待保存") >= 0, "填了请求头却没标脏");
+
+    const puts = [];
+    const realRpc = window.WB.rpc;
+    window.WB.rpc = function (method, params, opts) {
+      if (method === "app.settings.put") puts.push(params || {});
+      return realRpc.call(window.WB, method, params, opts);
+    };
+    try {
+      const saveBtn = [...window.document.querySelectorAll("button")].find(
+        (b) => b.textContent.trim() === "保存"
+      );
+      saveBtn.click();
+      await tick(150);
+    } finally {
+      window.WB.rpc = realRpc;
+    }
+    const patch = puts.length ? puts[puts.length - 1].values || {} : {};
+    const headers = (patch.llm || {}).extra_headers;
+    assert.ok(headers && typeof headers === "object", "提交里没有 llm.extra_headers 对象：" + JSON.stringify(patch).slice(0, 120));
+    assert.strictEqual(Object.keys(headers).length, 2, "应解析出两个头，实际 " + JSON.stringify(headers));
+    assert.strictEqual(headers["api-version"], "2024-02-01");
+  });
+
   dom.window.close();
 
   console.log("\n前端骨架验收");

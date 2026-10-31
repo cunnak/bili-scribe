@@ -89,11 +89,19 @@ RPC 里跟模型相关的只有两个：`llm.test`（发一条最小对话验证
 `llm.models`（`GET {base_url}/models` 列这家账号能用的模型，供界面「获取可用模型」用；
 不需要 `model` 已配好，缺地址/密钥回 `LLM_NOT_CONFIGURED`，地址不支持该接口回 `LLM_BAD_RESPONSE`）。
 
-`llm.user_agent` 留空用内置 UA（`VideoWorkbench/0.1 openai-compatible-client`）。
-之所以有这一项：Cloudflare 的 1010 规则按客户端指纹判机器人，urllib 默认 UA 会被直接 403
-（报错原文 `blocked access based on your browser signature`），而密钥完全正确。
-被拦时填一个浏览器 UA、或填 `llm.proxy` 走代理出口，改完重启生效。
+`llm.user_agent` 留空用**内置浏览器 UA**（`Mozilla/5.0 … Chrome/141 … Safari/537.36`）。
+之所以这么设：Cloudflare 的 1010 规则按客户端指纹判机器人。同一把 key、同一个地址实测——
+UA 写 `python-urllib/3.x` 或写 `VideoWorkbench/0.1 …` 一律 403（`blocked access based on your browser signature`），
+换成浏览器 UA 就是 200。**把自己程序的名字当 UA 发出去等于自报脚本**，所以默认值不能是程序名。
+仍被拦时只剩两条：`llm.proxy` 走代理出口，或换一个更新的浏览器 UA。改完重启生效。
 403 与 401 已经分开：401 是 `LLM_AUTH`（key 不对），403 是 `LLM_FORBIDDEN`（网关/权限拒绝）。
+
+`llm.extra_headers`（`dict[str, str]`）给需要私有请求头的网关用：Azure 的 `api-version`、
+自建网关的 `x-tenant` 之类，界面上是「上下文与长素材 → 额外请求头」，一行一个 `名字: 值`。
+优先级：`extra_headers` > 自动补的会话头 > 内置 UA（所以填 `User-Agent` 也能覆盖 UA）。
+`x-opencode-session` 不用手填——host 含 `opencode.ai` 时程序自动补一个进程内稳定的
+`wb-<uuid4 前 16 位>`（这一家缺它直接回 400 `MissingSessionID`，不补就根本用不了）。
+头名与值都不许含 CR/LF（`validate()` 会拒），防头注入。
 
 `tasks.vision` 留空会自动回落到 `llm.model`——**只有真能收图的多模态模型**才配这一项，
 否则画面精析会自动跳过（跳过写进任务备注，不会假装跑过）。

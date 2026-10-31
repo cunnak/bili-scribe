@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 import time
 import urllib.error
 import urllib.request
@@ -36,7 +37,12 @@ MAX_ATTEMPTS = 3
 # 默认 UA。为什么不能用 urllib 自带的那个：
 # `Python-urllib/3.x` 命中 Cloudflare 防火墙的 "bad browser signature"（Error 1010），
 # 会在**密钥完全正确**的情况下直接 403——用户看到的就是「别处能用，这里不能用」。
-DEFAULT_USER_AGENT = "VideoWorkbench/0.1 openai-compatible-client"
+# 默认 UA 必须长得像浏览器：Cloudflare 的 1010 规则按「客户端指纹」放行或拦截。
+# 实测同一把密钥、同一个地址：VideoWorkbench/0.1 一律 403，换成下面这串就 200。
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+)
 
 BACKOFF_SECONDS = (0.8, 2.4)
 
@@ -193,6 +199,7 @@ class ChatClient:
         sleep: Callable[[float], None] = time.sleep,
         provider_name: str = "",
         user_agent: str = "",
+        extra_headers: Mapping[str, str] | None = None,
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key or ""
@@ -204,10 +211,37 @@ class ChatClient:
         self.proxy = proxy or ""
         self._transport = transport or _urllib_transport(self.proxy)
         self.user_agent = (user_agent or "").strip() or DEFAULT_USER_AGENT
+        self.extra_headers = {
+            str(k): str(v) for k, v in dict(extra_headers or {}).items() if str(k).strip()
+        }
+        self._session_id = ""
         self._getter = getter or _urllib_get(self.proxy)
         self._sleep = sleep
 
     # ------------------------------------------------------------- 列模型
+
+    def _headers(self, *, json_body: bool) -> dict[str, str]:
+        """按网关要求拼请求头。
+
+        ``extra_headers`` 是给「需要私有请求头」的网关留的通用旋钮。
+        ``opencode.ai`` 那家另外有一个固定的坑：``chat/completions`` 必须带
+        ``x-opencode-session``（任意字符串都行，缺了回 400 MissingSessionID），
+        这里给它补一个进程内稳定的值，用户不必自己去读文档。
+        """
+        headers = {
+            "Authorization": "Bearer " + self.api_key,
+            "Accept": "application/json",
+            "User-Agent": self.user_agent,
+        }
+        if json_body:
+            headers["Content-Type"] = "application/json"
+        headers.update(self.extra_headers)
+        lowered = {k.lower() for k in headers}
+        if "opencode.ai" in self.base_url.lower() and "x-opencode-session" not in lowered:
+            if not self._session_id:
+                self._session_id = "wb-" + uuid.uuid4().hex[:16]
+            headers["x-opencode-session"] = self._session_id
+        return headers
 
     def list_models(self) -> list[dict[str, str]]:
         """``GET {base_url}/models`` —— 这家密钥能用的模型有哪些。
@@ -232,11 +266,8 @@ class ChatClient:
                 "缺：" + "、".join(missing),
             )
         url = f"{self.base_url}/models"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-            "User-Agent": self.user_agent,
-        }
+
+        headers = self._headers(json_body=False)
         try:
             status, text = self._getter(url, headers, self.timeout)
         except TimeoutError as exc:
@@ -299,6 +330,7 @@ class ChatClient:
                 transport=transport,
                 provider_name=picked.name,
                 user_agent=str(getattr(llm, "user_agent", "") or ""),
+                extra_headers=dict(getattr(llm, "extra_headers", {}) or {}),
             )
         provider_obj, model = resolve_task_model(llm, task)
         return cls(
@@ -310,6 +342,7 @@ class ChatClient:
             transport=transport,
             provider_name=str(getattr(provider_obj, "name", "") or "") or (provider or ""),
             user_agent=str(getattr(llm, "user_agent", "") or ""),
+            extra_headers=dict(getattr(llm, "extra_headers", {}) or {}),
         )
 
     @property
@@ -361,12 +394,8 @@ class ChatClient:
 
         url = f"{self.base_url}/chat/completions"
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-            "User-Agent": self.user_agent,
-        }
+
+        headers = self._headers(json_body=True)
 
         last: ChatError | None = None
         for attempt in range(MAX_ATTEMPTS):

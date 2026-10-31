@@ -452,6 +452,10 @@ class LlmConfig(_LlmConfig):
     # 有些网关（Cloudflare 前置）会按客户端指纹/UA 拦人。留空用内置默认 UA；
     # 填了就用填的（例如整段浏览器 UA），改完要重启才生效。
     user_agent: str = ""
+    # 额外请求头。有些网关要求自己的私有头（例如 opencode zen 的
+    # ``x-opencode-session``，缺了回 400 MissingSessionID），也有要 ``api-version``
+    # 这类 Azure 风格的。放成键值对而不是写死进代码，换一家就不用改程序。
+    extra_headers: dict[str, str] = field(default_factory=dict)
     providers: list[LlmProviderConfig] = field(default_factory=list)
     # 当前生效的服务商 id。空 ＝ 第一条。
     active_provider: str = ""
@@ -851,6 +855,14 @@ def _fill(cls: type, values: Any, path: str = ""):
         child = f"{path}.{key}" if path else key
         if isinstance(hint, type) and dataclasses.is_dataclass(hint):
             kwargs[key] = _fill(hint, value, child)
+        elif hint is dict or str(hint).startswith("dict["):
+            if value is None:
+                kwargs[key] = {}
+            elif isinstance(value, dict):
+                # 头名/值都是自由文本：统一转 str，省掉「填了数字 5 就报类型错」。
+                kwargs[key] = {str(k): str(v) for k, v in value.items()}
+            else:
+                raise WBError("VALIDATION", f"{child} 必须是映射结构", repr(value))
         elif hint is list or str(hint).startswith("list["):
             if value is None:
                 kwargs[key] = []
@@ -932,6 +944,12 @@ def validate(cfg: WorkbenchConfig) -> None:
 
     # 服务商：只挡"配了但一眼会打错门"的。地址留空不算错——新装的机器本来就没有，
     # 首次请求时由 ``ChatClient.require()`` 报 LLM_NOT_CONFIGURED，那才是合适的位置。
+    # 额外请求头：不能含换行，否则等于允许注入别的头。
+    for head_name, head_val in (getattr(cfg.llm, "extra_headers", None) or {}).items():
+        for what, text in (("头名", head_name), ("值", head_val)):
+            if chr(10) in str(text) or chr(13) in str(text):
+                raise WBError("VALIDATION", f"llm.extra_headers 的{what}不能含换行", str(text))
+
     for i, p in enumerate(cfg.llm.providers or []):
         label = f"llm.providers[{i}]"
         _enum(p.protocol, PROVIDER_PROTOCOLS, f"{label}.protocol")

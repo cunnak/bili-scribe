@@ -35,6 +35,7 @@
       proxy: "",
       role: "standard",
       user_agent: "",
+      extra_headers: {},
       // 服务商列表：跟后端 config.LlmProviderConfig 同形状。mock 里给两家，
       // 是为了让"多服务商"的界面路径（切换当前、任务映射下拉分组）真的有东西可渲染，
       // 而不是只画一张卡糊弄过去。

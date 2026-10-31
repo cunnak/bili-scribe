@@ -88,8 +88,16 @@
           label: "请求 UA",
           group: "advanced",
           type: "text",
-          placeholder: "留空用内置 UA",
-          help: "有的网关（Cloudflare 前置）会按客户端 UA 判定机器人直接 403。被拦时把这里填成你自己浏览器的 UA 再试；改完要重启。"
+          placeholder: "留空用内置浏览器 UA",
+          help: "内置的是浏览器 UA——Cloudflare 的 1010 规则按客户端指纹拦人，填成程序名会被 403。一般不用改。"
+        },
+        {
+          path: "llm.extra_headers",
+          label: "额外请求头",
+          type: "headers",
+          group: "advanced",
+          placeholder: "x-opencode-session: 任意字符串",
+          help: "每行一个「名字: 值」。有些网关要求私有头：opencode zen 的对话接口必须带 x-opencode-session（这里已自动补），Azure 风格要 api-version。"
         },
         // 任务 → 服务商/模型 的映射，同样不是普通输入框（每行一个下拉）。
         { path: "llm.tasks", label: "任务模型", type: "taskmap", group: "advanced" }
@@ -1411,6 +1419,19 @@
         onChange(text.value);
       }
     });
+    if (field.type === "headers") {
+      // 界面上是一行一个「名字: 值」，配置里是对象。两边都要能转。
+      text = ui.h("textarea", {
+        class: "input",
+        rows: 3,
+        placeholder: field.placeholder || "",
+        value: headersToText(value),
+        oninput: function () {
+          onChange(textToHeaders(text.value));
+        }
+      });
+      return row(field, text);
+    }
     if (field.type === "textarea") {
       text = ui.h("textarea", {
         class: "input",
@@ -1422,6 +1443,31 @@
       });
     }
     return row(field, text);
+  }
+
+  function headersToText(value) {
+    if (!value || typeof value !== "object") return "";
+    return Object.keys(value)
+      .map(function (k) { return k + ": " + value[k]; })
+      .join("\n");
+  }
+
+  function textToHeaders(text) {
+    // 换行符用 charCode 拼，避免在源码里出现转义序列（本仓库多次被两层转义吃掉）。
+    var NL = String.fromCharCode(13) + String.fromCharCode(10);
+    var out = {};
+    String(text || "")
+      .split(new RegExp("[" + NL + "]+"))
+      .forEach(function (line) {
+        var trimmed = line.trim();
+        if (!trimmed || trimmed.charAt(0) === "#") return;
+        var at = trimmed.indexOf(":");
+        if (at <= 0) return;
+        var name = trimmed.slice(0, at).trim();
+        var val = trimmed.slice(at + 1).trim();
+        if (name) out[name] = val;
+      });
+    return out;
   }
 
   function row(field, control) {
