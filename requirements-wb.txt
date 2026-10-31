@@ -1,0 +1,10 @@
+# VideoWorkbench 额外依赖（bili-scribe 的 requirements.txt 已覆盖 requests/PyYAML）
+pywebview>=5.0            # 桌面窗口（WebView2）
+pydantic>=2.6             # RPC 参数校验
+faster-whisper>=1.1       # ASR
+ctranslate2>=4.5          # faster-whisper 的推理后端
+huggingface-hub>=0.24     # 模型下载（走 hf-mirror）
+yt-dlp>=2026.1            # 下载（真站解析/取流）
+numpy>=1.26               # 波形峰值、ASR 音频数组
+pillow>=10.0              # 封面合成
+pyinstaller>=6.0          # 只在需要出 exe 时

@@ -1,0 +1,59 @@
+/* P4-06：发布记录卡（左栏第三张）。全部走 token，无硬编码颜色。 */
+
+.pb-records {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.pb-record {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 发失败的那条要一眼看见：它是"还需要人处理"的东西 */
+.pb-record--bad {
+  border-color: var(--danger);
+}
+
+.pb-record__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pb-record__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pb-record__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pb-record__err {
+  font-size: 11px;
+  color: var(--danger);
+  word-break: break-all;
+}
+
+.pb-record__acts {
+  display: flex;
+  gap: 6px;
+}

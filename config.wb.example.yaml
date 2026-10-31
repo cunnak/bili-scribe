@@ -1,0 +1,125 @@
+# VideoWorkbench 配置
+#
+# 本文件由设置页面生成。手动修改同样生效；下次在页面上保存时整体覆盖，
+# 覆盖前会备份为 config.yaml.bak。
+#
+# 路径字段支持 ~ 与 %APPDATA% 这类环境变量，读入时统一展开为绝对路径。
+
+app:
+  language: "zh-CN"
+  # 媒体交给界面播放的方式：auto=按体积和编码自动挑 / file=file:// / http=本地 HTTP。
+  media_server: "auto"
+
+ui:
+  # 界面皮肤：ark（深色，默认）/ exhibition（浅色）。只影响配色，不影响处理逻辑。
+  skin: "exhibition"
+  rail_collapsed: false
+  # 首次启动向导看过没有（跳过一次也算看过，不会每次启动都弹）。
+  onboarded: false
+
+server:
+  # 仅调试模式（python run.py --web）使用。桌面模式不起 HTTP 服务。
+  host: "127.0.0.1"
+  port: 8818
+
+llm:
+  base_url: "https://api.deepseek.com/v1"
+  api_key: ""
+  model: "deepseek-chat"
+  temperature: 0.3
+  max_tokens: 4096
+  # auto=不发相关参数 / off=显式关思考 / on=显式开思考。
+  # 思考模型的推理过程不吃 max_tokens，开着容易超时或正文返回空。
+  thinking: "auto"
+  timeout_seconds: 300
+  # 调用模型时走的代理。留空 = 直连，且不读 HTTP_PROXY/HTTPS_PROXY。
+  proxy: ""
+  # 总结角色：standard / xueshu / wengao / xiezuo / fenxi / jinglian。
+  role: "standard"
+  max_input_chars: 24000
+  chunk_size: 6000
+  chunk_overlap: 400
+  # 分任务模型，留空回退 model。
+  tasks:
+    summary: ""
+    collection_overview: ""
+    translate: ""
+    clip_analyze: ""
+    copy: ""
+    refine: ""
+    vision: ""
+
+storage:
+  db_path: "C:\\Users\\b1596\\.bili-scribe\\bili-scribe.db"
+  # 凭据加密密钥，与 bili-scribe 共用。
+  key_path: "C:\\Users\\b1596\\.bili-scribe\\key.bin"
+  media_root: "%APPDATA%/VideoWorkbench/media"
+  cache_root: "%APPDATA%/VideoWorkbench/cache"
+  models_root: "%APPDATA%/VideoWorkbench/models"
+  ffmpeg_dir: "%APPDATA%/VideoWorkbench/bin"
+  # 保留天数。0 = 不自动清理。
+  retention:
+    source_days: 30
+    audio_days: 3
+    frames_days: 7
+    subtitle_days: 0
+    export_days: 0
+
+collect:
+  prefer_subtitle_lang: ["zh-CN", "zh-Hans", "zh-Hant", "ai-zh"]
+  include_platform_summary: true
+  danmaku:
+    enabled: true
+    also_with_subtitle: false
+    max_items: 800
+    hot_items: 200
+    sample_items: 200
+  frames:
+    enabled: true
+    max_frames: 12
+    quality: 85
+
+download:
+  quality: "1080p"
+  codec: "h264"
+  concurrency: 2
+  # 复用 bili-scribe 已登录的凭据，不用二次扫码。
+  cookies_from: "bili_scribe"
+  # 空段自动省略；单稿件时 page_title 为空。
+  dir_template: "{up}/{collection}/{title}/{page_title}"
+
+transcribe:
+  engine: "faster-whisper"
+  model: "large-v3-turbo"
+  device: "auto"
+  compute_type: "auto"
+  language: "auto"
+  vad: true
+  word_timestamps: true
+
+subtitle:
+  default_style: "default"
+  optimize: true
+  translate:
+    target: "auto"
+    bilingual: true
+    layout: "original_top"
+    glossary: []
+
+clip:
+  highlight_min_seconds: 15
+  highlight_max_seconds: 90
+  segment_min_seconds: 120
+  segment_max_seconds: 480
+  candidate_count: 12
+  snap_tolerance_ms: 2000
+  vertical_mode: "center"
+
+publish:
+  require_confirm: true
+  min_interval_seconds: 60
+  max_summary_chars: 200
+  max_comment_chars: 900
+  disclose_ai: true
+  disclosure_text: "（本总结由 AI 依据视频字幕／弹幕生成）"
+  auto_comment: true

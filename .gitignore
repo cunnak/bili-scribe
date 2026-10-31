@@ -32,3 +32,9 @@ node_modules/
 # 验收照常生成本地文件，只是不提交——样张（docs/design/style-probe*）用的是虚构数据，可以留。
 docs/design/app-exe.png
 docs/design/app-shot-*.png
+
+# VideoWorkbench 验收矩阵每次重跑都重拍这些样张，不入库
+docs/acceptance/matrix/
+
+# 某次脚本把 %APPDATA% 当字面量建出来的日志目录
+%APPDATA%/

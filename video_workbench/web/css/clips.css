@@ -1,0 +1,732 @@
+/* ============================================================================
+ * clips.css —— 切片台（P3-03）
+ *
+ * 只用 tokens.css 里的变量，不写字面色值（scripts/check_colors.py 会拦）。
+ * 三栏：候选 300px / 播放器与时间轴 自适应 / 队列与规格 280px。
+ * ========================================================================= */
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 280px;
+  gap: var(--gap-4, 16px);
+  align-items: start;
+  min-height: 0;
+}
+
+.clip-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3, 12px);
+}
+
+.clip-center {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3, 12px);
+}
+
+.clip-pick {
+  max-width: 260px;
+}
+
+/* ---------------------------------------------------------------- 候选卡片 */
+
+.clip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 12px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+}
+
+.clip-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--panel-2);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.clip-card:hover {
+  border-color: var(--line-strong, var(--line));
+}
+
+.clip-card.is-active {
+  border-color: var(--acid-tx);
+  background: var(--active-wash);
+  box-shadow: inset 3px 0 0 var(--acid-tx);
+}
+
+.clip-card__top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.clip-card__score {
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--acid);
+  color: var(--on-acid, var(--void));
+  font: 600 12px/20px var(--mono);
+  text-align: center;
+}
+
+.clip-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.clip-card__kind {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.clip-card__reason {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pill--warn {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------- 播放器 */
+
+.clip-player {
+  padding: 0;
+}
+
+.clip-player__host {
+  border-radius: var(--radius-sm, 6px);
+  background: var(--video-bg, var(--void));
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-player {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: var(--video-bg, var(--void));
+}
+
+/* ---------------------------------------------------------------- 时间轴 */
+
+.clip-tl {
+  padding: 8px 12px 0;
+}
+
+.tl {
+  position: relative;
+  height: 72px;
+  user-select: none;
+}
+
+.tl__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.tl__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tl__range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--active-wash);
+  border-left: 1px solid var(--acid-tx);
+  border-right: 1px solid var(--acid-tx);
+  box-sizing: border-box;
+}
+
+.tl__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -4px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  background: var(--acid-tx);
+  border-radius: 2px;
+  opacity: 0.85;
+}
+
+.tl__handle:hover {
+  opacity: 1;
+}
+
+.tl__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--paper);
+  opacity: 0.8;
+}
+
+.tl__hint {
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  font: 11px/1.4 var(--mono);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- 运输条 */
+
+.clip-transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 12px;
+  flex-wrap: wrap;
+}
+
+.clip-transport__clock {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.clip-transport__note {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- 检查器 */
+
+.clip-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clip-inspect {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clip-inspect__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.clip-inspect__row .input {
+  width: 108px;
+  font-family: var(--mono);
+}
+
+.clip-inspect__dur {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clip-inspect__note {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.clip-player {
+  position: relative;
+}
+
+.clip-player__hint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.clip-transport__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.clip-transport__check input {
+  accent-color: var(--accent);
+}
+
+.exp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.exp-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.exp-form__hint,
+.exp-form__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.exp-form__note {
+  color: var(--acid-tx);
+}
+
+.exp-form__go {
+  width: 100%;
+}
+
+.exp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.exp-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel-2);
+}
+
+.exp-row__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.exp-row__name {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.exp-row__meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.exp-row__note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.exp-row__acts {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- 竖屏导出（P3-06）：安全区遮罩 + 取景行 ---------------------------- */
+
+/* 预览读不出来时提示条盖在下面，遮罩仍在它之上：安全区是画面性质的提示 */
+.wb-player__safe {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 上下两块压住区：半透明填充 + 虚线边界，深浅皮肤下都量得出来 */
+.wb-player__safe-top,
+.wb-player__safe-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--scrim);
+}
+
+.wb-player__safe-top {
+  top: 0;
+  height: var(--safe-top, 120px);
+  border-bottom: 1px dashed var(--accent);
+}
+
+.wb-player__safe-bottom {
+  bottom: 0;
+  height: var(--safe-bottom, 260px);
+  border-top: 1px dashed var(--accent);
+}
+
+.exp-form__vmap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.exp-form__range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+
+.exp-form__range {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.exp-form__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.exp-form__check input {
+  accent-color: var(--accent);
+}
+
+.exp-form__focus {
+  margin-left: auto;
+}
+
+.btn--tiny {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------- 文案与封面（P3-08） */
+
+.copy-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.copy-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.copy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.copy-desc {
+  resize: vertical;
+  min-height: 72px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.copy-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.copy-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.cover-block {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cover-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.cover-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cover-img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--video-bg);
+}
+
+.cover-img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.cover-meta {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.cover-frames {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.cover-frame {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.cover-frame:hover {
+  border-color: var(--accent);
+}
+
+.cover-frame__img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.cover-frame__img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--dim);
+  background: var(--panel-2);
+}
+
+/* ---- P3-09 批量导出 ---- */
+
+/* 候选栏顶部：已选 N 条 + 全选/清空 + 批量导出 */
+.clip-picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.clip-picks__count {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clip-picks__note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+/* 勾选框贴着卡片左侧，别跟分数抢位 */
+.clip-card__pick {
+  flex: 0 0 auto;
+  margin: 0 2px 0 0;
+  accent-color: var(--accent);
+}
+
+/* 一批导出的抬头：比行浅一档，视觉上包住下面几行 */
+.exp-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 4px;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.exp-batch__text {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.exp-batch__id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+/* ---------------------------------------------------------------- P6-03 音轨 */
+
+.exp-form__audio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.exp-form__bgm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.exp-form__bgm-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exp-form__bgm-pick,
+.exp-form__bgm-clear {
+  flex: 0 0 auto;
+}
+
+.exp-form__fade {
+  width: 88px;
+  flex: 0 0 auto;
+}
+
+.exp-form__audio-hint {
+  color: var(--dim);
+}
+
+/* -------------------------------------------------------------- P6-04 交付 */
+
+.exp-form__deliver {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.exp-form__deliver-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.exp-form__deliver-btn {
+  flex: 1 1 auto;
+  min-width: 92px;
+}
+
+.exp-form__deliver-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.exp-form__deliver-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.exp-form__deliver-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.exp-form__deliver-open {
+  flex: 0 0 auto;
+}
+
+.exp-form__deliver-why {
+  color: var(--dim);
+}

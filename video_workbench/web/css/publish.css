@@ -1,0 +1,412 @@
+/* ============================================================================
+ * css/publish.css —— 发布中心（P2-09）
+ *
+ * 只有草稿：左列表 + 右编辑器。颜色一律走 token，`scripts/check_colors.py`
+ * 会拦下任何硬编码色值——两套皮肤都要能被这套样式直接穿上。
+ * ========================================================================= */
+
+.pb-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 12px;
+  font-size: 12.5px;
+}
+
+.pb-bar__hint {
+  color: var(--muted);
+}
+
+.pb-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pb-side,
+.pb-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.pb-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 8px);
+  padding: 14px;
+  min-width: 0;
+}
+
+.pb-card--pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pb-card--edit {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pb-card--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+}
+
+.pb-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pb-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pb-card__count {
+  font-size: 12px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.pb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.pb-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.pb-row:hover {
+  background: var(--hover-wash, var(--panel));
+}
+
+.pb-row.is-active {
+  border-color: var(--accent);
+  background: var(--active-wash, var(--panel-2));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.pb-row__title {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pb-row__meta {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--dim);
+  min-width: 0;
+  /* 三段时间/字数挤在一行里，允许滚动但不要折行：折了之后行高忽高忽低 */
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pb-row__proj {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46%;
+}
+
+.pb-empty {
+  padding: 18px 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.pb-pick {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.pb-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.pb-hint {
+  font-size: 11.5px;
+  color: var(--dim);
+  line-height: 1.6;
+}
+
+.pb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pb-field__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pb-input,
+.pb-textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.pb-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.pb-input:focus,
+.pb-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pb-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.pb-count.is-over {
+  color: var(--danger);
+}
+
+.pb-body {
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pb-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pb-clip {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  opacity: 0;
+}
+
+.pb-bar .muted {
+  font-size: 12px;
+}
+
+.is-hidden {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- 状态与门禁（P4-04） */
+
+.pb-status {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.pb-status--published {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pb-status--withdrawn,
+.pb-status--failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.pb-gate {
+  margin-top: 12px;
+}
+
+.pb-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pb-gate__row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+}
+
+.pb-gate__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pb-gate__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex: 0 0 auto;
+}
+
+.pb-gate__dot--ok {
+  background: var(--accent);
+}
+
+.pb-gate__dot--blocked {
+  background: var(--danger);
+}
+
+.pb-gate__label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.pb-gate__state {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pb-gate__reason {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* 待确认不是错误：写红色会让人以为已经出事了 */
+.pb-gate__reason--todo {
+  color: var(--muted);
+}
+
+.pb-gate__items {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pb-gate__item {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pb-gate__item.is-bad {
+  color: var(--danger);
+}
+
+.pb-gate__mark {
+  width: 12px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+/* ---------------------------------------------------- 勾确认 / 发布 / 撤回 */
+
+/* 单独一行并加一道上边线：这是"不可撤销"的入口，不该混在一排灰按钮里 */
+.pb-publish {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.pb-publish__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pb-publish__check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.pb-publish__hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 门禁没过的理由要看得见，但不能抢按钮的注意力 */
+.pb-publish__blocked {
+  font-size: 12px;
+  color: var(--danger);
+}

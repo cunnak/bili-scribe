@@ -1,0 +1,264 @@
+/* ============================================================================
+ * merge.css —— 合并页
+ *
+ * 三栏（来源 / 顺序 / 输出）+ 底部预检。全部颜色走 token，禁写字面量
+ * （scripts/check_colors.py 会拦）。
+ * ========================================================================= */
+
+.merge .merge-flash {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.merge .merge-flash--error {
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+}
+
+.merge-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(240px, 300px);
+  gap: 16px;
+  align-items: start;
+}
+
+.merge-card {
+  min-width: 0;
+}
+
+.merge-card--wide {
+  margin-top: 16px;
+}
+
+.merge .card__aside {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-head-acts {
+  margin-left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.merge-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.merge-form {
+  max-height: none;
+}
+
+/* ------------------------------------------------------------ 来源 */
+
+.merge-srcs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.merge-group {
+  margin-top: 4px;
+}
+
+.merge-group__label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.merge-src {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.merge-src:hover {
+  border-color: var(--accent);
+}
+
+.merge-src.is-picked {
+  /* 已加入列表：只做"已在里面了"的视觉提示，不要把文字调淡。
+     浅色皮肤下 opacity 0.55 会让文件名几乎读不出来——用户回头找素材时正需要它。 */
+  border-style: dashed;
+  border-color: var(--accent);
+  background: var(--active-wash);
+  color: var(--muted);
+  cursor: default;
+}
+
+.merge-src__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-src__meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-empty {
+  margin: 2px 0;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------ 顺序 */
+
+.merge-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.merge-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.merge-row.is-bad {
+  border-left: 3px solid var(--danger);
+}
+
+.merge-row__no {
+  flex: 0 0 20px;
+  color: var(--dim);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merge-row__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-row__acts {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* ------------------------------------------------------------ 输出 */
+
+.merge-opt {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.merge-radio {
+  accent-color: var(--accent);
+}
+
+/* ------------------------------------------------------------ 预检 */
+
+.merge-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.merge-kv {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.merge-kv__k {
+  color: var(--dim);
+}
+
+.merge-kv__v {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-diff {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.merge-diff__head {
+  padding: 6px 10px;
+  background: var(--panel-2);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.merge-diff__row {
+  display: flex;
+  gap: 12px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.merge-diff__label {
+  flex: 0 0 84px;
+  color: var(--muted);
+}
+
+.merge-diff__vals {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

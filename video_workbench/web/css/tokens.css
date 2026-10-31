@@ -1,0 +1,156 @@
+/* ============================================================================
+ * tokens.css —— 唯一的颜色出处
+ *
+ * 规则（方案书 3.3）：
+ *   1. 除本文件外，web/ 下不允许出现 #RRGGBB 或 rgb(...) / rgba(...) 硬编码。
+ *      scripts/check_colors.py 会扫，扫到就失败。
+ *   2. 新组件只准用语义变量，不准自己发明颜色。
+ *   3. 两套皮肤共用同一套变量名，切换只换 :root/[data-skin] 的值。
+ *
+ * 变量命名沿用 bili-scribe（--acid / --ember / --paper …），因为这些名字已经在
+ * 旧界面里出现过了，重新命名只会让"哪个是哪个"多一层翻译成本。
+ * ========================================================================= */
+
+:root,
+[data-skin="ark"] {
+  --void: #08090A;
+  --bg: #0D0F10;
+  --panel: #131617;
+  --panel-2: #191D1E;
+  --line: rgba(var(--ink-rgb), .10);
+  --line-s: rgba(var(--ink-rgb), .055);
+
+  --acid: #D8F24B;
+  --acid-d: #8A9B22;
+  --acid-tx: #D8F24B;
+  --acid-hover: #E4FA6B;
+  --acid-rgb: 216, 242, 75;
+  --ember: #FF6B35;
+  --paper: #E8E2D4;
+  --danger: #FF6B6B;
+
+  --text: #F2F4F2;
+  --muted: #8B9490;
+  --dim: #6B7672;
+  --ink-rgb: 255, 255, 255;
+  --on-acid: #0A0B08;
+  /* 字幕叠在画面上：这套颜色跟皮肤无关（视频画面不会跟着换皮肤），
+     放在这里是因为 hex 只允许出现在 tokens.css。 */
+  --cap-fg: #FFFFFF;
+  --cap-bg: #000000;
+  --cap-stroke: #000000;
+
+  /* 视频画布：播放器底色不跟皮肤走明度，否则黑边和白字幕会一起糊掉。 */
+  --video-bg: #000000;
+  --flag-warn-bg: rgba(255, 122, 0, .18);
+  --flag-error-bg: rgba(255, 64, 64, .18);
+
+  /* 波形：四段颜色都必须能随皮肤换，所以全部由 ink/acid 派生，不写死。 */
+  --wave: rgba(var(--acid-rgb), .55);
+  --wave-dim: rgba(var(--ink-rgb), .16);
+  --wave-played: rgba(var(--acid-rgb), .90);
+  --wave-segment: rgba(var(--ink-rgb), .06);
+  --wave-segment-active: rgba(var(--acid-rgb), .14);
+  --wave-playhead: var(--acid-tx);
+  --wave-tick: rgba(var(--ink-rgb), .18);
+
+  --sans: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --cn: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  --mono: 'Cascadia Mono', 'Consolas', 'SF Mono', monospace;
+
+  /* 结构性不变量中的"跟皮肤走"的那部分：遮罩、阴影、滚动条、选中态。
+     它们在不同明度下必须不同强度，所以留在 tokens 里而不是 app.css 里。 */
+  --scrim: rgba(8, 9, 10, .62);
+  --shadow-pop: 0 24px 64px rgba(0, 0, 0, .55);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, .03);
+  --hover-wash: rgba(216, 242, 75, .06);
+  --active-wash: rgba(216, 242, 75, .12);
+  --scroll-thumb: rgba(255, 255, 255, .16);
+  --focus-ring: rgba(216, 242, 75, .45);
+  --grain: rgba(255, 255, 255, .02);
+}
+
+[data-skin="exhibition"] {
+  --void: #E9E7DF;
+  --bg: #F7F6F1;
+  --panel: #FFFFFF;
+  --panel-2: #FBFAF6;
+  --line: rgba(var(--ink-rgb), .12);
+  --line-s: rgba(var(--ink-rgb), .07);
+
+  --acid: #C5D622;
+  --acid-d: #4A6B12;
+  --acid-tx: #5F6E00;
+  --acid-hover: #B4C41A;
+  --acid-rgb: 197, 214, 34;
+  --ember: #C4186F;
+  --paper: #2A3134;
+  --danger: #B42318;
+
+  --text: #14181A;
+  --muted: #5E6866;
+  --dim: #6B7573;
+  --ink-rgb: 0, 0, 0;
+  --on-acid: #0A0B08;
+  /* 字幕叠在画面上：这套颜色跟皮肤无关（视频画面不会跟着换皮肤），
+     放在这里是因为 hex 只允许出现在 tokens.css。 */
+  --cap-fg: #FFFFFF;
+  --cap-bg: #000000;
+  --cap-stroke: #000000;
+
+  --video-bg: #14181A;
+  --flag-warn-bg: rgba(255, 122, 0, .22);
+  --flag-error-bg: rgba(180, 35, 24, .14);
+
+  --wave: rgba(var(--acid-rgb), .70);
+  --wave-dim: rgba(var(--ink-rgb), .14);
+  --wave-played: rgba(var(--acid-rgb), .95);
+  --wave-segment: rgba(var(--ink-rgb), .05);
+  --wave-segment-active: rgba(var(--acid-rgb), .22);
+  --wave-playhead: var(--acid-tx);
+  --wave-tick: rgba(var(--ink-rgb), .22);
+
+  --scrim: rgba(42, 49, 52, .38);
+  --shadow-pop: 0 24px 56px rgba(42, 49, 52, .18);
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, .04);
+  --hover-wash: rgba(95, 110, 0, .05);
+  --active-wash: rgba(95, 110, 0, .10);
+  --scroll-thumb: rgba(0, 0, 0, .18);
+  --focus-ring: rgba(95, 110, 0, .35);
+  --grain: rgba(0, 0, 0, .015);
+}
+
+/* 只读别名：给旧代码/旧心智一个迁移期，除这两个之外不新增颜色变量。 */
+:root {
+  --accent: var(--acid-tx);
+  --ok: var(--acid-tx);
+
+  /* 皮肤选择器上的两个示意圆点。它们要表达"这套皮肤是深还是浅"，
+     所以**不能**跟着当前皮肤变——否则切到浅色皮肤时两个点一起变浅。 */
+  --swatch-ark: #0D0F10;
+  --swatch-exhibition: #F7F6F1;
+}
+
+/* ---------------------------------------------------------------- 尺寸
+ * 尺寸不是颜色，但同样不允许各页面自己写死——1100×720 下不出滚动条这件事
+ * 只有在所有间距都从同一处取值时才可能保证。 */
+:root {
+  --topbar-h: 48px;
+  --statusbar-h: 28px;
+  --rail-w: 220px;
+  --rail-w-collapsed: 56px;
+  --page-pad: 24px;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-pill: 999px;
+  --row-h: 44px;
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+  --gap-5: 24px;
+  --gap-6: 32px;
+  --z-drawer: 40;
+  --z-modal: 60;
+  --z-toast: 80;
+}

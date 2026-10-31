@@ -1,0 +1,234 @@
+/* ============================================================================
+ * css/styles.css —— 字幕样式页（P3-07）
+ *
+ * 两栏：左 300px 预设，右自适应编辑区。所有颜色走 token，不写字面量
+ * （scripts/check_colors.py 会拦）。
+ * ========================================================================= */
+
+.styles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.styles__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 20px;
+  padding: 2px 2px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.styles__error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.styles__grid2 {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.styles__pane {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.styles__pane--list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.styles__pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.styles__items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.styles__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.styles__item:hover {
+  border-color: var(--accent);
+}
+
+.styles__item.is-active {
+  background: var(--active-wash);
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.styles__item-name {
+  font-size: 13px;
+}
+
+.styles__item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.styles__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.styles__pane--edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 右栏：预设列表只有几行，不要被拉到跟右栏一样高（截图里像一块没内容的空盘） */
+.styles__pane--list {
+  align-self: start;
+  position: sticky;
+  top: 0;
+}
+
+/* 预览粘在右栏顶部：改字号/描边时画布一直在眼前，不用滚到底看效果 */
+.styles__preview {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  box-shadow: 0 6px 18px var(--shadow-card);
+}
+
+.styles__block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel-2);
+}
+
+.styles__block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.styles__hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.styles__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.styles__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.styles__field--wide {
+  grid-column: 1 / -1;
+}
+
+.styles__num {
+  min-width: 0;
+}
+
+.styles__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.styles__range {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.styles__canvas-host {
+  display: flex;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 160px;
+}
+
+.styles__canvas {
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+.styles__canvas-host[data-degraded]::after {
+  content: "这个环境画不出 canvas 预览，请用「真实渲染」看效果";
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.styles__render {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.styles__render-img {
+  max-width: 100%;
+  max-height: 360px;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.styles__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.styles__savebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}

@@ -1,0 +1,202 @@
+/* 首次启动向导。只用 token 变量——`scripts/check_colors.py` 会拦字面量颜色。 */
+
+.onb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 60);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap-4);
+  background: var(--scrim);
+  backdrop-filter: blur(2px);
+}
+
+.onb-panel {
+  width: min(680px, 100%);
+  max-height: 82vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3);
+  padding: var(--gap-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card, 8px);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop, none);
+  color: var(--text);
+}
+
+.onb-head__title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.onb-head__sub {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.onb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card, 8px);
+  overflow: hidden;
+}
+
+.onb-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: var(--gap-3);
+  background: var(--panel-2);
+}
+
+.onb-row__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.onb-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.onb-row__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.onb-row__detail {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.onb-row__hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+.onb-row__act {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.onb-row__dot {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+}
+
+.onb-row__dot[data-ok="true"] {
+  color: var(--on-acid, var(--text));
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.onb-pill {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.onb-pill--ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.onb-pill--warn {
+  color: var(--muted);
+  border-color: var(--line);
+  background: var(--hover-wash, transparent);
+}
+
+.onb-pill--bad {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.onb-sum {
+  padding: var(--gap-3);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-card, 8px);
+  background: var(--panel-2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.onb-sum.is-ready {
+  border-left-color: var(--accent);
+}
+
+.onb-meta {
+  font-size: 11px;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.onb-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding-top: var(--gap-2);
+  border-top: 1px solid var(--line);
+}
+
+.onb-foot__hint {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.onb-foot__btns {
+  display: flex;
+  gap: var(--gap-2);
+}
+
+.onb-empty {
+  padding: var(--gap-4);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.onb-empty--bad {
+  color: var(--danger);
+}
+
+/* 作为独立页面（设置里回看）时不需要遮罩与阴影 */
+.onb-page {
+  display: flex;
+  justify-content: center;
+  padding: var(--gap-4) 0;
+}
+
+.onb-page .onb-panel {
+  box-shadow: none;
+  max-height: none;
+}

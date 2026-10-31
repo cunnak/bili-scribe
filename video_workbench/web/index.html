@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN" data-skin="ark" data-rail="expanded">
+<head>
+  <meta charset="utf-8" />
+  <!--
+    CSP 说明：界面是 file:// 加载的，同源策略帮不上忙，所以这里显式收紧。
+    - script-src 只允许本地文件（file:），远程脚本一律进不来。
+    - img-src 放开 https:，因为封面图直接引 B站 CDN，不落地就没法显示。
+    - connect-src 'none'：页面**不做任何 fetch/XHR**，所有网络动作都在 Python 侧。
+      这条是"页面被注入也拿不走数据"的兜底。
+    - 保留 'unsafe-inline' 给 style：局部样式（进度条宽度、双色主题值）靠它。
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: https:; media-src 'self' file: blob:; font-src 'self' file: data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VideoWorkbench</title>
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/summary.css" />
+  <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/onboard.css" />
+  <link rel="stylesheet" href="css/clips.css" />
+  <link rel="stylesheet" href="css/merge.css" />
+  <link rel="stylesheet" href="css/publish.css" />
+    <link rel="stylesheet" href="css/publish-records.css" />
+</head>
+<body>
+  <div class="wb-app" id="app">
+    <!-- ------------------------------------------------------------ 顶栏 -->
+    <header class="topbar">
+      <h1 class="topbar__title" id="page-title">素材库</h1>
+      <span class="topbar__crumb" id="page-crumb"></span>
+      <div class="topbar__spacer"></div>
+
+      <label class="topbar__search" title="搜索项目标题、UP、BV 号（Ctrl+F）">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="7" cy="7" r="4.4"></circle>
+          <path d="M10.4 10.4 14 14" stroke-linecap="round"></path>
+        </svg>
+        <span class="sr-only">全局搜索</span>
+        <input type="search" id="global-search" placeholder="搜索项目 / BV / UP" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <button class="btn btn--ghost btn--icon" id="btn-jobs" title="任务中心">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" stroke-linecap="round"></path>
+        </svg>
+        <span class="sr-only">任务中心</span>
+      </button>
+
+      <div class="skin-picker" id="skin-picker" role="group" aria-label="皮肤">
+        <button class="skin-chip" data-skin-chip="ark" aria-pressed="true" title="深色（ark）">
+          <span class="skin-chip__dot skin-chip__dot--dark"></span>ark
+        </button>
+        <button class="skin-chip" data-skin-chip="exhibition" aria-pressed="false" title="浅色（exhibition）">
+          <span class="skin-chip__dot skin-chip__dot--light"></span>exhibition
+        </button>
+      </div>
+    </header>
+
+    <!-- ------------------------------------------------------------ 左栏 -->
+    <aside class="rail" aria-label="主导航">
+      <nav class="rail__nav" id="rail-nav"></nav>
+      <div class="rail__foot">
+        <button class="rail__item" data-route="settings" type="button" title="设置">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="2.2"></circle>
+            <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"></path>
+          </svg>
+          <span class="rail__label">设置</span>
+        </button>
+        <button class="rail__item rail__collapse" id="rail-toggle" type="button" title="折叠左栏">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M10 4 6 8l4 4" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+          <span class="rail__label">折叠</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ------------------------------------------------------------ 主区 -->
+    <main class="view" id="view" role="main"></main>
+
+    <!-- ------------------------------------------------------------ 状态条 -->
+    <footer class="statusbar">
+      <button class="statusbar__group" id="status-jobs" type="button" title="打开任务中心">
+        <span class="statusbar__dot" id="status-dot"></span>
+        <span id="status-jobs-text">下载 0 · 转录 0 · 导出 0</span>
+      </button>
+      <span class="statusbar__group" id="status-disk" title="素材盘剩余空间">磁盘 —</span>
+      <span class="statusbar__spacer"></span>
+      <span class="statusbar__group" id="status-deps" title="依赖状态">依赖检查中…</span>
+      <span class="statusbar__group mono" id="status-version">v—</span>
+    </footer>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+  <div id="modal-root"></div>
+
+  <!-- 经典脚本，按依赖顺序加载：mock → rpc → ui → router → pages → app -->
+  <script src="js/mock.js"></script>
+  <script src="js/rpc.js"></script>
+  <script src="js/components/ui.js"></script>
+  <script src="js/components/waveform.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/pages/newtask.js"></script>
+  <script src="js/pages/library.js"></script>
+  <script src="js/pages/subtitles.js"></script>
+  <script src="js/pages/summary.js"></script>
+  <script src="js/components/player.js"></script>
+  <script src="js/components/timeline.js"></script>
+  <script src="js/pages/clips.js"></script>
+  <script src="js/pages/merge.js"></script>
+  <script src="js/pages/publish.js"></script>
+  <script src="js/pages/styles.js"></script>
+    <script src="js/pages/onboard.js"></script>
+  <script src="js/pages/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

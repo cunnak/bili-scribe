@@ -1,0 +1,316 @@
+/* ============================================================================
+ * summary.css —— 总结页与合集总览（P2-07 / P2-08）
+ *
+ * 颜色一律走 token：scripts/check_colors.py 会拦 #RRGGBB / rgb() / rgba() 字面量。
+ * 版式骨架：左栏版本与打磨（240–300px），右栏正文（自适应）。
+ * ========================================================================= */
+
+.sum-pick { min-width: 260px; }
+.sum-pick .input--select { width: 100%; }
+
+.sum-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  margin-bottom: var(--gap-3);
+  min-height: 18px;
+}
+
+.sum-bar .callout { padding: 4px 10px; }
+
+.sum-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: var(--gap-3);
+  align-items: start;
+}
+
+.sum-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3);
+  position: sticky;
+  top: var(--gap-3);
+}
+
+.sum-main { min-width: 0; }
+
+/* ------------------------------------------------------------------ 版本列表 */
+
+.ver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.ver-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-2);
+  padding: 6px var(--gap-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.ver-row:hover { background: var(--hover-wash); }
+
+.ver-row.is-active {
+  border-color: var(--accent);
+  background: var(--active-wash);
+}
+
+.ver-row__body { min-width: 0; flex: 1; }
+
+.ver-row__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ver-row__meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ver-row__note {
+  font-size: 11px;
+  color: var(--acid-tx);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ 正文 */
+
+.sum-body {
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.sum-one {
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 600;
+  margin: 0 0 var(--gap-3);
+  padding-left: var(--gap-2);
+  border-left: 2px solid var(--accent);
+  color: var(--text);
+}
+
+.sum-h {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: var(--gap-4) 0 var(--gap-2);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line-s);
+}
+
+.sum-points {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sum-time { display: flex; flex-direction: column; gap: 4px; }
+
+.sum-time__row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--gap-2);
+  align-items: baseline;
+}
+
+.sum-time__at {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--acid-tx);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-time__text { color: var(--text); }
+
+.sum-short {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-2);
+  padding: var(--gap-2) var(--gap-3);
+  background: var(--panel-2);
+  border: 1px solid var(--line-s);
+  border-radius: var(--radius-sm);
+}
+
+.sum-short__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.sum-meta {
+  margin-top: var(--gap-3);
+  padding-top: var(--gap-2);
+  border-top: 1px solid var(--line-s);
+  font-size: 11px;
+  color: var(--dim);
+  font-family: var(--mono);
+}
+
+.sum-ai {
+  margin: var(--gap-2) 0 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* ------------------------------------------------- 简易 Markdown（DOM 渲染） */
+
+.md { font-size: 13px; line-height: 1.8; color: var(--text); }
+
+.md__h {
+  font-size: 13px;
+  font-weight: 600;
+  margin: var(--gap-3) 0 var(--gap-2);
+  color: var(--text);
+}
+
+.md__p { margin: 0 0 var(--gap-2); }
+
+.md__list {
+  margin: 0 0 var(--gap-2);
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.md__item { line-height: 1.7; }
+
+.md__quote {
+  margin: var(--gap-2) 0;
+  padding: 4px var(--gap-3);
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  background: var(--panel-2);
+}
+
+.md__rule {
+  border: 0;
+  border-top: 1px solid var(--line-s);
+  margin: var(--gap-3) 0;
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel-2);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.md strong { color: var(--text); font-weight: 600; }
+
+/* ============================================================================
+ * P2-08 合集总览：模式切换条 + 子项清单 + 总览正文
+ * ========================================================================= */
+
+.sum-tabs {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  width: max-content;
+  margin-bottom: var(--gap-3);
+}
+
+.sum-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.sum-tab:hover { color: var(--text); background: var(--hover-wash); }
+
+.sum-tab.is-active {
+  background: var(--accent);
+  color: var(--on-acid);
+  font-weight: 600;
+}
+
+.sum-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.coll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.coll-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--gap-2);
+  align-items: start;
+  padding: 6px var(--gap-2);
+  border-radius: var(--radius-sm);
+}
+
+.coll-row:hover { background: var(--hover-wash); }
+
+.coll-row__no {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  text-align: right;
+  padding-top: 1px;
+}
+
+.coll-row__title {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.coll-row__meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.pill--warn {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.sum-order {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.coll-time { display: flex; flex-direction: column; gap: 2px; }
