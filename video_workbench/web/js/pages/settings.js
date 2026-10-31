@@ -83,6 +83,14 @@
         { path: "llm.chunk_overlap", label: "分块重叠（字）", type: "number", group: "advanced" },
         { path: "llm.timeout_seconds", label: "请求超时（秒）", type: "number", group: "advanced", help: "长文摘要与思考模型把这里放宽。" },
         { path: "llm.proxy", label: "代理", type: "text", group: "advanced", placeholder: "http://127.0.0.1:7897", help: "只作用于模型请求；yt-dlp 用下面的下载代理。" },
+        {
+          path: "llm.user_agent",
+          label: "请求 UA",
+          group: "advanced",
+          type: "text",
+          placeholder: "留空用内置 UA",
+          help: "有的网关（Cloudflare 前置）会按客户端 UA 判定机器人直接 403。被拦时把这里填成你自己浏览器的 UA 再试；改完要重启。"
+        },
         // 任务 → 服务商/模型 的映射，同样不是普通输入框（每行一个下拉）。
         { path: "llm.tasks", label: "任务模型", type: "taskmap", group: "advanced" }
       ]
@@ -187,6 +195,19 @@
     }, obj);
   }
 
+  /**
+   * 编辑用的副本：数组/对象必须深拷一份。
+   *
+   * 直接引用 base 里的对象会踩坑——卡片改模型是就地改（`p.models = [...]`），
+   * 而标脏靠 `JSON.stringify(current) !== JSON.stringify(base)`：两边指向同一个
+   * 对象时永远相等，于是「改过但保存按钮还是灰的」。深拷一次，脏判定才有意义。
+   */
+  function copyValue(value) {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== "object") return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+
   /** 把「改过的字段」按段落归拢成后端认识的嵌套结构。 */
   function buildPatch(dirty, values) {
     var patch = {};
@@ -245,7 +266,7 @@
     // 用一份副本承载编辑中的值，保存成功后再把它变成新的 base
     SECTIONS.forEach(function (section) {
       section.fields.forEach(function (field) {
-        current[field.path] = getPath(base, field.path);
+        current[field.path] = copyValue(getPath(base, field.path));
       });
     });
 
@@ -358,7 +379,9 @@
           base = (data && data.settings) || base;
           SECTIONS.forEach(function (section) {
             section.fields.forEach(function (field) {
-              current[field.path] = getPath(base, field.path);
+              // 这里也必须深拷：回填成同一个对象引用，下一次就地改就再也标不出脏了
+              // （症状是「保存过一次之后，再改模型列表就不提示待保存」）。
+              current[field.path] = copyValue(getPath(base, field.path));
             });
           });
           dirty = {};
@@ -589,6 +612,84 @@
   // 输入框就地改模型、不整段重绘——重绘会把光标从正在打的字里踢出去。
   // 只有结构性变化（加卡、删卡、改模型标签、切当前）才 repaint。
 
+  // 本机 magpie 网关：默认监听 3425，OpenAI 兼容，key 填什么都能过（它只信任本机回环请求）。
+  // 之所以做成按钮而不是让人手抄地址：这三项（地址 / 密钥 / 模型名）手抄最容易错，
+  // 而 magpie 的模型列表每次开都可能变。
+  var MAGPIE_BASE = "http://127.0.0.1:3425/v1";
+  var MAGPIE_KEY = "magpie";
+
+  function magpieRow(arr, current, markDirty, repaint) {
+    return ui.h("div", { class: "providers__extra" }, [
+      ui.h("button", {
+        class: "btn btn--ghost",
+        type: "button",
+        text: "接入本机 magpie",
+        title: "探测 127.0.0.1:3425 上的 magpie 网关：建一张卡、设为当前、拉回它的模型列表",
+        onclick: function () {
+          var card = null;
+          for (var i = 0; i < arr.length; i++) {
+            if (String(arr[i].base_url || "").indexOf("127.0.0.1:3425") >= 0) {
+              card = arr[i];
+              break;
+            }
+          }
+          if (!card) {
+            card = {
+              id: "magpie",
+              name: "本机 magpie",
+              protocol: "openai",
+              base_url: MAGPIE_BASE,
+              api_key: MAGPIE_KEY,
+              models: []
+            };
+            arr.push(card);
+          }
+          card.base_url = card.base_url || MAGPIE_BASE;
+          card.api_key = card.api_key || MAGPIE_KEY;
+          current["llm.active_provider"] = card.id;
+          markDirty("llm.providers", arr);
+          markDirty("llm.active_provider", card.id);
+          repaint();
+
+          WB.rpc(
+            "llm.models",
+            { provider: card.id, base_url: card.base_url, api_key: card.api_key },
+            { silent: true }
+          )
+            .then(function (data) {
+              var ids = ((data && data.models) || []).map(function (m) {
+                return m.id;
+              });
+              var merged = (card.models || []).slice();
+              ids.forEach(function (id) {
+                if (merged.indexOf(id) < 0) merged.push(id);
+              });
+              card.models = merged;
+              // 模型没选过、或选的那个这次没出现，就落到第一个——否则点「生成总结」会报模型不存在
+              if (!current["llm.model"] || merged.indexOf(current["llm.model"]) < 0) {
+                if (merged.length) {
+                  current["llm.model"] = merged[0];
+                  markDirty("llm.model", merged[0]);
+                }
+              }
+              markDirty("llm.providers", arr);
+              repaint();
+              ui.toast("已接入本机 magpie：" + merged.length + " 个模型", "ok");
+            })
+            .catch(function (err) {
+              repaint();
+              var why = (err && err.message) || "连不上";
+              ui.toast("没连上本机 magpie（" + MAGPIE_BASE + "）：" + why, "error");
+            });
+        }
+      }),
+      ui.h("span", {
+        class: "muted",
+        text: "同一台机器上跑着 magpie 时用这个，自动填地址与密钥"
+      })
+    ]);
+  }
+
   function renderProviders(current, markDirty) {
     var box = ui.h("div", { class: "providers" });
 
@@ -629,6 +730,7 @@
           }
         })
       );
+      box.appendChild(magpieRow(arr, current, markDirty, repaint));
     }
 
     repaint();
@@ -784,6 +886,131 @@
     }
     renderModelChips();
 
+    // 「获取可用模型」：问这家密钥能用哪些模型，勾选后一次加进 chips。
+    // 为什么要有：手打模型名是这类设置页最容易出错的一步（大小写、带不带日期后缀、
+    // 网关前缀），而 /models 是标准 OpenAI 路径，能列就直接列。
+    var fetchBtn = ui.h("button", {
+      class: "btn btn--ghost",
+      type: "button",
+      text: "获取可用模型",
+      onclick: function () {
+        openModelPicker();
+      }
+    });
+
+    function openModelPicker() {
+      // 外层放吸顶条、内层滚动放行：原来是同一个容器，条压在滚动区里
+      // 把第一行的勾选框盖住了（截图上第一行只剩半截）。
+      var box = ui.h("div", { class: "model-pick__wrap" });
+      var status = ui.h("div", { class: "muted", text: "正在问这家密钥能用哪些模型…" });
+      box.appendChild(status);
+
+      var addBtn = ui.h("button", { class: "btn", type: "button", text: "保存所选", disabled: true });
+      var cancel = ui.h("button", { class: "btn btn--ghost", type: "button", text: "取消" });
+      var dlg = ui.modal({
+        title: "可用模型 · " + (p.name || "服务商"),
+        body: box,
+        footer: [cancel, addBtn]
+      });
+      cancel.onclick = function () {
+        dlg.close();
+      };
+      addBtn.onclick = function () {
+        var picked = [];
+        Array.prototype.forEach.call(box.querySelectorAll("input[type=checkbox]"), function (cb) {
+          if (cb.checked) picked.push(cb.value);
+        });
+        // 勾选框表示「这家能用哪些」，所以勾选集合就是最终列表——取消勾选等于移除。
+        // 只增不减（原来的行为）会让弹窗与卡片各说一套：卡片里明明有，弹窗里取消不掉。
+        var kept = (p.models || []).filter(function (id) {
+          return picked.indexOf(id) >= 0;
+        });
+        picked.forEach(function (id) {
+          if (kept.indexOf(id) < 0) kept.push(id);
+        });
+        if (!kept.length && (p.models || []).length) {
+          dlg.close();
+          ui.confirm(
+            "清空模型列表？",
+            "这家服务商将没有任何模型，相关任务会报「未配置模型」。",
+            { confirmText: "清空", danger: true }
+          ).then(function (yes) {
+            if (!yes) return;
+            p.models = [];
+            touch("models", []);
+            renderModelChips();
+          });
+          return;
+        }
+        p.models = kept;
+        touch("models", kept);
+        renderModelChips();
+        dlg.close();
+      };
+
+      WB.rpc(
+        "llm.models",
+        // 带上卡片里**当前**的值：用户常常是刚敲完地址和密钥就点这里，还没保存。
+        { provider: p.id || "", base_url: p.base_url || "", api_key: p.api_key || "" },
+        { silent: true }
+      )
+        .then(function (data) {
+          var list = (data && data.models) || [];
+          var have = p.models || [];
+          box.textContent = "";
+          var rows = ui.h("div", { class: "model-pick" });
+          var bar = ui.h("div", { class: "model-pick__bar" }, [
+            ui.h("span", { class: "muted", text: "共 " + list.length + " 个可用模型 · 勾选即这家可用，取消勾选会移除" }),
+            ui.h("span", { class: "topbar__spacer" })
+          ]);
+          var all = ui.h("button", { class: "btn btn--ghost", type: "button", text: "全选" });
+          var none = ui.h("button", { class: "btn btn--ghost", type: "button", text: "全不选" });
+          bar.appendChild(all);
+          bar.appendChild(none);
+          box.appendChild(bar);
+
+          list.forEach(function (item) {
+            var id = typeof item === "string" ? item : item.id;
+            var owned = (typeof item === "object" && item.owned_by) || "";
+            var cb = ui.h("input", { type: "checkbox", value: id });
+            cb.checked = have.indexOf(id) >= 0;
+            rows.appendChild(
+              ui.h("label", { class: "model-pick__row" }, [
+                cb,
+                ui.h("span", { class: "model-pick__id mono", text: id }),
+                owned ? ui.h("span", { class: "muted", text: owned }) : null
+              ])
+            );
+          });
+          box.appendChild(rows);
+          all.onclick = function () {
+            Array.prototype.forEach.call(rows.querySelectorAll("input[type=checkbox]"), function (cb) {
+              cb.checked = true;
+            });
+          };
+          none.onclick = function () {
+            Array.prototype.forEach.call(rows.querySelectorAll("input[type=checkbox]"), function (cb) {
+              cb.checked = false;
+            });
+          };
+          addBtn.disabled = false;
+          probeResult.className = "muted accent";
+          probeResult.textContent = "列出 " + list.length + " 个模型";
+        })
+        .catch(function (err) {
+          var code = (err && err.code) || "";
+          var why =
+            code === "LLM_NOT_CONFIGURED"
+              ? "先填好这家的 API 地址和密钥再获取"
+              : (err && err.message) || "获取失败";
+          box.textContent = "";
+          box.appendChild(ui.h("div", { class: "muted danger", text: why }));
+          if (err && err.detail) box.appendChild(ui.h("div", { class: "muted", text: String(err.detail).slice(0, 300) }));
+          probeResult.className = "muted danger";
+          probeResult.textContent = why;
+        });
+    }
+
     var probeResult = ui.h("span", { class: "muted", text: "" });
     var probeBtn = ui.h("button", {
       class: "btn btn--ghost",
@@ -794,7 +1021,16 @@
         probeBtn.textContent = "测试中…";
         probeResult.className = "muted";
         probeResult.textContent = "";
-        WB.rpc("llm.test", { provider: p.id || "", model: (p.models || [])[0] || "" }, { silent: true })
+        WB.rpc(
+          "llm.test",
+          {
+            provider: p.id || "",
+            model: (p.models || [])[0] || "",
+            base_url: p.base_url || "",
+            api_key: p.api_key || ""
+          },
+          { silent: true }
+        )
           .then(function (data) {
             probeResult.className = "muted accent";
             probeResult.textContent = "连上了：" + (data.model || "") + " · " + (data.latency_ms || 0) + "ms";
@@ -824,7 +1060,7 @@
         })
       ]),
       ui.h("div", { class: "field" }, [ui.h("label", { class: "field__label", text: "模型" }), models]),
-      ui.h("div", { class: "row", style: "gap:10px;align-items:center" }, [probeBtn, probeResult])
+      ui.h("div", { class: "row", style: "gap:10px;align-items:center" }, [fetchBtn, probeBtn, probeResult])
     ]);
   }
 
@@ -1059,13 +1295,32 @@
     }
 
     if (field.type === "number") {
+      // 必须 oninput，不能只靠 onchange：onchange 要等失焦才触发，而用户的动作是
+      // 「改完数字直接去点保存」——点之前光标还在框里，脏标记还没起来，保存按钮就是灰的
+      // （症状：改数字必须先点一下别的地方，"选中"了才算数）。边打边标脏。
       var num = ui.h("input", {
         class: "input mono",
         type: "number",
         value: value === null || value === undefined ? "" : String(value),
+        oninput: function () {
+          var raw = num.value;
+          if (raw === "") {
+            onChange(null);
+            return;
+          }
+          var parsed = Number(raw);
+          // 打到一半（"-"、"1e"）先不报；别把中间态写进脏表，否则保存下去是 NaN
+          if (isNaN(parsed)) return;
+          onChange(parsed);
+        },
         onchange: function () {
-          var parsed = num.value === "" ? null : Number(num.value);
-          onChange(parsed === null || isNaN(parsed) ? null : parsed);
+          var raw = num.value;
+          if (raw === "") {
+            onChange(null);
+            return;
+          }
+          var parsed = Number(raw);
+          onChange(isNaN(parsed) ? null : parsed);
         }
       });
       control = num;

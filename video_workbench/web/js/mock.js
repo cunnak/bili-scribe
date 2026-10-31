@@ -34,6 +34,7 @@
       timeout_seconds: 300,
       proxy: "",
       role: "standard",
+      user_agent: "",
       // 服务商列表：跟后端 config.LlmProviderConfig 同形状。mock 里给两家，
       // 是为了让"多服务商"的界面路径（切换当前、任务映射下拉分组）真的有东西可渲染，
       // 而不是只画一张卡糊弄过去。
@@ -1231,6 +1232,38 @@
         return ok(subtitleSave(p.project_id, p.segments || []));
       case "subtitle.op":
         return ok(subtitleOp(p));
+            case "llm.models": {
+        // 永远比卡里已配的多两个：弹窗要能演示「选中还没加的模型」
+        var pid = String(p.provider || "").toLowerCase();
+        var catalog = {
+          deepseek: ["deepseek-chat", "deepseek-reasoner", "deepseek-coder", "deepseek-vl2"],
+          moonshot: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-k2-0905-preview"]
+        };
+        // 本机 magpie 网关：地址里带 3425 就当它，回一份混装清单（真网关是 30 个模型的聚合）
+        var list = catalog[pid] || ["gpt-4o-mini", "gpt-4o", "o4-mini"];
+        var probeBase = String((p && p.base_url) || "");
+        var provs0 = (SETTINGS.llm && SETTINGS.llm.providers) || [];
+        var hit0 = null;
+        for (var qi = 0; qi < provs0.length; qi++) {
+          if (!p.provider || provs0[qi].id === p.provider) { hit0 = provs0[qi]; break; }
+        }
+        var mBase = String((p && p.base_url) || (hit0 && hit0.base_url) || "");
+        var mKey = String((p && p.api_key) || (hit0 && hit0.api_key) || "");
+        if (!mBase || !mKey) {
+          return fail("LLM_NOT_CONFIGURED", "还缺接口地址或 API Key");
+        }
+        if (probeBase.indexOf("127.0.0.1:3425") >= 0 || mBase.indexOf("127.0.0.1:3425") >= 0) {
+          list = ["auto", "hy4-preview", "gpt-5.1", "claude-sonnet-4.5", "gemini-2.5-pro", "deepseek-v4.1"];
+        }
+        return ok({
+          provider: p.provider || "",
+          base_url: mBase,
+          models: list.map(function (id) {
+            return { id: id, owned_by: "" };
+          }),
+          count: list.length
+        });
+      }
       case "llm.test": {
         // 按 provider/model 回显：界面要能看出"测的是哪一家"，不然两张卡的反馈长得一样。
         var llmCfg = SETTINGS.llm || {};
@@ -1242,10 +1275,13 @@
         }
         if (!hit) hit = provs[0] || { id: "", name: "", base_url: llmCfg.base_url || "", models: [] };
         var chosen = (p && p.model) || (hit.models && hit.models[0]) || llmCfg.model || "";
-        if (!hit.base_url || !hit.api_key) {
+        // 参数优先：真后端允许把界面里还没保存的地址/密钥传上来（见 _llm_client_for）。
+        var effBase = String((p && p.base_url) || hit.base_url || "");
+        var effKey = String((p && p.api_key) || hit.api_key || "");
+        if (!effBase || !effKey) {
           return fail("LLM_NOT_CONFIGURED", (hit.name || hit.id || "这家服务商") + "：缺少接口地址或 API Key");
         }
-        return ok({ ok: true, model: chosen, base_url: hit.base_url, provider: hit.id,
+        return ok({ ok: true, model: chosen, base_url: effBase, provider: hit.id,
                     latency_ms: 218, reply: "OK" });
       }
       case "subtitle.optimize": {

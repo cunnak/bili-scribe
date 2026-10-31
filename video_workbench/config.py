@@ -6,13 +6,16 @@
 bili-scribe 的模型客户端、发布器读的是这些属性名，一旦另写一份，
 上游哪天改一个字段名，这边会静默读到默认值，表现为"配置填了但没生效"。
 
-**为什么不用 ``AppConfig.load`` 直接读本文件。** 因为它的 ``section()`` 会拒绝
-未知键，而我们要在 ``ui`` 里加 ``rail_collapsed``、在 ``storage`` 里加
-``media_root`` 等——那些键在它眼里都是非法的。所以本文件自带一个语义相同的
-``_fill()``（未知键报错、缺字段落默认值），校验规则复用 bili-scribe 导出的常量
-（``SKIN_KEYS`` / ``THINKING_MODES`` / ``PROXY_SCHEMES``），保证两边判据一致。
+**两个文件。** ``config.yaml`` 是两边共用的，只放 bili-scribe 认识的键；Workbench
+多出来的配置（五整段 + ui/storage/llm 里那几个键）存在同目录的 ``workbench.json``。
+原因是它的 ``section()`` 对未知键**报错**：把 ``llm.tasks`` 写进共享文件，bili-scribe
+下次启动就是 ``ValueError``。所以本文件自带一个语义相同的 ``_fill()``（未知键报错、
+缺字段落默认值）来读合并后的 dict，写 yaml 时则投影成它的 ``AppConfig`` 再交给它的
+模板渲染——形状、注释风格都由上游说了算。
+校验规则复用 bili-scribe 导出的常量（``SKIN_KEYS`` / ``THINKING_MODES`` /
+``PROXY_SCHEMES``），保证两边判据一致。
 
-**读取顺序**：``config.yaml`` → 环境变量（仅密钥）→ 内置默认。
+**读取顺序**：``config.yaml`` + ``workbench.json`` → 环境变量（仅密钥）→ 内置默认。
 **写入**：先写 ``.tmp`` 再 ``os.replace`` 原子替换，替换前备份 ``config.yaml.bak``。
 """
 
@@ -47,6 +50,135 @@ from video_workbench.app.errors import WBError
 
 DEFAULT_HOME = Path.home() / ".bili-scribe"
 DEFAULT_CONFIG_PATH = DEFAULT_HOME / "config.yaml"
+
+# Workbench 的配置比 bili-scribe 多得多：``app`` / ``download`` / ``transcribe`` /
+# ``subtitle`` / ``clip`` 是整整五段新段，另外 ``ui`` 里加了 ``rail_collapsed`` /
+# ``onboarded``、``storage`` 里加了四个目录与 ``retention``、``llm`` 里加了
+# ``providers`` / ``active_provider`` / ``tasks``。
+# 共用一个 config.yaml 是方案书要的（B站 凭证、库路径都复用），但 bili-scribe 的
+# ``AppConfig.load`` 遇到不认识的键**直接报错**而不是忽略：
+# 实测只要文件里出现 ``llm.tasks``，它就是
+# ``ValueError: LlmConfig 存在未知配置项：tasks`` —— 用户打开 bili-scribe 只会看到
+# 一句"起不来"，压根想不到是配置里多了个键。
+# 所以这里划一条硬边界，两个文件各管一摊：
+#   config.yaml    —— 只写 bili-scribe 认识的键，形状由它自己的 render_config_yaml 决定；
+#   workbench.json —— 同目录 sidecar，存 Workbench 的全部配置（含扩展键）。
+# 读的时候合并：共享键以 yaml 为准（用户可能直接改文件），扩展键只有 sidecar 有。
+EXT_NAME = "workbench.json"
+LEGACY_LLM_EXT_NAME = "workbench.llm.json"  # v0.8.0 短暂用过的旧 sidecar，只读兼容
+
+
+def ext_path(config_path: str | os.PathLike[str]) -> Path:
+    """sidecar 路径：与 config.yaml 同目录，文件名固定。"""
+    raw = os.path.abspath(os.path.expanduser(str(config_path)))
+    return Path(raw).with_name(EXT_NAME)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    """坏文件当空处理。扩展配置丢了顶多退回单服务商，不该拦启动。"""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_ext(config_path: str | os.PathLike[str]) -> dict[str, Any]:
+    """读 sidecar。新文件优先；只有旧文件时把它的 llm 三键包成 ``llm`` 段。"""
+    data = _read_json(ext_path(config_path))
+    if data:
+        return data
+    raw = os.path.abspath(os.path.expanduser(str(config_path)))
+    legacy = _read_json(Path(raw).with_name(LEGACY_LLM_EXT_NAME))
+    if legacy:
+        keys = ("providers", "active_provider", "tasks")
+        return {"llm": {k: legacy[k] for k in keys if legacy.get(k) is not None}}
+    return {}
+
+
+def write_ext(config_path: str | os.PathLike[str], data: dict[str, Any]) -> Path:
+    """原子写 sidecar（先 .tmp 再 replace，和 config.yaml 一个规矩）。"""
+    p = ext_path(config_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.replace(tmp, p)
+    return p
+
+
+def _bili_app_cls() -> Any:
+    """bili-scribe 的 AppConfig。延迟导入，方便测试替身。"""
+    import bili_scribe.config as bc
+
+    return bc.AppConfig
+
+
+def _fields(cls: Any) -> dict[str, Any]:
+    """字段名 → 真实类型。
+
+    bili-scribe 开了 ``from __future__ import annotations``，``f.type`` 是字符串，
+    直接 ``is_dataclass(f.type)`` 永远为假，得走 ``get_type_hints`` 才拿到类对象。
+    """
+    hints = get_type_hints(cls)
+    return {f.name: hints.get(f.name, f.type) for f in dataclasses.fields(cls)}
+
+
+def _project(value: Any, cls: Any) -> Any:
+    """投影成 ``cls``：只保留它认识的字段，同名 dataclass 递归投影。
+
+    不写死键名清单——bili-scribe 哪天加字段，这里自动跟上，省得维护两份。
+    """
+    kwargs: dict[str, Any] = {}
+    for name, ftype in _fields(cls).items():
+        if not hasattr(value, name):
+            continue
+        item = getattr(value, name)
+        if dataclasses.is_dataclass(item) and dataclasses.is_dataclass(ftype):
+            item = _project(item, ftype)
+        kwargs[name] = item
+    return cls(**kwargs)
+
+
+def to_bili_config(cfg: "WorkbenchConfig") -> Any:
+    """投影成 bili-scribe 的 AppConfig —— 写 config.yaml 时只写这个形状。"""
+    return _project(cfg, _bili_app_cls())
+
+
+def _merge_raw(raw: dict[str, Any], ext: dict[str, Any]) -> dict[str, Any]:
+    """yaml 与 sidecar 合并成一份 dict。
+
+    sidecar 是全量快照，yaml 里只有共享键（用户可以手改）——所以共享键以 yaml 为准，
+    扩展键只有 sidecar 有。只认 ``_SECTION_NAMES`` 里的段，别的一律丢掉。
+    """
+    out: dict[str, Any] = {}
+    for name in _SECTION_NAMES:
+        side = ext.get(name)
+        base = dict(side) if isinstance(side, dict) else {}
+        top = raw.get(name)
+        out[name] = _deep_merge(base, top) if isinstance(top, dict) else base
+    return out
+
+
+def foreign_keys(raw: Any) -> list[str]:
+    """``raw`` 里 bili-scribe 认不出的键（段名或段内子键）。空列表 = 形状合法。"""
+    if not isinstance(raw, dict):
+        return []
+    fields = _fields(_bili_app_cls())
+    bad: list[str] = []
+    for name, value in raw.items():
+        ftype = fields.get(name)
+        if ftype is None:
+            bad.append(str(name))
+            continue
+        if isinstance(value, dict) and dataclasses.is_dataclass(ftype):
+            known = set(_fields(ftype))
+            bad += [f"{name}.{k}" for k in sorted(set(value) - known)]
+    return bad
+
 
 # 仅密钥可以从环境变量覆盖。把整份配置开放给环境变量会让"到底读到了什么"
 # 变得不可复现，而密钥恰恰是最不适合写进文件的那类值。
@@ -117,10 +249,14 @@ def provider_id(name: str, base_url: str) -> str:
     跳过 ``api``/``www`` 这类通用前缀和 ``com``/``cn`` 这类尾缀，取剩下第一段；
     整串是 IP、中文主机名、或压根没有地址时才退回名称哈希（哈希只保证稳定，不保证可读）。
     """
-    host = ""
     url = (base_url or "").strip()
+    host = ""
     if "://" in url:
         host = url.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
+    # 本机网关（llm 代理服务、Ollama、LM Studio）没有可读的商号。硬拿 sha1 当 id 的话，
+    # ``llm.tasks.summary`` 里会写成 ``p_da8bcfd0/deepseek-chat``，用户看不懂也没法手改。
+    if host.lower() in {"localhost", "127.0.0.1", "0.0.0.0"} or host.lower().endswith(".local"):
+        return "local"
     generic = {"api", "www", "gateway", "prod", "v1", "open"}
     tails = {"com", "cn", "net", "org", "io", "ai", "dev", "co", "me", "cc", "xyz", "com.cn"}
     for label in (host or "").split("."):
@@ -313,6 +449,9 @@ class LlmConfig(_LlmConfig):
     tasks: LlmTasksConfig = field(default_factory=LlmTasksConfig)
     # 服务商列表。空列表在 load()/apply() 里会由扁平字段合成一条（见
     # ``WorkbenchConfig.sync_providers``），所以运行期永远至少有一条。
+    # 有些网关（Cloudflare 前置）会按客户端指纹/UA 拦人。留空用内置默认 UA；
+    # 填了就用填的（例如整段浏览器 UA），改完要重启才生效。
+    user_agent: str = ""
     providers: list[LlmProviderConfig] = field(default_factory=list)
     # 当前生效的服务商 id。空 ＝ 第一条。
     active_provider: str = ""
@@ -554,23 +693,35 @@ class WorkbenchConfig:
                 ) from exc
             if not isinstance(raw, dict):
                 raise WBError("VALIDATION", "config.yaml 顶层必须是映射结构", str(target))
+        merged = _merge_raw(raw, read_ext(target))
+        # 老版本把扩展键写进了共享 yaml：记下来，构造完立刻按新形状重写一次。
+        foreign = foreign_keys(raw)
         cfg = cls(
-            app=_fill(AppSectionConfig, raw.get("app"), "app"),
-            ui=_fill(UiConfig, raw.get("ui"), "ui"),
-            server=_fill(ServerConfig, raw.get("server"), "server"),
-            llm=_fill(LlmConfig, raw.get("llm"), "llm"),
-            storage=_fill(StorageConfig, raw.get("storage"), "storage"),
-            collect=_fill(CollectConfig, raw.get("collect"), "collect"),
-            download=_fill(DownloadConfig, raw.get("download"), "download"),
-            transcribe=_fill(TranscribeConfig, raw.get("transcribe"), "transcribe"),
-            subtitle=_fill(SubtitleConfig, raw.get("subtitle"), "subtitle"),
-            clip=_fill(ClipConfig, raw.get("clip"), "clip"),
-            publish=_fill(PublishConfig, raw.get("publish"), "publish"),
+            app=_fill(AppSectionConfig, merged.get("app"), "app"),
+            ui=_fill(UiConfig, merged.get("ui"), "ui"),
+            server=_fill(ServerConfig, merged.get("server"), "server"),
+            llm=_fill(LlmConfig, merged.get("llm"), "llm"),
+            storage=_fill(StorageConfig, merged.get("storage"), "storage"),
+            collect=_fill(CollectConfig, merged.get("collect"), "collect"),
+            download=_fill(DownloadConfig, merged.get("download"), "download"),
+            transcribe=_fill(TranscribeConfig, merged.get("transcribe"), "transcribe"),
+            subtitle=_fill(SubtitleConfig, merged.get("subtitle"), "subtitle"),
+            clip=_fill(ClipConfig, merged.get("clip"), "clip"),
+            publish=_fill(PublishConfig, merged.get("publish"), "publish"),
             source_path=str(target),
         )
         # 服务商先归一，再谈环境变量：反过来的话 ``sync_providers`` 会把文件里那把密钥
         # 抄回扁平字段，环境变量覆盖就被吃掉了（表现为"设了 env 还是 401"）。
         cfg.sync_providers()
+        # 文件里还留着 bili-scribe 不认识的键（老版本写进去过）就立刻按新形状重写：
+        # 留着不管，用户每次打开 bili-scribe 都是一句 ValueError。
+        # 放在 sync_providers 之后：save 会把服务商列表写进 sidecar，
+        # 反过来的话这次重写会把刚归一出来的那张卡写成空列表，用户的服务商就没了。
+        if foreign:
+            try:
+                cfg.save(target)
+            except OSError:
+                pass  # 写不进去不影响本次启动，下次保存会重写
         # 密钥允许被环境变量覆盖：这样容器/脚本里起服务不用把密钥落盘。
         # 生效服务商也要一起改，否则界面显示的还是文件里那把。
         if os.environ.get(ENV_API_KEY):
@@ -622,6 +773,9 @@ class WorkbenchConfig:
             raise WBError("VALIDATION", "不知道要写到哪里：配置没有 source_path")
         target = Path(self._abs(str(target_raw)))
         target.parent.mkdir(parents=True, exist_ok=True)
+        # 写盘前归一一次：调用方可能只改了扁平字段（脚本、测试、命令行都这么干），
+        # 不归一的话 sidecar 里那张「当前服务商」的卡会是空的，重启后密钥就丢了。
+        self.sync_providers()
 
         backup: Path | None = None
         if target.exists():
@@ -635,8 +789,13 @@ class WorkbenchConfig:
             fh.write(render_yaml(self))
         os.replace(tmp, target)
         self.source_path = str(target)
+        # 全量配置落 sidecar：yaml 那边只有 bili-scribe 认识的键。
+        data = dataclasses.asdict(self)
+        data.pop("source_path", None)
+        ext = write_ext(target, data)
         return {
             "path": str(target),
+            "ext": str(ext),
             "backup": str(backup) if backup else None,
             "bytes": target.stat().st_size,
         }
@@ -782,13 +941,10 @@ def validate(cfg: WorkbenchConfig) -> None:
                 f"{label}.base_url 必须是 http(s) 地址（到 /v1 这一层，不含 /chat/completions）",
                 f"收到：{p.base_url!r}",
             )
-        for m in p.models or []:
-            if "/" in str(m):
-                raise WBError(
-                    "VALIDATION",
-                    f"{label}.models 里的模型名不能带 /（服务商前缀写在 llm.tasks.* 里）",
-                    f"收到：{m!r}",
-                )
+        # 这里**不校验模型名里的斜杠**。真实网关的模型 id 大量自带斜杠
+        # （magpie 的 ``auto/hy4-preview``、OpenRouter 的 ``anthropic/claude-3.5``、
+        # HF 的 ``Qwen/Qwen3-VL-Plus``），把它们判成「写错了」会让正常配置根本存不下来。
+        # 前缀消歧由 ``parse_model_spec`` 负责：只有前缀命中已知服务商 id 才当服务商用。
     if cfg.llm.active_provider and find_provider(cfg.llm, cfg.llm.active_provider) is None:
         raise WBError(
             "VALIDATION",
@@ -871,181 +1027,23 @@ def validate(cfg: WorkbenchConfig) -> None:
 # =========================================================== 渲染
 
 
-def _q(value: Any) -> str:
-    # JSON 字符串转义是 YAML 双引号标量的子集，借它处理中文/引号/反斜杠，
-    # 省得自己写转义。
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _flag(value: bool) -> str:
-    return "true" if value else "false"
-
-
-def _provider_lines(llm: LlmConfig) -> list[str]:
-    """渲染 ``llm.providers``。空列表写成 ``providers: []``——
-    留一行孤零零的 ``providers:`` 会被 YAML 读成 null，下次 ``_fill`` 直接报
-    「providers 必须是列表」，用户看到的是打不开而不是没配服务商。
-    """
-    providers = list(llm.providers or [])
-    if not providers:
-        return ["  providers: []"]
-    lines = ["  providers:"]
-    for p in providers:
-        lines += [
-            f"    - id: {_q(p.id)}",
-            f"      name: {_q(p.name)}",
-            f"      protocol: {_q(p.protocol)}",
-            f"      base_url: {_q(p.base_url)}",
-            f"      api_key: {_q(p.api_key)}",
-            "      models: [" + ", ".join(_q(m) for m in (p.models or [])) + "]",
-        ]
-    return lines
-
-
 def render_yaml(cfg: WorkbenchConfig) -> str:
-    """渲染成带完整注释的 YAML。
+    """渲染 config.yaml —— **只含 bili-scribe 认识的键**。
 
-    不用 ``yaml.dump``：它把注释全丢掉，配置文件退化成机器输出，以后没人看得懂。
+    直接用它的 ``render_config_yaml``：这个文件是两边共用的，形状必须由它说了算，
+    连注释风格一起复用，省得两份模板各说一套、越走越远。
+    Workbench 自己的设置（服务商列表、任务模型、下载/转录/切片/发布各项）在
+    ``workbench.json``，由 ``save()`` 写。
     """
-    lines: list[str] = [
-        "# VideoWorkbench 配置",
-        "#",
-        "# 本文件由设置页面生成。手动修改同样生效；下次在页面上保存时整体覆盖，",
-        "# 覆盖前会备份为 config.yaml.bak。",
-        "#",
-        "# 路径字段支持 ~ 与 %APPDATA% 这类环境变量，读入时统一展开为绝对路径。",
-        "",
-        "app:",
-        f"  language: {_q(cfg.app.language)}",
-        "  # 媒体交给界面播放的方式：auto=按体积和编码自动挑 / file=file:// / http=本地 HTTP。",
-        f"  media_server: {_q(cfg.app.media_server)}",
-        "",
-        "ui:",
-        "  # 界面皮肤：ark（深色，默认）/ exhibition（浅色）。只影响配色，不影响处理逻辑。",
-        f"  skin: {_q(cfg.ui.skin)}",
-        f"  rail_collapsed: {_flag(cfg.ui.rail_collapsed)}",
-        "  # 首次启动向导看过没有（跳过一次也算看过，不会每次启动都弹）。",
-        f"  onboarded: {_flag(cfg.ui.onboarded)}",
-        "",
-        "server:",
-        "  # 仅调试模式（python run.py --web）使用。桌面模式不起 HTTP 服务。",
-        f"  host: {_q(cfg.server.host)}",
-        f"  port: {cfg.server.port}",
-        "",
-        "llm:",
-        f"  base_url: {_q(cfg.llm.base_url)}",
-        f"  api_key: {_q(cfg.llm.api_key)}",
-        f"  model: {_q(cfg.llm.model)}",
-        "  # ↑ 这三行是下面 providers 的镜像，给 bili-scribe 读；改服务商请改 providers。",
-        f"  active_provider: {_q(cfg.llm.active_provider)}",
-        "  # 服务商列表：界面「设置 → 模型」里的卡片，一张 = 一个 API 地址 + 一把密钥。",
-        "  # llm.tasks.* 可以写 provider_id/model 指名用哪一家，只写 model 则按列表归属自动挑。",
-        *_provider_lines(cfg.llm),
-        f"  temperature: {cfg.llm.temperature}",
-        f"  max_tokens: {cfg.llm.max_tokens}",
-        "  # auto=不发相关参数 / off=显式关思考 / on=显式开思考。",
-        "  # 思考模型的推理过程不吃 max_tokens，开着容易超时或正文返回空。",
-        f"  thinking: {_q(cfg.llm.thinking)}",
-        f"  timeout_seconds: {cfg.llm.timeout_seconds}",
-        "  # 调用模型时走的代理。留空 = 直连，且不读 HTTP_PROXY/HTTPS_PROXY。",
-        f"  proxy: {_q(cfg.llm.proxy)}",
-        "  # 总结角色：standard / xueshu / wengao / xiezuo / fenxi / jinglian。",
-        f"  role: {_q(cfg.llm.role)}",
-        f"  max_input_chars: {cfg.llm.max_input_chars}",
-        f"  chunk_size: {cfg.llm.chunk_size}",
-        f"  chunk_overlap: {cfg.llm.chunk_overlap}",
-        "  # 分任务模型，留空回退 model。",
-        "  tasks:",
-        f"    summary: {_q(cfg.llm.tasks.summary)}",
-        f"    collection_overview: {_q(cfg.llm.tasks.collection_overview)}",
-        f"    translate: {_q(cfg.llm.tasks.translate)}",
-        f"    clip_analyze: {_q(cfg.llm.tasks.clip_analyze)}",
-        f"    copy: {_q(cfg.llm.tasks.copy)}",
-        f"    refine: {_q(cfg.llm.tasks.refine)}",
-        f"    vision: {_q(cfg.llm.tasks.vision)}",
-        "",
-        "storage:",
-        f"  db_path: {_q(cfg.storage.db_path)}",
-        "  # 凭据加密密钥，与 bili-scribe 共用。",
-        f"  key_path: {_q(cfg.storage.key_path)}",
-        f"  media_root: {_q(cfg.storage.media_root)}",
-        f"  cache_root: {_q(cfg.storage.cache_root)}",
-        f"  models_root: {_q(cfg.storage.models_root)}",
-        f"  ffmpeg_dir: {_q(cfg.storage.ffmpeg_dir)}",
-        "  # 保留天数。0 = 不自动清理。",
-        "  retention:",
-        f"    source_days: {cfg.storage.retention.source_days}",
-        f"    audio_days: {cfg.storage.retention.audio_days}",
-        f"    frames_days: {cfg.storage.retention.frames_days}",
-        f"    subtitle_days: {cfg.storage.retention.subtitle_days}",
-        f"    export_days: {cfg.storage.retention.export_days}",
-        "",
-        "collect:",
-        f"  prefer_subtitle_lang: {_q(cfg.collect.prefer_subtitle_lang)}",
-        f"  include_platform_summary: {_flag(cfg.collect.include_platform_summary)}",
-        "  danmaku:",
-        f"    enabled: {_flag(cfg.collect.danmaku.enabled)}",
-        f"    also_with_subtitle: {_flag(cfg.collect.danmaku.also_with_subtitle)}",
-        f"    max_items: {cfg.collect.danmaku.max_items}",
-        f"    hot_items: {cfg.collect.danmaku.hot_items}",
-        f"    sample_items: {cfg.collect.danmaku.sample_items}",
-        "  frames:",
-        f"    enabled: {_flag(cfg.collect.frames.enabled)}",
-        f"    max_frames: {cfg.collect.frames.max_frames}",
-        f"    quality: {cfg.collect.frames.quality}",
-        "",
-        "download:",
-        f"  quality: {_q(cfg.download.quality)}",
-        f"  codec: {_q(cfg.download.codec)}",
-        f"  concurrency: {cfg.download.concurrency}",
-        "  # 复用 bili-scribe 已登录的凭据，不用二次扫码。",
-        f"  cookies_from: {_q(cfg.download.cookies_from)}",
-        "  # 空段自动省略；单稿件时 page_title 为空。",
-        f"  dir_template: {_q(cfg.download.dir_template)}",
-        "  # ytdlp 为主；bbdown 是手动兜底（失败后点「用 BBDown 重试」才走）。",
-        f"  backend: {_q(cfg.download.backend)}",
-        f"  bbdown_path: {_q(cfg.download.bbdown_path)}",
-        f"  bbdown_args: {_q(cfg.download.bbdown_args)}",
-        "",
-        "transcribe:",
-        f"  engine: {_q(cfg.transcribe.engine)}",
-        f"  model: {_q(cfg.transcribe.model)}",
-        f"  device: {_q(cfg.transcribe.device)}",
-        f"  compute_type: {_q(cfg.transcribe.compute_type)}",
-        f"  language: {_q(cfg.transcribe.language)}",
-        f"  vad: {_flag(cfg.transcribe.vad)}",
-        f"  word_timestamps: {_flag(cfg.transcribe.word_timestamps)}",
-        "",
-        "subtitle:",
-        f"  default_style: {_q(cfg.subtitle.default_style)}",
-        f"  optimize: {_flag(cfg.subtitle.optimize)}",
-        "  translate:",
-        f"    target: {_q(cfg.subtitle.translate.target)}",
-        f"    bilingual: {_flag(cfg.subtitle.translate.bilingual)}",
-        f"    layout: {_q(cfg.subtitle.translate.layout)}",
-        f"    glossary: {_q(cfg.subtitle.translate.glossary)}",
-        "",
-        "clip:",
-        f"  highlight_min_seconds: {cfg.clip.highlight_min_seconds}",
-        f"  highlight_max_seconds: {cfg.clip.highlight_max_seconds}",
-        f"  segment_min_seconds: {cfg.clip.segment_min_seconds}",
-        f"  segment_max_seconds: {cfg.clip.segment_max_seconds}",
-        f"  candidate_count: {cfg.clip.candidate_count}",
-        f"  snap_tolerance_ms: {cfg.clip.snap_tolerance_ms}",
-        f"  vertical_mode: {_q(cfg.clip.vertical_mode)}",
-        f"  follow_enhance: {_flag(cfg.clip.follow_enhance)}",
-        f"  bgm_volume: {cfg.clip.bgm_volume}",
-        f"  bgm_duck: {_flag(cfg.clip.bgm_duck)}",
-        f"  fade_ms: {cfg.clip.fade_ms}",
-        "",
-        "publish:",
-        f"  require_confirm: {_flag(cfg.publish.require_confirm)}",
-        f"  min_interval_seconds: {cfg.publish.min_interval_seconds}",
-        f"  max_summary_chars: {cfg.publish.max_summary_chars}",
-        f"  max_comment_chars: {cfg.publish.max_comment_chars}",
-        f"  disclose_ai: {_flag(cfg.publish.disclose_ai)}",
-        f"  disclosure_text: {_q(cfg.publish.disclosure_text)}",
-        f"  auto_comment: {_flag(cfg.publish.auto_comment)}",
-        "",
-    ]
-    return "\n".join(lines)
+    import bili_scribe.config as bc
+
+    head = "\n".join(
+        [
+            "# 本文件由 bili-scribe 与 VideoWorkbench 共用，只放两边都认识的键。",
+            "# VideoWorkbench 自己的设置（服务商列表、任务模型、下载/转录/切片等）",
+            f"# 存在同目录的 {EXT_NAME}。别往这里加新键 —— bili-scribe 遇到不认识的键会直接报错。",
+            "",
+        ]
+    )
+    body = bc.render_config_yaml(to_bili_config(cfg))
+    return head + (body if body.endswith("\n") else body + "\n")

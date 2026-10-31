@@ -834,6 +834,19 @@ select,
   justify-content: flex-end;
 }
 
+/* 关闭键：原来用的是对勾图标，语义反了（✓ 看着像「确定」）。改成 ×，字号撑到 20px 才不显小。 */
+.modal__x {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+  height: 26px;
+}
+
+.modal__x:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
 .modal__body {
   padding: var(--gap-4);
   overflow: auto;
@@ -1940,3 +1953,76 @@ select,
 }
 
 .taskmap .select { flex: 1 1 auto; }
+
+/* 「获取可用模型」弹窗里的勾选列表 */
+.model-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow: auto;
+}
+.model-pick__wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-pick__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.model-pick__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.model-pick__row:hover {
+  background: var(--hover-wash);
+}
+.model-pick__id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------- 总结页：控件内文字居中 */
+
+/* 项目选择 / 角色选择：原生 select 的选中项默认靠左，加大宽度后看着像悬在半空。
+   `text-align-last` 是真正管「选中项」的那条，`text-align` 兜底（部分平台只认前者）。*/
+#sum-project,
+#sum-role {
+  text-align: center;
+  text-align-last: center;
+  padding-left: var(--gap-3);
+  padding-right: var(--gap-3);
+}
+
+/* 没有版本时那句提示，居中当空态文案读，而不是当左对齐的正文读 */
+.sum-ver-empty {
+  text-align: center;
+  padding: var(--gap-3) 0;
+}
+
+/* 「按这个改」：按钮本身是 inline-flex，文字靠 justify-content 摆，光 text-align 不管用 */
+#sum-refine {
+  justify-content: center;
+  text-align: center;
+  /* .row 是 flex，按住 flex 项的左右 auto 外边距把它摆到整行中间 */
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 服务商卡片下面那一行额外动作（接入本机 magpie 之类） */
+.providers__extra {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}

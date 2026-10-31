@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from video_workbench.config import read_ext
 from video_workbench.core.subtitles import normalize
 
 
@@ -317,7 +318,9 @@ def test_glossary_put_persists(service, cfg_path):
     import yaml
     data = rpc(service, "glossary.put", {"entries": ["AI=人工智能", "token=词元"]})
     assert data["count"] == 2
-    saved = yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8"))
+    # subtitle 整段是 Workbench 独有，落 sidecar；共享 yaml 里不该出现
+    assert "subtitle" not in yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8"))
+    saved = read_ext(cfg_path)
     assert saved["subtitle"]["translate"]["glossary"] == ["AI=人工智能", "token=词元"]
 
 

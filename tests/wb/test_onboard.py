@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from video_workbench.config import read_ext, write_ext
 from video_workbench.core import onboard
 
 
@@ -180,8 +181,10 @@ def test_service_onboard_and_done_persist(tmp_path):
     finally:
         service.close()
 
+    # 扩展键不进共享 yaml（bili-scribe 遇到不认识的键会报错），落 sidecar
     saved = cfg_path.read_text(encoding="utf-8")
-    assert "onboarded: true" in saved
+    assert "onboarded" not in saved, "ui.onboarded 不该写进共享的 config.yaml"
+    assert read_ext(cfg_path)["ui"]["onboarded"] is True
 
     service2 = WorkbenchService(config_path=str(cfg_path))
     try:
@@ -196,13 +199,26 @@ def test_service_onboard_is_read_only(tmp_path):
     from video_workbench.app.service import WorkbenchService
 
     cfg_path = tmp_path / "config.yaml"
+    # 干净的共享文件（只有 bili-scribe 认识的键）+ 扩展配置在 sidecar：
+    # 这样体检跑完不该有任何重写动作。
     cfg_path.write_text(
+        "server:\n"
+        "  host: '127.0.0.1'\n"
+        "  port: 8765\n"
         "storage:\n"
-        f"  media_root: '{tmp_path.as_posix()}/media'\n"
-        f"  cache_root: '{tmp_path.as_posix()}/cache'\n"
-        f"  models_root: '{tmp_path.as_posix()}/models'\n"
         f"  db_path: '{tmp_path.as_posix()}/wb.db'\n",
         encoding="utf-8",
+    )
+    write_ext(
+        cfg_path,
+        {
+            "storage": {
+                "db_path": f"{tmp_path.as_posix()}/wb.db",
+                "media_root": f"{tmp_path.as_posix()}/media",
+                "cache_root": f"{tmp_path.as_posix()}/cache",
+                "models_root": f"{tmp_path.as_posix()}/models",
+            }
+        },
     )
     before = cfg_path.read_text(encoding="utf-8")
     service = WorkbenchService(config_path=str(cfg_path))
@@ -212,3 +228,4 @@ def test_service_onboard_is_read_only(tmp_path):
     finally:
         service.close()
     assert cfg_path.read_text(encoding="utf-8") == before, "体检改动了配置文件"
+    assert cfg_path.read_text(encoding="utf-8").count("onboarded") == 0

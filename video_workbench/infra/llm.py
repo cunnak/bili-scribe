@@ -25,9 +25,18 @@ from ..app.errors import WBError
 
 # 传输层签名：(url, payload_bytes, headers, timeout) -> (status, body_text)
 Transport = Callable[[str, bytes, Mapping[str, str], float], tuple[int, str]]
+# GET 用另一条签名（没有 body）。分开而不是给 Transport 加 method 参数：
+# 加参数就得让已有的假传输层全部多接一个位置参数，改动面比新增一条大。
+Getter = Callable[[str, Mapping[str, str], float], tuple[int, str]]
 
 RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 3
+
+# 默认 UA。为什么不能用 urllib 自带的那个：
+# `Python-urllib/3.x` 命中 Cloudflare 防火墙的 "bad browser signature"（Error 1010），
+# 会在**密钥完全正确**的情况下直接 403——用户看到的就是「别处能用，这里不能用」。
+DEFAULT_USER_AGENT = "VideoWorkbench/0.1 openai-compatible-client"
+
 BACKOFF_SECONDS = (0.8, 2.4)
 
 
@@ -62,9 +71,73 @@ def _urllib_transport(proxy: str = "") -> Transport:
     return send
 
 
+def _urllib_get(proxy: str = "") -> Getter:
+    """默认 GET：列模型用。和 ``_urllib_transport`` 共用代理规则（只认 llm.proxy）。"""
+
+    def send(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, str]:
+        request = urllib.request.Request(url, headers=dict(headers), method="GET")
+        handlers: list[urllib.request.BaseHandler] = []
+        if proxy:
+            handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        opener = urllib.request.build_opener(*handlers)
+        try:
+            with opener.open(request, timeout=timeout) as resp:
+                return int(resp.status), resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001
+                body = ""
+            return int(exc.code), body
+
+    return send
+
+
+def normalize_models(payload: Any) -> list[dict[str, str]]:
+    """把各家 ``GET /models`` 的返回归一成 ``[{"id","owned_by"}]``。
+
+    见过的三种形状（都不是猜测，是真跑出来的）：
+
+    * 标准 OpenAI：``{"object":"list","data":[{"id":"gpt-4o","owned_by":"openai"}]}``
+    * 网关常用：``{"models":["deepseek-chat", {...}]}``
+    * 直给数组：``["qwen-max", "qwen-plus"]``
+
+    统一按出现顺序去重（网关有时会重复列出同一个 id）。
+    """
+    raw: Any
+    if isinstance(payload, dict):
+        raw = payload.get("data")
+        if raw is None:
+            raw = payload.get("models")
+        if raw is None:
+            # 有的实现把列表塞在别的键里，只剩一个 list 值的情况也认
+            lists = [v for v in payload.values() if isinstance(v, list)]
+            raw = lists[0] if len(lists) == 1 else []
+    elif isinstance(payload, list):
+        raw = payload
+    else:
+        raw = []
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in raw if isinstance(raw, list) else []:
+        if isinstance(entry, str):
+            mid, owner = entry.strip(), ""
+        elif isinstance(entry, dict):
+            mid = str(entry.get("id") or entry.get("name") or entry.get("model") or "").strip()
+            owner = str(entry.get("owned_by") or entry.get("owner") or "")
+        else:
+            continue
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        out.append({"id": mid, "owned_by": owner})
+    return out
+
+
 class _SupportsChat(Protocol):  # pragma: no cover - 仅用于类型说明
     def chat(self, messages: Iterable[dict[str, str]], **kwargs: Any) -> str: ...
-
 
 class ChatClient:
     """一次请求 = 一次 ``chat``。批量、分批、进度由调用方管（那是业务逻辑）。"""
@@ -78,8 +151,10 @@ class ChatClient:
         timeout: float = 120.0,
         proxy: str = "",
         transport: Transport | None = None,
+        getter: Getter | None = None,
         sleep: Callable[[float], None] = time.sleep,
         provider_name: str = "",
+        user_agent: str = "",
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key or ""
@@ -90,7 +165,62 @@ class ChatClient:
         self.timeout = float(timeout or 120.0)
         self.proxy = proxy or ""
         self._transport = transport or _urllib_transport(self.proxy)
+        self.user_agent = (user_agent or "").strip() or DEFAULT_USER_AGENT
+        self._getter = getter or _urllib_get(self.proxy)
         self._sleep = sleep
+
+    # ------------------------------------------------------------- 列模型
+
+    def list_models(self) -> list[dict[str, str]]:
+        """``GET {base_url}/models`` —— 这家密钥能用的模型有哪些。
+
+        为什么要单独一个方法而不是塞进 ``chat``：这条路径**不需要 model**，
+        用户正是在「还不知道有哪些模型」的时候点它。所以只校验地址与密钥，
+        不走 ``require()``（那会把"没填模型"也算作没配置）。
+
+        失败一律翻成 ``ChatError``，码和 ``chat`` 同一套：界面上 401 是
+        「密钥不对」、连不上是 NETWORK，不需要另写一套文案。
+        """
+        missing = [
+            name
+            for name, value in (("base_url", self.base_url), ("api_key", self.api_key))
+            if not value
+        ]
+        if missing:
+            who = f"：{self.provider_name}" if self.provider_name else ""
+            raise ChatError(
+                "LLM_NOT_CONFIGURED",
+                f"服务商还没有配置完整{who}",
+                "缺：" + "、".join(missing),
+            )
+        url = f"{self.base_url}/models"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+            "User-Agent": self.user_agent,
+        }
+        try:
+            status, text = self._getter(url, headers, self.timeout)
+        except TimeoutError as exc:
+            raise ChatError("LLM_TIMEOUT", "获取模型列表超时", str(exc)) from exc
+        except OSError as exc:
+            raise ChatError("NETWORK", "连不上大模型服务", str(exc)) from exc
+        if not (200 <= status < 300):
+            raise self._error_for(status, text)
+        try:
+            payload = json.loads(text or "null")
+        except ValueError as exc:
+            raise ChatError("LLM_BAD_RESPONSE", "模型列表返回的不是 JSON", (text or "")[:400]) from exc
+        models = normalize_models(payload)
+        if not models:
+            # 200 但空列表：多半是网关不实现 /models（有的只认 chat 路径）。
+            # 不当成成功——否则界面上会弹出「0 个模型」的空窗，用户以为坏了。
+            raise ChatError(
+                "LLM_BAD_RESPONSE",
+                "这家没有返回可用模型列表",
+                "该地址可能不支持 /models，手动填模型名即可",
+            )
+        return models
 
     # ------------------------------------------------------------- 装配
 
@@ -108,21 +238,29 @@ class ChatClient:
         from video_workbench.config import resolve_task_model
 
         llm = getattr(cfg, "llm", cfg)
+        picked = None
         if provider:
             from video_workbench.config import find_provider
 
             picked = find_provider(llm, provider)
+            # 指名了一家不存在的服务商时**不要**造一个空客户端：那样报出来的是
+            # 「这家还没填接口地址和密钥」，指的是一个根本不存在的服务商，把排查方向
+            # 引到填表上去了。这里安静退到「任务/默认」那条路（与 resolve_task_model
+            # 的「服务商写错就退下一条」一致），provider_name 仍带上用户写的名字，
+            # 报错文案里能看出是哪一次点名没对上。
+        if picked is not None:
             model = str(getattr(llm, "model", "") or "")
-            if picked is not None and picked.models:
+            if picked.models:
                 model = model if model in picked.models else picked.models[0]
             return cls(
-                base_url=picked.base_url if picked else "",
-                api_key=picked.api_key if picked else "",
+                base_url=picked.base_url,
+                api_key=picked.api_key,
                 model=model,
                 timeout=float(getattr(llm, "timeout_seconds", 120) or 120),
                 proxy=str(getattr(llm, "proxy", "") or ""),
                 transport=transport,
-                provider_name=picked.name if picked else provider,
+                provider_name=picked.name,
+                user_agent=str(getattr(llm, "user_agent", "") or ""),
             )
         provider_obj, model = resolve_task_model(llm, task)
         return cls(
@@ -132,7 +270,8 @@ class ChatClient:
             timeout=float(getattr(llm, "timeout_seconds", 120) or 120),
             proxy=str(getattr(llm, "proxy", "") or ""),
             transport=transport,
-            provider_name=str(getattr(provider_obj, "name", "") or ""),
+            provider_name=str(getattr(provider_obj, "name", "") or "") or (provider or ""),
+            user_agent=str(getattr(llm, "user_agent", "") or ""),
         )
 
     @property
@@ -188,6 +327,7 @@ class ChatClient:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json",
+            "User-Agent": self.user_agent,
         }
 
         last: ChatError | None = None
@@ -212,8 +352,19 @@ class ChatClient:
 
     def _error_for(self, status: int, text: str) -> ChatError:
         snippet = (text or "").strip()[:400]
-        if status in (401, 403):
+        if status == 401:
             return ChatError("LLM_AUTH", "大模型鉴权失败（api_key 不对或没有权限）", snippet, status)
+        if status == 403:
+            # 403 ≠ 密钥错。最常见是 CDN 按客户端指纹/UA 拦人（Cloudflare 1010）。
+            # 文案必须把这条说清，否则用户会一直怀疑自己的 key。
+            low = snippet.lower()
+            if "cloudflare" in low or "1010" in low or "blocked access" in low:
+                why = "被服务端前面的 CDN 拦了（Cloudflare 1010：按客户端指纹/UA 判定为机器人）"
+                tip = "密钥本身没问题。可在设置里填代理再试；或在「上下文与长素材」填一个自己的 llm.user_agent"
+            else:
+                why = "服务端拒绝了这次请求（403，不是密钥格式问题）"
+                tip = "该 key 可能没有这个接口或模型的权限"
+            return ChatError("LLM_FORBIDDEN", why, (tip + " | " + snippet)[:600], status)
         if status == 429:
             return ChatError("LLM_RATE_LIMIT", "大模型限流，稍后再试", snippet, status)
         if status in (400, 404, 422):
@@ -232,8 +383,32 @@ class ChatClient:
         if not choices:
             # 有些网关把错误塞进 200 的 body 里，这种情况也要说清楚
             raise ChatError("LLM_BAD_RESPONSE", "大模型没有返回内容", json.dumps(data, ensure_ascii=False)[:400])
-        message = choices[0].get("message") or {}
+        choice = choices[0] or {}
+        message = choice.get("message") or {}
         content = message.get("content")
         if isinstance(content, list):  # 少数实现返回分段结构
             content = "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
-        return str(content or "").strip()
+        out = str(content or "").strip()
+        if out:
+            return out
+
+        # 空正文不能当成功返回。推理型模型（magpie 的 auto/*、deepseek-reasoner 等）
+        # 在 max_tokens 不够时会把预算全烧在 reasoning 上，content 给 null、
+        # finish_reason 是 length——上层拿到空串只会以为「模型不想说话」。
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+        details = (data.get("usage") or {}).get("completion_tokens_details") or {}
+        spent = details.get("reasoning_tokens")
+        if reasoning or spent:
+            raise ChatError(
+                "LLM_EMPTY",
+                "模型这次只输出了思考过程，正文是空的（预算被思考吃掉了）",
+                (
+                    "finish_reason=%s，思考用了 %s tokens。把 max_tokens 调大，"
+                    "或换一个非推理模型，再试。" % (choice.get("finish_reason") or "?", spent or "?")
+                ),
+            )
+        raise ChatError(
+            "LLM_EMPTY",
+            "模型没有返回正文",
+            json.dumps(data, ensure_ascii=False)[:400],
+        )

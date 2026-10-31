@@ -243,12 +243,10 @@ def test_resolve_survives_bili_scribe_flat_config():
 # ── 4. 校验 / 往返 / 对外形状 ───────────────────────────────────────────────
 
 def test_validate_rejects_cards_that_would_hit_the_wrong_door(tmp_path):
-    """只拦"配了但会静默打错门"的：地址缺协议、模型名里带斜杠。"""
+    """只拦"配了但会静默打错门"的：地址缺协议、协议枚举写错。"""
     cases = [
         # 少了 https:// —— urllib 会当相对地址，症状是"连不上"，跟真原因隔一层
         {"providers": [{"name": "A", "base_url": "api.deepseek.com/v1", "models": ["m"]}]},
-        # 模型名带 / 是"把服务商前缀写进模型里"的旧写法，打到网关是个不存在的 id
-        {"providers": [{"name": "A", "base_url": "https://a.example/v1", "models": ["qwen/m1"]}]},
         {"providers": [{"name": "A", "base_url": "https://a.example/v1", "models": ["m"],
                         "protocol": "anthropic"}]},
     ]
@@ -256,6 +254,47 @@ def test_validate_rejects_cards_that_would_hit_the_wrong_door(tmp_path):
         with pytest.raises(Exception) as ei:
             write_cfg(tmp_path / f"bad{i}", llm)
         assert getattr(ei.value, "code", "") == "VALIDATION", ei.value
+
+
+def test_validate_allows_model_ids_with_slashes(tmp_path):
+    """模型 id 自带斜杠是常态，不是"写错了"。
+
+    magpie 的 ``auto/hy4-preview``、OpenRouter 的 ``anthropic/claude-3.5``、
+    HF 的 ``Qwen/Qwen3-VL-Plus`` 都带斜杠。早先这里按"斜杠等于服务商前缀"一刀切
+    拦掉，结果真网关的模型根本存不下来（实测：接入 magpie 时首存就报 VALIDATION）。
+    前缀消歧交给 ``parse_model_spec``：只有前缀命中已知服务商 id 才当服务商用。
+    """
+    cfg = write_cfg(tmp_path, {
+        "providers": [{"name": "本机网关", "base_url": "http://127.0.0.1:3425/v1",
+                       "api_key": "k", "models": ["auto/hy4-preview", "Qwen/Qwen3-VL-Plus"]}],
+    })
+    assert cfg.llm.providers[0].models == ["auto/hy4-preview", "Qwen/Qwen3-VL-Plus"]
+    # 本机地址给的是可读 id，不是 sha1
+    assert cfg.llm.providers[0].id == "local"
+
+
+def test_unknown_provider_ref_falls_back_instead_of_empty_client():
+    """点名一家不存在的服务商时，不许造空客户端报"还没填地址"。
+
+    那会把排查方向引到填表上——明明填了，报的却是"缺 base_url、api_key"。
+    """
+    from video_workbench.infra.llm import ChatClient
+
+    class Cfg:
+        class llm:  # noqa: N801
+            base_url = "https://api.deepseek.com/v1"
+            api_key = "k"
+            model = "deepseek-chat"
+            timeout_seconds = 30
+            proxy = ""
+            user_agent = ""
+            providers = []
+            active_provider = ""
+
+    client = ChatClient.from_config(Cfg(), provider="typo-here")
+    assert client.base_url == "https://api.deepseek.com/v1"
+    assert client.api_key == "k"
+    assert client.configured
 
 
 def test_validate_allows_empty_cards_on_a_fresh_install(tmp_path):

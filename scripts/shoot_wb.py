@@ -557,6 +557,21 @@ SHOTS: list[tuple[str, str, str]] = [
         """,
     ),
     (
+        "settings-model-picker",
+        "#/settings?section=llm",
+        """
+        (async () => {
+          await new Promise(r => setTimeout(r, 450));
+          // 弹窗里的候选列表要能看见「已配的预勾上、没配的留空」，这才是这个功能的卖点。
+          const card = document.querySelectorAll('.provider-card')[0];
+          const btn = card && [...card.querySelectorAll('button')]
+            .find(b => b.textContent.trim() === '获取可用模型');
+          if (btn) btn.click();
+          await new Promise(r => setTimeout(r, 600));
+        })()
+        """,
+    ),
+    (
         "settings-llm-adv",
         "#/settings?section=llm",
         """

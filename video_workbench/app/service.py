@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+import copy
 import csv
 import io
 import json
@@ -31,7 +32,13 @@ from video_workbench.app.errors import ERROR_CODES, WBError
 from video_workbench.app.events import EventBus
 from video_workbench.app.jobs import JobContext, JobManager
 from video_workbench.app.rpc import Router
-from video_workbench.config import BILINGUAL_MODES, TRANSLATE_TARGETS, WorkbenchConfig, render_yaml
+from video_workbench.config import (
+    BILINGUAL_MODES,
+    TRANSLATE_TARGETS,
+    WorkbenchConfig,
+    find_provider,
+    render_yaml,
+)
 from video_workbench.core import resolver as resolver_mod
 from video_workbench.core import subtitles, summarizer, waveform
 from video_workbench.core import overview as overview_core
@@ -591,6 +598,19 @@ class SubtitleOpParams(BaseModel):
 # ============================================================ 服务
 
 
+def _llm_code(exc: Exception) -> str:
+    """把 ChatError 的码尽量原样交给界面。
+
+    只折成 ``LLM_ERROR`` 会把「还没配」「被网关拦」「只出了思考」三种完全不同的
+    处置方式揉成一句「模型调用失败」。未登记的码仍回落 ``LLM_ERROR``。
+    """
+    code = str(getattr(exc, "code", "") or "")
+    keep = {"LLM_NOT_CONFIGURED", "LLM_FORBIDDEN", "LLM_EMPTY"}
+    if code in keep and code in ERROR_CODES:
+        return code
+    return "LLM_ERROR"
+
+
 class WorkbenchService:
     def __init__(
         self,
@@ -813,6 +833,7 @@ class WorkbenchService:
         r.add("publish.records", self.publish_records, PublishRecordsParams)
         r.add("publish.regenerate", self.publish_regenerate, PublishRegenerateParams)
         r.add("llm.test", self.llm_test)
+        r.add("llm.models", self.llm_models)
         r.add("fs.reveal", self.fs_reveal, RevealParams)
         r.add("app.open_url", self.open_url, OpenUrlParams)
         r.add("app.diagnostics", self.app_diagnostics, DiagnosticsParams)
@@ -1581,17 +1602,47 @@ class WorkbenchService:
         """
         return ChatClient.from_config(self.cfg, task=task)
 
-    def llm_test(self, provider: str = "", model: str = "") -> dict[str, Any]:
+    def _llm_client_for(
+        self, provider: str = "", base_url: str = "", api_key: str = "", task: str = ""
+    ):
+        """按界面上**当前**的地址/密钥造客户端，允许它们还没保存。
+
+        设置页的用法是「敲完地址和密钥、还没点保存，就直接点测试连接 / 获取可用模型」。
+        磁盘上的配置那会儿还是旧的（甚至是空的），所以这里把配置**拷一份**再改副本：
+        既能让这次请求用上新填的值，又不会把 self.cfg 改脏——用户随后点「放弃改动」时，
+        内存里的配置必须跟磁盘一致，否则界面回显与文件对不上。
+        """
+        base_url = (base_url or "").strip()
+        api_key = (api_key or "").strip()
+        if not base_url and not api_key:
+            if provider:
+                return ChatClient.from_config(self.cfg, provider=provider, task=task)
+            return self._llm_client(task)
+        cfg = copy.deepcopy(self.cfg)
+        card = find_provider(cfg.llm, provider) if provider else None
+        if card is not None:
+            if base_url:
+                card.base_url = base_url
+            if api_key:
+                card.api_key = api_key
+        else:
+            if base_url:
+                cfg.llm.base_url = base_url
+            if api_key:
+                cfg.llm.api_key = api_key
+        return ChatClient.from_config(cfg, provider=provider, task=task)
+
+    def llm_test(
+        self, provider: str = "", model: str = "", base_url: str = "", api_key: str = ""
+    ) -> dict[str, Any]:
         """设置页的「测试连接」。失败必须说清是没配还是连不上。
 
         ``provider`` 指名某张服务商卡（卡片右下角那个按钮）；留空就用当前生效那家。
         打的是这家自己的地址与密钥，不借当前生效服务商的配置——
         否则「新加的一家没填 key」会被误测成能通过。
         """
-        client = (
-            ChatClient.from_config(self.cfg, provider=provider)
-            if provider
-            else self._llm_client("subtitle")
+        client = self._llm_client_for(
+            provider, base_url, api_key, task="" if provider else "subtitle"
         )
         if model:
             client.model = model
@@ -1613,10 +1664,12 @@ class WorkbenchService:
                     {"role": "user", "content": "ping"},
                 ],
                 temperature=0.0,
-                max_tokens=8,
+                # 推理型模型（magpie 的 auto/*、deepseek-reasoner）会先把预算花在思考上，
+                # 给 8 个 token 的话正文必然是空的——「测试连接」会把好模型判成坏的。
+                max_tokens=512,
             )
         except ChatError as exc:
-            raise WBError("LLM_ERROR", str(exc), getattr(exc, "detail", "")) from exc
+            raise WBError(_llm_code(exc), str(exc), getattr(exc, "detail", "")) from exc
         return {
             "ok": True,
             "model": client.model,
@@ -1626,6 +1679,31 @@ class WorkbenchService:
             "provider": who,
             "latency_ms": int((time.time() - started) * 1000),
             "reply": (reply or "").strip()[:40],
+        }
+
+    def llm_models(
+        self, provider: str = "", base_url: str = "", api_key: str = ""
+    ) -> dict[str, Any]:
+        """「获取可用模型」：问这家密钥能用哪些模型。
+
+        和 ``llm.test`` 一样指名某张卡（界面上的按钮长在卡片里）。区别是
+        **不需要模型名**——用户点它的时候正是还不知道有哪些模型，所以这里
+        只校验地址 + 密钥，不借 ``require()``。
+
+        ``LLM_NOT_CONFIGURED`` 原样透出（界面要显示「这家还没填地址/密钥」），
+        其余一律折成 ``LLM_ERROR`` + 原始文案（401 说密钥、网络说连不上）。
+        """
+        client = self._llm_client_for(provider, base_url, api_key)
+        who = str(getattr(client, "provider_name", "") or "")
+        try:
+            models = client.list_models()
+        except ChatError as exc:
+            raise WBError(_llm_code(exc), str(exc), getattr(exc, "detail", "")) from exc
+        return {
+            "provider": who,
+            "base_url": client.base_url,
+            "models": models,
+            "count": len(models),
         }
 
     def subtitle_optimize(self, project_id: str = "", batch_size: int = 30,

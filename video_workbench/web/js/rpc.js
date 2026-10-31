@@ -82,7 +82,15 @@
   /** 底层调用：返回原始 `{ok, ...}` 结构，不 toast、不抛。 */
   WB.raw = function (method, params) {
     if (WB.isMock()) {
-      return Promise.resolve(WB.mock ? WB.mock.call(method, params) : { ok: false, error: { code: "UNSUPPORTED", message: "mock 未装载" } });
+      var res = WB.mock ? WB.mock.call(method, params) : { ok: false, error: { code: "UNSUPPORTED", message: "mock 未装载" } };
+      // 真桥返回的是 JSON 序列化的副本。mock 若把内存里的同一个对象直接递出去，页面上的
+      // 「就地改」就等于改了"服务端"本身——脏检测失效、保存按钮点不点都看不出差别，
+      // 这种假象会把真问题盖住，所以这里照真桥走一遍序列化。
+      try {
+        return Promise.resolve(JSON.parse(JSON.stringify(res)));
+      } catch (err) {
+        return Promise.resolve(res);
+      }
     }
     var requestId = "r" + ++seq + "-" + Date.now().toString(36);
     return Promise.resolve(window.pywebview.api.rpc(method, params === undefined ? null : params, requestId)).catch(function (err) {

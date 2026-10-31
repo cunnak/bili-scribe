@@ -138,7 +138,13 @@
       h("div", { class: "modal__head" }, [
         h("span", { text: opts.title || "" }),
         h("span", { class: "topbar__spacer" }),
-        h("button", { class: "btn btn--ghost btn--icon", title: "关闭", onclick: close, html: ui.svg("check") })
+        h("button", {
+          class: "btn btn--ghost btn--icon modal__x",
+          title: "关闭",
+          "aria-label": "关闭",
+          text: "×",
+          onclick: close
+        })
       ]),
       body,
       foot ? h("div", { class: "modal__foot" }, foot) : null

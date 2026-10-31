@@ -13,7 +13,7 @@
 | 代码位置 | `bili_scribe/` | `video_workbench/` |
 | 数据库 | `~/.bili-scribe/bili-scribe.db` | **同一个库**，只写 `wb_*` 表；读它的 task/publish/summary_version 表 |
 | B 站登录 | `~/.bili-scribe/key.bin` | **复用**，不需要再登一次 |
-| 配置 | `~/.bili-scribe/config.yaml` | **同一个文件**，`video_workbench/config.py` 在它的 dataclass 上继承扩展 |
+| 配置 | `~/.bili-scribe/config.yaml` + `workbench.json` | `config.yaml` 只写 bili-scribe 认识的六段（它的加载器遇到未知键会报错）；扩展设置全在同目录 `workbench.json` |
 
 原则：**不改 `bili_scribe/` 的任何业务代码**。需要的能力（下载、摘要、B 站客户端）按函数
 导入复用；新功能一律写在 `video_workbench/`。
@@ -56,7 +56,16 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 体检可以「先这样，进去试试」跳过，之后再从设置页「关于 → 运行环境体检」打开。
 跳过这件事记在 `ui.onboarded`，下次不再弹。
 
-## 配置（`~/.bili-scribe/config.yaml`，或 `config.wb.example.yaml` 作模板）
+## 配置（`~/.bili-scribe/config.yaml` + `workbench.json`，或 `config.wb.example.yaml` 作模板）
+
+两个文件分工明确：
+
+- `config.yaml`：只放 bili-scribe 也认的六段（`server` / `llm` / `collect` / `publish` / `storage` / `ui`），
+  形状由 bili-scribe 自己的模板渲染。**往里加键会让 bili-scribe 起不来。**
+- `workbench.json`：Workbench 的 11 段全量配置（服务商列表、任务模型、目录、切片参数、保留策略……）。
+
+读取顺序：`config.yaml` 与 `workbench.json` 合并 → 共享键以 yaml 为准 → 环境变量 → 默认值。
+老版本把扩展键写在 yaml 里的，首次 `load()` 会自动迁移（值搬到 sidecar，yaml 重写成合法形状）。
 
 | 段 | 关键项 |
 |---|---|
@@ -75,6 +84,16 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 `llm.tasks.<任务>` 里既能写 `服务商/模型`（`kimi/moonshot-v1-8k`），也能只写模型名
 （`deepseek-reasoner`，谁的 `models` 里有它就用谁）；解析只有 `config.resolve_task_model` 一个入口。
 模型 id 自带斜杠时（如 `qwen/qwen3-vl-plus`）不会被拆开——前缀不是已知服务商就整串当模型名。
+
+RPC 里跟模型相关的只有两个：`llm.test`（发一条最小对话验证这家能不能用）和
+`llm.models`（`GET {base_url}/models` 列这家账号能用的模型，供界面「获取可用模型」用；
+不需要 `model` 已配好，缺地址/密钥回 `LLM_NOT_CONFIGURED`，地址不支持该接口回 `LLM_BAD_RESPONSE`）。
+
+`llm.user_agent` 留空用内置 UA（`VideoWorkbench/0.1 openai-compatible-client`）。
+之所以有这一项：Cloudflare 的 1010 规则按客户端指纹判机器人，urllib 默认 UA 会被直接 403
+（报错原文 `blocked access based on your browser signature`），而密钥完全正确。
+被拦时填一个浏览器 UA、或填 `llm.proxy` 走代理出口，改完重启生效。
+403 与 401 已经分开：401 是 `LLM_AUTH`（key 不对），403 是 `LLM_FORBIDDEN`（网关/权限拒绝）。
 
 `tasks.vision` 留空会自动回落到 `llm.model`——**只有真能收图的多模态模型**才配这一项，
 否则画面精析会自动跳过（跳过写进任务备注，不会假装跑过）。
@@ -175,3 +194,16 @@ tests/wb/               # pytest 与前端 jsdom 测试
 scripts/                # 验收脚本、截图、矩阵、色值检查
 docs/                   # 用户手册、验收记录、截图
 ```
+
+### 本机网关（magpie）
+
+设置页「模型」分区底部有「接入本机 magpie」：一键建卡并拉模型清单
+（`base_url=http://127.0.0.1:3425/v1`、`api_key=magpie`、`id=magpie`）。
+环回地址的服务商 id 统一是 `local`（不是 sha1），所以 `llm.tasks.*` 里可以写 `local/auto/hy4-preview`。
+
+模型 id 自带斜杠是允许的（`auto/hy4-preview`、`Qwen/Qwen3-VL-Plus`）：
+`parse_model_spec()` 只在斜杠前缀**命中已知服务商 id** 时才把它当服务商前缀。
+
+推理型模型在小 `max_tokens` 下只产出 `reasoning_content`、`content=null`。
+这种响应会造成 `LLM_EMPTY`（「模型没有返回正文」/「只输出了思考过程」），
+不会被当成成功结果写入 `wb_summary` / `wb_subtitle`。`llm.test` 的探测预算固定 512 token。

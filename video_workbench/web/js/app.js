@@ -363,6 +363,18 @@
 
     // 2) 左栏与交互
     WB.router.renderRail(document.getElementById("rail-nav"));
+    // 左栏底部的「设置」是静态 HTML（不在 navItems 里，renderRail 管不到），
+    // 之前点了没反应。这里统一接管左栏内所有带 data-route 的按钮。
+    var railEl = document.querySelector(".rail"); // aside.rail 没有 id
+    if (railEl) {
+      railEl.addEventListener("click", function (event) {
+        var node = event.target;
+        var item = node && node.closest ? node.closest(".rail__item[data-route]") : null;
+        if (!item) return;
+        if (item.closest("#rail-nav")) return; // 上面那批已自带 onclick
+        WB.router.go(item.dataset.route);
+      });
+    }
     wireRailToggle();
     wireSearch();
 

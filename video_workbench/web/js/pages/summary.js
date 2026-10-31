@@ -574,7 +574,7 @@
       ui.h("span", { class: "muted", text: state.versions.length ? state.versions.length + " 版" : "" })
     ]));
     if (!state.versions.length) {
-      card.appendChild(ui.h("p", { class: "muted", text: "还没有版本。生成一次就有了。" }));
+      card.appendChild(ui.h("p", { class: "muted sum-ver-empty", text: "还没有版本。生成一次就有了。" }));
       return card;
     }
     var list = ui.h("div", { class: "ver-list" });

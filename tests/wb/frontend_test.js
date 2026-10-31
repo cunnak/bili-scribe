@@ -402,6 +402,303 @@ async function main() {
     assert.strictEqual(saved.providers[0].name, "DeepSeek 官方（改）", "就地改的名称没提交");
   });
 
+  await check("服务商卡片：获取可用模型 → 勾选后加进 chips", async () => {
+    WB.router.go("settings", { section: "llm" });
+    await tick(80);
+    const body = window.document.querySelector("#settings-body");
+    const card = body.querySelectorAll(".provider-card")[0];
+    const chipTexts = () => [...card.querySelectorAll(".chip .mono")].map((el) => el.textContent);
+    const before = chipTexts();
+
+    const btn = [...card.querySelectorAll("button")].find((b) => b.textContent.trim() === "获取可用模型");
+    assert.ok(btn, "卡片上没有「获取可用模型」按钮");
+    btn.click();
+    await tick(200);
+
+    const rows = () => [...window.document.querySelectorAll(".model-pick__row")];
+    assert.ok(rows().length >= 3, "候选模型没列出来，实际 " + rows().length + " 行");
+    const boxes = rows().map((r) => r.querySelector("input[type=checkbox]"));
+    assert.ok(boxes.every(Boolean), "每一行都要有勾选框");
+    const checkedIds = boxes.filter((b) => b.checked).map((b) => b.value);
+    assert.ok(
+      before.every((m) => checkedIds.indexOf(m) >= 0),
+      "已配置的模型没有预勾上：" + before.join(",") + " vs " + checkedIds.join(",")
+    );
+
+    const all = [...window.document.querySelectorAll(".model-pick__bar button")].find(
+      (b) => b.textContent.trim() === "全选"
+    );
+    assert.ok(all, "弹窗里没有「全选」");
+    all.click();
+    await tick(30);
+
+    const addBtn = [...window.document.querySelectorAll(".modal__foot button")].find(
+      (b) => b.textContent.trim() === "保存所选"
+    );
+    assert.ok(addBtn, "弹窗里没有「保存所选」");
+    assert.strictEqual(addBtn.disabled, false, "列出候选后「保存所选」该可用");
+    const total = rows().length;
+    addBtn.click();
+    await tick(80);
+    assert.strictEqual(rows().length, 0, "确认后弹窗没关");
+    assert.strictEqual(chipTexts().length, total, "加完之后 chips 数应等于候选数");
+
+    const save = [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存");
+    assert.ok(save, "没有保存按钮");
+    save.click();
+    await tick(200);
+    const saved = WB.mock.settings().llm.providers[0].models;
+    assert.strictEqual(saved.length, total, "保存后这家卡的模型数不对：" + saved.length + " vs " + total);
+    assert.ok(
+      chipTexts().length === saved.length,
+      "保存回填后 chips 与库里的模型数不一致"
+    );
+  });
+
+  await check("服务商卡片：弹窗里取消勾选，卡片里的模型也跟着少一个", async () => {
+    // 之前弹窗只能"加"：勾选框看起来是「已选」，可取消勾选完全不生效，
+    // 卡片与弹窗各说一套。现在勾选集合就是这家的模型列表。
+    WB.router.go("settings", { section: "llm" });
+    await tick(100);
+    const body = window.document.querySelector("#settings-body");
+    const card = () => body.querySelectorAll(".provider-card")[0];
+    const chips = () => [...card().querySelectorAll(".chip .mono")].map((el) => el.textContent);
+    const before = chips();
+    assert.ok(before.length >= 2, "这张卡初始应有多个模型，实际 " + before.join(","));
+
+    [...card().querySelectorAll("button")]
+      .find((b) => b.textContent.trim() === "获取可用模型")
+      .click();
+    await tick(200);
+
+    const rows = [...window.document.querySelectorAll(".model-pick__row")];
+    const target = rows.find((r) => {
+      const cb = r.querySelector("input[type=checkbox]");
+      return cb && cb.value === before[0];
+    });
+    assert.ok(target, "弹窗里找不到已在卡片上的模型：" + before[0]);
+    const box = target.querySelector("input[type=checkbox]");
+    box.checked = false;
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await tick(30);
+
+    [...window.document.querySelectorAll(".modal__foot button")]
+      .find((b) => b.textContent.trim() === "保存所选")
+      .click();
+    await tick(100);
+
+    const after = chips();
+    assert.strictEqual(after.indexOf(before[0]), -1, "取消勾选后卡片里还留着 " + before[0]);
+    assert.strictEqual(after.length, before.length - 1, "卡片模型数应减一");
+    assert.strictEqual(
+      [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存").disabled,
+      false,
+      "取消勾选后没有标脏，保存按钮是灰的"
+    );
+  });
+
+  await check("设置页：保存过一次之后，再改模型列表仍然能保存", async () => {
+    // 回归：current 若与 base 共享引用（浅拷），就地改数组后 JSON 相等 → 永远标不出脏，
+    // 症状是「保存过一次，之后再改模型列表，保存按钮一直是灰的，得先去动一下别的开关」。
+    WB.router.go("settings", { section: "llm" });
+    await tick(80);
+    const body = window.document.querySelector("#settings-body");
+    const card = () => body.querySelectorAll(".provider-card")[0];
+    const nameInput = () =>
+      [...card().querySelectorAll("input")].find((el) => el.placeholder === "模型名，回车添加");
+    const saveBtn = () =>
+      [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存");
+
+    function addModel(text) {
+      const input = nameInput();
+      assert.ok(input, "没找到「模型名，回车添加」输入框");
+      input.value = text;
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+      input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+
+    addModel("probe-a");
+    await tick(30);
+    assert.strictEqual(saveBtn().disabled, false, "第一次改模型后保存按钮就该亮");
+    saveBtn().click();
+    await tick(200);
+    assert.ok(
+      WB.mock.settings().llm.providers[0].models.indexOf("probe-a") >= 0,
+      "第一次改的模型没存进去"
+    );
+
+    // 第二次改：这里就是那条回归
+    addModel("probe-b");
+    await tick(40);
+    assert.strictEqual(
+      saveBtn().disabled,
+      false,
+      "保存过一次再改模型列表，保存按钮还是灰的（脏检测失效）"
+    );
+    saveBtn().click();
+    await tick(200);
+    const saved = WB.mock.settings().llm.providers[0].models;
+    assert.ok(saved.indexOf("probe-b") >= 0, "第二次改的模型没存进去");
+    assert.ok(saved.indexOf("probe-a") >= 0, "第二次保存把第一次的模型弄丢了");
+    assert.strictEqual(saveBtn().disabled, true, "存完没有新改动时保存按钮该回到禁用");
+  });
+
+  await check("设置页：数字输入框边打边标脏，不用先点别处", async () => {
+    // 回归：数字框原本只绑 onchange（失焦才触发）。用户改完数字直接点保存——按钮此时
+    // 还是禁用态，点不动，只能先去点一下别的控件「选中」才生效。
+    WB.router.go("settings", { section: "general" });
+    await tick(100);
+    const body = window.document.querySelector("#settings-body");
+    const portInput = [...body.querySelectorAll("input[type=number]")][0];
+    assert.ok(portInput, "常规分区没有数字输入框");
+    const saveBtn = () =>
+      [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存");
+
+    portInput.value = "9123";
+    portInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(40);
+    assert.strictEqual(
+      saveBtn().disabled,
+      false,
+      "改了数字、光标还在框里，保存按钮却是灰的（检测要等失焦才发生）"
+    );
+    saveBtn().click();
+    await tick(200);
+    assert.strictEqual(
+      window.WB.mock.settings().server.port,
+      9123,
+      "数字改动没保存进去"
+    );
+  });
+
+  await check("左栏底部的「设置」也能打开设置页", async () => {
+    // 底部那个「设置」是 index.html 里的静态按钮（不在 navItems 里），
+    // 之前点了没反应：renderRail 只给 #rail-nav 挂点击。
+    WB.router.go("library");
+    await tick(100);
+    const foot = window.document.querySelector(".rail .rail__foot .rail__item[data-route=settings]");
+    assert.ok(foot, "左栏底部没找到设置按钮");
+    foot.click();
+    await tick(120);
+    assert.strictEqual(WB.router.current().route, "settings", "点了底部设置没进设置页");
+    const body = window.document.querySelector("#settings-body");
+    assert.ok(body && body.textContent.trim().length > 0, "设置页没渲染内容");
+  });
+
+  await check("模型分区：还没保存就能测连接、取可用模型", async () => {
+    // 用户的实际动作：新填地址和密钥 → 直接点「测试连接」/「获取可用模型」。
+    // 之前后端只认磁盘配置，于是明明填了却说「缺 api_key」。
+    WB.router.go("settings", { section: "llm" });
+    await tick(100);
+    const body = window.document.querySelector("#settings-body");
+    const card = body.querySelector(".provider-card");
+    assert.ok(card, "没有服务商卡片");
+    // 按 type/class 精确取：第一张卡里还有一个「名称」输入框（input.provider-card__name）
+    const base = card.querySelector("input.mono");
+    const key = card.querySelector('input[type="password"]');
+    base.value = "https://typed.example/v1";
+    base.dispatchEvent(new window.Event("input", { bubbles: true }));
+    key.value = "sk-typed";
+    key.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(40);
+
+    const btn = (text) =>
+      [...card.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
+
+    // 盯住参数本身：mock 里第一张卡本来就带密钥，只看"成功"分不出
+    // 到底用的是卡片里现填的值还是磁盘上的旧值。
+    const llmCalls = [];
+    const origRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (String(method).indexOf("llm.") === 0) llmCalls.push({ method: method, params: params || {} });
+      return origRpc.call(WB, method, params, opts);
+    };
+
+    // 测试连接：不该再报「缺 api_key」
+    btn("测试连接").click();
+    await tick(150);
+    const probeText = [...card.querySelectorAll("span")].map((s) => s.textContent).join(" | ");
+    assert.ok(
+      probeText.indexOf("连上了") >= 0,
+      "没保存就测试连接失败了，卡片上的回报是：" + probeText.slice(0, 80)
+    );
+
+    // 获取可用模型：弹窗里应该真列出候选
+    btn("获取可用模型").click();
+    await tick(150);
+    const rows = [...window.document.querySelectorAll(".model-pick__row")];
+    assert.ok(rows.length >= 3, "没保存就取模型，弹窗里没有候选，实际 " + rows.length);
+    const cancel = [...window.document.querySelectorAll(".modal__foot button")].find(
+      (b) => b.textContent.trim() === "取消"
+    );
+    if (cancel) cancel.click();
+    await tick(40);
+    WB.rpc = origRpc;
+
+    const probeCall = llmCalls.find((c) => c.method === "llm.test");
+    const modelsCall = llmCalls.find((c) => c.method === "llm.models");
+    assert.ok(probeCall && modelsCall, "没发 llm.test / llm.models 请求");
+    [probeCall, modelsCall].forEach((c) => {
+      assert.strictEqual(
+        c.params.base_url,
+        "https://typed.example/v1",
+        c.method + " 没把界面上刚填的地址传上去"
+      );
+      assert.strictEqual(
+        c.params.api_key,
+        "sk-typed",
+        c.method + " 没把界面上刚填的密钥传上去"
+      );
+    });
+  });
+
+  await check("模型分区：一键接入本机 magpie，自动带地址密钥并设为当前", async () => {
+    WB.router.go("settings", { section: "llm" });
+    await tick(80);
+    const body = window.document.querySelector("#settings-body");
+    const cards = () => [...body.querySelectorAll(".provider-card")];
+
+    const btn = [...body.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "接入本机 magpie"
+    );
+    assert.ok(btn, "模型分区里没有「接入本机 magpie」按钮");
+
+    const before = cards().length;
+    btn.click();
+    await tick(160);
+
+    const after = cards();
+    assert.strictEqual(after.length, before + 1, "点完没有多出一张卡");
+
+    const card = after[after.length - 1];
+    const inputs = [...card.querySelectorAll("input")].filter(
+      (i) => i.type !== "checkbox" && i.type !== "radio"
+    );
+    const url = inputs.find((i) => String(i.value).indexOf("127.0.0.1:3425") >= 0);
+    assert.ok(url, "新卡里没有 magpie 的地址，实际 " + inputs.map((i) => i.value).join(" | "));
+    assert.ok(card.classList.contains("is-active"), "接进来的卡没有设为当前使用");
+
+    const chips = [...card.querySelectorAll(".chip .mono")].map((n) => n.textContent.trim());
+    assert.ok(chips.length >= 3, "模型列表没拉回来，实际 " + chips.length + " 个");
+
+    // 再点一次不该重复建卡（只认地址里带 3425 的那张）
+    btn.click();
+    await tick(120);
+    assert.strictEqual(cards().length, before + 1, "重复点会重复建卡");
+
+    // 存下去，卡片要真的进了配置
+    const saveBtn = [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存");
+    assert.ok(saveBtn, "找不到保存按钮");
+    assert.strictEqual(saveBtn.disabled, false, "接入之后保存按钮还是灰的（没标脏）");
+    saveBtn.click();
+    await tick(140);
+    const provs = WB.mock.settings().llm.providers || [];
+    const saved = provs.find((x) => String(x.base_url || "").indexOf("127.0.0.1:3425") >= 0);
+    assert.ok(saved, "保存后配置里没有 magpie 这张卡");
+    assert.ok((saved.models || []).length >= 3, "保存后模型列表是空的");
+    assert.strictEqual(WB.mock.settings().llm.active_provider, saved.id, "保存后当前服务商不是它");
+  });
+
   await check("模型分区只剩一张卡时不给删除按钮（不能删空）", async () => {
     WB.router.go("settings", { section: "llm" });
     await tick(80);

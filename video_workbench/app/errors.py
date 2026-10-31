@@ -22,6 +22,8 @@ ERROR_CODES: dict[str, str] = {
     "PROCESS_FAILED": "外部进程执行失败",
     "CANCELED": "任务已取消",
     "LLM_ERROR": "模型调用失败",
+    "LLM_FORBIDDEN": "被网关拒绝（403）",
+    "LLM_EMPTY": "模型没有返回正文",
     "LLM_BAD_RESPONSE": "模型返回的内容不合规范",
     "LLM_NOT_CONFIGURED": "还没有配置大模型",
     # 下面这几个是 infra/llm.py 真的会抛的码（按 HTTP 状态分）。之前它们**不在表里**：
