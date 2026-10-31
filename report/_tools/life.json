@@ -1,0 +1,114 @@
+{
+ "task": {
+  "title": "【世纪末之诗】虚妄嵌合序言：给90年代查一次账",
+  "bvid": "BV1jxno65Eo6",
+  "up": "固液",
+  "source_kind": "subtitle_user",
+  "source_label": "你上传的字幕",
+  "source_trust": "未知",
+  "warnings": "[]",
+  "status": "ready",
+  "len_preview": 3150,
+  "len_comment": 257
+ },
+ "versions": [
+  {
+   "version_no": 1,
+   "source": "initial",
+   "role": "wengao",
+   "requirement": "",
+   "lp": 2005,
+   "lc": 266,
+   "created_at": "2026-10-27T17:21:08+08:00",
+   "calls": 10,
+   "total_tokens": 129740,
+   "prompt_tokens": 109958,
+   "elapsed": 393.6,
+   "chunks": 7,
+   "frames": 12
+  },
+  {
+   "version_no": 2,
+   "source": "refine",
+   "role": "wengao",
+   "requirement": "这是level1版本，迭代一个level2版本",
+   "lp": 2560,
+   "lc": 257,
+   "created_at": "2026-10-27T17:27:24+08:00",
+   "calls": 3,
+   "total_tokens": 60568,
+   "prompt_tokens": 55561,
+   "elapsed": 339.0,
+   "chunks": 7,
+   "frames": 12
+  },
+  {
+   "version_no": 3,
+   "source": "refine",
+   "role": "wengao",
+   "requirement": "这是level2版本，迭代一个新的level3版本",
+   "lp": 3176,
+   "lc": 257,
+   "created_at": "2026-10-27T17:32:35+08:00",
+   "calls": 3,
+   "total_tokens": 62588,
+   "prompt_tokens": 56603,
+   "elapsed": 92.5,
+   "chunks": 7,
+   "frames": 12
+  },
+  {
+   "version_no": 4,
+   "source": "refine",
+   "role": "wengao",
+   "requirement": "这是level3版本，迭代一个新的level4版本，并将“毛主席”改成“教员”",
+   "lp": 3150,
+   "lc": 257,
+   "created_at": "2026-10-27T17:54:20+08:00",
+   "calls": 3,
+   "total_tokens": 62361,
+   "prompt_tokens": 57028,
+   "elapsed": 372.4,
+   "chunks": 7,
+   "frames": 12
+  }
+ ],
+ "summary_keys": {
+  "one_line": 32,
+  "summary_md": 2216,
+  "key_points": 6,
+  "timeline": 8,
+  "caution": 147,
+  "comment_short": 257,
+  "chunks": "int",
+  "model": 18,
+  "role": 6,
+  "frames": "int",
+  "revise_note": 92
+ },
+ "summary_preview": {
+  "one_line": "从巴西与塞尔维亚政局切入，解构90年代怀旧滤镜并盘点全球化输家。",
+  "summary_md": "## 梦核幻象与被折叠的九十年代\n视频开篇由电竞椅的物理落差引出心理落差：大众在短视频中怀念的“90年代”，本质上是一种特权阶级的视觉残留。那些半截绿漆脱落露出",
+  "key_points": [
+   "90年代怀旧是拥有拍摄条件的特权阶层的专属叙事。",
+   "卢拉胜选得益于基层动员与博索纳罗派的战略傲慢。"
+  ],
+  "timeline": [
+   {
+    "t": "03:20",
+    "text": "主播开播闲聊，提及苹果折叠屏翻车及游戏评分争议。"
+   },
+   {
+    "t": "09:52",
+    "text": "话题转入巴西大选，分析卢拉胜选原因及博索纳罗家族的败局。"
+   }
+  ],
+  "caution": "素材来源于直播录像字幕，存在大量口语化表达、跳跃性思维及ASR识别错误（如人名地名音译偏差）。部分内容涉及敏感政治评价或未经证实的个人推测（如对特定人物的健康预",
+  "comment_short": "这期视频是一场针对90年代怀旧情绪的祛魅手术。我们在短视频里看到的绿漆走廊和电视雪花，不过是拥有闲暇和设备的幸运儿眼中的世界。真正的90年代，是阿尔巴尼亚的枪声",
+  "chunks": 7,
+  "model": "qwen3.8-omni-flash",
+  "role": "wengao",
+  "frames": 12,
+  "revise_note": "本次修订按要求删除了结尾处素材未提及的虚构金句“旧秩序不会自己让位，但它迟早会烂掉”，并在第一段补全了素材中明确列出但此前遗漏的“孟买贫民区”和“里约山坡”两个"
+ }
+}

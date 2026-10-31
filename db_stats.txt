@@ -1,0 +1,51 @@
+## TASK 2c7ff315bcdb
+id: 2c7ff315bcdb
+bvid: BV1eAHG6LE4Y
+aid: 117500373177771
+cid: 43037887700
+page: 1
+title: 《新闻周刊》 20261024期 完整版
+up_name: 小逸Xiaoyi2026
+status: ready
+source_kind: subtitle_ai
+source_label: B站 AI 字幕
+source_trust: 中
+created_at: 2026-10-27T21:16:58+08:00
+updated_at: 2026-10-27T21:35:30+08:00
+progress: 已按你的要求改好一版，等待确认
+error: None
+warnings: ["本次用的是平台 AI 字幕（语音识别），存在同音字与断句误差，总结中的专有名词与数字需自行复核"]
+summary_json keys: ['one_line', 'summary_md', 'key_points', 'timeline', 'caution', 'comment_short', 'chunks', 'model', 'role', 'frames', 'revise_note']
+chunks: 1 frames: 12 role: wengao
+preview_md len: 1950
+comment_text len: 287
+timeline items: 7
+key_points: 5
+summary_md len: 1105
+
+## VERSIONS of new task
+v1 src=initial role=wengao req='' calls=3 in=26874 out=3859 elapsed=107.3 chunks=1 frames=12 at=2026-10-27T21:18:45+08:00
+v2 src=refine role=wengao req='第二个小标题「AI造假维权之困与法律博弈」现在有三段，读起来太密。把这段压成两段，法律条文那半段只留最高法的两条明确规则（可识别标准、惩罚性赔偿），其余展开删掉。另外时间轴现在只有六条，从 25:29 直接跳到 26:33，补一条萨维在伦敦马拉松破二的那个瞬间。' calls=3 in=30119 out=4092 elapsed=81.0 chunks=1 frames=12 at=2026-10-27T21:35:30+08:00
+
+## GLOBAL
+task total: 80
+  status ready: 64
+  status failed: 16
+distinct bvid: 36
+versions: 65
+publish rows: 38
+  publish blocked: 1
+  publish published: 37
+  src subtitle_ai: 47
+  src subtitle_user: 21
+  src meta: 7
+  src danmaku: 4
+  src None: 1
+  role wengao: 61
+  role xiezuo: 1
+  role standard: 1
+  role shensi: 1
+  role fenxi: 1
+date range: 2026-09-19T13:55:39+08:00 .. 2026-10-27T21:16:58+08:00
+tokens in=3,332,890 out=499,565 total=3,832,455 calls=305
+elapsed n=61 median=109.5s min=37.4 max=457.2 p25=76.0 p75=266.2

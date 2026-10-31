@@ -1,0 +1,548 @@
+/* ===================================================================
+   视觉语言：ignoredone.space「明日方舟美术资源库」索引页
+   实测规格（report/shots/rs_style.json / rs_deep.json / rs_card.json）：
+     body      bg #FFFFFF / color rgb(17,17,17) / Jost 16.8px / lh 26.04
+     main      bg rgb(241,254,251) 薄荷绿，整页 51939px
+     h1        Instrument Sans 56px / 600 / letter-spacing 2.24px
+     p         20px / letter-spacing 2.4px / lh 31px
+     .card     bg rgba(255,255,255,.12) / br 20px / 1px solid rgba(255,255,255,.25)
+               shadow rgba(0,0,0,.15) 0 8px 32px 0, rgba(255,255,255,.05) 0 0 20px 0 inset
+               842x842 正方形，单列居中，纵向步进 882（= 842 + 40 gap）
+     .pill     br 100px / bg rgb(241,254,251) / 14.4px 500 / pad 9.6px 24px
+               shadow rgba(0,0,0,.2) 6px 6px 9px
+     .cover-btn 34x34 / br 50% / bg rgba(255,255,255,.15) / 白色 ⋮
+   两枚字体文件已下载到 report/fonts/，此处直接本地引用。
+   报告沿用这套语言：薄荷绿纸面 + 白色圆角卡 + 巨字标题 + 药丸 + 图卡网格。
+   =================================================================== */
+
+@font-face{
+  font-family:"Instrument Sans";
+  src:url("fonts/InstrumentSans.woff2") format("woff2");
+  font-weight:400 700;font-style:normal;font-display:swap;
+}
+@font-face{
+  font-family:"Jost";
+  src:url("fonts/Jost.woff2") format("woff2");
+  font-weight:100 900;font-style:normal;font-display:swap;
+}
+
+:root{
+  --mint:#F1FEFB;          /* main 背景，实测 rgb(241,254,251) */
+  --mint-2:#DFF7F1;
+  --mint-3:#C4EEE4;
+  --mint-deep:#1B6B5B;
+  --paper:#FFFFFF;
+  --ink:#111111;
+  --ink-2:#212529;         /* 图集页正文色，实测 rgb(33,37,41) */
+  --ink-3:#57616A;
+  --mute:#8B959C;
+  --rule:#E2EFEB;
+  --rule-2:#EFF8F5;
+  --wash:#F7FDFB;
+
+  --sans:"Instrument Sans","Noto Sans SC","Microsoft YaHei","PingFang SC",Arial,sans-serif;
+  --body:"Jost","Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif;
+  --cn:"Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono:"Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
+
+  --card-shadow:0 8px 32px rgba(0,0,0,.10), 0 0 20px rgba(255,255,255,.55) inset;
+  --card-shadow-sm:0 2px 10px rgba(0,0,0,.06);
+  --pill-shadow:rgba(0,0,0,.16) 4px 4px 9px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--mint)}
+body{
+  background:var(--mint);color:var(--ink-2);
+  font-family:var(--body);font-size:14.5px;line-height:1.9;
+  letter-spacing:.012em;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  padding:0 0 0;
+}
+@page{size:A4;margin:12mm 11mm 15mm}
+
+/* ============ 顶栏：白底药丸条 ============ */
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:rgba(255,255,255,.86);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(0,0,0,.06);
+}
+.topbar .in{
+  max-width:1120px;margin:0 auto;padding:10px 30px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+}
+.topbar .l{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.2em;color:var(--ink)}
+.topbar .l i{width:9px;height:9px;background:var(--mint-3);border:1px solid var(--mint-deep);display:block;border-radius:50%}
+.topbar .r{display:flex;gap:7px;color:var(--mute)}
+.topbar .r span{
+  background:var(--mint);border-radius:100px;padding:4px 13px;
+  color:var(--ink-3);font-weight:500;letter-spacing:.1em;
+}
+
+.wrap{max-width:1120px;margin:0 auto;padding:0 30px 56px}
+
+/* ============ 封面：薄荷纸 + 白色巨卡 ============ */
+.cover{
+  position:relative;
+  background:var(--paper);border-radius:28px;
+  box-shadow:var(--card-shadow);
+  margin:26px 0 0;padding:52px 54px 46px;
+  overflow:hidden;
+}
+.blob{
+  position:absolute;right:-90px;top:-110px;width:420px;height:400px;z-index:0;
+  background:var(--mint-3);
+  border-radius:58% 42% 46% 54% / 52% 48% 52% 48%;
+  transform:rotate(-9deg);opacity:.55;
+}
+.blob.b2{
+  right:auto;left:-140px;bottom:-120px;top:auto;
+  width:300px;height:280px;opacity:.35;transform:rotate(14deg);
+}
+.cover > :not(.blob){position:relative;z-index:1}
+
+.eyebrow{
+  font-family:var(--sans);font-size:11px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.eyebrow b{
+  background:var(--ink);color:var(--paper);padding:4px 13px;border-radius:100px;
+  letter-spacing:.16em;font-weight:600;
+}
+
+h1{
+  font-family:var(--sans);font-weight:600;
+  font-size:68px;line-height:1.02;letter-spacing:.035em;
+  color:var(--ink);margin:0 0 4px;
+}
+h1 .word{display:block}
+h1 .mark{
+  font-family:var(--sans);font-size:23px;letter-spacing:.22em;font-weight:500;
+  color:var(--ink-3);margin-top:18px;display:block;text-transform:uppercase;
+}
+h1 .mark em{
+  font-style:normal;background:var(--mint-2);padding:3px 12px;color:var(--ink);
+  border-radius:100px;letter-spacing:.16em;
+}
+
+.sub{
+  font-family:var(--body);font-size:16.5px;color:var(--ink-2);
+  margin:22px 0 0;max-width:660px;line-height:1.85;letter-spacing:.03em;
+}
+.sub b{font-weight:600;color:var(--ink);box-shadow:inset 0 -.36em 0 var(--mint-3)}
+
+/* 药丸：实测 br 100px / shadow 6px 6px 9px */
+.pills{display:flex;flex-wrap:wrap;gap:10px;margin:30px 0 0}
+.pill{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--sans);font-size:12.5px;font-weight:500;letter-spacing:.06em;
+  border-radius:100px;padding:8px 22px;
+  background:var(--mint);color:var(--ink);text-decoration:none;
+  box-shadow:var(--pill-shadow);
+  transition:background .18s ease,color .18s ease;
+}
+.pill.k{background:var(--ink);color:var(--paper);box-shadow:rgba(0,0,0,.28) 4px 4px 9px}
+.pill.y{background:var(--mint-3);color:var(--ink);font-weight:600}
+.pill .lb{color:var(--mute);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:400}
+.pill.k .lb{color:#9BA3A8}
+.pill:hover{background:var(--mint-3);color:var(--ink)}
+
+/* ============ 信息格：白卡内细线网格 ============ */
+.grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  border-top:1px solid var(--rule);border-left:1px solid var(--rule);
+  margin:34px 0 0;border-radius:16px;overflow:hidden;
+}
+.grid div{
+  border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:13px 16px 14px;background:var(--wash);
+}
+.grid .k{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);display:block;margin-bottom:5px;
+}
+.grid .v{font-family:var(--body);font-size:13px;color:var(--ink);font-weight:500;letter-spacing:.02em}
+.grid .v.blank{display:block;height:19px;border-bottom:1px dashed #C9D6D2;color:transparent}
+.grid .v .hl{background:var(--mint-3);padding:1px 7px;border-radius:100px}
+
+/* ============ 组员 ============ */
+.roster{
+  margin:14px 0 0;border-radius:16px;padding:17px 19px 16px;
+  background:var(--wash);border:1px solid var(--rule);
+}
+.roster .h{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);margin-bottom:12px;display:flex;justify-content:space-between;
+}
+.roster .h .cnt{color:var(--ink);font-weight:600}
+.roster .names{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:7px}
+.roster .names li{
+  font-family:var(--body);font-size:12.5px;color:var(--ink);
+  border-radius:100px;padding:4px 14px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);letter-spacing:.03em;
+}
+.roster .names li .i{
+  font-family:var(--mono);font-size:9px;color:var(--mute);
+  margin-right:6px;letter-spacing:.06em;
+}
+
+/* ============ 摘要：薄荷实色大块 ============ */
+.abstract{
+  margin:34px 0 0;background:var(--mint-2);border-radius:24px;
+  padding:32px 34px 28px;position:relative;overflow:hidden;
+}
+.abstract:after{
+  content:"";position:absolute;right:-70px;bottom:-80px;width:220px;height:210px;
+  background:var(--mint-3);border-radius:52% 48% 44% 56% / 46% 54% 46% 54%;opacity:.6;
+}
+.abstract > *{position:relative;z-index:1}
+.abstract .h{
+  font-family:var(--sans);font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--mint-deep);margin-bottom:15px;font-weight:600;
+}
+.abstract p{font-family:var(--body);font-size:14px;line-height:1.95;color:var(--ink-2);margin-bottom:12px;letter-spacing:.03em}
+.abstract p:last-of-type{margin-bottom:0}
+.abstract b{font-weight:600;color:var(--ink)}
+.abstract em{font-style:normal;box-shadow:inset 0 -.36em 0 rgba(255,255,255,.9)}
+.abstract .kw{
+  font-family:var(--mono);font-size:11px;color:var(--mint-deep);margin-top:18px;padding-top:14px;
+  border-top:1px solid rgba(27,107,91,.18);letter-spacing:.02em;
+}
+.abstract .kw b{color:var(--ink);font-weight:600}
+
+/* ============ 章节：白卡 ============ */
+section{
+  background:var(--paper);border-radius:28px;box-shadow:var(--card-shadow);
+  margin:26px 0 0;padding:44px 54px 46px;
+}
+.sec-head{display:flex;align-items:flex-start;gap:18px;margin-bottom:28px}
+.sec-head .num{
+  flex:0 0 auto;width:56px;height:56px;background:var(--mint-2);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--sans);font-size:20px;font-weight:600;letter-spacing:.02em;
+  border-radius:18px;color:var(--mint-deep);
+}
+.sec-head .tt{flex:1;min-width:0}
+.sec-head h2{
+  font-family:var(--sans);font-weight:600;font-size:32px;line-height:1.2;
+  letter-spacing:.03em;margin:0;color:var(--ink);
+}
+.sec-head small{
+  display:block;font-family:var(--body);font-size:13px;font-weight:400;
+  color:var(--mute);letter-spacing:.04em;line-height:1.7;margin-top:8px;
+}
+
+h3{
+  font-family:var(--sans);font-weight:600;font-size:18px;letter-spacing:.045em;
+  margin:36px 0 14px;padding-left:14px;border-left:4px solid var(--mint-3);
+  line-height:1.45;color:var(--ink);
+}
+h3 .x{
+  font-family:var(--mono);font-size:11px;color:var(--mute);font-weight:400;
+  margin-left:10px;letter-spacing:0;
+}
+
+p{margin-bottom:14px;color:var(--ink-2);letter-spacing:.02em}
+p.lead{font-size:16px;color:var(--ink);line-height:1.88;letter-spacing:.03em}
+strong,b{color:var(--ink);font-weight:600}
+em{color:var(--ink);font-style:normal;box-shadow:inset 0 -.4em 0 var(--mint-2)}
+code{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink);
+  background:var(--wash);border:1px solid var(--rule);border-radius:6px;padding:1px 6px;
+  letter-spacing:0;
+}
+a{color:var(--ink);text-decoration:none;border-bottom:2px solid var(--mint-3)}
+a:hover{background:var(--mint-2)}
+
+ul,ol{margin:0 0 15px 0;padding-left:22px}
+li{margin-bottom:8px;color:var(--ink-2)}
+li::marker{color:var(--mint-deep);font-weight:600}
+ul.plain{list-style:none;padding-left:0}
+ul.plain li{padding-left:18px;position:relative}
+ul.plain li:before{
+  content:"";position:absolute;left:1px;top:10px;width:8px;height:8px;
+  background:var(--mint-3);border-radius:50%;
+}
+
+/* ============ 流水线 ============ */
+.flow{
+  margin:24px 0 12px;border-radius:20px;padding:24px 20px 20px;
+  background:var(--wash);border:1px solid var(--rule);
+}
+.flow .row{display:flex;align-items:stretch;gap:0;min-width:0}
+.stage{
+  flex:1;min-width:0;background:var(--paper);border-radius:14px;
+  padding:14px 13px;box-shadow:var(--card-shadow-sm);
+}
+.stage .i{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;color:var(--mute);margin-bottom:7px;
+}
+.stage .n{font-family:var(--body);font-size:13px;font-weight:600;color:var(--ink);margin-bottom:5px;letter-spacing:.03em}
+.stage .d{font-size:10.5px;color:var(--ink-3);line-height:1.65;letter-spacing:.02em}
+.stage.hot{background:var(--mint-2)}
+.stage.hot .i{color:var(--mint-deep)}
+.stage.hot .n,.stage.hot .d{color:var(--ink)}
+.arrow{
+  align-self:center;color:var(--mint-deep);font-family:var(--mono);font-size:13px;
+  padding:0 6px;flex:0 0 auto;
+}
+.loop{
+  margin-top:15px;padding-top:12px;border-top:1px dashed #CFE2DC;
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:center;
+}
+
+/* ============ 表格 ============ */
+table{
+  width:100%;border-collapse:separate;border-spacing:0;margin:18px 0 22px;
+  font-size:12.5px;font-family:var(--body);
+  border-radius:14px;overflow:hidden;box-shadow:var(--card-shadow-sm);
+}
+thead th{
+  background:var(--mint-2);color:var(--ink);font-weight:600;
+  text-align:left;padding:11px 13px;font-size:11px;letter-spacing:.1em;
+  white-space:nowrap;border-bottom:1px solid var(--rule);
+}
+tbody td{
+  padding:9px 13px;border-bottom:1px solid var(--rule-2);
+  color:var(--ink-2);vertical-align:top;letter-spacing:.02em;
+}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:nth-child(even) td{background:var(--wash)}
+tbody td.num{font-family:var(--mono);text-align:right;white-space:nowrap;color:var(--ink);font-weight:600}
+tbody td.dim{color:var(--mute);font-family:var(--mono);font-size:11.5px}
+tbody td b{color:var(--ink);font-weight:600}
+td .cn,th .cn{font-family:var(--body);font-size:12px;letter-spacing:.02em}
+tbody tr.mark td{background:var(--mint-2)}
+tbody tr.mark td.num{color:var(--ink)}
+
+/* ============ 代码 ============ */
+pre{
+  background:var(--wash);border:1px solid var(--rule);border-left:4px solid var(--mint-3);
+  border-radius:12px;padding:16px 18px;overflow-x:auto;margin:16px 0 20px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.8;color:var(--ink-2);
+  letter-spacing:0;
+}
+pre .c{color:#9AA6A2}
+pre .k{color:var(--mint-deep);font-weight:700}
+pre .s{color:#3F6B4E}
+pre .o{color:#8A5A00;font-weight:700}
+
+/* ============ 图卡：复刻 postimg 图集的「缩略图 + 底部文件名条」 ============ */
+/* 参考站点的图集单元格 = 图片 + 下方白底细条（实测格间 10px 缝、条高 44px）。
+   这里把每张截图做成一整块卡：上圆角图、下白底说明条，与索引页的 20px 圆角一致。 */
+figure{margin:24px 0 28px}
+figure .frame{
+  border-radius:20px 20px 0 0;overflow:hidden;
+  background:#0B0C0D;padding:0;
+}
+figure img{display:block;width:100%;height:auto}
+figcaption{
+  background:var(--paper);border:1px solid var(--rule);border-top:0;
+  border-radius:0 0 20px 20px;padding:14px 18px 15px;
+  font-size:11.5px;color:var(--ink-3);line-height:1.85;
+  display:flex;gap:10px;letter-spacing:.02em;
+  box-shadow:var(--card-shadow-sm);
+}
+figcaption .no{
+  flex:0 0 auto;background:var(--ink);color:var(--paper);border-radius:100px;
+  font-family:var(--sans);font-size:9.5px;padding:2px 11px;height:20px;line-height:16px;
+  letter-spacing:.12em;
+}
+
+/* ============ 图卡网格（美术资源库式铺图） ============ */
+/* 参考站点用 6 列缩略图网格，但那是美术资源、读者只需看整体。
+   这里是 1440x900 的界面截图，格内文字是报告的证据，缩到半宽就读不出来了，
+   所以取单列、保留「图在上、白底说明条在下」的单元格结构。 */
+.gal{
+  display:grid;grid-template-columns:1fr;gap:24px;
+  margin:24px 0 28px;align-items:start;
+}
+.gal figure{margin:0}
+.gal figure .frame{border-radius:18px 18px 0 0}
+.gal figcaption{
+  display:block;padding:13px 17px 14px;font-size:11.5px;line-height:1.85;
+  border-radius:0 0 18px 18px;
+}
+.gal figcaption .no{
+  display:inline-block;background:var(--mint-2);color:var(--mint-deep);
+  font-family:var(--sans);font-size:9px;padding:2px 9px;height:18px;line-height:14px;
+  letter-spacing:.12em;margin-right:7px;border-radius:100px;
+}
+.gal .cap-t{
+  font-family:var(--body);font-weight:600;color:var(--ink);font-size:12.5px;
+  letter-spacing:.03em;display:block;margin-bottom:5px;
+}
+.duo figure .frame{border-radius:20px}
+
+/* ============ 提示块 ============ */
+.note{
+  border-radius:18px;background:var(--wash);border:1px solid var(--rule);
+  border-left:5px solid var(--mint-3);padding:17px 20px;margin:20px 0;
+  font-size:13px;color:var(--ink-2);
+}
+.note .h{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--mint-deep);font-weight:600;margin-bottom:8px;
+}
+.note.y{border-left-color:var(--mint-deep);background:var(--mint)}
+
+/* ============ 数据卡 ============ */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0 28px}
+.stats .c{
+  border-radius:18px;padding:17px 15px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);
+}
+.stats .c.hi{background:var(--mint-2);box-shadow:none}
+.stats .k{
+  font-family:var(--sans);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);display:block;margin-bottom:9px;
+}
+.stats .c.hi .k{color:var(--mint-deep)}
+.stats .v{
+  font-family:var(--sans);font-weight:600;font-size:28px;line-height:1;
+  letter-spacing:-.01em;color:var(--ink);
+}
+.stats .v small{font-size:12.5px;font-weight:500;margin-left:2px;letter-spacing:0}
+.stats .u{font-size:10.5px;color:var(--mute);margin-top:8px;font-family:var(--mono);letter-spacing:0}
+.stats .c.hi .u{color:var(--mint-deep)}
+
+/* ============ 图注并排 ============ */
+.duo{display:grid;grid-template-columns:.86fr 1.14fr;gap:26px;align-items:start;margin:26px 0 30px}
+.duo figure{margin:0}
+.duo .duo-cap{
+  font-size:11.5px;line-height:1.9;color:var(--ink-3);
+  padding-left:14px;border-left:3px solid var(--mint-3);margin-bottom:14px;letter-spacing:.02em;
+}
+.duo .duo-cap .no{
+  background:var(--ink);color:var(--paper);border-radius:100px;
+  font-family:var(--sans);font-size:9.5px;padding:2px 10px;margin-right:8px;letter-spacing:.12em;
+}
+.duo .duo-t p{font-size:13px;line-height:1.88}
+
+/* ============ 页脚 ============ */
+footer{
+  margin-top:34px;padding:22px 26px;border-radius:20px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);
+  font-family:var(--sans);font-size:10px;color:var(--mute);letter-spacing:.14em;
+  display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;text-transform:uppercase;
+}
+footer .r{color:var(--ink-3)}
+
+/* ============ 打印 ============ */
+@media print{
+  html,body{background:var(--mint)}
+  .topbar{display:none}
+  body{padding:0;font-size:12.5px;line-height:1.8}
+  .wrap{max-width:none;padding:0}
+  .cover{margin:0;padding:30px 30px 26px;border-radius:20px;box-shadow:none;break-inside:avoid}
+  .blob{right:-70px;top:-90px;width:290px;height:280px;opacity:.5}
+  .blob.b2{display:none}
+  h1{font-size:46px;letter-spacing:.02em}
+  h1 .mark{font-size:17px;letter-spacing:.16em;margin-top:12px}
+  .sub{font-size:13.5px;margin-top:14px;line-height:1.75}
+  .pills{margin-top:18px;gap:7px}
+  .pill{font-size:10px;padding:5px 15px;box-shadow:rgba(0,0,0,.14) 3px 3px 6px}
+  .pill .lb{font-size:8px}
+  .grid{margin-top:20px}
+  .grid div{padding:9px 11px 10px}
+  .grid .k{font-size:8.5px}
+  .grid .v{font-size:11px}
+  .roster{padding:12px 14px 11px;margin-top:10px}
+  .roster .names li{font-size:10.5px;padding:3px 11px}
+  .abstract{margin-top:18px;padding:20px 22px 17px;border-radius:16px}
+  .abstract p{font-size:11.5px;line-height:1.82}
+  .abstract .kw{font-size:9.5px;margin-top:13px;padding-top:10px}
+
+  section{
+    margin:8mm 0 0;padding:22px 26px 24px;border-radius:18px;
+    box-shadow:none;border:1px solid var(--rule);
+  }
+  .sec-head{margin-bottom:16px;gap:13px;break-after:avoid;break-inside:avoid}
+  .sec-head .num{width:40px;height:40px;font-size:15px;border-radius:12px}
+  .sec-head h2{font-size:22px}
+  .sec-head small{font-size:11px;margin-top:5px}
+  h3{font-size:14.5px;margin:20px 0 9px;padding-left:11px;border-left-width:3px}
+  h3 .x{font-size:9px}
+  p{margin-bottom:9px}
+  p.lead{font-size:12.5px}
+  li{margin-bottom:5px}
+  ul,ol{margin-bottom:10px}
+
+  table{font-size:10.5px;margin:12px 0 15px;border-radius:10px}
+  thead th{font-size:9px;padding:7px 8px;white-space:normal;letter-spacing:.06em}
+  tbody td{padding:6px 8px}
+  td .cn,th .cn{font-size:10px}
+  pre{font-size:9px;padding:11px 12px;white-space:pre-wrap;word-break:break-word;border-radius:8px}
+  .note{padding:11px 13px;font-size:11px;margin:12px 0;border-radius:12px}
+  .note .h{font-size:8px}
+
+  figure{margin:14px 0 16px}
+  figure .frame{border-radius:14px;box-shadow:var(--card-shadow-sm)}
+  figure img{max-height:380px;width:auto;max-width:100%;margin:0 auto}
+  figcaption{font-size:9.5px;line-height:1.7;margin-top:0;padding:10px 13px 11px}
+  .gal{gap:12px;margin:12px 0 14px}
+  .gal figure img{max-height:236px}
+
+/* 竖版截图（设置抽屉）按 16:9 画框铺开会两侧留大片黑边，
+   改成画框贴合图片本身宽度 */
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.pair figure{margin:0}
+.pair figure .frame{background:transparent;display:flex;justify-content:center}
+.pair figure .frame img{width:100%;height:auto;border-radius:16px 16px 0 0}
+.pair figcaption{border-radius:0 0 16px 16px}
+.pair .cap-t{font-size:12px}
+.pair figcaption{font-size:10.5px;line-height:1.72}
+  .gal figcaption{padding:9px 12px 10px;font-size:9.5px;line-height:1.72}
+  .gal .cap-t{font-size:10.5px;margin-bottom:4px}
+  .gal figcaption .no{font-size:8px;height:15px;line-height:12px;padding:2px 7px}
+  .duo{gap:16px;margin:14px 0 18px;grid-template-columns:.44fr 1.56fr}
+  .duo figure img{max-height:165mm;width:100%;object-fit:contain}
+  .duo .duo-cap{font-size:9.5px;line-height:1.75}
+  .duo .duo-t p{font-size:11px;line-height:1.72;margin-bottom:6px}
+
+  .stats{gap:8px;margin:15px 0 18px}
+  .stats .c{padding:11px 10px;border-radius:13px}
+  .stats .v{font-size:21px}
+  .stats .k{font-size:8px}
+  .stats .u{font-size:8.5px}
+  .flow{padding:15px 13px 12px;border-radius:14px}
+  .flow .row{min-width:0}
+  .stage{padding:9px 8px;border-radius:10px}
+  .stage .n{font-size:10.5px}
+  .stage .d{font-size:9px;line-height:1.5}
+  .stage .i{font-size:8px;margin-bottom:4px}
+  .arrow{padding:0 3px;font-size:10px}
+  .loop{font-size:9px;min-width:0}
+
+  footer{margin-top:8mm;padding:14px 18px;font-size:8.5px;border-radius:14px}
+
+  /* 附录四节压在一页：条目多、段落短，收紧行距即可整体收进 A4 */
+  section.appendix{padding:16px 20px 14px}
+  section.appendix p{font-size:9.6px;line-height:1.68;margin-bottom:7px}
+  section.appendix h3{font-size:12.4px;margin:11px 0 6px}
+  section.appendix table{font-size:9.2px;margin:7px 0 9px}
+  section.appendix thead th{font-size:8.2px;padding:4px 6px}
+  section.appendix tbody td{padding:3px 6px;line-height:1.5}
+  section.appendix pre{font-size:7.8px;line-height:1.46;padding:7px 9px;margin:7px 0 8px}
+  section.appendix pre.tall{font-size:7.6px;line-height:1.5;padding:7px 9px}
+  section.appendix ol,section.appendix ul{padding-left:17px;margin-bottom:6px}
+  section.appendix li{margin-bottom:1px;line-height:1.56;font-size:9.6px}
+  section.appendix .v-blank{color:var(--mute);border-bottom:1px dashed var(--rule)}
+  h2,h3{break-after:avoid;break-inside:avoid}
+  p,li{orphans:3;widows:3}
+  pre,table,.flow,.stats,.roster,.duo{break-inside:avoid}
+  /* 长表格允许跨页，否则整张被推到下一页留下半页空白；但单行不许拆开 */
+  table.long{break-inside:auto}
+  /* 目录树整块留在一页内：字号压到 8.2px 才放得下附录全篇 */
+  pre.tall{break-inside:avoid;font-size:8.2px;line-height:1.58;padding:9px 11px}
+  table.long tr{break-inside:avoid}
+  table.long thead{display:table-header-group}
+  figure{break-inside:avoid}
+  .gal{break-inside:auto}
+  .gal figure{break-inside:avoid}
+  .abstract,section{break-inside:auto}
+  /* 提示块都是 2-4 行，允许拆页会出现「只有标题落在页底」的孤行，故整块保留 */
+  .note{break-inside:avoid}
+}

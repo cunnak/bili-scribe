@@ -1,0 +1,2860 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>bili-scribe</title>
+<style>
+/* ===================================================================
+   配色取自明日方舟 / 终末地海报的实测取色。
+   酸性黄绿是主强调，工业橙红只用在一件事上：需要你马上看一眼。
+   =================================================================== */
+:root{
+  --void:#08090A;
+  --bg:#0D0F10;
+  --panel:#131617;
+  --panel-2:#191D1E;
+  --line:rgba(255,255,255,.10);
+  --line-s:rgba(255,255,255,.055);
+
+  --acid:#D8F24B;
+  --acid-d:#8A9B22;
+  --ember:#FF6B35;
+  --paper:#E8E2D4;
+
+  --text:#F2F4F2;
+  --muted:#8B9490;
+  /* 第三档灰。**别再调暗。** 原来这里是 #4A5250，对 --bg 的对比度只有
+     2.39:1——设计上想靠"更暗"来分层，实际结果是那几行字在深色底上根本读不出来
+     （实测反馈：标题下面那行元信息、版本面板里的差异说明，都要凑近看）。
+     现在 #6B7672 = 4.08:1，过 WCAG AA 的 4.5 还差一点，但它是"辅助信息"档，
+     正文与关键信息一律用 --muted。改前请先算对比度，别凭感觉。 */
+  --dim:#6B7672;
+
+  --mono:'Cascadia Mono','Consolas','SF Mono',monospace;
+  --sans:'Segoe UI','Microsoft YaHei',sans-serif;
+  --cn:'Microsoft YaHei','PingFang SC',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void);color:var(--text);
+  font-family:var(--sans);font-size:13px;line-height:1.6;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit}
+input,textarea,select{font:inherit}
+::selection{background:rgba(216,242,75,.28);color:#fff}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10)}
+::-webkit-scrollbar-thumb:hover{background:rgba(216,242,75,.35)}
+
+/* ============ 刻度尺 ============ */
+.ruler{
+  height:9px;flex:0 0 auto;display:flex;align-items:flex-end;
+  border-bottom:1px solid var(--line-s);background:var(--bg);
+}
+.ruler i{flex:1;height:3px;background:rgba(255,255,255,.13)}
+.ruler i:nth-child(5n+1){height:8px;background:rgba(255,255,255,.30)}
+
+/* ============ 顶栏 ============ */
+.top{
+  height:52px;flex:0 0 auto;display:flex;align-items:center;
+  padding:0 20px;position:relative;
+  background:
+    linear-gradient(90deg, rgba(216,242,75,.06), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+  border-bottom:1px solid var(--line);
+}
+.top::before{
+  content:'';position:absolute;left:0;top:0;width:34px;height:52px;
+  background:var(--acid);
+  clip-path:polygon(0 0, 100% 0, 44% 100%, 0 100%);
+}
+.top::after{
+  content:'';position:absolute;left:0;top:0;width:34px;height:52px;
+  background:repeating-linear-gradient(115deg, rgba(0,0,0,.9) 0 3px, transparent 3px 7px);
+  clip-path:polygon(0 0, 100% 0, 44% 100%, 0 100%);
+}
+.brand{display:flex;align-items:baseline;gap:11px;padding-left:16px;z-index:1}
+.brand b{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:.16em;color:var(--acid)}
+.brand .cn{font-family:var(--cn);font-size:12px;font-weight:600;letter-spacing:.30em;color:var(--muted)}
+.top .sp{flex:1}
+
+.st{
+  display:inline-flex;align-items:center;gap:7px;margin-left:9px;cursor:pointer;
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  color:var(--muted);border:1px solid var(--line);
+  padding:4px 10px;background:rgba(255,255,255,.02);
+}
+.st:hover{border-color:rgba(216,242,75,.4);color:var(--text)}
+.st i{width:4px;height:4px;background:var(--acid);flex:0 0 auto}
+.st.warn i{background:var(--ember)}
+.st.off i{background:var(--dim)}
+.st b{font-weight:400;color:var(--text);letter-spacing:.06em}
+
+/* 顶栏的角色选择器：一个小浮层，不占整块抽屉。
+   跟 620px 的设置抽屉分开放，是因为换角色是高频动作——每总结一类视频就想换一次，
+   让它跟「设置」并排、点一下就开，比每次翻进抽屉再滚到底部找那个下拉框省事。 */
+.pop{
+  position:fixed;top:58px;right:20px;width:360px;z-index:39;
+  background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 18px 48px rgba(0,0,0,.62);
+  opacity:0;pointer-events:none;transform:translateY(-6px);
+  transition:opacity .14s ease,transform .14s ease;
+}
+.pop.on{opacity:1;pointer-events:auto;transform:none}
+.pop .ph{
+  display:flex;align-items:center;padding:9px 14px;
+  border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;
+  color:var(--acid);text-transform:uppercase;
+}
+.pop .ph .x{
+  margin-left:auto;cursor:pointer;color:var(--muted);
+  font-size:15px;line-height:1;letter-spacing:0;text-transform:none;
+}
+.pop .ph .x:hover{color:var(--acid)}
+.pop .pl{max-height:min(58vh,420px);overflow-y:auto}
+.role{
+  display:block;width:100%;text-align:left;background:none;border:0;
+  border-left:2px solid transparent;padding:9px 14px;cursor:pointer;
+}
+.role:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
+.role.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.role .rn{display:flex;align-items:baseline;gap:8px}
+.role .rn b{font-size:12.5px;font-weight:600;color:var(--text);letter-spacing:.02em}
+.role.on .rn b{color:var(--acid)}
+.role .rn .p{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--muted)}
+.role .rn .cur{
+  margin-left:auto;font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;color:var(--acid);
+}
+.role .rt{display:block;font-size:11px;line-height:1.6;color:var(--muted);margin-top:2px}
+.role.on .rt{color:var(--text)}
+.pop .pn{
+  padding:9px 14px;border-top:1px solid var(--line);
+  font-size:10.5px;line-height:1.6;color:var(--muted);
+}
+
+/* 历史浮层：比角色浮层宽得多，左边列表右边预览。
+   宽度按 720px 起，但不写死——窄窗口下用 min() 收回来，不然会顶出屏幕右边。 */
+.pop.wide{width:min(760px,calc(100vw - 40px));right:20px}
+.pop.wide .ph{gap:10px}
+.pop .ph .cnt{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--muted);text-transform:none;
+}
+.pop .ph .q{
+  flex:1;min-width:0;height:22px;margin-left:4px;
+  background:var(--void);border:1px solid var(--line);color:var(--text);
+  font-family:var(--mono);font-size:10px;letter-spacing:.04em;
+  padding:0 8px;outline:none;
+}
+.pop .ph .q:focus{border-color:rgba(216,242,75,.45)}
+.pop .ph .q::placeholder{color:var(--dim)}
+.hb{display:grid;grid-template-columns:minmax(0,1fr) 290px;grid-template-rows:minmax(0,1fr);max-height:min(62vh,520px);min-height:0;overflow:hidden}
+/* 容器名不能叫 .hl——那个类是正文里的高亮 span，两者会互相污染：
+   列表会继承 color:var(--acid) 和一条 border-bottom。 */
+.hlist{overflow-y:auto;border-right:1px solid var(--line);min-height:0}
+.hl .e,.hp .e{
+  padding:22px 14px;font-size:11px;line-height:1.7;color:var(--muted);text-align:center;
+}
+.hrow{
+  display:block;width:100%;text-align:left;background:none;border:0;
+  border-left:2px solid transparent;padding:9px 12px;cursor:pointer;
+}
+.hrow:hover{background:rgba(255,255,255,.035);border-left-color:var(--line)}
+.hrow.on{background:rgba(216,242,75,.07);border-left-color:var(--acid)}
+.hrow .ht{
+  display:block;font-size:12px;line-height:1.5;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hrow.on .ht{color:var(--acid)}
+.hrow .hm{
+  display:flex;align-items:baseline;gap:7px;margin-top:3px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--dim);
+}
+.hrow .hm .bad{color:var(--ember)}
+.hrow .hm .ok{color:var(--acid-d)}
+.hrow .ho{
+  display:block;margin-top:3px;font-size:10.5px;line-height:1.55;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hp{padding:12px 14px;overflow-y:auto;min-height:0}
+.hp h4{
+  margin:0 0 8px;font-size:12.5px;font-weight:600;line-height:1.5;color:var(--text);
+}
+.hp .kv{
+  display:flex;gap:8px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.08em;color:var(--dim);margin-bottom:10px;
+}
+.hp .kv b{font-weight:400;color:var(--muted)}
+.hp .sum{
+  font-size:11px;line-height:1.75;color:var(--muted);
+  border-top:1px solid var(--line-s);padding-top:10px;
+  white-space:pre-wrap;word-break:break-word;
+}
+.hp .acts{display:flex;gap:8px;margin-top:12px}
+.hp .acts button{
+  flex:1;height:28px;background:none;border:1px solid var(--line);cursor:pointer;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--muted);
+}
+.hp .acts button:hover{border-color:rgba(216,242,75,.45);color:var(--acid)}
+.hp .acts button.pri{border-color:rgba(216,242,75,.45);color:var(--acid)}
+.hp .acts button.pri:hover{background:rgba(216,242,75,.1)}
+
+/* ============ 主体 ============ */
+.wrap{height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 322px}
+
+.left{padding:20px 22px 40px;overflow:auto;position:relative}
+.left::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.016) 1px, transparent 1px);
+  background-size:38px 38px;
+  mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image:radial-gradient(circle at 30% 0%, #000 0%, transparent 78%);
+}
+
+/* 输入条 */
+.inrow{display:flex;gap:9px;margin-bottom:9px;position:relative;z-index:1}
+.fld{
+  flex:1;display:flex;align-items:center;gap:12px;height:46px;cursor:text;
+  background:var(--panel);border:1px solid var(--line);padding:0 15px;
+}
+.fld:focus-within{border-color:rgba(216,242,75,.45)}
+.fld .k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--acid-d);flex:0 0 auto}
+.fld .v{
+  flex:1;background:none;border:none;outline:none;
+  font-family:var(--mono);font-size:14px;letter-spacing:.06em;color:var(--text);
+}
+.fld .v::placeholder{color:var(--dim);letter-spacing:.02em;font-family:var(--cn);font-size:12.5px}
+.fld .cur{width:1px;height:15px;background:var(--acid);animation:bl 1.1s steps(2) infinite}
+@keyframes bl{50%{opacity:0}}
+
+.btn{
+  height:46px;padding:0 26px;border:none;cursor:pointer;
+  background:var(--acid);color:#0A0B08;
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.18em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+.btn:hover{background:#E4FA6B}
+.btn:disabled{background:rgba(255,255,255,.10);color:var(--dim);cursor:not-allowed}
+.btn2{
+  height:46px;padding:0 18px;cursor:pointer;flex:0 0 auto;
+  background:transparent;border:1px solid var(--line);color:var(--muted);
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.btn2:hover{border-color:rgba(216,242,75,.42);color:var(--acid)}
+.btn2:disabled{opacity:.4;cursor:not-allowed}
+.btn2.on{border-color:rgba(216,242,75,.55);color:var(--acid);background:rgba(216,242,75,.07)}
+
+/* 状态行 */
+.line{
+  min-height:0;font-family:var(--cn);font-size:11.5px;color:var(--muted);
+  padding:2px 0 0;line-height:1.75;
+}
+.line:empty{display:none}
+.line.ok{color:var(--acid-d)}
+.line.err{color:var(--ember)}
+.line.gap{margin-bottom:14px}
+
+/* 标题区 */
+.hd{display:flex;gap:16px;margin:20px 0 18px;position:relative;z-index:1}
+.hd .rail{flex:0 0 auto;width:2px;background:linear-gradient(180deg,var(--acid),transparent 78%)}
+.hd .body{flex:1;padding-left:2px;min-width:0}
+.hd h1{font-family:var(--cn);font-size:21px;font-weight:700;line-height:1.42;letter-spacing:.01em}
+.chips{display:flex;flex-wrap:wrap;margin-top:10px}
+.c{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;color:var(--muted);
+  padding:0 11px;border-right:1px solid var(--line-s);
+}
+.c:first-child{padding-left:0}
+.c:last-child{border:none}
+.c em{color:var(--acid-d);font-style:normal}
+.c a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
+.c a:hover{color:var(--acid)}
+
+/* 进度 */
+.prog{position:relative;z-index:1;margin-bottom:16px}
+.seg{display:flex;gap:2px;margin-bottom:7px}
+.seg i{flex:1;height:5px;background:rgba(255,255,255,.075)}
+.seg i.on{background:var(--acid)}
+.seg i.cur{background:var(--ember);animation:pl 1.4s ease-in-out infinite}
+.seg i.bad{background:rgba(255,107,53,.72)}
+.seg.anim i{background:var(--ember);animation:pl 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * 80ms)}
+@keyframes pl{50%{opacity:.30}}
+.prow{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
+.prow .l{font-family:var(--cn);font-size:11.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .r{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--acid);flex:0 0 auto;font-variant-numeric:tabular-nums}
+
+/* 提示块 */
+.wblock{
+  border-left:2px solid var(--ember);background:rgba(255,107,53,.05);
+  padding:9px 12px;margin-bottom:14px;position:relative;z-index:1;
+}
+.wblock .wt{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ember);
+  text-transform:uppercase;margin-bottom:5px;
+}
+.wblock li{list-style:none;font-size:11.5px;color:#C8CFCB;line-height:1.75;padding-left:11px;position:relative}
+.wblock li::before{content:'·';position:absolute;left:2px;color:var(--ember)}
+.cand{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;position:relative;z-index:1}
+.cand span{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  border:1px solid var(--line);padding:2px 7px;color:var(--dim);
+}
+.cand span.yes{color:var(--acid-d);border-color:rgba(216,242,75,.28)}
+.cand span.no{color:var(--dim);text-decoration:line-through}
+
+/* ============ 正文卡 ============ */
+.card{
+  position:relative;z-index:1;margin-bottom:18px;
+  background:var(--panel);border:1px solid var(--line);
+  padding:22px 24px;
+  clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+.card::before,.card::after{content:'';position:absolute;width:12px;height:12px}
+.card::before{top:0;right:0;border-top:2px solid var(--acid);border-right:2px solid var(--acid)}
+.card::after{bottom:0;left:0;border-bottom:2px solid var(--acid);border-left:2px solid var(--acid)}
+.card .idx{
+  position:absolute;top:10px;right:26px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);
+  text-transform:uppercase;
+}
+
+h2.s{
+  font-family:var(--cn);font-size:12.5px;font-weight:700;color:var(--text);
+  letter-spacing:.12em;margin:19px 0 9px;
+  display:flex;align-items:center;gap:10px;
+}
+h2.s:first-of-type{margin-top:0}
+h2.s .n{
+  font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.14em;
+  border:1px solid rgba(216,242,75,.32);padding:1px 5px;flex:0 0 auto;
+}
+h2.s::after{content:'';flex:1;height:1px;background:var(--line-s)}
+p.tx{color:#C8CFCB;font-size:13px;line-height:1.95;margin-bottom:10px}
+p.tx:last-child{margin-bottom:0}
+strong{color:#fff;font-weight:700}
+.hl{color:var(--acid);border-bottom:1px solid rgba(216,242,75,.4)}
+.warn-tx{color:var(--ember)}
+.ic{
+  font-family:var(--mono);font-size:11.5px;color:var(--acid-d);
+  background:rgba(216,242,75,.07);padding:1px 5px;
+}
+.tx-h{
+  font-family:var(--cn);font-size:12px;font-weight:700;color:var(--paper);
+  letter-spacing:.08em;margin:16px 0 8px;padding-left:9px;
+  border-left:2px solid rgba(216,242,75,.42);
+}
+.tx-h:first-child{margin-top:0}
+.tx-ul{list-style:none;margin:0 0 10px}
+.tx-ul li{
+  font-size:12.5px;color:#C8CFCB;line-height:1.85;padding-left:15px;position:relative;
+}
+.tx-ul li::before{
+  content:'';position:absolute;left:0;top:.72em;width:5px;height:1px;background:var(--acid-d);
+}
+
+/* 时间轴 */
+.tl{list-style:none;margin:2px 0 0}
+.tl li{display:flex;gap:13px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.tl li:last-child{border:none}
+.tl .t{
+  font-family:var(--mono);font-size:10.5px;color:var(--acid);letter-spacing:.06em;
+  flex:0 0 62px;padding-top:2px;font-variant-numeric:tabular-nums;
+}
+.tl .x{flex:1;font-size:12.5px;color:#C8CFCB;line-height:1.72}
+
+/* 空态 */
+.empty{
+  height:100%;min-height:280px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;position:relative;z-index:1;
+  padding:40px 0;
+}
+.empty .mark{
+  width:66px;height:66px;border:1px solid rgba(216,242,75,.20);
+  display:flex;align-items:center;justify-content:center;position:relative;
+  clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  background:rgba(216,242,75,.03);
+}
+.empty .mark::before,.empty .mark::after{content:'';position:absolute;background:var(--acid)}
+.empty .mark::before{width:16px;height:1px}
+.empty .mark::after{width:1px;height:16px}
+.empty .t1{font-family:var(--cn);font-size:13px;color:var(--muted);letter-spacing:.1em}
+.empty .t2{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:.18em;text-transform:uppercase}
+
+/* ============ 右栏 ============ */
+.side{border-left:1px solid var(--line);padding:20px 18px 40px;overflow:auto;background:var(--panel-2)}
+.side .ph{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);
+  text-transform:uppercase;padding:26px 0;text-align:center;line-height:2;
+}
+.blk{margin-bottom:24px}
+.bh{
+  display:flex;align-items:center;gap:9px;margin-bottom:11px;
+  padding-bottom:8px;border-bottom:1px solid var(--line-s);
+}
+.bh .t{
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;
+  color:var(--muted);text-transform:uppercase;flex:0 0 auto;
+}
+.bh .ln{flex:1;height:1px;background:var(--line-s)}
+.bh .c{font-family:var(--mono);font-size:9px;color:var(--acid);letter-spacing:.1em;flex:0 0 auto}
+
+/* 版本条目 */
+.v{display:flex;gap:10px;padding:8px 9px;margin-bottom:3px;border-left:2px solid transparent;background:rgba(255,255,255,.012)}
+.v:hover{background:rgba(255,255,255,.035)}
+.v.on{border-left-color:var(--acid);background:rgba(216,242,75,.055)}
+.v .n{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 18px;padding-top:1px;font-variant-numeric:tabular-nums}
+.v.on .n{color:var(--acid)}
+.v .x{flex:1;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.v.on .x{color:var(--text)}
+.v .act{
+  flex:0 0 auto;font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--muted);background:none;border:none;cursor:pointer;padding:0 2px;
+}
+.v .act:hover{color:var(--acid)}
+.v .cur{flex:0 0 auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--acid);padding-top:2px}
+.vd{font-size:10.5px;color:var(--muted);line-height:1.7;padding:0 9px 7px 37px}
+.vd .k{color:var(--acid)}
+.vd .w{color:var(--ember)}
+
+textarea{
+  width:100%;height:82px;resize:none;background:var(--void);
+  border:1px solid var(--line);color:var(--text);
+  font-family:var(--cn);font-size:12px;padding:10px 11px;line-height:1.7;outline:none;
+}
+textarea::placeholder{color:var(--dim)}
+textarea:focus{border-color:rgba(216,242,75,.45)}
+textarea:disabled{opacity:.45;cursor:not-allowed}
+.b2{
+  width:100%;height:38px;margin-top:7px;cursor:pointer;
+  background:transparent;border:1px solid rgba(216,242,75,.42);color:var(--acid);
+  font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  clip-path:polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+.b2:hover{background:rgba(216,242,75,.10)}
+.b2:disabled{border-color:var(--line);color:var(--dim);cursor:not-allowed;background:none}
+
+/* 开销表 */
+.kt{display:flex;justify-content:space-between;gap:12px;padding:5.5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.kt:last-child{border:none}
+.kt .k{font-size:11.5px;color:var(--muted);flex:0 0 auto}
+.kt .v2{
+  font-family:var(--mono);font-size:11.5px;color:var(--text);
+  font-variant-numeric:tabular-nums;text-align:right;
+}
+.kt .v2.a{color:var(--acid)}
+.kt .v2.e{color:var(--ember)}
+
+/* ============ 底栏 ============ */
+.ft{
+  flex:0 0 auto;height:28px;display:flex;align-items:center;gap:14px;
+  padding:0 18px;border-top:1px solid var(--line);background:#0A0C0D;position:relative;
+}
+.ft::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:56px;
+  background:repeating-linear-gradient(115deg, var(--acid) 0 4px, transparent 4px 9px);
+  opacity:.5;
+}
+.ft .t{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--muted)}
+.ft .t.a{color:var(--acid-d);padding-left:46px}
+.ft .t.e{color:var(--ember)}
+
+/* ============ 抽屉（设置） ============ */
+.mask{
+  position:fixed;inset:0;background:rgba(4,5,6,.72);opacity:0;pointer-events:none;
+  transition:opacity .2s;z-index:40;
+}
+.mask.on{opacity:1;pointer-events:auto}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:620px;max-width:92vw;z-index:41;
+  background:var(--bg);border-left:1px solid var(--line);
+  transform:translateX(101%);transition:transform .22s cubic-bezier(.3,.8,.3,1);
+  display:flex;flex-direction:column;
+}
+.drawer.on{transform:none}
+.dh{
+  flex:0 0 auto;height:52px;display:flex;align-items:center;gap:12px;padding:0 20px;
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(255,255,255,.035), transparent);
+}
+.dh .t{font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--acid);text-transform:uppercase}
+.dh .sp{flex:1}
+.dh button{
+  background:none;border:1px solid var(--line);color:var(--muted);cursor:pointer;
+  font-family:var(--mono);font-size:9px;letter-spacing:.14em;padding:4px 10px;text-transform:uppercase;
+}
+.dh button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.db{flex:1;overflow:auto;padding:18px 20px 40px}
+
+.grp{margin-bottom:26px}
+.gt{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  text-transform:uppercase;
+}
+.gt::after{content:'';flex:1;height:1px;background:var(--line-s)}
+.gh{font-size:11px;color:var(--dim);line-height:1.8;margin:-4px 0 12px}
+
+.f{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.f label{
+  flex:0 0 138px;font-size:11.5px;color:var(--muted);text-align:right;line-height:1.5;
+}
+.f .i{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+.f input[type=text],.f input[type=password],.f input[type=number],.f select{
+  width:100%;height:32px;background:var(--void);border:1px solid var(--line);
+  color:var(--text);font-family:var(--mono);font-size:11.5px;padding:0 9px;outline:none;
+}
+.f input:focus,.f select:focus{border-color:rgba(216,242,75,.45)}
+.f input::placeholder{color:var(--dim);font-family:var(--cn)}
+.f select{cursor:pointer}
+.f .u{font-family:var(--mono);font-size:10px;color:var(--dim);flex:0 0 auto}
+.f .mini{
+  flex:0 0 auto;background:none;border:1px solid var(--line);color:var(--dim);cursor:pointer;
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:5px 8px;
+}
+.f .mini:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+
+.sw{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.sw input{display:none}
+.sw .tb{
+  width:34px;height:18px;border:1px solid var(--line);background:var(--void);
+  position:relative;flex:0 0 auto;transition:border-color .15s;
+}
+.sw .tb::after{
+  content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;
+  background:var(--dim);transition:transform .15s,background .15s;
+}
+.sw input:checked + .tb{border-color:rgba(216,242,75,.5)}
+.sw input:checked + .tb::after{transform:translateX(16px);background:var(--acid)}
+.sw .tx{font-size:11.5px;color:var(--muted)}
+.sw input:checked ~ .tx{color:var(--text)}
+
+.gate{
+  border:1px solid rgba(255,107,53,.42);background:rgba(255,107,53,.055);
+  padding:12px 14px;margin-top:10px;
+}
+.gate .t{
+  font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--ember);
+  text-transform:uppercase;margin-bottom:8px;
+}
+.gate p{font-size:11.5px;color:#C8CFCB;line-height:1.8;margin-bottom:9px}
+.chk{display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:11.5px;color:var(--muted);line-height:1.7}
+.chk input{
+  appearance:none;-webkit-appearance:none;width:13px;height:13px;flex:0 0 auto;margin-top:3px;
+  border:1px solid var(--line);background:var(--void);cursor:pointer;position:relative;
+}
+.chk input:checked{border-color:var(--acid);background:var(--acid)}
+.chk input:checked::after{
+  content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;
+  border-right:2px solid #0A0B08;border-bottom:2px solid #0A0B08;transform:rotate(42deg);
+}
+.chk:hover input{border-color:rgba(216,242,75,.5)}
+
+.dfoot{
+  flex:0 0 auto;border-top:1px solid var(--line);padding:14px 20px;
+  display:flex;align-items:center;gap:12px;background:#0A0C0D;
+}
+.dfoot .sp{flex:1}
+.dfoot .st-line{font-size:11px;color:var(--muted);min-width:0;line-height:1.6}
+.dfoot .st-line.ok{color:var(--acid-d)}
+.dfoot .st-line.err{color:var(--ember)}
+
+/* ============ 模态 ============ */
+.modal{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.97);z-index:51;
+  width:420px;max-width:90vw;background:var(--panel);border:1px solid var(--line);
+  padding:22px 24px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;
+  clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal .mt{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--acid);
+  text-transform:uppercase;margin-bottom:12px;
+}
+.modal p{font-size:12.5px;color:#C8CFCB;line-height:1.85;margin-bottom:14px;white-space:pre-wrap}
+.modal .acts{display:flex;gap:9px;justify-content:flex-end}
+.modal .acts button{
+  height:34px;padding:0 18px;cursor:pointer;background:none;
+  border:1px solid var(--line);color:var(--muted);
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+.modal .acts button:hover{border-color:rgba(216,242,75,.4);color:var(--acid)}
+.modal .acts button.pri{background:var(--acid);border-color:var(--acid);color:#0A0B08;font-weight:700}
+.modal .acts button.pri:hover{background:#E4FA6B;color:#0A0B08}
+.modal .acts button.dan{border-color:rgba(255,107,53,.5);color:var(--ember)}
+.modal .acts button.dan:hover{background:rgba(255,107,53,.12);color:var(--ember)}
+
+/* 二维码 */
+.qrwrap{display:flex;gap:18px;align-items:flex-start;margin-bottom:14px}
+.qrwrap .im{
+  width:148px;height:148px;flex:0 0 auto;background:#fff;padding:6px;
+  display:flex;align-items:center;justify-content:center;
+}
+.qrwrap .im img{width:100%;height:100%;object-fit:contain;display:block}
+.qrwrap .side2{flex:1;min-width:0}
+.qrwrap .side2 .s1{font-size:12px;color:var(--text);line-height:1.8;margin-bottom:8px}
+.qrwrap .side2 .s2{font-size:11px;color:var(--dim);line-height:1.8}
+.modal .sep{height:1px;background:var(--line-s);margin:16px 0 14px}
+.modal textarea{height:64px}
+.modal .fl{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.modal .fl label{flex:0 0 82px;font-size:11px;color:var(--muted);text-align:right}
+.modal .fl input{
+  flex:1;height:30px;background:var(--void);border:1px solid var(--line);
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:0 8px;outline:none;
+}
+.modal .fl input:focus{border-color:rgba(216,242,75,.45)}
+
+/* 断桥横幅 */
+#bridge{
+  display:none;flex:0 0 auto;padding:8px 18px;background:rgba(255,107,53,.10);
+  border-bottom:1px solid rgba(255,107,53,.35);
+  font-family:var(--cn);font-size:11.5px;color:var(--ember);
+}
+#bridge.on{display:block}
+
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="ruler" id="ruler"></div>
+
+  <div class="top">
+    <div class="brand"><b>BILI·SCRIBE</b><span class="cn">视频内容总结</span></div>
+    <div class="sp"></div>
+    <button class="st off" id="chip-auth" title="点这里登录 / 退出"><i></i><span>未连接</span></button>
+    <button class="st warn" id="chip-model" title="点这里打开设置"><i></i><span>—</span></button>
+    <button class="st" id="chip-history" title="历史总结"><i></i><span>历史</span></button>
+    <button class="st" id="chip-role" title="选择总结角色"><i></i><span>角色</span></button>
+    <button class="st" id="chip-settings" title="设置"><i></i><span>设置</span></button>
+  </div>
+
+  <div class="pop" id="role-pop">
+    <div class="ph"><span>总结角色</span><span class="x" id="role-pop-x" title="关闭">×</span></div>
+    <div class="pl" id="role-list"></div>
+    <div class="pn" id="role-note"></div>
+  </div>
+
+  <!-- 历史总结：一个宽一点的浮层，左边是列表、右边是选中那条的摘要预览。
+       刻意不做成抽屉：翻历史是"扫一眼、点一下"的动作，抽屉那种整块遮罩
+       每次都把工作面盖住，看完还得关一次。 -->
+  <div class="pop wide" id="hist-pop">
+    <div class="ph">
+      <span>历史总结</span>
+      <span class="cnt" id="hist-count"></span>
+      <input class="q" id="hist-q" placeholder="搜标题、UP、BV 或一句话结论" autocomplete="off">
+      <span class="x" id="hist-pop-x" title="关闭">×</span>
+    </div>
+    <div class="hb">
+      <div class="hlist" id="hist-list2"></div>
+      <div class="hp" id="hist-preview">
+        <div class="e">选一条看摘要</div>
+      </div>
+    </div>
+    <div class="pn" id="hist-note"></div>
+  </div>
+
+  <div id="bridge">桥接没有建立起来：界面拿不到本地接口。请关掉窗口重新启动程序；如果一直这样，说明安装不完整。</div>
+
+  <div class="main">
+    <!-- ==================== 左：工作面 ==================== -->
+    <div class="left" id="left">
+      <div class="inrow">
+        <label class="fld">
+          <span class="k">BV</span>
+          <input id="raw-input" class="v" placeholder="粘贴视频链接、BV 号，或整段分享文案"
+                 autocomplete="off" spellcheck="false">
+          <span class="cur"></span>
+        </label>
+        <button class="btn2" id="srt-btn" title="选一份本地字幕文件，本次任务优先用它">字幕</button>
+        <button class="btn" id="run-btn">开始总结</button>
+      </div>
+      <div class="line" id="srt-line"></div>
+      <div class="line gap" id="task-msg"></div>
+
+      <div class="empty" id="empty">
+        <div class="mark"></div>
+        <div class="t1">粘一条视频链接，开始</div>
+        <div class="t2">local · no port · no polling</div>
+      </div>
+
+      <div id="work" class="hidden">
+        <div class="hd">
+          <div class="rail"></div>
+          <div class="body">
+            <h1 id="t-title">—</h1>
+            <div class="chips" id="t-chips"></div>
+          </div>
+        </div>
+
+        <div class="prog">
+          <div class="seg" id="seg"></div>
+          <div class="prow">
+            <span class="l" id="seg-label">—</span>
+            <span class="r" id="seg-pct">0%</span>
+          </div>
+        </div>
+
+        <div class="cand" id="cand"></div>
+        <div class="wblock hidden" id="warn-blk">
+          <div class="wt">采集提示</div>
+          <ul id="warn-list"></ul>
+        </div>
+
+        <div class="card hidden" id="body-card">
+          <span class="idx" id="body-idx">V—</span>
+          <div id="body-inner"></div>
+        </div>
+
+        <div class="card hidden" id="pub-card">
+          <span class="idx">PUBLISH</span>
+          <h2 class="s"><span class="n">发</span>将发到评论区的文本</h2>
+          <textarea id="comment-box" spellcheck="false"></textarea>
+          <div class="prow" style="margin-top:7px">
+            <span class="l" id="counter">0 字</span>
+            <span class="r" id="via-hint"></span>
+          </div>
+          <label class="chk" style="margin-top:12px">
+            <input type="checkbox" id="confirm-box">
+            <span>我已核对上面这段文字，确认发到这条视频的评论区。</span>
+          </label>
+          <button class="btn2" id="publish-btn" style="margin-top:12px;height:38px">发布</button>
+          <div class="line" id="publish-msg"></div>
+        </div>
+
+        <div class="blk hidden" id="hist-blk" style="margin-top:4px">
+          <div class="bh"><span class="t">发布记录</span><span class="ln"></span></div>
+          <div id="hist-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 右：版本 / 打磨 / 开销 ==================== -->
+    <div class="side" id="side">
+      <div class="ph" id="side-ph">NO TASK<br>—<br>选择一条视频后<br>这里显示版本与消耗</div>
+
+      <div id="side-body" class="hidden">
+        <div class="blk">
+          <div class="bh"><span class="t">版本 · version</span><span class="ln"></span><span class="c" id="v-count">0</span></div>
+          <div id="v-list"></div>
+          <div class="line" id="v-hint"></div>
+        </div>
+
+        <div class="blk" id="refine-blk">
+          <div class="bh"><span class="t">迭代打磨</span><span class="ln"></span></div>
+          <textarea id="refine-req" placeholder="说要改什么，比如「第三部分太绕，压成两段」"></textarea>
+          <button class="b2" id="refine-btn">改这一版</button>
+          <div class="line" id="refine-hint"></div>
+        </div>
+
+        <div class="blk">
+          <div class="bh"><span class="t">这一版开销</span><span class="ln"></span></div>
+          <div id="cost-now"></div>
+        </div>
+
+        <div class="blk">
+          <div class="bh"><span class="t">这条视频累计</span><span class="ln"></span></div>
+          <div id="cost-all"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ft">
+    <span class="t a" id="ft-mode">本地 · 无端口</span>
+    <span class="t" id="ft-ver">—</span>
+    <span class="t" id="ft-note">—</span>
+    <span style="flex:1"></span>
+    <span class="t e hidden" id="ft-gate">确认闸门已关闭</span>
+    <span class="t" id="ft-clock"></span>
+  </div>
+</div>
+
+<!-- ==================== 设置抽屉 ==================== -->
+<div class="mask" id="mask"></div>
+<aside class="drawer" id="drawer">
+  <div class="dh">
+    <span class="t">设置 · settings</span>
+    <span class="sp"></span>
+    <button id="d-test">测试连通</button>
+    <button id="d-close">关闭</button>
+  </div>
+  <div class="db" id="d-body">
+
+    <div class="grp">
+      <div class="gt">大模型</div>
+      <div class="gh">所有总结都由这里配置的端点生成。改完点右下角「保存并生效」。</div>
+      <div class="f"><label>接口地址</label><div class="i"><input type="text" data-path="llm.base_url" placeholder="https://aihubmix.com/v1"></div></div>
+      <div class="f"><label>API Key</label><div class="i">
+        <input type="password" data-path="llm.api_key" id="s-key" placeholder="sk-…">
+        <button class="mini" id="s-key-eye">显示</button>
+      </div></div>
+      <div class="f"><label>模型名</label><div class="i"><input type="text" data-path="llm.model" placeholder="qwen3.8-omni-flash"></div></div>
+      <div class="f"><label>温度</label><div class="i"><input type="number" data-path="llm.temperature" data-kind="number" min="0" max="2" step="0.1"><span class="u">0–2</span></div></div>
+      <div class="f"><label>单次输出上限</label><div class="i"><input type="number" data-path="llm.max_tokens" data-kind="number" min="1" step="256"><span class="u">tokens</span></div></div>
+      <div class="f"><label>素材送入上限</label><div class="i"><input type="number" data-path="llm.max_input_chars" data-kind="number" min="1000" step="1000"><span class="u">字符</span></div></div>
+      <div class="f"><label>分块大小</label><div class="i"><input type="number" data-path="llm.chunk_size" data-kind="number" min="200" step="500"><span class="u">字符</span></div></div>
+      <div class="f"><label>分块重叠</label><div class="i"><input type="number" data-path="llm.chunk_overlap" data-kind="number" min="0" step="100"><span class="u">必须小于分块大小</span></div></div>
+      <div class="f"><label>思考模式</label><div class="i"><select data-path="llm.thinking">
+        <option value="auto">auto · 不干预</option>
+        <option value="off">off · 显式关闭</option>
+        <option value="on">on · 显式打开</option>
+      </select></div></div>
+      <div class="f"><label>超时</label><div class="i"><input type="number" data-path="llm.timeout_seconds" data-kind="number" min="5" step="10"><span class="u">秒</span></div></div>
+      <div class="f"><label>代理</label><div class="i"><input type="text" data-path="llm.proxy" placeholder="留空 = 直连（不读系统代理）"></div></div>
+      <!-- 角色选择器已经搬到顶栏（跟「设置」并排）。这里留一个隐藏字段，只做一件事：
+           让 collectSettings() 交上去的 llm.role 仍然是用户选的那个。
+           删掉它的话，保存设置时这个字段缺席，Pydantic 的 LlmPatch.role 默认值
+           "standard" 会把角色悄悄重置——那种"我明明选了学术分析，改个代理就又变回标准"的
+           问题，找起来非常费劲。 -->
+      <input type="hidden" data-path="llm.role" id="s-role">
+    </div>
+
+    <div class="grp">
+      <div class="gt">采集</div>
+      <div class="gh">决定“拿什么当素材”。字幕优先，没有字幕才退到弹幕和简介。</div>
+      <div class="f"><label>字幕语言优先</label><div class="i"><input type="text" data-path="collect.prefer_subtitle_lang" data-kind="csv" placeholder="zh-CN, zh-Hans, ai-zh"></div></div>
+      <div class="f"><label>平台侧摘要</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.include_platform_summary"><span class="tb"></span><span class="tx">仅作对照，不参与生成</span></label>
+      </div></div>
+      <div class="f"><label>弹幕</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.danmaku.enabled"><span class="tb"></span><span class="tx">启用</span></label>
+      </div></div>
+      <div class="f"><label>有字幕也用弹幕</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.danmaku.also_with_subtitle"><span class="tb"></span><span class="tx">补充语气与反应</span></label>
+      </div></div>
+      <div class="f"><label>弹幕条数</label><div class="i"><input type="number" data-path="collect.danmaku.max_items" data-kind="number" min="1" step="100"></div></div>
+      <div class="f"><label>画面帧</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="collect.frames.enabled" id="s-frames"><span class="tb"></span><span class="tx">抽取关键画面（PPT、图表上的字只有它有）</span></label>
+      </div></div>
+      <div class="f"><label>帧数上限</label><div class="i"><input type="number" data-path="collect.frames.max_frames" data-kind="number" min="1" step="1"></div></div>
+      <div class="f"><label>帧质量</label><div class="i"><input type="number" data-path="collect.frames.quality" data-kind="number" min="1" max="100" step="1"><span class="u">1–100</span></div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">发布</div>
+      <div class="gh">评论发出后不能编辑。这里的闸门是最后一道拦截。</div>
+      <div class="f"><label>人工确认闸门</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="publish.require_confirm" id="s-gate"><span class="tb"></span><span class="tx">发布前必须勾选确认</span></label>
+      </div></div>
+      <div class="gate hidden" id="gate-ack">
+        <div class="t">关闭闸门 · 持续风险</div>
+        <p>关掉之后，总结一生成就会直接发到评论区，中间没有让你看一眼的机会。
+           评论不能编辑，发错了只能撤回重发——而撤回有频率限制。</p>
+        <label class="chk"><input type="checkbox" id="s-gate-ack"><span>我知道这意味着什么，仍然要关掉。</span></label>
+      </div>
+      <div class="f"><label>发帖最小间隔</label><div class="i"><input type="number" data-path="publish.min_interval_seconds" data-kind="number" min="0" step="10"><span class="u">秒</span></div></div>
+      <div class="f"><label>评论字数上限</label><div class="i"><input type="number" data-path="publish.max_comment_chars" data-kind="number" min="50" max="1000" step="10"><span class="u">平台硬限制 1000</span></div></div>
+      <div class="f"><label>署明 AI 生成</label><div class="i">
+        <label class="sw"><input type="checkbox" data-path="publish.disclose_ai" id="s-disclose"><span class="tb"></span><span class="tx">在评论末尾加上声明</span></label>
+      </div></div>
+      <div class="f"><label>声明文字</label><div class="i"><input type="text" data-path="publish.disclosure_text" placeholder="本总结由 AI 辅助整理"></div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">存储</div>
+      <div class="f"><label>数据库</label><div class="i"><input type="text" data-path="storage.db_path"></div></div>
+      <div class="f"><label>密钥文件</label><div class="i"><input type="text" data-path="storage.key_path"></div></div>
+      <div class="f"><label>预读缓存</label><div class="i">
+        <span class="u" id="notes-info" style="flex:1;text-align:left">—</span>
+        <button class="mini" id="notes-clear">清空</button>
+      </div></div>
+      <div class="f"><label>数据目录</label><div class="i">
+        <span class="u" id="data-dir" style="flex:1;text-align:left;word-break:break-all">—</span>
+        <button class="mini" id="open-dir">打开</button>
+      </div></div>
+    </div>
+
+    <div class="grp">
+      <div class="gt">服务器（仅命令行）</div>
+      <div class="gh">桌面模式不起 HTTP 服务，这一段只有用 <code class="ic" style="font-size:10px">python run.py</code> 时才生效。</div>
+      <div class="f"><label>监听地址</label><div class="i"><input type="text" data-path="server.host"></div></div>
+      <div class="f"><label>端口</label><div class="i"><input type="number" data-path="server.port" data-kind="number" min="1" max="65535"></div></div>
+    </div>
+  </div>
+  <div class="dfoot">
+    <span class="st-line" id="d-msg"></span>
+    <span class="sp"></span>
+    <button class="btn" id="d-save" style="height:36px;padding:0 20px">保存并生效</button>
+  </div>
+</aside>
+
+<!-- ==================== 模态 ==================== -->
+<div class="modal" id="modal">
+  <div class="mt" id="m-title">CONFIRM</div>
+  <div id="m-body"></div>
+  <div class="acts" id="m-acts"></div>
+</div>
+
+<script>
+/* ===================================================================
+   bili-scribe 桌面前端
+
+   两条硬约束决定了这里的写法：
+
+   1. **不轮询。** 进度由后端在状态变更时 `evaluate_js` 主动推进来，
+      入口是全局的 `window.__onTaskUpdate`。原来 1.2 秒一次的 GET 全部消失。
+   2. **不拼 URL。** 所有调用走 `window.pywebview.api.<方法>`，返回统一的
+      `{ok, data}` / `{ok:false, error, status}`。传输层的翻译只此一处。
+   =================================================================== */
+
+"use strict";
+
+/* ------------------------------------------------------------ 常量 */
+
+const STAGES = [
+  "resolving", "fetching_meta", "fetching_tags", "fetching_subtitle",
+  "fetching_danmaku", "fetching_replies", "fetching_platform",
+  "fetching_frames", "mapping", "reducing", "critiquing", "revising",
+];
+const STAGE_LABEL = {
+  resolving: "解析输入",
+  fetching_meta: "读取视频信息",
+  fetching_tags: "读取标签",
+  fetching_subtitle: "获取字幕",
+  fetching_danmaku: "获取弹幕",
+  fetching_replies: "读取热门评论",
+  fetching_platform: "读取平台侧摘要",
+  fetching_frames: "抽取画面帧",
+  mapping: "分段预读长素材",
+  reducing: "生成结构化总结",
+  critiquing: "自我批判",
+  revising: "按批判修订",
+  queued: "待排队",
+  ready: "完成",
+  failed: "失败",
+  refining: "按你的要求修改",
+};
+
+/* ------------------------------------------------------------ 状态 */
+
+const S = {
+  cfg: null,
+  roles: [],
+  auth: null,
+  task: null,
+  taskId: null,
+  versions: [],
+  versionTotal: null,
+  currentVersion: null,
+  viewingVersion: null,
+  awaitingRefine: null,
+  subtitleToken: null,
+  subtitleName: "",
+  publishes: [],
+  history: [],
+  histPick: null,
+  histError: null,
+  settingsLoaded: false,
+  showDiffs: false,
+  online: false,
+  qrTimer: null,
+  qrKey: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const has = (id) => document.getElementById(id) !== null;
+
+/* ------------------------------------------------------------ 传输层
+   同一个界面要能跑在两种形态里：
+
+   - **桌面版**（`bili-scribe.exe`）：pywebview 把 Python 方法直接挂成
+     `window.pywebview.api.*`，是同一个进程里的函数调用。不开端口，进度由
+     Python 从后台线程 `evaluate_js` 推过来（见 `__onTaskUpdate`）。
+   - **源码版**（`python run.py` + 浏览器）：中间隔着一层 HTTP，方法名要翻成
+     路由和动词，进度只能自己定时去问。
+
+   差别**只有这一层**。业务判断、渲染、状态机全在上面共用——两边要是各写一份，
+   就会出现"桌面上能发、网页上不能发"这种最难查的 bug。
+
+   为什么留着 HTTP：改后端时能一边改一边刷新页面看效果，而重打包 exe 要 25 秒。
+   代价是源码版每逢进度更新都要发一次请求，桌面版一次都不发。 */
+
+/* 由 `start()` 在页面起来时定下来，跑起来之后不再改。 */
+let TRANSPORT = null;
+
+/* 方法名 → HTTP 路由。表里的每一项都对应 `app/main.py` 里一个真实路由；
+   名字对不上时不会静默失败，`callHttp` 会明确抛出"源码版没有这条接口"。
+   `b` 是「把位置参数拼成请求体」的函数，没有就不发 body。 */
+const HTTP_ROUTES = {
+  get_config:       { m: "GET",    p: () => "/api/config" },
+  check_llm:        { m: "GET",    p: () => "/api/llm/check" },
+  get_roles:        { m: "GET",    p: () => "/api/roles" },
+  set_role:         { m: "POST",   p: () => "/api/role", b: (v) => v },
+
+  get_settings:     { m: "GET",    p: () => "/api/settings" },
+  save_settings:    { m: "PUT",    p: () => "/api/settings", b: (v) => v },
+  test_llm:         { m: "POST",   p: () => "/api/settings/test-llm", b: (v) => v },
+
+  auth_status:      { m: "GET",    p: () => "/api/auth/status" },
+  auth_qrcode:      { m: "GET",    p: () => "/api/auth/qrcode" },
+  auth_poll:        { m: "GET",    p: (k) => "/api/auth/poll?key=" + encodeURIComponent(k) },
+  auth_cookie:      { m: "POST",   p: () => "/api/auth/cookie", b: (v) => v },
+  auth_logout:      { m: "POST",   p: () => "/api/auth/logout" },
+
+  discard_subtitle: { m: "DELETE", p: (t) => "/api/subtitle/" + encodeURIComponent(t) },
+
+  create_task:      { m: "POST",   p: () => "/api/task", b: (v) => v },
+  get_task:         { m: "GET",    p: (id) => "/api/task/" + encodeURIComponent(id) },
+  list_versions:    { m: "GET",    p: (id) => "/api/task/" + encodeURIComponent(id) + "/versions" },
+  get_version:      { m: "GET",    p: (id, n) => "/api/task/" + encodeURIComponent(id) + "/versions/" + n },
+  restore_version:  { m: "POST",   p: (id, n) => "/api/task/" + encodeURIComponent(id) + "/versions/" + n + "/restore" },
+  refine_task:      { m: "POST",   p: (id) => "/api/task/" + encodeURIComponent(id) + "/refine", b: (id, v) => v },
+  list_tasks:       { m: "GET",    p: (lim) => "/api/tasks?limit=" + (lim || 20) },
+  list_history:     { m: "GET",    p: (lim) => "/api/history?limit=" + (lim || 100) },
+
+  publish:          { m: "POST",   p: () => "/api/publish", b: (v) => v },
+  withdraw:         { m: "POST",   p: () => "/api/publish/withdraw", b: (pid) => ({ publish_id: pid }) },
+  list_publishes:   { m: "GET",    p: (lim) => "/api/publishes?limit=" + (lim || 20) },
+
+  notes_stats:      { m: "GET",    p: () => "/api/notes/stats" },
+  clear_notes:      { m: "POST",   p: () => "/api/notes/clear" },
+};
+
+/* 浏览器里的"选文件"。桌面版走 Python 的原生对话框（`pick_subtitle`），
+   这边只能用 `<input type=file>`——它拿不到路径，但能拿到字节，够用。 */
+function pickFile(accept) {
+  return new Promise((resolve) => {
+    const el = document.createElement("input");
+    el.type = "file";
+    el.accept = accept;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const done = (v) => { el.remove(); resolve(v); };
+    el.addEventListener("change", () => {
+      done(el.files && el.files[0] ? el.files[0] : null);
+    }, { once: true });
+    // 点"取消"时不会触发 change。现代浏览器有 cancel 事件，没有的话
+    // 这个 promise 就一直挂着——但只有源码版会走到这里，不值得为它做兜底超时。
+    el.addEventListener("cancel", () => done(null), { once: true });
+    el.click();
+  });
+}
+
+async function callHttp(name, ...args) {
+  // 这三条在 HTTP 世界里没有对应物，逐个处理。
+  if (name === "mark_ready") return null;          // 桥的唯一用途就是握手，HTTP 不需要
+  if (name === "open_data_dir") {
+    // 浏览器里"打开文件夹"等于让服务器去开资源管理器，跨了信任边界，不做。
+    throw new Error("源码版没法从浏览器打开文件夹，目录是 " + dataDir());
+  }
+  if (name === "pick_subtitle") {
+    const file = await pickFile(".srt,.txt,text/plain");
+    if (!file) return { cancelled: true };
+    const buf = await file.arrayBuffer();
+    const res = await fetch("/api/subtitle/parse", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: buf,
+    });
+    const d = await readJson(res);
+    return Object.assign({ cancelled: false, name: file.name }, d);
+  }
+
+  const r = HTTP_ROUTES[name];
+  if (!r) throw new Error("源码版没有「" + name + "」这条接口。");
+  const body = r.b ? r.b(...args) : undefined;
+  const res = await fetch(r.p(...args), {
+    method: r.m,
+    headers: body === undefined ? {} : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return readJson(res);
+}
+
+/* FastAPI 的成功响应就是数据本身，失败是 `{detail}`——和桥的 `{ok,data}`
+   形状不同，在这里抹平。 */
+async function readJson(res) {
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+  if (!res.ok) {
+    const raw = data && (data.detail || data.error);
+    const msg = typeof raw === "string" ? raw
+      : Array.isArray(raw) ? raw.map((x) => (x && (x.msg || x.detail)) || JSON.stringify(x)).join("；")
+      : raw ? JSON.stringify(raw) : ("HTTP " + res.status);
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+async function call(name, ...args) {
+  if (TRANSPORT === "http") return callHttp(name, ...args);
+
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || typeof api[name] !== "function") {
+    throw new Error("界面还没连上本地接口，请稍等一下或重启程序。");
+  }
+  const r = await api[name](...args);
+  if (!r || r.ok !== true) {
+    const err = new Error((r && r.error) || "调用没有返回结果");
+    err.status = r && r.status;
+    throw err;
+  }
+  return r.data;
+}
+
+/* ------------------------------------------------------- 进度：HTTP 才需要
+   桌面版由 Python 主动推（`__onTaskUpdate`），这边一条请求都不用发。
+   源码版只能问。用 setTimeout 串起来而不是 setInterval：上一轮没回来就不开下一轮，
+   网络慢的时候不会堆出一串并发请求。任务进入终态就停表，不留永远在跑的定时器。 */
+
+let pollTimer = null;
+
+function ensurePolling() {
+  if (TRANSPORT !== "http" || pollTimer || !S.taskId) return;
+  pollTimer = setTimeout(pollOnce, 1200);
+}
+
+async function pollOnce() {
+  pollTimer = null;
+  if (TRANSPORT !== "http" || !S.taskId) return;
+  let t = null;
+  try {
+    t = await call("get_task", S.taskId);
+  } catch (e) {
+    /* 一次没问到不算错（后面可能正在重启后端）。下一轮再试，不要在界面上闪红。 */
+  }
+  if (t) {
+    window.__onTaskUpdate(t);
+    if (t.status === "ready" || t.status === "failed") return;
+  }
+  ensurePolling();
+}
+
+/* ------------------------------------------------------------ 小工具 */
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function fmt(n) {
+  return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function bytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+/* 数据目录。取数据库文件所在的那一层——库、凭据密钥、笔记缓存都放在一起。 */
+function dataDir() {
+  const p = (S.cfg && S.cfg.storage && S.cfg.storage.db_path) || "";
+  return p.replace(/[\\/][^\\/]*$/, "") || p;
+}
+
+function setMsg(id, text, kind) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "line" + (kind ? " " + kind : "") + (id === "task-msg" ? " gap" : "");
+}
+
+function getPath(obj, path) {
+  return path.split(".").reduce((a, k) => (a == null ? a : a[k]), obj);
+}
+
+function setPath(obj, path, v) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null || typeof cur[parts[i]] !== "object") cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = v;
+}
+
+/* 极简 Markdown：标题、列表、加粗、行内代码、段落。
+   **先转义再加标签**，所以模型写的内容不可能注进 HTML。 */
+function inlineMd(s) {
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, '<code class="ic">$1</code>');
+}
+
+function mdBlocks(md) {
+  const out = [];
+  let list = null;
+  const flush = () => {
+    if (list) { out.push('<ul class="tx-ul">' + list.join("") + "</ul>"); list = null; }
+  };
+  for (const raw of String(md || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flush(); out.push('<div class="tx-h">' + inlineMd(h[2]) + "</div>"); continue; }
+    const li = line.match(/^[-*+]\s+(.*)$/);
+    if (li) { (list = list || []).push("<li>" + inlineMd(li[1]) + "</li>"); continue; }
+    flush();
+    out.push('<p class="tx">' + inlineMd(line) + "</p>");
+  }
+  flush();
+  return out.join("");
+}
+
+/* ------------------------------------------------------------ 自定义确认框
+   WebView 里的原生 confirm() 行为取决于宿主是否接管，不可靠。
+   而且它长得和这个界面完全不搭。自己做一个。 */
+
+let modalResolve = null;
+
+function closeModal() {
+  $("modal").classList.remove("on");
+  $("mask").classList.remove("on");
+  const r = modalResolve;
+  modalResolve = null;
+  if (r) r(false);
+}
+
+function openModal({ title, bodyHtml, actions }) {
+  $("m-title").textContent = title || "CONFIRM";
+  $("m-body").innerHTML = bodyHtml || "";
+  const box = $("m-acts");
+  box.innerHTML = "";
+  (actions || []).forEach((a) => {
+    const b = document.createElement("button");
+    b.textContent = a.label;
+    if (a.kind) b.className = a.kind;
+    b.onclick = () => {
+      if (a.onClick) { a.onClick(); return; }
+      const r = modalResolve;
+      modalResolve = null;
+      $("modal").classList.remove("on");
+      if (!a.keepMask) $("mask").classList.remove("on");
+      if (r) r(a.value === undefined ? true : a.value);
+    };
+    box.appendChild(b);
+  });
+  $("mask").classList.add("on");
+  $("modal").classList.add("on");
+}
+
+function ask(title, message, { ok = "确认", cancel = "取消", danger = false } = {}) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    openModal({
+      title,
+      bodyHtml: "<p>" + esc(message) + "</p>",
+      actions: [
+        { label: cancel, value: false },
+        { label: ok, value: true, kind: danger ? "dan" : "pri" },
+      ],
+    });
+  });
+}
+
+function alertBox(title, message) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    openModal({
+      title,
+      bodyHtml: "<p>" + esc(message) + "</p>",
+      actions: [{ label: "知道了", value: true, kind: "pri" }],
+    });
+  });
+}
+
+/* ------------------------------------------------------------ 顶栏 */
+
+function renderTop() {
+  // 账号
+  const a = $("chip-auth");
+  const id = S.auth && S.auth.identity;
+  if (id) {
+    a.className = "st";
+    a.innerHTML = "<i></i><span>UID <b>" + esc(id.mid) + "</b> · " + esc(id.uname || "") + "</span>";
+  } else {
+    a.className = "st off";
+    a.innerHTML = "<i></i><span>未登录 · 点此扫码</span>";
+  }
+  // 模型
+  const m = $("chip-model");
+  const llm = S.cfg && S.cfg.llm;
+  if (llm && llm.model) {
+    m.className = "st" + (llm.configured ? "" : " warn");
+    m.innerHTML = "<i></i><span>" + esc(llm.model) + (llm.configured ? "" : " · 缺 KEY") + "</span>";
+    m.title = llm.base_url || "";
+  } else {
+    m.className = "st off";
+    m.innerHTML = "<i></i><span>未配置</span>";
+  }
+  // 底栏
+  const g = S.cfg && S.cfg.publish && S.cfg.publish.require_confirm === false;
+  $("ft-gate").classList.toggle("hidden", !g);
+  renderRoleChip();
+}
+
+/* 顶栏的角色 chip。
+   显示的是「下一次总结会用哪个角色」，不是某个任务的历史角色——
+   任务自己的角色记在任务的 summary_json 里，跟着版本走。 */
+function renderRoleChip() {
+  const el = $("chip-role");
+  const r = currentRole();
+  el.innerHTML = "<i></i><span>角色 · <b>" + esc(r.name) + "</b></span>";
+  el.title = r.tagline
+    ? "总结角色：" + r.name + "（" + r.tagline + "）"
+    : "选择总结角色";
+}
+
+function currentRole() {
+  const k = (S.cfg && S.cfg.llm && S.cfg.llm.role) || "standard";
+  const hit = S.roles.find((r) => r.key === k);
+  // 配置里是个已经不存在的 key 时不要显示空白：get_role 在后端也会退回 standard，
+  // 界面上跟着退回同一个默认值，两边才不会互相矛盾。
+  return hit || { key: k, name: k, tagline: "", note: "", passes: 0 };
+}
+
+function renderRoleList() {
+  const cur = currentRole().key;
+  $("role-list").innerHTML = S.roles.map((r) => {
+    const on = r.key === cur;
+    return '<button class="role' + (on ? " on" : "") + '" data-role="' + esc(r.key) + '">' +
+      '<span class="rn"><b>' + esc(r.name) + "</b>" +
+      '<span class="p">' + (r.passes > 1 ? r.passes + " 轮" : "单轮") + "</span>" +
+      (on ? '<span class="cur">当前</span>' : "") +
+      "</span>" +
+      '<span class="rt">' + esc(r.tagline || "") + "</span>" +
+      "</button>";
+  }).join("");
+  $("role-list").querySelectorAll("[data-role]").forEach((b) => {
+    b.onclick = () => pickRole(b.dataset.role);
+  });
+  /* 底部这行写死，不放 role.note。
+     note 是给维护者看的实现说明（「原文要求正文≥原文 20%」这种），
+     摆在选择器底下既占地方又答非所问——用户此刻想知道的是"我选了之后会发生什么"。 */
+  $("role-note").textContent =
+    "选中的角色对下一次总结生效。三轮回的角色会多花约两倍调用成本；已经生成的内容可以用「迭代打磨」单独改。";
+}
+
+function openRolePop() {
+  if (!S.roles.length) return;
+  renderRoleList();
+  $("role-pop").classList.add("on");
+}
+
+function closeRolePop() {
+  $("role-pop").classList.remove("on");
+}
+
+async function pickRole(key) {
+  if (key === currentRole().key) { closeRolePop(); return; }
+  closeRolePop();
+  try {
+    const r = await call("set_role", { role: key });
+    S.cfg.llm.role = r.role;
+    $("s-role").value = r.role;  // 抽屉里那个隐藏字段必须跟上，否则保存设置会把它写回旧值
+    renderRoleChip();
+    setMsg("task-msg", "角色已切到「" + r.name + "」，下一次总结生效。", "ok");
+  } catch (e) {
+    setMsg("task-msg", "切换角色失败：" + e.message, "err");
+  }
+}
+
+/* ------------------------------------------------------------ 历史总结
+
+   后端只给索引（标题 / 时间 / 一句话结论 / 版本数），不给全文。翻一条点一条，
+   全文由 get_task 单独取——历史可能有几百条，一次全搬过来会让浮层打开要等好几秒，
+   而其中 99% 你根本不会点。 */
+
+function renderHistChip() {
+  const n = S.history.length;
+  const el = $("chip-history");
+  el.innerHTML = "<i></i><span>历史" + (n ? " · <b>" + n + "</b>" : "") + "</span>";
+  el.title = n ? "共 " + n + " 条历史总结" : "还没有历史总结";
+}
+
+function histFiltered() {
+  const q = ($("hist-q").value || "").trim().toLowerCase();
+  if (!q) return S.history;
+  return S.history.filter((h) =>
+    (h.title || "").toLowerCase().includes(q) ||
+    (h.up_name || "").toLowerCase().includes(q) ||
+    (h.bvid || "").toLowerCase().includes(q) ||
+    (h.one_line || "").toLowerCase().includes(q)
+  );
+}
+
+function histTime(s) {
+  // 后端给的是 ISO 带时区。只显示「月-日 时:分」，列表里不需要年份；
+  // 但跨年的记录要能看出来，所以不是今年的补上年份。
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s || "").slice(5, 16).replace("T", " ");
+  const p = (n) => String(n).padStart(2, "0");
+  const md = p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  return d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + "-" + md;
+}
+
+function renderHistList() {
+  const rows = histFiltered();
+  $("hist-count").textContent = rows.length === S.history.length
+    ? "共 " + S.history.length + " 条"
+    : rows.length + " / " + S.history.length + " 条";
+
+  const box = $("hist-list2");
+  if (!rows.length) {
+    // 读失败和「还没总结过」是两件事，必须分开说。混成一句「还没有历史总结」
+    // 会让人以为记录丢了，然后去翻数据库——实际上只是这次请求没成功。
+    box.innerHTML = '<div class="e">' +
+      (S.histError
+        ? "历史读取失败：" + esc(S.histError)
+        : (S.history.length ? "没有匹配的记录" : "还没有历史总结。总结完第一条就会出现在这里。")) +
+      "</div>";
+    renderHistPreview(null);
+    return;
+  }
+
+  box.innerHTML = rows.map((h) => {
+    const on = h.id === S.histPick;
+    // 状态只在两种情况下值得占位置：失败、以及正在跑。ready 是常态，不写反而清爽。
+    const st = h.status === "failed"
+      ? '<span class="bad">失败</span>'
+      : (h.status === "ready" ? "" : '<span class="ok">' + esc(h.status) + "</span>");
+    return '<button class="hrow' + (on ? " on" : "") + '" data-hid="' + esc(h.id) + '">' +
+      '<span class="ht">' + esc(h.title || h.bvid || h.id) + "</span>" +
+      '<span class="hm">' + st +
+        "<span>" + esc(histTime(h.created_at)) + "</span>" +
+        (h.version_count > 1 ? "<span>v" + h.version_count + "</span>" : "") +
+        (h.role ? "<span>" + esc(roleName(h.role)) + "</span>" : "") +
+      "</span>" +
+      (h.one_line ? '<span class="ho">' + esc(h.one_line) + "</span>" : "") +
+      "</button>";
+  }).join("");
+
+  box.querySelectorAll("[data-hid]").forEach((b) => {
+    b.onclick = () => {
+      S.histPick = b.dataset.hid;
+      // 列表和预览是两半，点行必须同时更新右边——只重画列表会出现
+      // 「左边高亮第二条、右边还写着第一条的摘要」，那比不显示更糟。
+      renderHistList();
+      renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+    };
+    // 双击直接打开。单击只是选中，因为翻历史时多半只是想看看摘要；
+    // 双击是「就它了」，不该还要再挪到右边点一次按钮。
+    b.ondblclick = () => openHistory(b.dataset.hid);
+  });
+
+  // 列表比预览区高的时候，选中项可能滚出视野。这里是"点谁就保证谁可见"，
+  // 不是每次都滚——用户自己滚上去看别的条目时不该被拽回来。
+  const hit = box.querySelector(".hrow.on");
+  if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: "nearest" });
+}
+
+function roleName(key) {
+  const hit = (S.roles || []).find((r) => r.key === key);
+  return hit ? hit.name : key;
+}
+
+function renderHistPreview(h) {
+  const box = $("hist-preview");
+  if (!h) {
+    box.innerHTML = '<div class="e">选一条看摘要</div>';
+    return;
+  }
+  const failed = h.status === "failed";
+  const meta = [
+    h.bvid ? "<span><b>BV</b> " + esc(h.bvid) + "</span>" : "",
+    h.up_name ? "<span><b>UP</b> " + esc(h.up_name) + "</span>" : "",
+    h.version_count ? "<span><b>版本</b> " + h.version_count + "</span>" : "",
+  ].filter(Boolean).join("");
+
+  const body = failed
+    ? '<div class="sum">' + esc(h.error || "这条任务失败了，没有留下原因。") + "</div>"
+    : (h.one_line
+        ? '<div class="sum">' + esc(h.one_line) + "</div>"
+        : '<div class="sum">这条还没有生成正文。</div>');
+
+  box.innerHTML =
+    "<h4>" + esc(h.title || h.bvid || h.id) + "</h4>" +
+    (meta ? '<div class="kv">' + meta + "</div>" : "") +
+    '<div class="kv"><span><b>时间</b> ' + esc(histTime(h.created_at)) + "</span>" +
+      (h.role ? "<span><b>角色</b> " + esc(roleName(h.role)) + "</span>" : "") +
+    "</div>" +
+    body +
+    '<div class="acts">' +
+      '<button class="pri" data-open="' + esc(h.id) + '">在工作区打开</button>' +
+      (h.bvid ? '<button data-reuse="' + esc(h.bvid) + '">重新总结</button>' : "") +
+    "</div>";
+
+  const open = box.querySelector("[data-open]");
+  if (open) open.onclick = () => openHistory(open.dataset.open);
+  const reuse = box.querySelector("[data-reuse]");
+  if (reuse) {
+    reuse.onclick = () => {
+      $("raw-input").value = reuse.dataset.reuse;
+      updateRunBtn();
+      closeHistPop();
+      $("raw-input").focus();
+    };
+  }
+}
+
+async function loadHistory() {
+  try {
+    const rows = await call("list_history", 200);
+    S.history = rows || [];
+    S.histError = null;
+    renderHistChip();
+    if ($("hist-pop").classList.contains("on")) renderHistList();
+  } catch (e) {
+    // 读不到历史不该影响总结本身。但也不能一声不响给个空列表——
+    // 空列表的意思是「你还没总结过」，跟「库读不出来」完全是两件事，
+    // 混在一起会让人以为记录丢了。
+    S.history = [];
+    S.histError = e.message || String(e);
+    renderHistChip();
+    if ($("hist-pop").classList.contains("on")) renderHistList();
+  }
+}
+
+function openHistPop() {
+  $("hist-pop").classList.add("on");
+  $("hist-q").value = "";
+  // 写在这里而不是写死在 HTML 里：以后要按状态改文案（比如加上"只显示最近
+  // 300 条"）时只改一处，不会出现两处说法不一致。
+  $("hist-note").textContent =
+    "历史存在本地数据库里，换机器时连同 ~/.bili-scribe 一起搬走即可。" +
+    "「重新总结」只把 BV 号填回输入框，不会立刻重跑——同一支视频再跑一次是要花钱的。";
+  // 默认选中当前正在看的那条，省得每次打开都要重新找一遍。
+  S.histPick = (S.task && S.task.id) || (S.history[0] && S.history[0].id) || null;
+  renderHistList();
+  renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+  $("hist-q").focus();
+}
+
+function closeHistPop() {
+  $("hist-pop").classList.remove("on");
+}
+
+async function openHistory(taskId) {
+  closeHistPop();
+  try {
+    const task = await call("get_task", taskId);
+    S.taskId = taskId;
+    S.viewingVersion = null;
+    S.awaitingRefine = null;
+    renderTask(task);
+    // 非终态说明它还在跑（或者上次关程序时还在跑）。源码版得接着问，
+    // 否则界面会停在当时的进度上，看着像卡住了。
+    if (task.status !== "ready" && task.status !== "failed") ensurePolling();
+    loadHistory();  // 重算 chip 上的条数（可能有新任务）
+  } catch (e) {
+    setMsg("task-msg", "打开这条历史失败：" + e.message, "err");
+  }
+}
+
+function tickClock() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  $("ft-clock").textContent =
+    d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+/* ------------------------------------------------------------ 输入区 */
+
+/* 任务在跑的时候不能重复提交——但"在跑"不是自己维护的一个布尔值，
+   而是从任务状态推出来的。多存一份状态，就会有"两处不一致"的那一天。 */
+function isRunning() {
+  const st = S.task && S.task.status;
+  return !!st && st !== "ready" && st !== "failed";
+}
+
+function updateRunBtn() {
+  const raw = $("raw-input").value.trim();
+  $("run-btn").disabled = !raw || !S.online || isRunning();
+}
+
+function setSrtLine(text, kind) {
+  const el = $("srt-line");
+  el.textContent = text || "";
+  el.className = "line" + (kind ? " " + kind : "");
+  el.style.display = text ? "" : "none";
+}
+
+/* ------------------------------------------------------------ 任务渲染 */
+
+function renderSegments() {
+  const box = $("seg");
+  if (!box.children.length) {
+    for (let i = 0; i < STAGES.length; i++) {
+      const el = document.createElement("i");
+      el.style.setProperty("--i", i);
+      box.appendChild(el);
+    }
+  }
+  const t = S.task;
+  const seg = Array.from(box.children);
+  seg.forEach((el) => (el.className = ""));
+
+  if (!t) return;
+
+  if (t.status === "refining") {
+    box.classList.add("anim");
+    $("seg-label").textContent = t.progress || "正在按你的要求改这一版…";
+    $("seg-pct").textContent = "···";
+    return;
+  }
+  box.classList.remove("anim");
+
+  if (t.status === "queued") {
+    $("seg-label").textContent = t.progress || "已接受请求，排队中";
+    $("seg-pct").textContent = "0%";
+    return;
+  }
+  if (t.status === "ready") {
+    seg.forEach((el) => (el.className = "on"));
+    $("seg-label").textContent = t.progress || "总结已生成";
+    $("seg-pct").textContent = "100%";
+    return;
+  }
+  if (t.status === "failed") {
+    const idx = STAGES.indexOf(t.status);
+    seg.forEach((el, i) => (el.className = i === seg.length - 1 ? "bad" : ""));
+    $("seg-label").textContent = t.progress || "失败";
+    $("seg-pct").textContent = "—";
+    return;
+  }
+  const idx = STAGES.indexOf(t.status);
+  if (idx < 0) {
+    $("seg-label").textContent = t.progress || t.status;
+    $("seg-pct").textContent = "—";
+    return;
+  }
+  seg.forEach((el, i) => {
+    if (i < idx) el.className = "on";
+    else if (i === idx) el.className = "cur";
+  });
+  $("seg-label").textContent = t.progress || STAGE_LABEL[t.status] || t.status;
+  $("seg-pct").textContent = Math.round(((idx + 1) / STAGES.length) * 100) + "%";
+}
+
+function renderHead() {
+  const t = S.task;
+  if (!t) return;
+  $("t-title").textContent = t.title || (t.bvid ? t.bvid : "（正在读取视频信息）");
+
+  const chips = [];
+  if (t.up_name) chips.push('<span class="c">UP · ' + esc(t.up_name) + "</span>");
+  if (t.source_label) {
+    const trust = t.source_trust || "";
+    chips.push('<span class="c">素材 · ' + esc(t.source_label) +
+      (trust ? "（" + esc(trust) + "）" : "") + "</span>");
+  }
+  if (t.current_version) {
+    chips.push('<span class="c em">第 ' + t.current_version + " 版" +
+      (t.version_count > 1 ? " · 共 " + t.version_count + " 版" : "") + "</span>");
+  }
+  const role = (t.summary_json && t.summary_json.role) || "";
+  if (role) {
+    const r = S.roles.find((x) => x.key === role);
+    chips.push('<span class="c">' + esc(r ? r.name : role) +
+      (r ? " · " + r.passes + " 轮" : "") + "</span>");
+  }
+  if (t.bvid) {
+    chips.push('<span class="c"><a href="#" id="open-bili">原视频 ↗</a></span>');
+  }
+  $("t-chips").innerHTML = chips.join("");
+  const link = $("open-bili");
+  if (link) {
+    link.onclick = (e) => {
+      e.preventDefault();
+      // 交给系统浏览器。窗口本身是应用，不是浏览器的标签页。
+      window.open("https://www.bilibili.com/video/" + t.bvid, "_blank");
+    };
+  }
+}
+
+function renderWarnings() {
+  const t = S.task;
+  const warns = (t && t.warnings) || [];
+  const cands = (t && t.candidates) || [];
+
+  $("warn-blk").classList.toggle("hidden", !warns.length);
+  $("warn-list").innerHTML = warns.map((w) => "<li>" + esc(w) + "</li>").join("");
+
+  const box = $("cand");
+  const list = cands.filter((c) => c && c.label);
+  box.classList.toggle("hidden", !list.length);
+  box.innerHTML = list.map((c) =>
+    '<span class="' + (c.available ? "yes" : "no") + '" title="' + esc(c.detail || "") + '">' +
+    esc(c.label) + "</span>"
+  ).join("");
+}
+
+/* 正文卡：一句话 / 主体 / 要点 / 时间轴 / 局限
+   `src` 是 summary_json（可能是当前版，也可能是正在回看的历史版）。 */
+function renderBody(src, idxText) {
+  const s = src || {};
+  $("body-idx").textContent = idxText || "";
+
+  const parts = [];
+  if (s.one_line) {
+    parts.push('<h2 class="s"><span class="n">01</span>一句话</h2>');
+    parts.push('<p class="tx"><span class="hl">' + inlineMd(s.one_line) + "</span></p>");
+  }
+  if (s.summary_md) {
+    parts.push('<h2 class="s"><span class="n">02</span>主体</h2>');
+    parts.push(mdBlocks(s.summary_md));
+  }
+  if (s.key_points && s.key_points.length) {
+    parts.push('<h2 class="s"><span class="n">03</span>要点</h2>');
+    parts.push('<ul class="tx-ul">' +
+      s.key_points.map((p) => "<li>" + inlineMd(p) + "</li>").join("") + "</ul>");
+  }
+  if (s.timeline && s.timeline.length) {
+    parts.push('<h2 class="s"><span class="n">04</span>时间轴</h2>');
+    parts.push('<ul class="tl">' + s.timeline.map((it) =>
+      "<li>" + (it.t ? '<span class="t">' + esc(it.t) + "</span>" : "") +
+      '<span class="x">' + inlineMd(it.text || "") + "</span></li>").join("") + "</ul>");
+  }
+  if (s.caution) {
+    parts.push('<h2 class="s"><span class="n">05</span>素材局限</h2>');
+    parts.push('<p class="tx"><span class="warn-tx">' + inlineMd(s.caution) + "</span></p>");
+  }
+  if (!parts.length) {
+    parts.push('<p class="tx" style="color:var(--dim)">还没有内容。</p>');
+  }
+  $("body-inner").innerHTML = parts.join("");
+  $("body-card").classList.remove("hidden");
+}
+
+function renderCounter() {
+  const box = $("comment-box");
+  const text = box.value;
+  const limit = (S.cfg && S.cfg.publish && S.cfg.publish.max_comment_chars) || 900;
+  const el = $("counter");
+  // 超过 1000 字不是错误：会自动改走笔记通道。所以这里不变红、不禁用按钮。
+  if (text.length > 1000) {
+    el.textContent = text.length + " 字";
+    el.style.color = "var(--acid-d)";
+    $("via-hint").textContent = "超普通评论上限 · 走笔记";
+  } else {
+    el.textContent = text.length + " / " + limit + "（平台上限 1000）";
+    el.style.color = text.length > limit ? "var(--ember)" : "";
+    $("via-hint").textContent = "";
+  }
+  $("publish-btn").disabled = !(box.value.trim() && $("confirm-box").checked);
+}
+
+function renderVersions() {
+  const list = S.versions || [];
+  $("v-count").textContent = String(list.length).padStart(2, "0");
+
+  const anyDiff = list.some((v) => (v.changed_fields || []).length);
+  const box = $("v-list");
+
+  if (!list.length) {
+    box.innerHTML = '<div class="vd">还没有版本记录。</div>';
+    return;
+  }
+
+  box.innerHTML = list.map((v) => {
+    const isCur = v.version_no === S.currentVersion;
+    const viewing = S.viewingVersion === v.version_no;
+    const kind = v.source === "refine" ? "按你的要求改"
+      : (v.source === "restore" ? "回退到底稿" : "初次生成");
+    const text = v.one_line || v.requirement || kind;
+
+    let right;
+    if (isCur) right = '<span class="cur">当前</span>';
+    else {
+      right = '<button class="act" data-view="' + v.version_no + '">' +
+        (viewing ? "在看" : "查看") + "</button>";
+    }
+
+    let extra = "";
+    if (v.revise_note) {
+      extra += '<div class="vd"><span class="k">它说：</span>' + esc(v.revise_note) + "</div>";
+    }
+    const diff = versionDiffText(v);
+    if (diff) {
+      const ex = versionDiffExamples(v);
+      extra += '<div class="vd"><span class="k">实际改动：</span>' +
+        (diff.bad ? '<span class="w">' + esc(diff.text) + "</span>" : esc(diff.text)) +
+        (ex.length && S.showDiffs ? "<br>" + ex.map((l) => "例 · " + esc(l)).join("<br>") : "") +
+        "</div>";
+    }
+    return '<div class="v' + (isCur ? " on" : "") + '" data-v="' + v.version_no + '">' +
+      '<span class="n">' + String(v.version_no).padStart(2, "0") + "</span>" +
+      '<span class="x" title="' + esc(kind + " · " + (v.created_at || "")) + '">' + esc(text) + "</span>" +
+      right + "</div>" + extra;
+  }).join("");
+
+  box.querySelectorAll("[data-view]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); showVersion(Number(b.dataset.view)); };
+  });
+  box.querySelectorAll("[data-v]").forEach((row) => {
+    row.onclick = () => {
+      const n = Number(row.dataset.v);
+      if (n !== S.currentVersion) showVersion(n);
+      else viewCurrent();
+    };
+  });
+
+  if (anyDiff && !$("v-difftoggle")) {
+    const b = document.createElement("button");
+    b.id = "v-difftoggle";
+    b.className = "b2";
+    b.style.marginTop = "6px";
+    b.textContent = "展开全部差异";
+    b.onclick = () => {
+      S.showDiffs = !S.showDiffs;
+      b.textContent = S.showDiffs ? "收起差异" : "展开全部差异";
+      renderVersions();
+    };
+    box.appendChild(b);
+  } else if (anyDiff && $("v-difftoggle")) {
+    $("v-difftoggle").textContent = S.showDiffs ? "收起差异" : "展开全部差异";
+  }
+}
+
+/* 「实际改了什么」三态：null 不显示、[] 明说没变、非空逐字段列。
+   混起来就会把"没比过"读成"没改动"。 */
+function versionDiffText(v) {
+  const f = v.changed_fields;
+  if (f === null || f === undefined) return null;
+  if (!f.length) return { text: "无 —— 和上一版逐字相同（要求没被落实）", bad: true };
+  return {
+    text: f.map((x) => {
+      const r = (x.ratio === null || x.ratio === undefined) ? "" : "，相似度 " + x.ratio;
+      return x.label + "（" + x.detail + r + "）";
+    }).join(" · "),
+    bad: false,
+  };
+}
+
+function versionDiffExamples(v) {
+  const f = v.changed_fields;
+  if (!f || !f.length) return [];
+  return f.filter((x) => x.example).map((x) => x.label + "：" + x.example);
+}
+
+/* 这一版花了多少。三类语义不同，分开写。 */
+function costRows(v) {
+  if (!v) return [["—", "—"]];
+  if (v.source === "restore") return [["回退", "没有调用模型，无消耗"]];
+  const m = v.metrics || {};
+  const u = m.usage;
+  if (!u) return [["消耗", "未记录（这一版生成于记账功能之前）"]];
+  const rows = [];
+  if (u.prompt_tokens != null) rows.push(["输入 tokens", fmt(u.prompt_tokens)]);
+  if (u.completion_tokens != null) rows.push(["输出 tokens", fmt(u.completion_tokens)]);
+  rows.push(["调用次数", String(u.calls == null ? "—" : u.calls)]);
+  if (m.elapsed != null) rows.push(["耗时", m.elapsed + "s"]);
+  if (m.chunks) rows.push(["素材预读", m.chunks > 1 ? m.chunks + " 段" : "未触发"]);
+  if (m.frames) rows.push(["画面帧", String(m.frames)]);
+  if (m.model) rows.push(["模型", m.model]);
+  if (u.unpriced) rows.push(["未返回用量", u.unpriced + " 次"]);
+  return rows;
+}
+
+function renderCost() {
+  const cur = (S.versions || []).find((v) => v.version_no === S.currentVersion);
+  $("cost-now").innerHTML = costRows(cur)
+    .map(([k, val]) => '<div class="kt"><span class="k">' + esc(k) +
+      '</span><span class="v2">' + esc(val) + "</span></div>").join("");
+
+  const t = S.versionTotal;
+  if (!t || (!t.calls && !t.untracked)) {
+    $("cost-all").innerHTML = '<div class="kt"><span class="k">累计</span><span class="v2">—</span></div>';
+    return;
+  }
+  const rows = [];
+  if (t.calls) rows.push(["模型调用", t.calls + " 次"]);
+  if (t.prompt_tokens) rows.push(["输入合计", fmt(t.prompt_tokens)]);
+  if (t.completion_tokens) rows.push(["输出合计", fmt(t.completion_tokens)]);
+  if (t.total_tokens) rows.push(["总 tokens", fmt(t.total_tokens)]);
+  if (t.unpriced) rows.push(["端点未返回用量", t.unpriced + " 次"]);
+  if (t.untracked) rows.push(["无记录版本", t.untracked + " 版"]);
+  $("cost-all").innerHTML = rows.map(([k, v], i) =>
+    '<div class="kt"><span class="k">' + esc(k) + '</span><span class="v2' +
+    (i === rows.length - 1 ? " a" : "") + '">' + esc(v) + "</span></div>").join("");
+}
+
+function applyRefineState() {
+  const t = S.task || {};
+  const can = !!t.can_refine;
+  const blocked = t.refine_blocked || "";
+  const live = t.live_publish;
+
+  const req = $("refine-req");
+  req.disabled = !can || !!S.viewingVersion;
+  $("refine-btn").disabled = !can || !!S.viewingVersion || !req.value.trim() || !S.online;
+
+  const hint = $("refine-hint");
+  let msg = "", kind = "";
+  if (S.viewingVersion) {
+    msg = "正在回看第 " + S.viewingVersion + " 版（只读）。要用它当底稿，先点上面的「以这版为底稿」。";
+  } else if (blocked) {
+    msg = "现在还不能改： " + blocked;
+    kind = "err";
+  } else if (live) {
+    msg = "这条视频的总结已经发出去了。评论发出后不能编辑，要改得先撤回。";
+    kind = "err";
+  } else if (!can) {
+    msg = "现在还不能改这一版。";
+    kind = "err";
+  }
+  hint.textContent = msg;
+  hint.className = "line" + (kind ? " " + kind : "");
+  hint.style.display = msg ? "" : "none";
+
+  $("refine-blk").classList.toggle("hidden", !!S.viewingVersion && !can);
+}
+
+function renderWork() {
+  const t = S.task;
+  const hasTask = !!t;
+  $("empty").classList.toggle("hidden", hasTask);
+  $("work").classList.toggle("hidden", !hasTask);
+  $("side-ph").classList.toggle("hidden", hasTask);
+  $("side-body").classList.toggle("hidden", !hasTask);
+  if (!hasTask) return;
+
+  renderHead();
+  renderSegments();
+  renderWarnings();
+  applyRefineState();
+}
+
+/* 完整渲染：只在"当前版变了"或"第一次拿到任务"时跑。
+   进度推送每秒来好几次，每次都重排正文会把滚动位置和选区打掉。 */
+function renderTask(task) {
+  S.task = task;
+  const prevVer = S.currentVersion;
+  S.currentVersion = task.current_version || null;
+
+  renderWork();
+
+  const ready = task.status === "ready" || task.status === "failed";
+  const hasSummary = !!task.summary_json;
+
+  if (hasSummary && !S.viewingVersion) {
+    renderBody(task.summary_json, "V" + String(task.current_version || 0).padStart(2, "0") + " / CURRENT");
+
+    // 发布框只在"看着当前版"时存在。翻历史版时整块收起——
+    // 否则会出现"预览里是第 2 版、发布框里是第 4 版"这种最危险的组合。
+    $("pub-card").classList.remove("hidden");
+    const doc = task.publish_document || task.comment_text || "";
+    if (prevVer !== S.currentVersion || $("comment-box").value === "") {
+      $("comment-box").value = doc;
+      // 内容变了而勾选还在，等于对着新版举着上一版的确认。
+      $("confirm-box").checked = false;
+    }
+    renderCounter();
+  } else if (!hasSummary) {
+    $("body-card").classList.add("hidden");
+    $("pub-card").classList.add("hidden");
+  }
+
+  if (ready) loadVersions();
+  else if (prevVer !== S.currentVersion) loadVersions();
+
+  loadPublishes();
+  // 一条任务刚跑完（或者刚被打开）时重取历史索引：否则新建的总结不会出现在
+  // 历史列表里，得等下次启动程序才看得见——那看起来就像"记录没保存"。
+  loadHistory();
+}
+
+/* 轻量更新：推进度用。只碰进度、标题和右侧判定，不重排正文。 */
+function applyPush(task) {
+  const before = S.task;
+  S.task = task;
+  renderSegments();
+  renderHead();
+  renderWarnings();
+
+  const verChanged = (task.current_version || null) !== (S.currentVersion || null);
+  if (verChanged) {
+    S.currentVersion = task.current_version || null;
+    if (!S.viewingVersion && task.summary_json) {
+      renderBody(task.summary_json, "V" + String(task.current_version).padStart(2, "0") + " / CURRENT");
+      $("pub-card").classList.remove("hidden");
+      $("comment-box").value = task.publish_document || task.comment_text || "";
+      $("confirm-box").checked = false;
+      renderCounter();
+    }
+    loadVersions();
+  }
+
+  const statusChanged = !before || before.status !== task.status;
+  if (statusChanged || verChanged) onStatusChange(task, before);
+  applyRefineState();
+}
+
+/* ------------------------------------------------------------ 状态机
+   这三条判断是旧界面用血换来的，任何一条丢了都会出现"永远等下去"或
+   "看着旧版发新版"。 */
+
+function onStatusChange(task, before) {
+  const prev = before || {};
+
+  if (task.status === "refining") {
+    // 状态还是 refining、后端却说没有线程在跑 —— 不是"正在改"，
+    // 是"上次改到一半程序退出了"。用 === false 而不是 !task.refining：
+    // 字段万一缺失，宁可什么都不说，也不能凭空宣布任务中断。
+    if (task.refining === false) {
+      S.awaitingRefine = null;
+      const lost = "上一次改到一半程序就退出了（重启或关掉了窗口），这一版没有改成。";
+      setMsg("task-msg", lost, "err");
+      setMsg("refine-hint", lost + " 下面仍是上一版，可以继续改。", "err");
+      return;
+    }
+    $("run-btn").disabled = true;
+    $("refine-btn").disabled = true;
+    setMsg("task-msg", task.progress || "正在按你的要求改…");
+    return;
+  }
+
+  if (task.status === "ready") {
+    // 迭代失败时后端把状态放回 ready 保住上一版，且刻意不写版本号——
+    // 只看版本号会把"已经失败了"读成"还在改"。真信号是 refining + error。
+    if (!task.refining && task.error) {
+      S.awaitingRefine = null;
+      updateRunBtn();
+      const why = task.progress || task.error;
+      setMsg("task-msg", why, "err");
+      setMsg("refine-hint", why + "（下面仍是上一版，可以继续改）", "err");
+      return;
+    }
+    // 刚提交的迭代可能快得离谱，第一次读到 ready 时新版还没落库。
+    // 用版本号确认"新的一版确实出来了"，否则这次迭代结果会永久丢失。
+    if (S.awaitingRefine && (task.current_version || 0) <= S.awaitingRefine) {
+      setMsg("task-msg", "正在按你的要求改…");
+      return;
+    }
+    const wasRefine = !!S.awaitingRefine;
+    S.awaitingRefine = null;
+    updateRunBtn();
+    setMsg("task-msg", wasRefine ? "" : "总结已生成，请在右侧确认。",
+      wasRefine ? "" : "ok");
+    if (wasRefine) {
+      const note = (task.summary_json && task.summary_json.revise_note) || "";
+      setMsg("refine-hint", "第 " + task.current_version + " 版改好了" +
+        (note ? "——它说：" + note : "。"), "ok");
+    }
+    return;
+  }
+
+  if (task.status === "failed") {
+    S.awaitingRefine = null;
+    updateRunBtn();
+    setMsg("task-msg", "失败：" + (task.error || "未知原因"), "err");
+    return;
+  }
+
+  // 流水线在跑
+  $("run-btn").disabled = true;
+  setMsg("task-msg", task.progress || "处理中…");
+}
+
+/* ------------------------------------------------------------ 版本接口 */
+
+async function loadVersions() {
+  if (!S.taskId) return;
+  try {
+    const d = await call("list_versions", S.taskId);
+    S.versions = d.versions || [];
+    S.versionTotal = d.total || null;
+    S.currentVersion = d.current;
+    renderVersions();
+    renderCost();
+    if (S.task) {
+      S.task.current_version = d.current;
+      S.task.version_count = S.versions.length;
+      renderHead();
+    }
+  } catch (e) {
+    $("v-hint").textContent = "版本历史读不到：" + e.message;
+    $("v-hint").className = "line err";
+  }
+}
+
+/* 翻历史版：只读，且把发布块与打磨块一起收起。 */
+async function showVersion(no) {
+  try {
+    const v = await call("get_version", S.taskId, no);
+    S.viewingVersion = no;
+    $("pub-card").classList.add("hidden");
+    renderBody(v.summary_json || {}, "V" + String(no).padStart(2, "0") + " / HISTORY");
+    renderVersions();
+    applyRefineState();
+
+    const hint = $("refine-hint");
+    hint.innerHTML = "";
+    const span = document.createElement("span");
+    span.textContent = "正在回看第 " + no + " 版（只读）。";
+    hint.appendChild(span);
+    const btn = document.createElement("button");
+    btn.className = "b2";
+    btn.style.marginTop = "7px";
+    btn.textContent = "以第 " + no + " 版为底稿";
+    btn.onclick = () => restoreVersion(no);
+    hint.appendChild(btn);
+    const back = document.createElement("button");
+    back.className = "b2";
+    back.style.marginTop = "5px";
+    back.textContent = "回到当前版";
+    back.onclick = () => viewCurrent();
+    hint.appendChild(back);
+    hint.className = "line";
+    hint.style.display = "";
+    $("refine-blk").classList.remove("hidden");
+    $("refine-req").disabled = true;
+    $("refine-btn").disabled = true;
+  } catch (e) {
+    setMsg("refine-hint", "读不到这一版：" + e.message, "err");
+  }
+}
+
+function viewCurrent() {
+  S.viewingVersion = null;
+  if (S.task) {
+    renderTask(S.task);
+    renderVersions();
+  }
+  setMsg("refine-hint", "");
+}
+
+async function restoreVersion(no) {
+  const ok = await ask(
+    "以这一版为底稿",
+    "会追加一版新的当前版（内容与第 " + no + " 版相同），已有的版本都保留。\n\n" +
+    "这一步不调用模型，不产生任何消耗。",
+    { ok: "确认回退" }
+  );
+  if (!ok) return;
+  setMsg("refine-hint", "正在回退…");
+  try {
+    const r = await call("restore_version", S.taskId, no);
+    S.viewingVersion = null;
+    $("refine-req").value = "";
+    const task = await call("get_task", S.taskId);
+    renderTask(task);
+    setMsg("refine-hint",
+      "已把第 " + r.restored_from + " 版设为当前版（现在是第 " + r.version_no +
+      " 版，没有花任何模型调用）。", "ok");
+  } catch (e) {
+    setMsg("refine-hint", "回退失败：" + e.message, "err");
+  }
+}
+
+/* ------------------------------------------------------------ 提交任务 */
+
+async function submitTask() {
+  const raw = $("raw-input").value.trim();
+  if (!raw) { setMsg("task-msg", "先粘一条视频链接或 BV 号。", "err"); return; }
+
+  $("run-btn").disabled = true;
+  setMsg("task-msg", "已提交，正在处理…");
+  try {
+    const payload = { raw_input: raw };
+    if (S.subtitleToken) payload.subtitle_token = S.subtitleToken;
+    const r = await call("create_task", payload);
+
+    if (S.subtitleToken) {
+      // 服务端会在任务结束时删掉临时文件。留着这个 token 再提交只会拿到「已过期」。
+      S.subtitleToken = null;
+      $("srt-btn").classList.remove("on");
+      $("srt-btn").textContent = "字幕";
+      setSrtLine("字幕已随本次任务提交（结束后自动删除）。要再用请重新选。", "ok");
+    }
+
+    // 新任务意味着上一轮的一切作废。残留的「等迭代结果」标记会让这一轮的
+    // 第一次推送误判成「迭代还没出结果」，从而永远停在等待里。
+    S.taskId = r.task_id;
+    S.awaitingRefine = null;
+    S.viewingVersion = null;
+    S.versions = [];
+    S.versionTotal = null;
+    S.currentVersion = null;
+    S.task = null;
+    $("comment-box").value = "";
+    $("confirm-box").checked = false;
+    $("refine-req").value = "";
+    renderCounter();
+
+    const task = await call("get_task", S.taskId);
+    renderTask(task);
+    ensurePolling();   // 源码版：这条任务跑完之前得自己问（桌面版不用，Python 会推）
+  } catch (e) {
+    setMsg("task-msg", "提交失败：" + e.message, "err");
+    updateRunBtn();
+  }
+}
+
+/* ------------------------------------------------------------ 迭代打磨 */
+
+async function refine() {
+  const req = $("refine-req").value.trim();
+  if (!req || !S.taskId) return;
+  $("refine-btn").disabled = true;
+  try {
+    const r = await call("refine_task", S.taskId, {
+      requirement: req,
+      base_version: S.currentVersion,
+    });
+    // 记下"提交时是哪一版"。之后看到当前版 <= 这个数，说明新版还没出来。
+    S.awaitingRefine = r.base_version || S.currentVersion || 0;
+    $("refine-req").value = "";
+    $("refine-btn").disabled = true;
+    setMsg("task-msg", "正在按你的要求改…");
+    setMsg("refine-hint", "正在按你的要求改…");
+    renderSegments();
+    ensurePolling();   // 源码版：改完之前要自己盯着
+  } catch (e) {
+    setMsg("refine-hint", "提交失败：" + e.message, "err");
+    $("refine-btn").disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------ 发布 */
+
+function publishTask() {
+  const text = $("comment-box").value;
+  doPublish(text);
+}
+
+async function doPublish(text) {
+  if (!S.taskId) return;
+  $("publish-btn").disabled = true;
+  setMsg("publish-msg", "正在发布…");
+  try {
+    const r = await call("publish", {
+      task_id: S.taskId,
+      text,
+      confirm: true,
+      mode: "auto",
+    });
+    if (r.status === "published") {
+      const viaNote = String(r.rpid || "").startsWith("note:");
+      setMsg("publish-msg", viaNote ? "已发布为笔记并同步到评论区。" : "已发布到评论区。", "ok");
+    } else {
+      setMsg("publish-msg", r.message || "没有发出去。", "err");
+    }
+    loadPublishes();
+    // 发出去之后打磨入口就该关了（评论不能编辑）。这里只刷新判定，
+    // 不重渲染正文——重渲染会把上面那句回执冲掉，看起来像什么都没发生。
+    await refreshGates();
+  } catch (e) {
+    setMsg("publish-msg", "发布失败：" + e.message, "err");
+  } finally {
+    renderCounter();
+  }
+}
+
+async function refreshGates() {
+  if (!S.taskId) return;
+  try {
+    const t = await call("get_task", S.taskId);
+    S.task = t;
+    applyRefineState();
+    loadPublishes();
+  } catch (e) {
+    /* 刷新失败不影响已发生的事 */
+  }
+}
+
+async function loadPublishes() {
+  try {
+    const rows = await call("list_publishes", 12);
+    S.publishes = rows || [];
+    const mine = S.task && S.task.bvid
+      ? S.publishes.filter((p) => p.bvid === S.task.bvid && !p.deleted_at)
+      : [];
+    const blk = $("hist-blk");
+    blk.classList.toggle("hidden", !mine.length);
+    $("hist-list").innerHTML = mine.map((p) => {
+      const st = p.status === "published" ? "已发布"
+        : (p.status === "blocked" ? "被拦下" : "失败");
+      const when = String(p.created_at || "").replace("T", " ").slice(0, 16);
+      return '<div class="v" style="cursor:default">' +
+        '<span class="n">' + esc(when.slice(5)) + "</span>" +
+        '<span class="x">' + esc(st) + " · " + esc((p.content || "").slice(0, 48)) + "</span>" +
+        '<button class="act" data-wd="' + p.id + '">撤回</button></div>';
+    }).join("");
+    $("hist-list").querySelectorAll("[data-wd]").forEach((b) => {
+      b.onclick = () => withdraw(Number(b.dataset.wd));
+    });
+  } catch (e) {
+    /* 发布记录读不到不影响主流程 */
+  }
+}
+
+async function withdraw(publishId) {
+  const ok = await ask("撤回这条评论", "撤回后可以重新发布，也可以继续打磨。确认撤回？",
+    { ok: "撤回", danger: true });
+  if (!ok) return;
+  try {
+    const r = await call("withdraw", publishId);
+    await alertBox("撤回", r.message || "已处理。");
+    loadPublishes();
+    await refreshGates();
+  } catch (e) {
+    await alertBox("撤回失败", e.message);
+  }
+}
+
+/* ------------------------------------------------------------ 字幕文件 */
+
+async function pickSubtitle() {
+  const btn = $("srt-btn");
+  btn.disabled = true;
+  btn.textContent = "选择中…";
+  try {
+    const r = await call("pick_subtitle");
+    if (r.cancelled) {
+      btn.textContent = "字幕";
+      btn.disabled = false;
+      return;
+    }
+    S.subtitleToken = r.token;
+    S.subtitleName = r.name || "";
+    btn.classList.add("on");
+    btn.textContent = "已选字幕";
+    btn.disabled = false;
+    setSrtLine(
+      "已选：" + (r.name || "字幕") + " · " + r.segments + " 段 · " +
+      r.chars + " 字 · " + r.encoding + " · " + bytes(r.bytes) +
+      "（" + r.first + " → " + r.last + "）",
+      "ok"
+    );
+  } catch (e) {
+    btn.textContent = "字幕";
+    btn.disabled = false;
+    setSrtLine("读不了这个文件：" + e.message, "err");
+  }
+}
+
+async function clearSubtitle() {
+  const token = S.subtitleToken;
+  S.subtitleToken = null;
+  S.subtitleName = "";
+  $("srt-btn").classList.remove("on");
+  $("srt-btn").textContent = "字幕";
+  setSrtLine("已清除，本次将使用平台字幕（如果有的话）。");
+  if (token) {
+    try { await call("discard_subtitle", token); } catch (e) { /* 兜底清理会收走 */ }
+  }
+}
+
+/* ------------------------------------------------------------ 账号 */
+
+async function refreshAuth() {
+  try {
+    S.auth = await call("auth_status");
+  } catch (e) {
+    S.auth = null;
+  }
+  renderTop();
+}
+
+function openLogin() {
+  const logged = S.auth && S.auth.logged_in;
+  if (logged) {
+    openModal({
+      title: "账号",
+      bodyHtml: '<p>已登录：' + esc(S.auth.identity.uname || "") +
+        "（UID " + esc(S.auth.identity.mid) + "）</p>",
+      actions: [
+        { label: "关闭", value: false },
+        { label: "退出登录", kind: "dan", onClick: doLogout },
+      ],
+    });
+    return;
+  }
+  const qrOk = S.cfg && S.cfg.features && S.cfg.features.qr_login;
+  openModal({
+    title: "登录 B 站",
+    bodyHtml:
+      '<div class="qrwrap"><div class="im" id="qr-im"><span style="color:#888;font-size:11px">加载中</span></div>' +
+      '<div class="side2"><div class="s1" id="qr-s1">正在获取二维码…</div>' +
+      '<div class="s2">' + (qrOk ? "用 B 站手机客户端扫码，然后确认登录。登录凭据只存在这台机器上。"
+        : "当前环境缺少二维码依赖，请用手动 Cookie 方式登录。") + "</div></div></div>" +
+      '<div class="sep"></div>' +
+      '<div class="s2" style="font-size:11px;color:var(--dim);margin-bottom:8px">或者手动填 Cookie（从浏览器开发者工具里取）</div>' +
+      '<div class="fl"><label>SESSDATA</label><input id="ck-1" placeholder="必填"></div>' +
+      '<div class="fl"><label>bili_jct</label><input id="ck-2" placeholder="必填"></div>' +
+      '<div class="fl"><label>DedeUserID</label><input id="ck-3" placeholder="选填"></div>',
+    actions: [
+      { label: "取消", value: false },
+      { label: "用 Cookie 登录", kind: "pri", onClick: submitCookie },
+    ],
+  });
+  if (qrOk) startQr();
+}
+
+async function startQr() {
+  try {
+    const q = await call("auth_qrcode");
+    S.qrKey = q.key;
+    const im = $("qr-im");
+    if (im) im.innerHTML = '<img alt="二维码" src="' + q.image + '">';
+    $("qr-s1").textContent = "扫码后在手机上点确认";
+    pollQr();
+  } catch (e) {
+    const im = $("qr-im");
+    if (im) im.textContent = "二维码取不到";
+    const s = $("qr-s1");
+    if (s) s.textContent = e.message;
+  }
+}
+
+/* 这个轮询保留：二维码的有效性是 B站 服务端的状态，不是本进程的状态，
+   没有任何本地事件能通知我们"用户刚扫了"。这是唯一必须轮询的地方。 */
+function pollQr() {
+  clearInterval(S.qrTimer);
+  let tries = 0;
+  S.qrTimer = setInterval(async () => {
+    tries++;
+    if (tries > 90) { clearInterval(S.qrTimer); return; }
+    try {
+      const r = await call("auth_poll", S.qrKey);
+      const s = $("qr-s1");
+      if (r.status === 0) {
+        clearInterval(S.qrTimer);
+        if (s) s.textContent = r.error ? ("登录成功但保存失败：" + r.error) : "已登录";
+        await refreshAuth();
+        setTimeout(() => { $("modal").classList.remove("on"); $("mask").classList.remove("on"); }, 700);
+      } else if (r.status === 2 && s) {
+        s.textContent = "已扫码，请在手机上确认";
+      } else if (r.status === 3 && s) {
+        s.textContent = "二维码已过期，关掉重开可以再拿一个";
+        clearInterval(S.qrTimer);
+      }
+    } catch (e) {
+      clearInterval(S.qrTimer);
+    }
+  }, 2000);
+}
+
+async function submitCookie() {
+  const p = {
+    sessdata: $("ck-1").value.trim(),
+    bili_jct: $("ck-2").value.trim(),
+    dedeuserid: $("ck-3").value.trim(),
+  };
+  if (!p.sessdata || !p.bili_jct) {
+    await alertBox("Cookie 不完整", "SESSDATA 和 bili_jct 都必须填。");
+    return;
+  }
+  try {
+    await call("auth_cookie", p);
+    clearInterval(S.qrTimer);
+    $("modal").classList.remove("on");
+    $("mask").classList.remove("on");
+    await refreshAuth();
+  } catch (e) {
+    await alertBox("登录失败", e.message);
+  }
+}
+
+async function doLogout() {
+  try {
+    await call("auth_logout");
+    await refreshAuth();
+    $("modal").classList.remove("on");
+    $("mask").classList.remove("on");
+  } catch (e) {
+    await alertBox("退出失败", e.message);
+  }
+}
+
+/* ------------------------------------------------------------ 设置抽屉 */
+
+function openDrawer() {
+  $("mask").classList.add("on");
+  $("drawer").classList.add("on");
+  if (!S.settingsLoaded) loadSettings();
+}
+
+function closeDrawer() {
+  $("drawer").classList.remove("on");
+  $("mask").classList.remove("on");
+  $("m-body").innerHTML = "";
+  $("modal").classList.remove("on");
+}
+
+function fillSettings(values) {
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const v = getPath(values, el.dataset.path);
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.dataset.kind === "csv") el.value = Array.isArray(v) ? v.join(", ") : (v || "");
+    else el.value = v == null ? "" : v;
+  });
+  syncGateAck();
+  syncDisclose();
+}
+
+function collectSettings() {
+  const out = {};
+  document.querySelectorAll("[data-path]").forEach((el) => {
+    const path = el.dataset.path;
+    let v;
+    if (el.type === "checkbox") v = el.checked;
+    else if (el.dataset.kind === "number") v = Number(el.value);
+    else if (el.dataset.kind === "csv") v = el.value.split(/[,，\s]+/).filter(Boolean);
+    else v = el.value;
+    setPath(out, path, v);
+  });
+  // 关闭闸门必须显式带确认位。服务端会查这个字段，前端弹窗拦不住手滑，
+  // 这一位才是"你确实勾了"的凭证。
+  if (out.publish && out.publish.require_confirm === false) out.confirm_disable_gate = true;
+  return out;
+}
+
+function syncGateAck() {
+  const on = $("s-gate").checked;
+  $("gate-ack").classList.toggle("hidden", on);
+  if (on) $("s-gate-ack").checked = false;
+}
+
+function syncDisclose() {
+  const on = $("s-disclose").checked;
+  const el = document.querySelector('[data-path="publish.disclosure_text"]');
+  if (el) el.disabled = !on;
+}
+
+async function loadSettings() {
+  $("d-msg").textContent = "正在读取…";
+  $("d-msg").className = "st-line";
+  try {
+    const d = await call("get_settings");
+    S.settingsLoaded = true;
+    fillSettings(d.values);
+    $("d-msg").textContent = d.config_exists
+      ? "配置文件：" + d.path
+      : "配置文件还没创建，保存时会新建：" + d.path;
+    $("d-msg").className = "st-line";
+
+    // 角色：界面上在顶栏选，抽屉里那个 #s-role 只是跟着同步的隐藏字段。
+    // fillSettings 已经按 data-path 填过它了，这里补一次兜底——值是空的话
+    // collectSettings 会原样交上去，而空串在服务端是"未知角色"、会被 400 挡掉。
+    if (!$("s-role").value) $("s-role").value = currentRole().key;
+
+    loadNotesStats();
+    loadDataDir();
+  } catch (e) {
+    $("d-msg").textContent = "读不到设置：" + e.message;
+    $("d-msg").className = "st-line err";
+  }
+}
+
+async function loadNotesStats() {
+  try {
+    const n = await call("notes_stats");
+    $("notes-info").textContent =
+      n.entries + " 条 · " + bytes(n.bytes) + "（本次命中 " + n.session_hits +
+      " 次 / 未命中 " + n.session_misses + " 次）";
+    $("notes-info").title = n.dir;
+  } catch (e) {
+    $("notes-info").textContent = "读不到";
+  }
+}
+
+async function loadDataDir() {
+  try {
+    const c = await call("get_config");
+    const dbp = (c.storage && c.storage.db_path) || "";
+    $("data-dir").textContent = dbp.replace(/[\\/][^\\/]+$/, "");
+  } catch (e) { /* 忽略 */ }
+}
+
+async function saveSettings() {
+  const btn = $("d-save");
+  btn.disabled = true;
+  $("d-msg").textContent = "正在保存…";
+  $("d-msg").className = "st-line";
+  try {
+    const values = collectSettings();
+    const r = await call("save_settings", values);
+    S.cfg = await call("get_config");
+    renderTop();
+    $("d-msg").textContent = "已写入 " + r.written +
+      (r.restart_required ? " · " + (r.restart_sections || []).join("、") + " 段需要重启程序才生效"
+        : " · 全部即时生效");
+    $("d-msg").className = "st-line ok";
+    if (r.gate_disabled) {
+      $("d-msg").textContent += " · 注意：确认闸门仍处于关闭状态";
+    }
+    updateCounterSafe();
+    loadNotesStats();
+  } catch (e) {
+    $("d-msg").textContent = "保存失败：" + e.message;
+    $("d-msg").className = "st-line err";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function updateCounterSafe() {
+  try { renderCounter(); } catch (e) { /* 没有评论框时忽略 */ }
+}
+
+async function testLlm() {
+  const btn = $("d-test");
+  btn.disabled = true;
+  $("d-msg").textContent = "正在测试连通…";
+  $("d-msg").className = "st-line";
+  try {
+    // 带上未保存的表单值：先测再存，省得"存了才发现不通"。
+    // 传的是 llm 那一段本身，不是再包一层 `{llm: ...}`——后端的 `LlmPatch`
+    // 就是这一段，包一层会变成"缺 base_url 与 model"的校验失败，而错误信息
+    // 指着字段名，不指着多出来的那层壳，很难看出真正原因。
+    const values = collectSettings();
+    const r = await call("test_llm", values.llm);
+    $("d-msg").textContent = r.ok
+      ? "连通正常 · " + r.model + " @ " + r.base_url
+      : "连不通 · " + r.detail;
+    $("d-msg").className = "st-line " + (r.ok ? "ok" : "err");
+  } catch (e) {
+    $("d-msg").textContent = "测试失败：" + e.message;
+    $("d-msg").className = "st-line err";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------ 启动 */
+
+function bootRuler() {
+  const box = $("ruler");
+  for (let i = 0; i < 64; i++) box.appendChild(document.createElement("i"));
+}
+
+/** 后端推送入口。**必须尽早定义**：后端可能在页面脚本跑完之前就来推。 */
+window.__onTaskUpdate = function (task) {
+  try {
+    if (!task || !task.id) return;
+    if (S.taskId && task.id !== S.taskId) return;   // 不是当前这条，忽略
+    if (!S.task) { renderTask(task); return; }
+    const prevStatus = S.task.status;
+    applyPush(task);
+    if (prevStatus !== task.status) onStatusChange(task, null);
+  } catch (e) {
+    console.error("[push] 处理失败", e);
+  }
+};
+
+async function boot() {
+  bootRuler();
+  tickClock();
+  setInterval(tickClock, 20000);
+
+  // 先定传输方式，后面所有 call() 都按它走。
+  const bridged = !!(window.pywebview && window.pywebview.api);
+  TRANSPORT = bridged ? "bridge" : "http";
+
+  if (bridged) {
+    // 告诉 Python「页面确实起来了」。**不能靠 pywebviewready 自己判断**：
+    // 那个事件只说明桥挂上了，不代表这个脚本已经跑完、__onTaskUpdate 已经存在。
+    try {
+      await window.pywebview.api.mark_ready();
+    } catch (e) {
+      $("bridge").classList.add("on");
+      return;
+    }
+  }
+
+  try {
+    S.cfg = await call("get_config");
+    S.online = true;
+  } catch (e) {
+    // 两种形态下这句话的意思不一样，分开说。桌面版说重启程序，
+    // 源码版该说去检查 run.py 那个终端——让人重启浏览器是没用的建议。
+    $("bridge").textContent = bridged
+      ? "桥接没有建立起来：界面拿不到本地接口。请关掉窗口重新启动程序；如果一直这样，说明安装不完整。"
+      : "连不上后端：这个页面是从 `python run.py` 起的服务上打开的，但接口没有响应。去那个终端窗口看它在报什么错，或者确认它还在跑。";
+    $("bridge").classList.add("on");
+    return;
+  }
+
+  try { S.roles = (await call("get_roles")).roles || []; } catch (e) { S.roles = []; }
+
+  renderTop();
+  renderCounter();
+  updateRunBtn();
+  await refreshAuth();
+
+  const note = (S.cfg.storage && S.cfg.storage.db_path)
+    ? "DB " + S.cfg.storage.db_path.replace(/^.*[\\/]/, "")
+    : "";
+  $("ft-note").textContent = note;
+  $("ft-mode").textContent = bridged ? "本地 · 无端口" : "本机 · 127.0.0.1";
+
+  // 版本号来自后端，前端不另抄一份——抄一份就会出现过期的数字。
+  // 桌面版的窗口标题里也有，但源码版跑在浏览器标签页里看不见，所以底栏要留一个。
+  $("ft-ver").textContent = S.cfg.version ? "v" + S.cfg.version : "版本未知";
+
+  // 最近一条任务：重启程序后不该从空白开始。
+  try {
+    const rows = await call("list_tasks", 1);
+    if (rows && rows.length) {
+      S.taskId = rows[0].id;
+      const task = await call("get_task", S.taskId);
+      renderTask(task);
+      // 上次关程序时它还在跑（或还在改）——源码版得接着问，否则界面会停在
+      // 当时的进度上，看着像卡住了。终态任务 ensurePolling 会自己返回。
+      if (task.status !== "ready" && task.status !== "failed") ensurePolling();
+    }
+  } catch (e) {
+    /* 没有历史任务不是错误 */
+  }
+
+  // 历史索引在启动时就取一次：顶栏 chip 上要显示条数，等用户点开再取会先闪一下
+  // 「历史」再变成「历史 · 78」，看起来像加载失败又好了。
+  await loadHistory();
+}
+
+/* ---- 事件绑定（脚本在 body 末尾，元素都已存在） ---- */
+
+$("raw-input").addEventListener("input", updateRunBtn);
+$("raw-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitTask(); }
+});
+$("run-btn").onclick = submitTask;
+$("srt-btn").onclick = () => (S.subtitleToken ? clearSubtitle() : pickSubtitle());
+$("srt-btn").addEventListener("contextmenu", (e) => {
+  if (S.subtitleToken) { e.preventDefault(); clearSubtitle(); }
+});
+
+$("comment-box").addEventListener("input", renderCounter);
+$("confirm-box").addEventListener("change", renderCounter);
+$("publish-btn").onclick = publishTask;
+
+$("refine-req").addEventListener("input", () => {
+  $("refine-btn").disabled = !$("refine-req").value.trim() || !S.task || !S.task.can_refine
+    || !!S.viewingVersion || !S.online;
+});
+$("refine-btn").onclick = refine;
+
+$("chip-auth").onclick = openLogin;
+$("chip-model").onclick = openDrawer;
+$("chip-settings").onclick = openDrawer;
+
+// 角色浮层：点 chip 开关，点 ×、点外面、按 Esc 都关。
+// 不共用 #mask 那层遮罩——遮罩会把整页压暗，对一个"随手换个角色"的小动作太重了。
+$("chip-role").onclick = () => {
+  if ($("role-pop").classList.contains("on")) closeRolePop();
+  else openRolePop();
+};
+$("role-pop-x").onclick = closeRolePop;
+document.addEventListener("click", (e) => {
+  if (!$("role-pop").classList.contains("on")) return;
+  // 重绘过的元素会脱离文档，这时 closest() 找不到任何祖先，看起来就像
+  // "点了外面"。凡是点击过程中被重绘掉的，一律不算外点。
+  if (!document.contains(e.target)) return;
+  if (e.target.closest("#role-pop") || e.target.closest("#chip-role")) return;
+  closeRolePop();
+});
+
+// 历史浮层：跟角色浮层同一套开关方式，但它是独立的一层——
+// 两个浮层都开着的时候点另一个 chip，得把前一个关掉，否则会叠在一起。
+$("chip-history").onclick = () => {
+  if ($("hist-pop").classList.contains("on")) {
+    closeHistPop();
+  } else {
+    closeRolePop();
+    loadHistory().then(openHistPop);
+  }
+};
+$("hist-pop-x").onclick = closeHistPop;
+$("hist-q").addEventListener("input", () => {
+  renderHistList();
+  renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+});
+// 搜索框里的 Esc 先清空关键词，再按一次才关浮层——一次按键关掉整个面板
+// 会让"我只是想清掉刚打的字"变成"面板没了，还得重新打开"。
+$("hist-q").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ($("hist-q").value) {
+    e.stopPropagation();
+    $("hist-q").value = "";
+    renderHistList();
+    renderHistPreview(S.history.find((h) => h.id === S.histPick) || null);
+  }
+});
+document.addEventListener("click", (e) => {
+  if (!$("hist-pop").classList.contains("on")) return;
+  // 点列表行会重绘整个列表，被点的那个按钮已经不在文档里了。
+  // 这时候 closest() 一路找不到祖先，会被误判成"点了外面"——面板刚点开
+  // 就关掉。凡是重绘掉的节点，一律不算外点。
+  if (!document.contains(e.target)) return;
+  if (e.target.closest("#hist-pop") || e.target.closest("#chip-history")) return;
+  closeHistPop();
+});
+
+$("mask").onclick = () => {
+  if ($("modal").classList.contains("on")) closeModal();
+  else closeDrawer();
+};
+$("d-close").onclick = closeDrawer;
+$("d-save").onclick = saveSettings;
+$("d-test").onclick = testLlm;
+
+$("s-key-eye").onclick = () => {
+  const el = $("s-key");
+  const shown = el.type === "text";
+  el.type = shown ? "password" : "text";
+  $("s-key-eye").textContent = shown ? "显示" : "隐藏";
+};
+
+$("s-gate").addEventListener("change", syncGateAck);
+$("s-disclose").addEventListener("change", syncDisclose);
+
+$("notes-clear").onclick = async () => {
+  const ok = await ask("清空预读缓存",
+    "清掉之后，之前总结过的长视频再打磨时要重新预读一遍，那一步是花钱的。\n\n" +
+    "只在缓存占了太多磁盘、或者你想彻底重来时才清。",
+    { ok: "清空", danger: true });
+  if (!ok) return;
+  try {
+    const r = await call("clear_notes");
+    await alertBox("已清空", "删掉了 " + r.removed + " 条缓存。");
+    loadNotesStats();
+  } catch (e) {
+    await alertBox("清空失败", e.message);
+  }
+};
+
+$("open-dir").onclick = async () => {
+  try { await call("open_data_dir"); } catch (e) { await alertBox("打不开", e.message); }
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    // 浮层在最上面，所以先关浮层。历史面板里的搜索框自己会拦一次 Esc（先清词），
+    // 它拦下来的时候这里不会收到，剩下的情况就是直接关面板。
+    if ($("hist-pop").classList.contains("on")) closeHistPop();
+    else if ($("role-pop").classList.contains("on")) closeRolePop();
+    else if ($("modal").classList.contains("on")) closeModal();
+    else if ($("drawer").classList.contains("on")) closeDrawer();
+  }
+});
+
+/* 就绪：两种形态的入口。
+
+   桌面版：pywebview 注入 api 后会抛 `pywebviewready`。**必须等它**，
+   直接读 `window.pywebview.api` 会是 undefined。
+   源码版：没有桥，页面是 HTTP 服务自己发出来的，脚本跑完就能开始。 */
+if (window.pywebview && window.pywebview.api) boot();
+else if (location.protocol === "http:" || location.protocol === "https:") boot();
+else window.addEventListener("pywebviewready", boot, { once: true });
+</script>
+</body>
+</html>

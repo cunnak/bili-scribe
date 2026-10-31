@@ -1,0 +1,2596 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="dns-prefetch" href="https://ignoredone-wp.oss-cn-shanghai.aliyuncs.com">
+<meta name='robots' content='max-image-preview:large' />
+<script>document.documentElement.classList.add("fl-js");</script>    <!-- Force Light Mode: CSS -->
+    <style id="force-light-mode">
+      :root { color-scheme: light !important; }
+
+      /* 强制基础背景与文字颜色（根据需要可调整） */
+      html, body {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+      }
+
+      /* 覆盖常见的深色选择器 / 主题开关 */
+      [data-theme="dark"],
+      .dark,
+      .dark-mode,
+      body.dark,
+      html.dark {
+        background: inherit !important;
+        color: inherit !important;
+      }
+
+      /* 防止媒体或 svg 被反色 */
+      img, picture, video, svg {
+        filter: none !important;
+        background-color: transparent !important;
+      }
+
+      /* 如果主题使用 CSS 变量定义暗色调，这里强制覆盖常用变量（可按需扩充） */
+      :root {
+        --background-color: #ffffff !important;
+        --bg: #ffffff !important;
+        --foreground: #111111 !important;
+        --text-color: #111111 !important;
+        --muted-color: #444444 !important;
+      }
+
+      /* 强制覆盖 prefers-color-scheme: dark 的行为 */
+      @media (prefers-color-scheme: dark) {
+        :root { color-scheme: light !important; }
+      }
+    </style>
+
+    <!-- Force Light Mode: JS to remove/add intercept dark classes that are added later -->
+    <script id="force-light-mode-js">
+      (function(){
+        try{
+          // tell browser to use light scheme
+          document.documentElement.style.colorScheme = 'light';
+          // remove known dark classes from html/body if present
+          document.documentElement.classList.remove('dark');
+          document.body.classList.remove('dark','dark-mode');
+
+          // convert data-theme="dark" -> "light"
+          document.querySelectorAll('[data-theme]').forEach(function(el){
+            if(el.getAttribute('data-theme') === 'dark') el.setAttribute('data-theme', 'light');
+          });
+
+          // observe future attribute changes on <html> and <body> to remove 'dark' classes if added later
+          var observer = new MutationObserver(function(mutations){
+            mutations.forEach(function(m){
+              var t = m.target;
+              if(t && t.classList){
+                if(t.classList.contains('dark') || t.classList.contains('dark-mode')){
+                  t.classList.remove('dark','dark-mode');
+                }
+              }
+              if(t && t.getAttribute && t.getAttribute('data-theme') === 'dark'){
+                t.setAttribute('data-theme','light');
+              }
+            });
+          });
+          observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class','data-theme'] });
+          observer.observe(document.body, { attributes: true, attributeFilter: ['class','data-theme'] });
+        }catch(e){
+          // fail silently
+          console && console.debug && console.debug('force-light-mode error', e);
+        }
+      })();
+    </script>
+    <title>ignoredone&#039;s space</title>
+<link rel='dns-prefetch' href='//fonts.googleapis.com' />
+<link rel='dns-prefetch' href='//cdn.jsdelivr.net' />
+<link rel="alternate" type="application/rss+xml" title="ignoredone&#039;s space &raquo; Feed" href="https://www.ignoredone.space/index.php/feed/" />
+<link rel="alternate" type="application/rss+xml" title="ignoredone&#039;s space &raquo; 评论 Feed" href="https://www.ignoredone.space/index.php/comments/feed/" />
+<style id="wp-img-auto-sizes-contain-inline-css">
+img:is([sizes=auto i],[sizes^="auto," i]){contain-intrinsic-size:3000px 1500px}
+/*# sourceURL=wp-img-auto-sizes-contain-inline-css */
+</style>
+<style id="wp-block-site-logo-inline-css">
+.wp-block-site-logo{box-sizing:border-box;line-height:0}.wp-block-site-logo a{display:inline-block;line-height:0}.wp-block-site-logo.is-default-size img{height:auto;width:120px}.wp-block-site-logo img{height:auto;max-width:100%}.wp-block-site-logo a,.wp-block-site-logo img{border-radius:inherit}.wp-block-site-logo.aligncenter{margin-left:auto;margin-right:auto;text-align:center}:root :where(.wp-block-site-logo.is-style-rounded){border-radius:9999px}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/site-logo/style.min.css */
+</style>
+<style id="wp-block-group-inline-css">
+.wp-block-group{box-sizing:border-box}:where(.wp-block-group.wp-block-group-is-layout-constrained){position:relative}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/group/style.min.css */
+</style>
+<style id="wp-block-navigation-link-inline-css">
+.wp-block-navigation .wp-block-navigation-item__label{overflow-wrap:break-word}.wp-block-navigation .wp-block-navigation-item__description{display:none}.link-ui-tools{outline:1px solid #f0f0f0;padding:8px}.link-ui-block-inserter{padding-top:8px}.link-ui-block-inserter__back{margin-left:8px;text-transform:uppercase}
+
+				.is-style-arrow-link .wp-block-navigation-item__label:after {
+					content: "\2197";
+					padding-inline-start: 0.25rem;
+					vertical-align: middle;
+					text-decoration: none;
+					display: inline-block;
+				}
+/*# sourceURL=wp-block-navigation-link-inline-css */
+</style>
+<style id="wp-block-navigation-inline-css">
+.wp-block-navigation{position:relative}.wp-block-navigation ul{margin-bottom:0;margin-left:0;margin-top:0;padding-left:0}.wp-block-navigation ul,.wp-block-navigation ul li{list-style:none}.wp-block-navigation .wp-block-navigation-item{align-items:center;background-color:inherit;display:flex;position:relative}.wp-block-navigation .wp-block-navigation-item .wp-block-navigation__submenu-container:empty{display:none}.wp-block-navigation .wp-block-navigation-item__content{display:block;z-index:1}.wp-block-navigation .wp-block-navigation-item__content.wp-block-navigation-item__content{color:inherit}.wp-block-navigation.has-text-decoration-underline .wp-block-navigation-item__content,.wp-block-navigation.has-text-decoration-underline .wp-block-navigation-item__content:active,.wp-block-navigation.has-text-decoration-underline .wp-block-navigation-item__content:focus{text-decoration:underline}.wp-block-navigation.has-text-decoration-line-through .wp-block-navigation-item__content,.wp-block-navigation.has-text-decoration-line-through .wp-block-navigation-item__content:active,.wp-block-navigation.has-text-decoration-line-through .wp-block-navigation-item__content:focus{text-decoration:line-through}.wp-block-navigation :where(a),.wp-block-navigation :where(a:active),.wp-block-navigation :where(a:focus){text-decoration:none}.wp-block-navigation .wp-block-navigation__submenu-icon{align-self:center;background-color:inherit;border:none;color:currentColor;display:inline-block;font-size:inherit;height:.6em;line-height:0;margin-left:.25em;padding:0;width:.6em}.wp-block-navigation .wp-block-navigation__submenu-icon svg{stroke:currentColor;display:inline-block;height:inherit;margin-top:.075em;width:inherit}.wp-block-navigation{--navigation-layout-justification-setting:flex-start;--navigation-layout-direction:row;--navigation-layout-wrap:wrap;--navigation-layout-justify:flex-start;--navigation-layout-align:center}.wp-block-navigation.is-vertical{--navigation-layout-direction:column;--navigation-layout-justify:initial;--navigation-layout-align:flex-start}.wp-block-navigation.no-wrap{--navigation-layout-wrap:nowrap}.wp-block-navigation.items-justified-center{--navigation-layout-justification-setting:center;--navigation-layout-justify:center}.wp-block-navigation.items-justified-center.is-vertical{--navigation-layout-align:center}.wp-block-navigation.items-justified-right{--navigation-layout-justification-setting:flex-end;--navigation-layout-justify:flex-end}.wp-block-navigation.items-justified-right.is-vertical{--navigation-layout-align:flex-end}.wp-block-navigation.items-justified-space-between{--navigation-layout-justification-setting:space-between;--navigation-layout-justify:space-between}:where(.wp-block-navigation) ul li{padding:0}.wp-block-navigation .has-child .wp-block-navigation__submenu-container{align-items:normal;background-color:inherit;color:inherit;display:flex;flex-direction:column;opacity:0;position:absolute;z-index:2}@media not (prefers-reduced-motion){.wp-block-navigation .has-child .wp-block-navigation__submenu-container{transition:opacity .1s linear}}.wp-block-navigation .has-child .wp-block-navigation__submenu-container{height:0;overflow:hidden;visibility:hidden;width:0}.wp-block-navigation .has-child .wp-block-navigation__submenu-container>.wp-block-navigation-item>.wp-block-navigation-item__content{display:flex;flex-grow:1;padding:.5em 1em}.wp-block-navigation .has-child .wp-block-navigation__submenu-container>.wp-block-navigation-item>.wp-block-navigation-item__content .wp-block-navigation__submenu-icon{margin-left:auto;margin-right:0}.wp-block-navigation .has-child .wp-block-navigation__submenu-container .wp-block-navigation-item__content{margin:0}.wp-block-navigation .has-child .wp-block-navigation__submenu-container{left:-1px;top:100%}@media (min-width:782px){.wp-block-navigation .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container{left:100%;top:-1px}.wp-block-navigation .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container:before{background:transparent;content:"";display:block;height:100%;position:absolute;right:100%;width:.5em}.wp-block-navigation .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-icon{margin-right:.25em}.wp-block-navigation .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-icon svg{transform:rotate(-90deg)}}@media (hover:hover){.wp-block-navigation .has-child:not(.open-on-click):hover>.wp-block-navigation__submenu-container{height:auto;min-width:200px;opacity:1;overflow:visible;visibility:visible;width:auto}}.wp-block-navigation .has-child .wp-block-navigation-submenu__toggle[aria-expanded=true]~.wp-block-navigation__submenu-container,.wp-block-navigation .has-child:not(.open-on-click):not(.open-on-hover-click):focus-within>.wp-block-navigation__submenu-container{height:auto;min-width:200px;opacity:1;overflow:visible;visibility:visible;width:auto}.wp-block-navigation .has-child.open-always{align-items:var(--navigation-layout-align,initial);flex-direction:var(--navigation-layout-direction,initial);flex-wrap:var(--navigation-layout-wrap,wrap);gap:var(--wp--style--block-gap,2em)}.wp-block-navigation .has-child.open-always,.wp-block-navigation .has-child.open-always .wp-block-navigation-item{justify-content:var(--navigation-layout-justify,initial)}.wp-block-navigation .has-child.open-always .wp-block-navigation__submenu-container,.wp-block-navigation .has-child.open-always.wp-block-navigation-submenu{gap:var(--wp--style--block-gap,2em)}.wp-block-navigation .has-child.open-always .wp-block-navigation-item,.wp-block-navigation .has-child.open-always .wp-block-navigation__submenu-container,.wp-block-navigation .has-child.open-always.wp-block-navigation-submenu{padding-bottom:0;padding-top:0}.wp-block-navigation .has-child.open-always .wp-block-navigation__submenu-container{padding-left:var(--wp--style--block-gap,2em);padding-right:var(--wp--style--block-gap,2em)}.wp-block-navigation .has-child.open-always .wp-block-navigation__submenu-container .wp-block-navigation-item__content{padding:0}.wp-block-navigation .has-child.open-always .wp-block-navigation__submenu-container>.wp-block-navigation-item>.wp-block-navigation-item__content,.wp-block-navigation .has-child.open-always>.wp-block-navigation-item__content{flex-grow:0}.wp-block-navigation .has-child.open-always>.wp-block-navigation__submenu-container{background-color:transparent;border:none;color:inherit;flex-basis:100%;height:auto;opacity:1;overflow:visible;position:static;visibility:visible;width:auto}.wp-block-navigation.has-background .has-child .wp-block-navigation__submenu-container{left:0;top:100%}@media (min-width:782px){.wp-block-navigation.has-background .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container{left:100%;top:0}}.wp-block-navigation-submenu{display:flex;position:relative}.wp-block-navigation-submenu .wp-block-navigation__submenu-icon svg{stroke:currentColor}button.wp-block-navigation-item__content{background-color:transparent;border:none;color:currentColor;font-family:inherit;font-size:inherit;font-style:inherit;font-weight:inherit;letter-spacing:inherit;line-height:inherit;text-align:left;text-transform:inherit}.wp-block-navigation-submenu__toggle{cursor:pointer}.wp-block-navigation-submenu__toggle[aria-expanded=true]+.wp-block-navigation__submenu-icon>svg,.wp-block-navigation-submenu__toggle[aria-expanded=true]>svg{transform:rotate(180deg)}.wp-block-navigation-item.open-on-click .wp-block-navigation-submenu__toggle{padding-left:0;padding-right:.85em}.wp-block-navigation-item.open-on-click .wp-block-navigation-submenu__toggle+.wp-block-navigation__submenu-icon{margin-left:-.6em;pointer-events:none}.wp-block-navigation-item.open-on-click button.wp-block-navigation-item__content:not(.wp-block-navigation-submenu__toggle){padding:0}.wp-block-navigation .wp-block-page-list,.wp-block-navigation__container,.wp-block-navigation__responsive-close,.wp-block-navigation__responsive-container,.wp-block-navigation__responsive-container-content,.wp-block-navigation__responsive-dialog{gap:inherit}:where(.wp-block-navigation.has-background .wp-block-navigation-item a:not(.wp-element-button)),:where(.wp-block-navigation.has-background .wp-block-navigation-submenu a:not(.wp-element-button)){padding:.5em 1em}:where(.wp-block-navigation .wp-block-navigation__submenu-container .wp-block-navigation-item a:not(.wp-element-button)),:where(.wp-block-navigation .wp-block-navigation__submenu-container .wp-block-navigation-submenu a:not(.wp-element-button)),:where(.wp-block-navigation .wp-block-navigation__submenu-container .wp-block-navigation-submenu button.wp-block-navigation-item__content),:where(.wp-block-navigation .wp-block-navigation__submenu-container .wp-block-pages-list__item button.wp-block-navigation-item__content){padding:.5em 1em}.wp-block-navigation.items-justified-right .wp-block-navigation__container .has-child .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-right .wp-block-page-list>.has-child .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between .wp-block-page-list>.has-child:last-child .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between>.wp-block-navigation__container>.has-child:last-child .wp-block-navigation__submenu-container{left:auto;right:0}.wp-block-navigation.items-justified-right .wp-block-navigation__container .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-right .wp-block-page-list>.has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between .wp-block-page-list>.has-child:last-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between>.wp-block-navigation__container>.has-child:last-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container{left:-1px;right:-1px}@media (min-width:782px){.wp-block-navigation.items-justified-right .wp-block-navigation__container .has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-right .wp-block-page-list>.has-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between .wp-block-page-list>.has-child:last-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container,.wp-block-navigation.items-justified-space-between>.wp-block-navigation__container>.has-child:last-child .wp-block-navigation__submenu-container .wp-block-navigation__submenu-container{left:auto;right:100%}}.wp-block-navigation:not(.has-background) .wp-block-navigation__submenu-container{background-color:#fff;border:1px solid rgba(0,0,0,.15)}.wp-block-navigation.has-background .wp-block-navigation__submenu-container{background-color:inherit}.wp-block-navigation:not(.has-text-color) .wp-block-navigation__submenu-container{color:#000}.wp-block-navigation__container{align-items:var(--navigation-layout-align,initial);display:flex;flex-direction:var(--navigation-layout-direction,initial);flex-wrap:var(--navigation-layout-wrap,wrap);justify-content:var(--navigation-layout-justify,initial);list-style:none;margin:0;padding-left:0}.wp-block-navigation__container .is-responsive{display:none}.wp-block-navigation__container:only-child,.wp-block-page-list:only-child{flex-grow:1}@keyframes overlay-menu__fade-in-animation{0%{opacity:0;transform:translateY(.5em)}to{opacity:1;transform:translateY(0)}}.wp-block-navigation__responsive-container{bottom:0;display:none;left:0;position:fixed;right:0;top:0}.wp-block-navigation__responsive-container :where(.wp-block-navigation-item a){color:inherit}.wp-block-navigation__responsive-container .wp-block-navigation__responsive-container-content{align-items:var(--navigation-layout-align,initial);display:flex;flex-direction:var(--navigation-layout-direction,initial);flex-wrap:var(--navigation-layout-wrap,wrap);justify-content:var(--navigation-layout-justify,initial)}.wp-block-navigation__responsive-container:not(.is-menu-open.is-menu-open){background-color:inherit!important;color:inherit!important}.wp-block-navigation__responsive-container.is-menu-open{background-color:inherit;display:flex;flex-direction:column}@media not (prefers-reduced-motion){.wp-block-navigation__responsive-container.is-menu-open{animation:overlay-menu__fade-in-animation .1s ease-out;animation-fill-mode:forwards}}.wp-block-navigation__responsive-container.is-menu-open:not(.disable-default-overlay){padding:clamp(1rem,var(--wp--style--root--padding-top),20rem) clamp(1rem,var(--wp--style--root--padding-right),20rem) clamp(1rem,var(--wp--style--root--padding-bottom),20rem) clamp(1rem,var(--wp--style--root--padding-left),20rem)}.wp-block-navigation__responsive-container.is-menu-open{overflow:auto;z-index:100000}.wp-block-navigation__responsive-container.is-menu-open:not(.disable-default-overlay) .wp-block-navigation__responsive-container-content{padding-top:calc(2rem + 24px)}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content{align-items:var(--navigation-layout-justification-setting,inherit);display:flex;flex-direction:column;flex-wrap:nowrap;overflow:visible}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__container,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-page-list{justify-content:flex-start}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__submenu-icon{display:none}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .has-child .wp-block-navigation__submenu-container{border:none;height:auto;min-width:200px;opacity:1;overflow:initial;padding-left:2rem;padding-right:2rem;position:static;visibility:visible;width:auto}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__container,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__submenu-container{gap:inherit}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__submenu-container{padding-top:var(--wp--style--block-gap,2em)}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation-item__content{padding:0}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation-item,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-navigation__container,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-container-content .wp-block-page-list{align-items:var(--navigation-layout-justification-setting,initial);display:flex;flex-direction:column}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation-item,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation-item .wp-block-navigation__submenu-container,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__container,.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-page-list{background:transparent!important;color:inherit!important}.wp-block-navigation__responsive-container.is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__submenu-container.wp-block-navigation__submenu-container.wp-block-navigation__submenu-container.wp-block-navigation__submenu-container{left:auto;right:auto}.wp-block-navigation__responsive-container.disable-default-overlay .wp-block-navigation__overlay-container{display:none;width:100%}.wp-block-navigation__responsive-container.disable-default-overlay .wp-block-navigation__responsive-close{max-width:none}.wp-block-navigation__responsive-container.disable-default-overlay.is-menu-open .wp-block-navigation__responsive-container-content>:not(.wp-block-navigation__overlay-container){display:none}.wp-block-navigation__responsive-container.disable-default-overlay.is-menu-open .wp-block-navigation__responsive-container-content .wp-block-navigation__overlay-container{display:block}.wp-block-navigation__responsive-container.disable-default-overlay.is-menu-open .wp-block-navigation__responsive-container-content .wp-block-navigation__overlay-container .wp-block-navigation__submenu-container{left:0;right:auto}@media (min-width:600px){.wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open){background-color:inherit;display:block;position:relative;width:100%;z-index:auto}.wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open) .wp-block-navigation__responsive-container-close{display:none}.wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation__submenu-container.wp-block-navigation__submenu-container.wp-block-navigation__submenu-container.wp-block-navigation__submenu-container{left:0}}.wp-block-navigation:not(.has-background) .wp-block-navigation__responsive-container.is-menu-open:not(.disable-default-overlay){background-color:#fff}.wp-block-navigation:not(.has-text-color) .wp-block-navigation__responsive-container.is-menu-open:not(.disable-default-overlay){color:#000}.wp-block-navigation__toggle_button_label{font-size:1rem;font-weight:700}.wp-block-navigation__responsive-container-close,.wp-block-navigation__responsive-container-open{background:transparent;border:none;color:currentColor;cursor:pointer;margin:0;padding:0;text-transform:inherit;vertical-align:middle}.wp-block-navigation__responsive-container-close svg,.wp-block-navigation__responsive-container-open svg{fill:currentColor;display:block;height:24px;pointer-events:none;width:24px}.wp-block-navigation__responsive-container-open{display:flex}.wp-block-navigation__responsive-container-open.wp-block-navigation__responsive-container-open.wp-block-navigation__responsive-container-open{font-family:inherit;font-size:inherit;font-weight:inherit}@media (min-width:600px){.wp-block-navigation__responsive-container-open:not(.always-shown){display:none}}.wp-block-navigation__responsive-container-close{position:absolute;right:0;top:0;z-index:2}.wp-block-navigation__responsive-container-close.wp-block-navigation__responsive-container-close.wp-block-navigation__responsive-container-close{font-family:inherit;font-size:inherit;font-weight:inherit}.disable-default-overlay .wp-block-navigation__responsive-container-close{right:clamp(1rem,var(--wp--style--root--padding-left),20rem);top:clamp(1rem,var(--wp--style--root--padding-left),20rem)}.wp-block-navigation__responsive-close{width:100%}.has-modal-open .wp-block-navigation__responsive-close{margin-left:auto;margin-right:auto;max-width:var(--wp--style--global--wide-size,100%)}.wp-block-navigation__responsive-close:focus{outline:none}.is-menu-open .wp-block-navigation__responsive-close,.is-menu-open .wp-block-navigation__responsive-container-content,.is-menu-open .wp-block-navigation__responsive-dialog{box-sizing:border-box}.wp-block-navigation__responsive-dialog{position:relative}.has-modal-open .admin-bar .is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-dialog{margin-top:46px}@media (min-width:782px){.has-modal-open .admin-bar .is-menu-open:where(:not(.disable-default-overlay)) .wp-block-navigation__responsive-dialog{margin-top:32px}}html.has-modal-open{overflow:hidden}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/navigation/style.min.css */
+</style>
+<style id="wp-block-site-title-inline-css">
+.wp-block-site-title{box-sizing:border-box}.wp-block-site-title :where(a){color:inherit;font-family:inherit;font-size:inherit;font-style:inherit;font-weight:inherit;letter-spacing:inherit;line-height:inherit;text-decoration:inherit}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/site-title/style.min.css */
+</style>
+<style id="wp-block-heading-inline-css">
+h1:where(.wp-block-heading).has-background,h2:where(.wp-block-heading).has-background,h3:where(.wp-block-heading).has-background,h4:where(.wp-block-heading).has-background,h5:where(.wp-block-heading).has-background,h6:where(.wp-block-heading).has-background{padding:1.25em 2.375em}h1.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h1.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]),h2.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h2.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]),h3.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h3.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]),h4.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h4.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]),h5.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h5.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]),h6.has-text-align-left[style*=writing-mode]:where([style*=vertical-lr]),h6.has-text-align-right[style*=writing-mode]:where([style*=vertical-rl]){rotate:180deg}
+
+				.is-style-asterisk:before {
+					content: '';
+					width: 1.5rem;
+					height: 3rem;
+					background: var(--wp--preset--color--contrast-2, currentColor);
+					clip-path: path('M11.93.684v8.039l5.633-5.633 1.216 1.23-5.66 5.66h8.04v1.737H13.2l5.701 5.701-1.23 1.23-5.742-5.742V21h-1.737v-8.094l-5.77 5.77-1.23-1.217 5.743-5.742H.842V9.98h8.162l-5.701-5.7 1.23-1.231 5.66 5.66V.684h1.737Z');
+					display: block;
+				}
+
+				/* Hide the asterisk if the heading has no content, to avoid using empty headings to display the asterisk only, which is an A11Y issue */
+				.is-style-asterisk:empty:before {
+					content: none;
+				}
+
+				.is-style-asterisk:-moz-only-whitespace:before {
+					content: none;
+				}
+
+				.is-style-asterisk.has-text-align-center:before {
+					margin: 0 auto;
+				}
+
+				.is-style-asterisk.has-text-align-right:before {
+					margin-left: auto;
+				}
+
+				.rtl .is-style-asterisk.has-text-align-left:before {
+					margin-right: auto;
+				}
+/*# sourceURL=wp-block-heading-inline-css */
+</style>
+<style id="wp-block-paragraph-inline-css">
+.is-small-text{font-size:.875em}.is-regular-text{font-size:1em}.is-large-text{font-size:2.25em}.is-larger-text{font-size:3em}.has-drop-cap:not(:focus):first-letter{float:left;font-size:8.4em;font-style:normal;font-weight:100;line-height:.68;margin:.05em .1em 0 0;text-transform:uppercase}body.rtl .has-drop-cap:not(:focus):first-letter{float:none;margin-left:.1em}p.has-drop-cap.has-background{overflow:hidden}:root :where(p.has-background){padding:1.25em 2.375em}:where(p.has-text-color:not(.has-link-color)) a{color:inherit}p.has-text-align-left[style*="writing-mode:vertical-lr"],p.has-text-align-right[style*="writing-mode:vertical-rl"]{rotate:180deg}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/paragraph/style.min.css */
+</style>
+<style id="wp-block-button-inline-css">
+.wp-block-button__link{align-content:center;box-sizing:border-box;cursor:pointer;display:inline-block;height:100%;text-align:center;word-break:break-word}.wp-block-button__link.aligncenter{text-align:center}.wp-block-button__link.alignright{text-align:right}:where(.wp-block-button__link){border-radius:9999px;box-shadow:none;padding:calc(.667em + 2px) calc(1.333em + 2px);text-decoration:none}.wp-block-button[style*=text-decoration] .wp-block-button__link{text-decoration:inherit}.wp-block-buttons>.wp-block-button.has-custom-width{max-width:none}.wp-block-buttons>.wp-block-button.has-custom-width .wp-block-button__link{width:100%}.wp-block-buttons>.wp-block-button.has-custom-font-size .wp-block-button__link{font-size:inherit}.wp-block-buttons>.wp-block-button[class*=wp-block-button__width]{width:calc(var(--wp--block-button--width)*1% - var(--wp--style--block-gap, .5em)*(1 - var(--wp--block-button--width)/100))}.wp-block-buttons>.wp-block-button.wp-block-button__width-25{width:calc(25% - var(--wp--style--block-gap, .5em)*.75)}.wp-block-buttons>.wp-block-button.wp-block-button__width-50{width:calc(50% - var(--wp--style--block-gap, .5em)*.5)}.wp-block-buttons>.wp-block-button.wp-block-button__width-75{width:calc(75% - var(--wp--style--block-gap, .5em)*.25)}.wp-block-buttons>.wp-block-button.wp-block-button__width-100{flex-basis:100%;width:100%}.wp-block-buttons.is-vertical>.wp-block-button[class*=wp-block-button__width]{width:calc(var(--wp--block-button--width)*1%)}.wp-block-buttons.is-vertical>.wp-block-button.wp-block-button__width-25{width:25%}.wp-block-buttons.is-vertical>.wp-block-button.wp-block-button__width-50{width:50%}.wp-block-buttons.is-vertical>.wp-block-button.wp-block-button__width-75{width:75%}.wp-block-button.is-style-squared,.wp-block-button__link.wp-block-button.is-style-squared{border-radius:0}.wp-block-button.no-border-radius,.wp-block-button__link.no-border-radius{border-radius:0!important}:root :where(.wp-block-button .wp-block-button__link.is-style-outline),:root :where(.wp-block-button.is-style-outline>.wp-block-button__link){border:2px solid;padding:.667em 1.333em}:root :where(.wp-block-button .wp-block-button__link.is-style-outline:not(.has-text-color)),:root :where(.wp-block-button.is-style-outline>.wp-block-button__link:not(.has-text-color)){color:currentColor}:root :where(.wp-block-button .wp-block-button__link.is-style-outline:not(.has-background)),:root :where(.wp-block-button.is-style-outline>.wp-block-button__link:not(.has-background)){background-color:transparent;background-image:none}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/button/style.min.css */
+</style>
+<style id="twentytwentyfour-button-style-outline-inline-css">
+.wp-block-button.is-style-outline
+	> .wp-block-button__link:not(.has-text-color, .has-background):hover {
+	background-color: var(--wp--preset--color--contrast-2, var(--wp--preset--color--contrast, transparent));
+	color: var(--wp--preset--color--base);
+	border-color: var(--wp--preset--color--contrast-2, var(--wp--preset--color--contrast, currentColor));
+}
+
+/*# sourceURL=https://www.ignoredone.space/wp-content/themes/twentytwentyfour/assets/css/button-outline.css */
+</style>
+<style id="wp-block-buttons-inline-css">
+.wp-block-buttons{box-sizing:border-box}.wp-block-buttons.is-vertical{flex-direction:column}.wp-block-buttons.is-vertical>.wp-block-button:last-child{margin-bottom:0}.wp-block-buttons>.wp-block-button{display:inline-block;margin:0}.wp-block-buttons.is-content-justification-left{justify-content:flex-start}.wp-block-buttons.is-content-justification-left.is-vertical{align-items:flex-start}.wp-block-buttons.is-content-justification-center{justify-content:center}.wp-block-buttons.is-content-justification-center.is-vertical{align-items:center}.wp-block-buttons.is-content-justification-right{justify-content:flex-end}.wp-block-buttons.is-content-justification-right.is-vertical{align-items:flex-end}.wp-block-buttons.is-content-justification-space-between{justify-content:space-between}.wp-block-buttons.aligncenter{text-align:center}.wp-block-buttons:not(.is-content-justification-space-between,.is-content-justification-right,.is-content-justification-left,.is-content-justification-center) .wp-block-button.aligncenter{margin-left:auto;margin-right:auto;width:100%}.wp-block-buttons[style*=text-decoration] .wp-block-button,.wp-block-buttons[style*=text-decoration] .wp-block-button__link{text-decoration:inherit}.wp-block-buttons.has-custom-font-size .wp-block-button__link{font-size:inherit}.wp-block-buttons .wp-block-button__link{width:100%}.wp-block-button.aligncenter{text-align:center}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/buttons/style.min.css */
+</style>
+<style id="wp-block-columns-inline-css">
+.wp-block-columns{box-sizing:border-box;display:flex;flex-wrap:wrap!important}@media (min-width:782px){.wp-block-columns{flex-wrap:nowrap!important}}.wp-block-columns{align-items:normal!important}.wp-block-columns.are-vertically-aligned-top{align-items:flex-start}.wp-block-columns.are-vertically-aligned-center{align-items:center}.wp-block-columns.are-vertically-aligned-bottom{align-items:flex-end}@media (max-width:781px){.wp-block-columns:not(.is-not-stacked-on-mobile)>.wp-block-column{flex-basis:100%!important}}@media (min-width:782px){.wp-block-columns:not(.is-not-stacked-on-mobile)>.wp-block-column{flex-basis:0;flex-grow:1}.wp-block-columns:not(.is-not-stacked-on-mobile)>.wp-block-column[style*=flex-basis]{flex-grow:0}}.wp-block-columns.is-not-stacked-on-mobile{flex-wrap:nowrap!important}.wp-block-columns.is-not-stacked-on-mobile>.wp-block-column{flex-basis:0;flex-grow:1}.wp-block-columns.is-not-stacked-on-mobile>.wp-block-column[style*=flex-basis]{flex-grow:0}:where(.wp-block-columns){margin-bottom:1.75em}:where(.wp-block-columns.has-background){padding:1.25em 2.375em}.wp-block-column{flex-grow:1;min-width:0;overflow-wrap:break-word;word-break:break-word}.wp-block-column.is-vertically-aligned-top{align-self:flex-start}.wp-block-column.is-vertically-aligned-center{align-self:center}.wp-block-column.is-vertically-aligned-bottom{align-self:flex-end}.wp-block-column.is-vertically-aligned-stretch{align-self:stretch}.wp-block-column.is-vertically-aligned-bottom,.wp-block-column.is-vertically-aligned-center,.wp-block-column.is-vertically-aligned-top{width:100%}
+/*# sourceURL=https://www.ignoredone.space/wp-includes/blocks/columns/style.min.css */
+</style>
+<style id="wp-emoji-styles-inline-css">
+
+	img.wp-smiley, img.emoji {
+		display: inline !important;
+		border: none !important;
+		box-shadow: none !important;
+		height: 1em !important;
+		width: 1em !important;
+		margin: 0 0.07em !important;
+		vertical-align: -0.1em !important;
+		background: none !important;
+		padding: 0 !important;
+	}
+/*# sourceURL=wp-emoji-styles-inline-css */
+</style>
+<style id="wp-block-library-inline-css">
+:root{--wp-block-synced-color:#7a00df;--wp-block-synced-color--rgb:122,0,223;--wp-bound-block-color:var(--wp-block-synced-color);--wp-editor-canvas-background:#ddd;--wp-admin-theme-color:#007cba;--wp-admin-theme-color--rgb:0,124,186;--wp-admin-theme-color-darker-10:#006ba1;--wp-admin-theme-color-darker-10--rgb:0,107,160.5;--wp-admin-theme-color-darker-20:#005a87;--wp-admin-theme-color-darker-20--rgb:0,90,135;--wp-admin-border-width-focus:2px}@media (min-resolution:192dpi){:root{--wp-admin-border-width-focus:1.5px}}.wp-element-button{cursor:pointer}:root .has-very-light-gray-background-color{background-color:#eee}:root .has-very-dark-gray-background-color{background-color:#313131}:root .has-very-light-gray-color{color:#eee}:root .has-very-dark-gray-color{color:#313131}:root .has-vivid-green-cyan-to-vivid-cyan-blue-gradient-background{background:linear-gradient(135deg,#00d084,#0693e3)}:root .has-purple-crush-gradient-background{background:linear-gradient(135deg,#34e2e4,#4721fb 50%,#ab1dfe)}:root .has-hazy-dawn-gradient-background{background:linear-gradient(135deg,#faaca8,#dad0ec)}:root .has-subdued-olive-gradient-background{background:linear-gradient(135deg,#fafae1,#67a671)}:root .has-atomic-cream-gradient-background{background:linear-gradient(135deg,#fdd79a,#004a59)}:root .has-nightshade-gradient-background{background:linear-gradient(135deg,#330968,#31cdcf)}:root .has-midnight-gradient-background{background:linear-gradient(135deg,#020381,#2874fc)}:root{--wp--preset--font-size--normal:16px;--wp--preset--font-size--huge:42px}.has-regular-font-size{font-size:1em}.has-larger-font-size{font-size:2.625em}.has-normal-font-size{font-size:var(--wp--preset--font-size--normal)}.has-huge-font-size{font-size:var(--wp--preset--font-size--huge)}:root .has-text-align-center{text-align:center}:root .has-text-align-left{text-align:left}:root .has-text-align-right{text-align:right}.has-fit-text{white-space:nowrap!important}#end-resizable-editor-section{display:none}.aligncenter{clear:both}.items-justified-left{justify-content:flex-start}.items-justified-center{justify-content:center}.items-justified-right{justify-content:flex-end}.items-justified-space-between{justify-content:space-between}.screen-reader-text{word-wrap:normal!important;border:0;clip-path:inset(50%);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;word-break:normal!important}.screen-reader-text:focus{background-color:#ddd;clip-path:none;color:#444;display:block;font-size:1em;height:auto;left:5px;line-height:normal;padding:15px 23px 14px;text-decoration:none;top:5px;width:auto;z-index:100000}html :where(.has-border-color){border-style:solid}html :where([style^=border-color],[style*=";border-color"],[style*="; border-color"]){border-style:solid}html :where([style^=border-top-color],[style*=";border-top-color"],[style*="; border-top-color"]){border-top-style:solid}html :where([style^=border-right-color],[style*=";border-right-color"],[style*="; border-right-color"]){border-right-style:solid}html :where([style^=border-bottom-color],[style*=";border-bottom-color"],[style*="; border-bottom-color"]){border-bottom-style:solid}html :where([style^=border-left-color],[style*=";border-left-color"],[style*="; border-left-color"]){border-left-style:solid}html :where([style^=border-width],[style*=";border-width"],[style*="; border-width"]){border-style:solid}html :where([style^=border-top-width],[style*=";border-top-width"],[style*="; border-top-width"]){border-top-style:solid}html :where([style^=border-right-width],[style*=";border-right-width"],[style*="; border-right-width"]){border-right-style:solid}html :where([style^=border-bottom-width],[style*=";border-bottom-width"],[style*="; border-bottom-width"]){border-bottom-style:solid}html :where([style^=border-left-width],[style*=";border-left-width"],[style*="; border-left-width"]){border-left-style:solid}html :where(img[class*=wp-image-]){height:auto;max-width:100%}:where(figure){margin:0 0 1em}html :where(.is-position-sticky){--wp-admin--admin-bar--position-offset:var(--wp-admin--admin-bar--height,0px)}@media screen and (max-width:600px){html :where(.is-position-sticky){--wp-admin--admin-bar--position-offset:0px}}
+/*# sourceURL=/wp-includes/css/dist/block-library/common.min.css */
+</style>
+<style id="global-styles-inline-css">
+:root{--wp--preset--aspect-ratio--square: 1;--wp--preset--aspect-ratio--4-3: 4/3;--wp--preset--aspect-ratio--3-4: 3/4;--wp--preset--aspect-ratio--3-2: 3/2;--wp--preset--aspect-ratio--2-3: 2/3;--wp--preset--aspect-ratio--16-9: 16/9;--wp--preset--aspect-ratio--9-16: 9/16;--wp--preset--color--black: #000000;--wp--preset--color--cyan-bluish-gray: #abb8c3;--wp--preset--color--white: #ffffff;--wp--preset--color--pale-pink: #f78da7;--wp--preset--color--vivid-red: #cf2e2e;--wp--preset--color--luminous-vivid-orange: #ff6900;--wp--preset--color--luminous-vivid-amber: #fcb900;--wp--preset--color--light-green-cyan: #7bdcb5;--wp--preset--color--vivid-green-cyan: #00d084;--wp--preset--color--pale-cyan-blue: #8ed1fc;--wp--preset--color--vivid-cyan-blue: #0693e3;--wp--preset--color--vivid-purple: #9b51e0;--wp--preset--color--base: #e4efeb;--wp--preset--color--base-2: #f1fefb;--wp--preset--color--contrast: #000000;--wp--preset--color--contrast-2: #353535;--wp--preset--color--contrast-3: #A4A4A4;--wp--preset--gradient--vivid-cyan-blue-to-vivid-purple: linear-gradient(135deg,rgb(6,147,227) 0%,rgb(155,81,224) 100%);--wp--preset--gradient--light-green-cyan-to-vivid-green-cyan: linear-gradient(135deg,rgb(122,220,180) 0%,rgb(0,208,130) 100%);--wp--preset--gradient--luminous-vivid-amber-to-luminous-vivid-orange: linear-gradient(135deg,rgb(252,185,0) 0%,rgb(255,105,0) 100%);--wp--preset--gradient--luminous-vivid-orange-to-vivid-red: linear-gradient(135deg,rgb(255,105,0) 0%,rgb(207,46,46) 100%);--wp--preset--gradient--very-light-gray-to-cyan-bluish-gray: linear-gradient(135deg,rgb(238,238,238) 0%,rgb(169,184,195) 100%);--wp--preset--gradient--cool-to-warm-spectrum: linear-gradient(135deg,rgb(74,234,220) 0%,rgb(151,120,209) 20%,rgb(207,42,186) 40%,rgb(238,44,130) 60%,rgb(251,105,98) 80%,rgb(254,248,76) 100%);--wp--preset--gradient--blush-light-purple: linear-gradient(135deg,rgb(255,206,236) 0%,rgb(152,150,240) 100%);--wp--preset--gradient--blush-bordeaux: linear-gradient(135deg,rgb(254,205,165) 0%,rgb(254,45,45) 50%,rgb(107,0,62) 100%);--wp--preset--gradient--luminous-dusk: linear-gradient(135deg,rgb(255,203,112) 0%,rgb(199,81,192) 50%,rgb(65,88,208) 100%);--wp--preset--gradient--pale-ocean: linear-gradient(135deg,rgb(255,245,203) 0%,rgb(182,227,212) 50%,rgb(51,167,181) 100%);--wp--preset--gradient--electric-grass: linear-gradient(135deg,rgb(202,248,128) 0%,rgb(113,206,126) 100%);--wp--preset--gradient--midnight: linear-gradient(135deg,rgb(2,3,129) 0%,rgb(40,116,252) 100%);--wp--preset--gradient--gradient-1: linear-gradient(to bottom, #cfcabe 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-2: linear-gradient(to bottom, #C2A990 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-3: linear-gradient(to bottom, #D8613C 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-4: linear-gradient(to bottom, #B1C5A4 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-5: linear-gradient(to bottom, #B5BDBC 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-6: linear-gradient(to bottom, #A4A4A4 0%, #F9F9F9 100%);--wp--preset--gradient--gradient-7: linear-gradient(to bottom, #cfcabe 50%, #F9F9F9 50%);--wp--preset--gradient--gradient-8: linear-gradient(to bottom, #C2A990 50%, #F9F9F9 50%);--wp--preset--gradient--gradient-9: linear-gradient(to bottom, #D8613C 50%, #F9F9F9 50%);--wp--preset--gradient--gradient-10: linear-gradient(to bottom, #B1C5A4 50%, #F9F9F9 50%);--wp--preset--gradient--gradient-11: linear-gradient(to bottom, #B5BDBC 50%, #F9F9F9 50%);--wp--preset--gradient--gradient-12: linear-gradient(to bottom, #A4A4A4 50%, #F9F9F9 50%);--wp--preset--font-size--small: 0.9rem;--wp--preset--font-size--medium: 1.05rem;--wp--preset--font-size--large: clamp(1.39rem, 1.39rem + ((1vw - 0.2rem) * 0.767), 1.85rem);--wp--preset--font-size--x-large: clamp(1.85rem, 1.85rem + ((1vw - 0.2rem) * 1.083), 2.5rem);--wp--preset--font-size--xx-large: clamp(2.5rem, 2.5rem + ((1vw - 0.2rem) * 1.283), 3.27rem);--wp--preset--font-family--heading: "Instrument Sans", sans-serif;--wp--preset--font-family--body: "Jost", sans-serif;--wp--preset--font-family--system-sans-serif: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, arial, sans-serif;--wp--preset--font-family--system-serif: Iowan Old Style, Apple Garamond, Baskerville, Times New Roman, Droid Serif, Times, Source Serif Pro, serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol;--wp--preset--spacing--20: min(1.5rem, 2vw);--wp--preset--spacing--30: min(2.5rem, 3vw);--wp--preset--spacing--40: min(4rem, 5vw);--wp--preset--spacing--50: min(6.5rem, 8vw);--wp--preset--spacing--60: min(10.5rem, 13vw);--wp--preset--spacing--70: 3.38rem;--wp--preset--spacing--80: 5.06rem;--wp--preset--spacing--10: 1rem;--wp--preset--shadow--natural: 6px 6px 9px rgba(0, 0, 0, 0.2);--wp--preset--shadow--deep: 12px 12px 50px rgba(0, 0, 0, 0.4);--wp--preset--shadow--sharp: 6px 6px 0px rgba(0, 0, 0, 0.2);--wp--preset--shadow--outlined: 6px 6px 0px -3px rgb(255, 255, 255), 6px 6px rgb(0, 0, 0);--wp--preset--shadow--crisp: 6px 6px 0px rgb(0, 0, 0);}.wp-block-button{--wp--preset--dimension--25: 25%;--wp--preset--dimension--50: 50%;--wp--preset--dimension--75: 75%;--wp--preset--dimension--100: 100%;}:root { --wp--style--global--content-size: 620px;--wp--style--global--wide-size: 1280px; }:where(body) { margin: 0; }.wp-site-blocks { padding-top: var(--wp--style--root--padding-top); padding-bottom: var(--wp--style--root--padding-bottom); }.has-global-padding { padding-right: var(--wp--style--root--padding-right); padding-left: var(--wp--style--root--padding-left); }.has-global-padding > .alignfull { margin-right: calc(var(--wp--style--root--padding-right) * -1); margin-left: calc(var(--wp--style--root--padding-left) * -1); }.has-global-padding :where(:not(.alignfull.is-layout-flow) > .has-global-padding:not(.wp-block-block, .alignfull)) { padding-right: 0; padding-left: 0; }.has-global-padding :where(:not(.alignfull.is-layout-flow) > .has-global-padding:not(.wp-block-block, .alignfull)) > .alignfull { margin-left: 0; margin-right: 0; }.wp-site-blocks > .alignleft { float: left; margin-right: 2em; }.wp-site-blocks > .alignright { float: right; margin-left: 2em; }.wp-site-blocks > .aligncenter { justify-content: center; margin-left: auto; margin-right: auto; }:where(.wp-site-blocks) > * { margin-block-start: 1.2rem; margin-block-end: 0; }:where(.wp-site-blocks) > :first-child { margin-block-start: 0; }:where(.wp-site-blocks) > :last-child { margin-block-end: 0; }:root { --wp--style--block-gap: 1.2rem; }:root :where(.is-layout-flow) > :first-child{margin-block-start: 0;}:root :where(.is-layout-flow) > :last-child{margin-block-end: 0;}:root :where(.is-layout-flow) > *{margin-block-start: 1.2rem;margin-block-end: 0;}:root :where(.is-layout-constrained) > :first-child{margin-block-start: 0;}:root :where(.is-layout-constrained) > :last-child{margin-block-end: 0;}:root :where(.is-layout-constrained) > *{margin-block-start: 1.2rem;margin-block-end: 0;}:root :where(.is-layout-flex){gap: 1.2rem;}:root :where(.is-layout-grid){gap: 1.2rem;}.is-layout-flow > .alignleft{float: left;margin-inline-start: 0;margin-inline-end: 2em;}.is-layout-flow > .alignright{float: right;margin-inline-start: 2em;margin-inline-end: 0;}.is-layout-flow > .aligncenter{margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > .alignleft{float: left;margin-inline-start: 0;margin-inline-end: 2em;}.is-layout-constrained > .alignright{float: right;margin-inline-start: 2em;margin-inline-end: 0;}.is-layout-constrained > .aligncenter{margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > :where(:not(.alignleft):not(.alignright):not(.alignfull)){max-width: var(--wp--style--global--content-size);margin-left: auto !important;margin-right: auto !important;}.is-layout-constrained > .alignwide{max-width: var(--wp--style--global--wide-size);}body .is-layout-flex{display: flex;}.is-layout-flex{flex-wrap: wrap;align-items: center;}.is-layout-flex > :is(*, div){margin: 0;}body .is-layout-grid{display: grid;}.is-layout-grid > :is(*, div){margin: 0;}body{background-color: var(--wp--preset--color--base);color: var(--wp--preset--color--contrast);font-family: var(--wp--preset--font-family--body);font-size: var(--wp--preset--font-size--medium);font-style: normal;font-weight: 400;line-height: 1.55;--wp--style--root--padding-top: 0px;--wp--style--root--padding-right: var(--wp--preset--spacing--50);--wp--style--root--padding-bottom: 0px;--wp--style--root--padding-left: var(--wp--preset--spacing--50);}a:where(:not(.wp-element-button)){color: var(--wp--preset--color--contrast);}:root :where(a:where(:not(.wp-element-button)):hover){text-decoration: none;}h1, h2, h3, h4, h5, h6{color: var(--wp--preset--color--contrast);font-family: var(--wp--preset--font-family--heading);font-style: normal;font-weight: 600;line-height: 1.2;}h1{font-size: var(--wp--preset--font-size--x-large);line-height: 1.15;}h2{font-size: clamp(1.301rem, 1.301rem + ((1vw - 0.2rem) * 1.332), 2.1rem);}h3{font-size: var(--wp--preset--font-size--large);}h4{font-size: clamp(1.039rem, 1.039rem + ((1vw - 0.2rem) * 0.935), 1.6rem);}h5{font-size: clamp(0.929rem, 0.929rem + ((1vw - 0.2rem) * 0.785), 1.4rem);}h6{font-size: var(--wp--preset--font-size--small);}:root :where(.wp-element-button, .wp-block-button__link){background-color: var(--wp--preset--color--contrast);border-radius: .33rem;border-color: var(--wp--preset--color--contrast);border-width: 0;color: var(--wp--preset--color--base);font-family: inherit;font-size: var(--wp--preset--font-size--small);font-style: normal;font-weight: 500;letter-spacing: inherit;line-height: inherit;padding-top: 0.6rem;padding-right: 1rem;padding-bottom: 0.6rem;padding-left: 1rem;text-decoration: none;text-transform: inherit;}:root :where(.wp-element-button:hover, .wp-block-button__link:hover){background-color: var(--wp--preset--color--contrast-2);border-color: var(--wp--preset--color--contrast-2);color: var(--wp--preset--color--base);}:root :where(.wp-element-button:focus, .wp-block-button__link:focus){background-color: var(--wp--preset--color--contrast-2);border-color: var(--wp--preset--color--contrast-2);color: var(--wp--preset--color--base);outline-color: var(--wp--preset--color--contrast);outline-offset: 2px;}:root :where(.wp-element-button:active, .wp-block-button__link:active){background-color: var(--wp--preset--color--contrast);color: var(--wp--preset--color--base);}:root :where(.wp-element-caption, .wp-block-audio figcaption, .wp-block-embed figcaption, .wp-block-gallery figcaption, .wp-block-image figcaption, .wp-block-table figcaption, .wp-block-video figcaption){color: var(--wp--preset--color--contrast-2);font-family: var(--wp--preset--font-family--body);font-size: 0.8rem;}.has-black-color{color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-color{color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-color{color: var(--wp--preset--color--white) !important;}.has-pale-pink-color{color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-color{color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-color{color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-color{color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-color{color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-color{color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-color{color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-color{color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-color{color: var(--wp--preset--color--vivid-purple) !important;}.has-base-color{color: var(--wp--preset--color--base) !important;}.has-base-2-color{color: var(--wp--preset--color--base-2) !important;}.has-contrast-color{color: var(--wp--preset--color--contrast) !important;}.has-contrast-2-color{color: var(--wp--preset--color--contrast-2) !important;}.has-contrast-3-color{color: var(--wp--preset--color--contrast-3) !important;}.has-black-background-color{background-color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-background-color{background-color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-background-color{background-color: var(--wp--preset--color--white) !important;}.has-pale-pink-background-color{background-color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-background-color{background-color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-background-color{background-color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-background-color{background-color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-background-color{background-color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-background-color{background-color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-background-color{background-color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-background-color{background-color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-background-color{background-color: var(--wp--preset--color--vivid-purple) !important;}.has-base-background-color{background-color: var(--wp--preset--color--base) !important;}.has-base-2-background-color{background-color: var(--wp--preset--color--base-2) !important;}.has-contrast-background-color{background-color: var(--wp--preset--color--contrast) !important;}.has-contrast-2-background-color{background-color: var(--wp--preset--color--contrast-2) !important;}.has-contrast-3-background-color{background-color: var(--wp--preset--color--contrast-3) !important;}.has-black-border-color{border-color: var(--wp--preset--color--black) !important;}.has-cyan-bluish-gray-border-color{border-color: var(--wp--preset--color--cyan-bluish-gray) !important;}.has-white-border-color{border-color: var(--wp--preset--color--white) !important;}.has-pale-pink-border-color{border-color: var(--wp--preset--color--pale-pink) !important;}.has-vivid-red-border-color{border-color: var(--wp--preset--color--vivid-red) !important;}.has-luminous-vivid-orange-border-color{border-color: var(--wp--preset--color--luminous-vivid-orange) !important;}.has-luminous-vivid-amber-border-color{border-color: var(--wp--preset--color--luminous-vivid-amber) !important;}.has-light-green-cyan-border-color{border-color: var(--wp--preset--color--light-green-cyan) !important;}.has-vivid-green-cyan-border-color{border-color: var(--wp--preset--color--vivid-green-cyan) !important;}.has-pale-cyan-blue-border-color{border-color: var(--wp--preset--color--pale-cyan-blue) !important;}.has-vivid-cyan-blue-border-color{border-color: var(--wp--preset--color--vivid-cyan-blue) !important;}.has-vivid-purple-border-color{border-color: var(--wp--preset--color--vivid-purple) !important;}.has-base-border-color{border-color: var(--wp--preset--color--base) !important;}.has-base-2-border-color{border-color: var(--wp--preset--color--base-2) !important;}.has-contrast-border-color{border-color: var(--wp--preset--color--contrast) !important;}.has-contrast-2-border-color{border-color: var(--wp--preset--color--contrast-2) !important;}.has-contrast-3-border-color{border-color: var(--wp--preset--color--contrast-3) !important;}.has-vivid-cyan-blue-to-vivid-purple-gradient-background{background: var(--wp--preset--gradient--vivid-cyan-blue-to-vivid-purple) !important;}.has-light-green-cyan-to-vivid-green-cyan-gradient-background{background: var(--wp--preset--gradient--light-green-cyan-to-vivid-green-cyan) !important;}.has-luminous-vivid-amber-to-luminous-vivid-orange-gradient-background{background: var(--wp--preset--gradient--luminous-vivid-amber-to-luminous-vivid-orange) !important;}.has-luminous-vivid-orange-to-vivid-red-gradient-background{background: var(--wp--preset--gradient--luminous-vivid-orange-to-vivid-red) !important;}.has-very-light-gray-to-cyan-bluish-gray-gradient-background{background: var(--wp--preset--gradient--very-light-gray-to-cyan-bluish-gray) !important;}.has-cool-to-warm-spectrum-gradient-background{background: var(--wp--preset--gradient--cool-to-warm-spectrum) !important;}.has-blush-light-purple-gradient-background{background: var(--wp--preset--gradient--blush-light-purple) !important;}.has-blush-bordeaux-gradient-background{background: var(--wp--preset--gradient--blush-bordeaux) !important;}.has-luminous-dusk-gradient-background{background: var(--wp--preset--gradient--luminous-dusk) !important;}.has-pale-ocean-gradient-background{background: var(--wp--preset--gradient--pale-ocean) !important;}.has-electric-grass-gradient-background{background: var(--wp--preset--gradient--electric-grass) !important;}.has-midnight-gradient-background{background: var(--wp--preset--gradient--midnight) !important;}.has-gradient-1-gradient-background{background: var(--wp--preset--gradient--gradient-1) !important;}.has-gradient-2-gradient-background{background: var(--wp--preset--gradient--gradient-2) !important;}.has-gradient-3-gradient-background{background: var(--wp--preset--gradient--gradient-3) !important;}.has-gradient-4-gradient-background{background: var(--wp--preset--gradient--gradient-4) !important;}.has-gradient-5-gradient-background{background: var(--wp--preset--gradient--gradient-5) !important;}.has-gradient-6-gradient-background{background: var(--wp--preset--gradient--gradient-6) !important;}.has-gradient-7-gradient-background{background: var(--wp--preset--gradient--gradient-7) !important;}.has-gradient-8-gradient-background{background: var(--wp--preset--gradient--gradient-8) !important;}.has-gradient-9-gradient-background{background: var(--wp--preset--gradient--gradient-9) !important;}.has-gradient-10-gradient-background{background: var(--wp--preset--gradient--gradient-10) !important;}.has-gradient-11-gradient-background{background: var(--wp--preset--gradient--gradient-11) !important;}.has-gradient-12-gradient-background{background: var(--wp--preset--gradient--gradient-12) !important;}.has-small-font-size{font-size: var(--wp--preset--font-size--small) !important;}.has-medium-font-size{font-size: var(--wp--preset--font-size--medium) !important;}.has-large-font-size{font-size: var(--wp--preset--font-size--large) !important;}.has-x-large-font-size{font-size: var(--wp--preset--font-size--x-large) !important;}.has-xx-large-font-size{font-size: var(--wp--preset--font-size--xx-large) !important;}.has-heading-font-family{font-family: var(--wp--preset--font-family--heading) !important;}.has-body-font-family{font-family: var(--wp--preset--font-family--body) !important;}.has-system-sans-serif-font-family{font-family: var(--wp--preset--font-family--system-sans-serif) !important;}.has-system-serif-font-family{font-family: var(--wp--preset--font-family--system-serif) !important;}
+:root :where(.wp-block-buttons-is-layout-flow) > :first-child{margin-block-start: 0;}:root :where(.wp-block-buttons-is-layout-flow) > :last-child{margin-block-end: 0;}:root :where(.wp-block-buttons-is-layout-flow) > *{margin-block-start: 0.7rem;margin-block-end: 0;}:root :where(.wp-block-buttons-is-layout-constrained) > :first-child{margin-block-start: 0;}:root :where(.wp-block-buttons-is-layout-constrained) > :last-child{margin-block-end: 0;}:root :where(.wp-block-buttons-is-layout-constrained) > *{margin-block-start: 0.7rem;margin-block-end: 0;}:root :where(.wp-block-buttons-is-layout-flex){gap: 0.7rem;}:root :where(.wp-block-buttons-is-layout-grid){gap: 0.7rem;}
+:root :where(.wp-block-navigation){font-style: normal;font-weight: 400;}
+:root :where(.wp-block-navigation a:where(:not(.wp-element-button))){text-decoration: none;}
+:root :where(.wp-block-navigation a:where(:not(.wp-element-button)):hover){text-decoration: underline;}
+:root :where(.wp-block-site-title){font-family: var(--wp--preset--font-family--heading);font-size: clamp(0.875rem, 0.875rem + ((1vw - 0.2rem) * 0.542), 1.2rem);font-style: normal;font-weight: 600;}
+:root :where(.wp-block-site-title a:where(:not(.wp-element-button))){text-decoration: none;}
+:root :where(.wp-block-site-title a:where(:not(.wp-element-button)):hover){text-decoration: none;}
+/*# sourceURL=global-styles-inline-css */
+</style>
+<style id="core-block-supports-inline-css">
+.wp-elements-1 a:where(:not(.wp-element-button)){color:var(--wp--preset--color--white);}.wp-container-core-navigation-is-layout-bd480092{gap:var(--wp--preset--spacing--10);justify-content:flex-end;}.wp-container-core-group-is-layout-314e2f2a{gap:0;justify-content:space-between;}.wp-container-core-group-is-layout-736f2c33 > .alignfull{margin-right:calc(var(--wp--preset--spacing--30) * -1);margin-left:calc(var(--wp--preset--spacing--30) * -1);}.wp-elements-2 a:where(:not(.wp-element-button)){color:var(--wp--preset--color--base-2);}.wp-elements-3 a:where(:not(.wp-element-button)){color:var(--wp--preset--color--base);}.wp-container-core-group-is-layout-831b2db5{flex-direction:column;align-items:flex-start;}.wp-container-core-navigation-is-layout-bce0c455{gap:var(--wp--preset--spacing--10);flex-direction:column;align-items:flex-start;}.wp-container-core-group-is-layout-bce0c455{gap:var(--wp--preset--spacing--10);flex-direction:column;align-items:flex-start;}.wp-container-core-group-is-layout-d8dce8eb{flex-direction:column;align-items:stretch;}.wp-container-core-buttons-is-layout-bf881693{justify-content:flex-end;}.wp-container-core-group-is-layout-cf54d0a6{justify-content:space-between;align-items:flex-start;}.wp-container-core-columns-is-layout-3a88641f{flex-wrap:nowrap;}
+/*# sourceURL=core-block-supports-inline-css */
+</style>
+<style id="wp-block-template-skip-link-inline-css">
+/*! This file is auto-generated */
+.skip-link.screen-reader-text{border:0;clip-path:inset(50%);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute!important;width:1px;word-wrap:normal!important;word-break:normal!important}.skip-link.screen-reader-text:focus{background-color:#eee;clip-path:none;color:#444;display:block;font-size:1em;height:auto;left:5px;line-height:normal;padding:15px 23px 14px;text-decoration:none;top:5px;width:auto;z-index:100000}
+/*# sourceURL=/wp-includes/css/wp-block-template-skip-link.min.css */
+</style>
+<link rel='stylesheet' id='google-sans-flex-css' href='https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,500&#038;display=swap' media='all' />
+<link rel='stylesheet' id='misans-font-css' href='https://cdn.jsdelivr.net/gh/TPCTang/MiSans-Webfont@latest/fonts.css' media='all' />
+<link rel='stylesheet' id='wpmp-css-css' href='https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/public/css/wpmp.css?ver=7.1.3' media='all' />
+<link rel='stylesheet' id='animate-css' href='https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/animate/animate.min.css?ver=7.1.3' media='all' />
+<link rel='stylesheet' id='magic-css' href='https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/animate/magic.min.css?ver=7.1.3' media='all' />
+<script id="jquery-core-js" src="https://www.ignoredone.space/wp-includes/js/jquery/jquery.min.js?ver=3.7.1"></script>
+<script id="jquery-migrate-js" src="https://www.ignoredone.space/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.4.1"></script>
+<link rel="https://api.w.org/" href="https://www.ignoredone.space/index.php/wp-json/" /><link rel="EditURI" type="application/rsd+xml" title="RSD" href="https://www.ignoredone.space/xmlrpc.php?rsd" />
+<meta name="generator" content="WordPress 7.1.3" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- 启动页 HTML -->
+<div id="preloader" style="display:none;">
+  <img src="https://www.ignoredone.space/wp-content/uploads/2025/02/cropped-LOGO-1.png" alt="Loading Logo" class="preloader-logo" />
+</div>
+
+<style>
+  #preloader {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background-color: #E3E3E3;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    clip-path: circle(100% at 50% 50%);
+    transition: clip-path 1s ease;
+    cursor: none;
+    pointer-events: none;
+  }
+
+  #preloader.preloader-hide {
+    clip-path: circle(0px at var(--mouse-x, 50%) var(--mouse-y, 50%));
+  }
+
+  .preloader-logo {
+    width: 100px;
+    animation: fadeLogo 4s ease-in-out infinite;
+  }
+
+  @keyframes fadeLogo {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+</style>
+
+<script id="wp-importmap" type="importmap">
+{"imports":{"@wordpress/interactivity":"https://www.ignoredone.space/wp-includes/js/dist/script-modules/interactivity/index.min.js?ver=efaa5193bbad9c60ffd1"}}
+</script>
+<link rel="modulepreload" href="https://www.ignoredone.space/wp-includes/js/dist/script-modules/interactivity/index.min.js?ver=efaa5193bbad9c60ffd1" id="@wordpress/interactivity-js-modulepreload" fetchpriority="low">
+<!-- 1. 隐藏原生管理栏，并为页面腾出空间 -->
+<style>
+    /* 隐藏原生 admin bar */
+    #wpadminbar { display: none !important; }
+    html { margin-top: 0 !important; }
+
+    /* 左下角悬浮按钮样式 */
+    #custom-admin-fab {
+        position: fixed;
+        left: 20px;
+        bottom: 20px;
+        z-index: 999999;
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        background: #1d2327; /* 与原生管理栏深色一致 */
+        color: #f0f0f1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        transition: transform 0.2s ease, background 0.2s ease;
+        font-size: 22px;
+        user-select: none;
+    }
+    #custom-admin-fab:hover {
+        background: #2c3338;
+        transform: scale(1.05);
+    }
+    #custom-admin-fab.active {
+        background: #2271b1; /* WordPress 蓝 */
+    }
+
+    /* 弹出面板容器 */
+    #custom-admin-panel {
+        position: fixed;
+        left: 20px;
+        bottom: 84px; /* 按钮上方 */
+        z-index: 999998;
+        width: 280px;
+        max-height: 70vh;
+        overflow-y: auto;
+        background: #1d2327;
+        border-radius: 8px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+        padding: 8px 0;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(10px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+    }
+    #custom-admin-panel.open {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+    }
+
+    /* 克隆进来的菜单项样式适配 */
+    #custom-admin-panel #wp-admin-bar-root-default,
+    #custom-admin-panel #wp-admin-bar-top-secondary {
+        display: block !important;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+    #custom-admin-panel #wp-admin-bar-root-default > li,
+    #custom-admin-panel #wp-admin-bar-top-secondary > li {
+        display: block !important;
+        position: relative !important;
+        float: none !important;
+        width: 100% !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    #custom-admin-panel #wp-admin-bar-root-default > li:last-child,
+    #custom-admin-panel #wp-admin-bar-top-secondary > li:last-child {
+        border-bottom: none;
+    }
+    #custom-admin-panel #wp-admin-bar-root-default > li > a,
+    #custom-admin-panel #wp-admin-bar-top-secondary > li > a {
+        display: block !important;
+        padding: 10px 16px !important;
+        color: #f0f0f1 !important;
+        font-size: 13px !important;
+        line-height: 1.4 !important;
+        text-decoration: none !important;
+        white-space: normal !important;
+        height: auto !important;
+        background: transparent !important;
+        transition: background 0.15s;
+    }
+    #custom-admin-panel #wp-admin-bar-root-default > li > a:hover,
+    #custom-admin-panel #wp-admin-bar-top-secondary > li > a:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+    }
+
+    /* 隐藏克隆过来的冗余元素（如搜索框、logo 的默认样式等，可按需保留） */
+    #custom-admin-panel #wp-admin-bar-wp-logo,
+    #custom-admin-panel #wp-admin-bar-search {
+        display: none !important;
+    }
+
+    /* 二级菜单在面板内简单处理为缩进 */
+    #custom-admin-panel .ab-sub-wrapper {
+        position: static !important;
+        display: none;
+        background: rgba(0, 0, 0, 0.2) !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        min-width: 0 !important;
+    }
+    #custom-admin-panel .menupop:hover > .ab-sub-wrapper,
+    #custom-admin-panel .menupop.hover > .ab-sub-wrapper {
+        display: block !important;
+    }
+    #custom-admin-panel .ab-sub-wrapper li a {
+        padding-left: 32px !important;
+        font-size: 12px !important;
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 782px) {
+        #custom-admin-fab {
+            width: 46px;
+            height: 46px;
+            font-size: 20px;
+            left: 12px;
+            bottom: 12px;
+        }
+        #custom-admin-panel {
+            left: 12px;
+            bottom: 68px;
+            width: calc(100vw - 24px);
+            max-width: 320px;
+        }
+    }
+</style>
+
+<!-- 2. 悬浮按钮与面板容器 -->
+<div id="custom-admin-fab" title="管理员快捷菜单">⚙️</div>
+<div id="custom-admin-panel"></div>
+
+<!-- 3. 交互逻辑：克隆原生菜单 + 展开/收起 -->
+<script>
+(function() {
+    'use strict';
+
+    var fab = document.getElementById('custom-admin-fab');
+    var panel = document.getElementById('custom-admin-panel');
+    if (!fab || !panel) return;
+
+    // 等待原生 admin bar 渲染完成后克隆菜单内容
+    function cloneAdminBar() {
+        var original = document.getElementById('wpadminbar');
+        if (!original) {
+            // 前端未登录或 admin bar 不存在时不执行
+            fab.style.display = 'none';
+            return false;
+        }
+
+        var rootMenu = original.querySelector('#wp-admin-bar-root-default');
+        var secondaryMenu = original.querySelector('#wp-admin-bar-top-secondary');
+
+        // 清空面板并注入克隆的菜单
+        panel.innerHTML = '';
+
+        if (rootMenu) {
+            var rootClone = rootMenu.cloneNode(true);
+            rootClone.id = 'custom-admin-root-clone';
+            panel.appendChild(rootClone);
+        }
+        if (secondaryMenu) {
+            var secClone = secondaryMenu.cloneNode(true);
+            secClone.id = 'custom-admin-secondary-clone';
+            panel.appendChild(secClone);
+        }
+
+        // 移除克隆节点中带有 id 的原生 admin bar 特有属性，避免冲突
+        panel.querySelectorAll('[id^="wp-admin-bar-"]').forEach(function(el) {
+            el.removeAttribute('id');
+        });
+
+        return true;
+    }
+
+    // 尝试克隆，如果 admin bar 尚未渲染则稍后重试
+    if (!cloneAdminBar()) {
+        var attempts = 0;
+        var timer = setInterval(function() {
+            attempts++;
+            if (cloneAdminBar() || attempts > 20) {
+                clearInterval(timer);
+            }
+        }, 200);
+    }
+
+    // 切换面板
+    function togglePanel(e) {
+        e.stopPropagation();
+        var isOpen = panel.classList.contains('open');
+        if (isOpen) {
+            panel.classList.remove('open');
+            fab.classList.remove('active');
+        } else {
+            panel.classList.add('open');
+            fab.classList.add('active');
+        }
+    }
+
+    fab.addEventListener('click', togglePanel);
+
+    // 点击面板外部关闭
+    document.addEventListener('click', function(e) {
+        if (panel.classList.contains('open') &&
+            !panel.contains(e.target) &&
+            e.target !== fab &&
+            !fab.contains(e.target)) {
+            panel.classList.remove('open');
+            fab.classList.remove('active');
+        }
+    });
+
+    // ESC 关闭
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && panel.classList.contains('open')) {
+            panel.classList.remove('open');
+            fab.classList.remove('active');
+        }
+    });
+
+    // 阻止面板内点击冒泡到 document，避免误关
+    panel.addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+})();
+</script><link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet"><style class="wpcode-css-snippet">/* 隐藏回到顶部按钮 */
+#back-to-top {
+    display: none !important;
+}</style><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>移动端页面跳转动画</title>
+    <style>
+        /* 移动端页面跳转遮罩层 */
+        @media screen and (max-width: 768px) {
+            #mobilePageTransition {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: white;
+                z-index: 99999;
+                opacity: 0;
+                visibility: hidden;
+                transition: opacity 0.4s ease-in-out, visibility 0.4s ease-in-out;
+            }
+
+            #mobilePageTransition.active {
+                opacity: 1;
+                visibility: visible;
+            }
+        }
+
+        /* 非移动端隐藏 */
+        @media screen and (min-width: 769px) {
+            #mobilePageTransition {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 移动端页面跳转遮罩层 -->
+    <div id="mobilePageTransition"></div>
+
+    <script>
+        // 检测是否为移动设备
+        function isMobileDevice() {
+            return window.innerWidth <= 768 && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        }
+
+        // 移动端页面跳转函数
+        function initiateMobileRedirect(url) {
+            if (!isMobileDevice()) {
+                // 非移动端直接跳转
+                window.location.href = url;
+                return;
+            }
+
+            // 显示过渡遮罩
+            const transitionElement = document.getElementById('mobilePageTransition');
+            transitionElement.classList.add('active');
+
+            // 延迟执行跳转以显示过渡效果
+            setTimeout(function() {
+                window.location.href = url;
+            }, 400); // 与CSS过渡时间保持一致
+        }
+    </script>
+</body>
+</html>
+
+
+
+<style class="wpcode-css-snippet">/* ===============================
+   全站隐藏浏览器滚动条（仍可滚动）
+================================ */
+
+/* Chrome / Edge / Safari */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Firefox */
+html {
+  scrollbar-width: none;
+}
+
+/* IE */
+html {
+  -ms-overflow-style: none;
+}
+</style><style class="wpcode-css-snippet">/* 移除特定区域的顶部 margin（推荐精准定位） */
+body .wp-block-group.has-background.is-layout-flow {
+    margin: 0 !important;
+}
+body .wp-block-group.has-base-2-background-color.has-background.has-global-padding.is-layout-constrained.wp-block-group-is-layout-constrained {
+    margin: 0 !important;
+    display:none;
+}
+/* 或者更具体：只针对页面顶部的第一个 group 块 */
+.entry-content > .wp-block-group:first-of-type {
+    margin-top: 0;
+}</style><style class="wpcode-css-snippet">/* 移除 WP 默认主题给内容区域加的多余 padding */
+body, html {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Gutenberg 新主题（TT3 / TT4） */
+.wp-site-blocks {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+/* 主内容容器 */
+.entry-content,
+.site-content,
+.site-main {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* 移除块编辑器默认 block-gap */
+:root {
+    --wp--style--block-gap: 0px !important;
+}
+
+/* 部分主题 wrapper 会导致上方被推开 */
+.wrap,
+.container,
+.content-area {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+</style><style class="wpcode-css-snippet">/* 去除移动端点击高亮 */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Safari 取消点击阴影 */
+*:focus {
+    outline: none !important;
+}
+</style><style class="wpcode-css-snippet">/* 修复首页灰色空白 */
+body.html {
+    margin-top: 0 !important;
+}
+</style><style class="wpcode-css-snippet">/* 隐藏所有页面的页脚（桌面端 + 移动端） */
+footer.wp-block-template-part {
+    display: none !important;
+}</style><style class="wpcode-css-snippet">/* 隐藏所有页眉 */
+header.wp-block-template-part {
+    display: none !important;
+}</style><style class="wpcode-css-snippet">/* 基本重置 */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* 仅在首页禁止整体纵向滚动 */
+body.home, body.home html {
+  overflow: hidden;             /* 禁止整体纵向滚动 */
+  overscroll-behavior: none;    /* 防止触摸滚动边界时的“回弹” */
+}
+
+/* wrapper 与 page 基本样式 */
+.page-wrapper {
+  display: flex;
+  height: 100vh;
+  transition: transform 0.8s ease-in-out;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: pan-y; /* 允许纵向内部滚动，但让 JS 能处理横向手势 */
+}
+
+.page {
+  flex: 0 0 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  /* 默认不强制 overflow，JS 会根据内容决定 overflowY */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 内部图片/iframe 自适应 */
+.page img, .page iframe, .page video {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+}
+
+/* --- 页码标记（第2-3-4页用） --- */
+.page-marker {
+  position: absolute;
+  right: 40px;         /* 靠右 */
+  top: 50%;            /* 垂直居中 */
+  transform: translateY(-50%);
+  font-size: 4rem;
+  font-weight: bold;
+  color: rgba(0,0,0,0);
+  pointer-events: none;   /* 不影响鼠标操作 */
+  animation: breathe 2.5s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translateY(-50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1.1);
+  }
+}</style><style class="wp-fonts-local">
+@font-face{font-family:"Instrument Sans";font-style:normal;font-weight:400 700;font-display:fallback;src:url('https://www.ignoredone.space/wp-content/themes/twentytwentyfour/assets/fonts/instrument-sans/InstrumentSans-VariableFont_wdth,wght.woff2') format('woff2');}
+@font-face{font-family:"Instrument Sans";font-style:italic;font-weight:400 700;font-display:fallback;src:url('https://www.ignoredone.space/wp-content/themes/twentytwentyfour/assets/fonts/instrument-sans/InstrumentSans-Italic-VariableFont_wdth,wght.woff2') format('woff2');}
+@font-face{font-family:Jost;font-style:normal;font-weight:100 900;font-display:fallback;src:url('https://www.ignoredone.space/wp-content/themes/twentytwentyfour/assets/fonts/jost/Jost-VariableFont_wght.woff2') format('woff2');}
+@font-face{font-family:Jost;font-style:italic;font-weight:100 900;font-display:fallback;src:url('https://www.ignoredone.space/wp-content/themes/twentytwentyfour/assets/fonts/jost/Jost-Italic-VariableFont_wght.woff2') format('woff2');}
+</style>
+<style id="uagb-style-conditional-extension">@media (min-width: 1025px){body .uag-hide-desktop.uagb-google-map__wrap,body .uag-hide-desktop{display:none !important}}@media (min-width: 768px) and (max-width: 1024px){body .uag-hide-tab.uagb-google-map__wrap,body .uag-hide-tab{display:none !important}}@media (max-width: 767px){body .uag-hide-mob.uagb-google-map__wrap,body .uag-hide-mob{display:none !important}}</style><style id="uagb-style-frontend-0">.uag-blocks-common-selector{z-index:var(--z-index-desktop) !important}@media (max-width: 976px){.uag-blocks-common-selector{z-index:var(--z-index-tablet) !important}}@media (max-width: 767px){.uag-blocks-common-selector{z-index:var(--z-index-mobile) !important}}
+</style><link rel="icon" sizes="32x32" href="https://ignoredone-wp.oss-cn-shanghai.aliyuncs.com/wp-content/uploads/2026/05/appLOGOs2.png?v=2"><link rel="icon" sizes="192x192" href="https://ignoredone-wp.oss-cn-shanghai.aliyuncs.com/wp-content/uploads/2026/05/appLOGOs2.png?v=2"><link rel="apple-touch-icon" href="https://ignoredone-wp.oss-cn-shanghai.aliyuncs.com/wp-content/uploads/2026/05/appLOGOs2.png?v=2"></head>
+
+<body class="home blog wp-custom-logo wp-embed-responsive wp-theme-twentytwentyfour">
+
+<div class="wp-site-blocks"><header class="wp-block-template-part">
+<div class="wp-block-group alignfull has-background-color has-white-color has-base-2-background-color has-text-color has-background has-link-color wp-elements-1 has-global-padding is-layout-constrained wp-container-core-group-is-layout-736f2c33 wp-block-group-is-layout-constrained" style="padding-top:1.2rem;padding-right:var(--wp--preset--spacing--30);padding-bottom:1.2rem;padding-left:var(--wp--preset--spacing--30)">
+<div class="wp-block-group alignwide is-content-justification-space-between is-layout-flex wp-container-core-group-is-layout-314e2f2a wp-block-group-is-layout-flex" style="min-height:0px;margin-top:0;margin-bottom:0;padding-top:0px;padding-bottom:0px">
+<div class="wp-block-group is-layout-flex wp-block-group-is-layout-flex"><div class="wp-block-site-logo"><a href="https://www.ignoredone.space/" class="custom-logo-link" rel="home" aria-current="page"><img width="28" height="28" src="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png" class="custom-logo" alt="ignoredone&#039;s space" decoding="async" srcset="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png 512w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-300x300.png 300w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-150x150.png 150w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-270x270.png 270w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-192x192.png 192w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-180x180.png 180w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-32x32.png 32w" sizes="(max-width: 28px) 100vw, 28px" /></a></div></div>
+
+
+
+<div class="wp-block-group is-layout-flex wp-block-group-is-layout-flex"><nav class="has-text-color has-contrast-color is-responsive items-justified-right wp-block-navigation is-horizontal is-content-justification-right is-layout-flex wp-container-core-navigation-is-layout-bd480092 wp-block-navigation-is-layout-flex" aria-label="页脚 导航 3" 
+		 data-wp-interactive="core/navigation" data-wp-context='{"overlayOpenedBy":{"click":false,"hover":false,"focus":false},"type":"overlay","roleAttribute":"","ariaLabel":"\u83dc\u5355"}'><button aria-haspopup="dialog" aria-label="打开菜单" class="wp-block-navigation__responsive-container-open always-shown" 
+				data-wp-on--click="actions.openMenuOnClick"
+				data-wp-on--keydown="actions.handleMenuKeydown"
+			><svg width="24" height="24" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 5v1.5h14V5H5z"></path><path d="M5 12.8h14v-1.5H5v1.5z"></path><path d="M5 19h14v-1.5H5V19z"></path></svg></button>
+				<div class="wp-block-navigation__responsive-container hidden-by-default has-background has-base-2-background-color"  id="modal-1" 
+				data-wp-class--has-modal-open="state.isMenuOpen"
+				data-wp-class--is-menu-open="state.isMenuOpen"
+				data-wp-watch="callbacks.initMenu"
+				data-wp-on--keydown="actions.handleMenuKeydown"
+				data-wp-on--focusout="actions.handleMenuFocusout"
+				tabindex="-1"
+			>
+					<div class="wp-block-navigation__responsive-close" tabindex="-1">
+						<div class="wp-block-navigation__responsive-dialog" 
+				data-wp-bind--aria-modal="state.ariaModal"
+				data-wp-bind--aria-label="state.ariaLabel"
+				data-wp-bind--role="state.roleAttribute"
+			>
+							<button aria-label="关闭菜单" class="wp-block-navigation__responsive-container-close" 
+				data-wp-on--click="actions.closeMenuOnClick"
+			><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><path d="m13.06 12 6.47-6.47-1.06-1.06L12 10.94 5.53 4.47 4.47 5.53 10.94 12l-6.47 6.47 1.06 1.06L12 13.06l6.47 6.47 1.06-1.06L13.06 12Z"></path></svg></button>
+							<div class="wp-block-navigation__responsive-container-content" 
+				data-wp-watch="callbacks.focusFirstElement"
+			 id="modal-1-content">
+								<ul class="wp-block-navigation__container has-text-color has-contrast-color is-responsive items-justified-right wp-block-navigation"><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/answer/"><span class="wp-block-navigation-item__label">· 新手入门</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/freeproject"><span class="wp-block-navigation-item__label">·免费内容</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/ignoredone-project/"><span class="wp-block-navigation-item__label">· 学习工程</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/article-arrangement/"><span class="wp-block-navigation-item__label">· 图文教程</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/graphic-design-arknights/"><span class="wp-block-navigation-item__label">· 学方舟做设计</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/resource/"><span class="wp-block-navigation-item__label">· 明日方舟美术资源共享</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://www.ignoredone.space/index.php/portfolio/"><span class="wp-block-navigation-item__label">· 作品库</span></a></li></ul>
+								
+							</div>
+						</div>
+					</div>
+				</div></nav></div>
+</div>
+</div>
+</header>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>融球 · 螺旋扩散 + 毛玻璃音波 · 双螺旋</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,1..1000&amp;display=swap" rel="stylesheet">
+<!-- 思源黑体（Noto Sans SC） -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;display=swap" rel="stylesheet">
+<!-- 引入 anime.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<!-- 引入 three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<style>
+  :root {
+    --yellow-color: #FFDE00;
+    --text-color: #000000;
+    --bg-color: #FFFFFF;
+    --circle-size: 30vh;
+    --gray-color: #CCCCCC;
+    --white-color: #FFFFFF;
+    --background-opacity: 0.35;
+
+    /* 背景点阵参数 */
+    --dot-color: 0, 0, 0;          /* 点的 RGB */
+    --dot-opacity-min: 0.10;       /* 呼吸最弱时的透明度 */
+    --dot-opacity-max: 0.34;       /* 呼吸最强时的透明度 */
+  }
+  body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--bg-color);
+    font-family: 'Google Sans Flex', sans-serif;
+    overflow: hidden;
+  }
+  .container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: visible;
+  }
+
+  /* ============================================================
+     背景图片层
+     层级：z-index -6（最底层，铺满整个视口）
+     · 完全固定不动（无鼠标视差位移）
+     · 与白色遮罩(-5)紧贴，中间不夹层，保证蒙版洞透出的是纯背景图
+     ============================================================ */
+  .bg-image {
+    position: fixed;
+    inset: 0;
+    z-index: -6;
+    background-image: url('https://www.ignoredone.space/wp-content/uploads/2025/02/%E7%BD%91%E9%A1%B5%E9%A6%96%E9%A1%B5%E4%BD%BF%E7%94%A8-scaled-e1756810226577.webp');
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-color: #FFFFFF;
+    pointer-events: none;
+  }
+
+  /* ============================================================
+     背景暖光层（与黄色波点发射器交互）
+     【方案一】z-index 从 -5 上移到 -4（位于白色遮罩之上）
+     ============================================================ */
+  .bg-glow {
+    position: fixed;
+    inset: 0;
+    z-index: -4;                 /* 原 -5 → -4 */
+    pointer-events: none;
+    mix-blend-mode: soft-light;
+    opacity: 0.95;
+    background:
+      radial-gradient(circle 420px at var(--glow-right-x, 75%) var(--glow-right-y, 50%),
+        rgba(255, 222, 0, 0.75) 0%,
+        rgba(255, 222, 0, 0.35) 38%,
+        rgba(255, 222, 0, 0) 72%),
+      radial-gradient(circle 340px at var(--glow-left-x, 15%) var(--glow-left-y, 75%),
+        rgba(255, 222, 0, 0.65) 0%,
+        rgba(255, 222, 0, 0.28) 38%,
+        rgba(255, 222, 0, 0) 72%);
+    will-change: background;
+  }
+
+  /* ============================================================
+     Three.js 波浪线画布
+     【方案一】z-index 从 -4 上移到 -3
+     ============================================================ */
+  #waveCanvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: -3;                 /* 原 -4 → -3 */
+    pointer-events: none;
+    -webkit-mask-image: radial-gradient(ellipse 85% 75% at 50% 50%, #000 45%, transparent 100%);
+            mask-image: radial-gradient(ellipse 85% 75% at 50% 50%, #000 45%, transparent 100%);
+  }
+
+  /* ============================================================
+     背景：呼吸感浅灰色点阵
+     【方案一】z-index 从 -3 上移到 -2（三层共用）
+     ============================================================ */
+  .dot-matrix-bg {
+    position: absolute;
+    inset: -12%;
+    z-index: -2;                 /* 原 -3 → -2 */
+    pointer-events: none;
+    background-image: radial-gradient(circle, rgba(var(--dot-color), 0.55) 1.5px, transparent 1.6px);
+    background-size: 34px 34px;
+    background-position: center center;
+    opacity: var(--dot-opacity-min);
+    will-change: opacity, transform;
+    animation: dotBreatheA 7.5s ease-in-out infinite;
+  }
+  .dot-matrix-bg.layer-2 {
+    background-image: radial-gradient(circle, rgba(var(--dot-color), 0.42) 1.1px, transparent 1.2px);
+    background-size: 56px 56px;
+    background-position: 17px 17px;
+    opacity: var(--dot-opacity-max);
+    animation: dotBreatheB 12s ease-in-out infinite;
+  }
+  .dot-matrix-bg.layer-3 {
+    background-image: radial-gradient(circle, rgba(var(--dot-color), 0.30) 0.9px, transparent 1px);
+    background-size: 20px 20px;
+    background-position: 5px 9px;
+    opacity: 0.12;
+    animation: dotDrift 26s ease-in-out infinite;
+  }
+
+  @keyframes dotBreatheA {
+    0%, 100% { opacity: var(--dot-opacity-min); transform: scale(1) translate3d(0, 0, 0); }
+    50%      { opacity: var(--dot-opacity-max); transform: scale(1.035) translate3d(0, -0.6%, 0); }
+  }
+  @keyframes dotBreatheB {
+    0%, 100% { opacity: var(--dot-opacity-max); transform: scale(1.03) translate3d(0, 0.5%, 0); }
+    50%      { opacity: var(--dot-opacity-min); transform: scale(1) translate3d(0, 0, 0); }
+  }
+  @keyframes dotDrift {
+    0%   { transform: translate3d(0, 0, 0) scale(1); opacity: 0.08; }
+    25%  { transform: translate3d(1.2%, -0.8%, 0) scale(1.01); opacity: 0.16; }
+    50%  { transform: translate3d(0, -1.4%, 0) scale(1); opacity: 0.10; }
+    75%  { transform: translate3d(-1.2%, -0.6%, 0) scale(1.01); opacity: 0.15; }
+    100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.08; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot-matrix-bg,
+    .dot-matrix-bg.layer-2,
+    .dot-matrix-bg.layer-3 {
+      animation: none;
+      opacity: 0.16;
+      transform: none;
+    }
+  }
+
+  /* ============================================================
+     【方案一核心】遮罩背景（半透明白，压低背景图对比度）
+     层级：z-index -5（紧贴背景图 -6 之上）
+     · 中间不夹任何氛围层，蒙版洞透出的是纯 .bg-image
+     · 氛围层（暖光/波浪线/点阵）全部上移到遮罩之上，
+       洞口视觉 = 背景图 + 极淡氛围叠加，仍然以背景图为主体
+     ============================================================ */
+  .container::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: white;
+    opacity: var(--background-opacity);
+    z-index: -5;                 /* 原 -1 → -5 */
+    pointer-events: none;
+
+    -webkit-mask-image: var(--mask-holes, none);
+            mask-image: var(--mask-holes, none);
+    -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+    -webkit-mask-composite: source-over;
+            mask-composite: add;
+  }
+
+  /* ============================================================
+     【新增】左上角小字打字机（思源黑体）
+     位置：与主标题打字机同一左侧基准线（left: 5%），置于视口左上方
+     ============================================================ */
+  .subtitle-typewriter {
+    position: absolute;
+    left: 5%;
+    top: 15vh;
+    z-index: 3;
+    font-family: 'Noto Sans SC', 'Source Han Sans SC', 'Source Han Sans CN',
+                 'Source Han Sans', '思源黑体', 'Google Sans Flex', sans-serif;
+    font-size: 6px;
+    font-weight: 200;
+    line-height: 1.5;
+    letter-spacing: 1.5em;
+    color: rgba(0, 0, 0, 0.4);
+    white-space: nowrap;
+    pointer-events: none;
+    font-feature-settings: 'palt' 1;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 小字号下的光标覆盖：固定 1px 宽，避免 0.05em 过细 */
+  .subtitle-typewriter .cursor {
+display: none;
+  }
+  @media (max-width: 750px) {
+    .subtitle-typewriter {
+      font-size: 8px;
+      letter-spacing: 0.06em;
+      top: 5vh;
+    }
+  }
+  @media (max-width: 480px) {
+    .subtitle-typewriter { font-size: 9px; }
+  }
+
+  /* ============================================================
+     主标题区域（打字机）
+     ============================================================ */
+  .main-text-container {
+    position: absolute;
+    left: 5%;
+    bottom: calc(10vh + 100px);
+    z-index: 3;
+    line-height: 0.85;
+    letter-spacing: -0.05em;
+    width: 90%;
+  }
+  .typewriter-line {
+    font-size: 9vw;
+    font-weight: 600;
+    color: var(--text-color);
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    letter-spacing: -0.05em;
+  }
+  .cursor {
+    display: inline-block;
+    width: 0.05em;
+    height: 0.8em;
+    background-color: black;
+    vertical-align: middle;
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* ============================================================
+     液态玻璃悬浮栏
+     ============================================================ */
+  .glass-bar {
+    position: absolute;
+    left: 5.5%;
+    bottom: 10vh;
+    transform: translateX(0);
+    width: min(1200px, 85vw);
+    height: auto;
+    min-height: 44px;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    box-sizing: border-box;
+    z-index: 100;
+    opacity: 0;
+  }
+  @media (max-width: 750px) {
+    .glass-bar { display: none; }
+    .main-text-container { bottom: 8vh; }
+  }
+  .logo {
+    width: 15px;
+    height: 15px;
+    margin-right: 16px;
+    margin-left: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .logo img { width: 100%; height: 100%; object-fit: contain; }
+
+  .nav-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 4px 0 4px 2px;
+    box-sizing: border-box;
+  }
+  .nav-buttons::-webkit-scrollbar { display: none; }
+
+  .nav-buttons.has-mask {
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+            mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+  }
+  .nav-buttons.has-mask.no-left {
+    -webkit-mask-image: linear-gradient(to right, black 5%, black 95%, transparent 100%);
+            mask-image: linear-gradient(to right, black 5%, black 95%, transparent 100%);
+  }
+  .nav-buttons.has-mask.no-right {
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%);
+            mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%);
+  }
+
+  .nav-btn {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.16));
+    backdrop-filter: blur(18px) saturate(170%) brightness(1.03);
+    -webkit-backdrop-filter: blur(18px) saturate(170%) brightness(1.03);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 50px;
+    padding: 10px 20px;
+    color: var(--text-color);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.35s ease,
+                backdrop-filter 0.35s ease,
+                -webkit-backdrop-filter 0.35s ease,
+                border-color 0.35s ease,
+                transform 0.3s ease,
+                box-shadow 0.35s ease;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    min-width: fit-content;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    will-change: transform, box-shadow, border-color, background, backdrop-filter;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.15),
+      0 2px 6px rgba(0, 0, 0, 0.03);
+  }
+
+  .nav-btn:hover {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.28));
+    backdrop-filter: blur(30px) saturate(190%) brightness(1.07);
+    -webkit-backdrop-filter: blur(30px) saturate(190%) brightness(1.07);
+    border-color: rgba(255, 255, 255, 0.78);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.22),
+      0 6px 16px rgba(0, 0, 0, 0.05);
+  }
+
+  @media (max-width: 768px) {
+    .glass-bar { width: auto; max-width: 90vw; padding: 0 10px; left: 5%; }
+    .nav-buttons { gap: 8px; }
+    .nav-btn { padding: 8px 15px; font-size: 10px; }
+    .logo { margin-right: 20px; }
+  }
+  @media (max-width: 480px) {
+    .glass-bar { left: 5%; width: auto; max-width: 90vw; }
+    .nav-buttons { gap: 5px; }
+    .nav-btn { padding: 6px 10px; font-size: 8px; }
+  }
+
+  /* --- 螺旋扩散黄色圆点容器 + 融球效果 (右侧) --- */
+  .spiral-dots-container {
+    position: absolute;
+    top: 35%;
+    left: 75%;
+    width: 0;
+    height: 0;
+    z-index: 5;
+    pointer-events: none;
+    filter: url(#gooeyFilter);
+  }
+  /* --- 左侧螺旋扩散圆点容器 --- */
+  .spiral-dots-container-left {
+    position: absolute;
+    top: 85%;
+    left: 30%;
+    width: 0;
+    height: 0;
+    z-index: 1;
+    pointer-events: none;
+    filter: url(#gooeyFilter);
+  }
+
+  /* ============================================================
+     融球圆点：拆成 外层(anime 驱动) + 内层(鼠标交互驱动)
+     ============================================================ */
+  .spiral-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--circle-size);
+    height: var(--circle-size);
+    margin-left: calc(var(--circle-size) / -2);
+    margin-top: calc(var(--circle-size) / -2);
+    border-radius: 50%;
+    will-change: transform;
+    z-index: 1;
+  }
+  .spiral-dot-core {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background-color: var(--yellow-color);
+    opacity: 0.9;
+    will-change: transform;
+    transform: translate3d(0, 0, 0) scale(1);
+    backface-visibility: hidden;
+  }
+
+  /* ============================================================
+     蒙版圆点：本身不显示黄色，只作为"开洞"的坐标占位
+     · 其位置由 JS 每帧读取，写入 .container::before 的 mask
+     · 洞口处直接透出最底层的 .bg-image
+     ============================================================ */
+  .spiral-dot.is-mask-hole .spiral-dot-core {
+    background-color: transparent;
+    opacity: 0;
+  }
+
+  /* --- 毛玻璃音波 --- */
+  .audio-wave-container {
+    position: absolute;
+    top: 50%;
+    left: 75%;
+    width: 0;
+    height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 6;
+    transform: translate(-50%, -50%) scale(1.5, 2);
+  }
+  .audio-bar {
+    position: absolute;
+    width: 6px;
+    height: 1000px;
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: blur(8px) saturate(150%);
+    -webkit-backdrop-filter: blur(8px) saturate(150%);
+    border: 0.5px solid rgba(255, 255, 255, 0.42);
+    border-radius: 3px;
+    opacity: 0.95;
+    will-change: transform, height, background-color;
+    transform-origin: center center;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: background 0.2s;
+  }
+
+  /* 减少动态偏好：让暖光静止 */
+  @media (prefers-reduced-motion: reduce) {
+    .bg-glow { opacity: 0.6; }
+  }
+</style>
+
+
+
+<!-- 融球 SVG 滤镜 -->
+<svg style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true">
+  <defs>
+    <filter id="gooeyFilter" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"></feGaussianBlur>
+      <feColorMatrix in="blur" mode="matrix" values="
+        1 0 0 0 0
+        0 1 0 0 0
+        0 0 1 0 0
+        0 0 0 35 -15" result="gooey"></feColorMatrix>
+      <feComposite in="SourceGraphic" in2="gooey" operator="atop"></feComposite>
+    </filter>
+  </defs>
+</svg>
+
+<div class="container">
+  <!-- 全屏背景图片（固定不动） -->
+  <div class="bg-image" id="bgImage" aria-hidden="true"></div>
+
+  <!-- 与黄色波点联动的背景暖光 -->
+  <div class="bg-glow" id="bgGlow" aria-hidden="true"></div>
+
+  <!-- Three.js 波浪线画布（底层氛围） -->
+  <canvas id="waveCanvas" aria-hidden="true"></canvas>
+
+  <!-- 背景呼吸点阵（三层错峰） -->
+  <div class="dot-matrix-bg" aria-hidden="true"></div>
+  <div class="dot-matrix-bg layer-2" aria-hidden="true"></div>
+  <div class="dot-matrix-bg layer-3" aria-hidden="true"></div>
+
+  <!-- 【新增】左上角小字打字机（思源黑体） -->
+  <div class="subtitle-typewriter" id="subtitleLine" aria-live="polite"></div>
+
+  <!-- 主标题（打字机） -->
+  <div class="main-text-container">
+    <div class="typewriter-line line1-container" id="line1"></div>
+    <div class="typewriter-line line2-container" id="line2"></div>
+  </div>
+
+  <!-- 液态玻璃悬浮栏 -->
+  <div class="glass-bar" id="glassBar">
+    <div class="logo">
+      <img src="https://www.ignoredone.space/wp-content/uploads/2026/05/LOGO.webp" alt="Logo">
+    </div>
+    <div class="nav-buttons" id="navButtonsContainer">
+      <a href="https://www.ignoredone.space/index.php/arknights_design/" class="nav-btn">美术资源</a>
+      <a href="https://www.ignoredone.space/index.php/designwebsite/" class="nav-btn">设计导航</a>
+      <a href="https://www.ignoredone.space/index.php/fontlab/" class="nav-btn">字体库</a>
+      <a href="https://www.ignoredone.space/index.php/personaldesign/" class="nav-btn">个人作品</a>
+      <a href="https://www.ignoredone.space/index.php/learningproject/" class="nav-btn">学习工程</a>
+      <a href="https://www.ignoredone.space/index.php/iconasset-2/" class="nav-btn">自制图标库</a>
+      <a href="https://www.ignoredone.space/index.php/ignoboard/" class="nav-btn">IgnoBoard</a>
+    </div>
+  </div>
+
+  <!-- 螺旋扩散圆点容器 - 右侧 (16 个，其中 4 个为蒙版洞) -->
+  <div class="spiral-dots-container" id="spiralContainer"></div>
+
+  <!-- 左侧螺旋扩散圆点容器 (6 个，其中 2 个为蒙版洞) -->
+  <div class="spiral-dots-container-left" id="spiralContainerLeft"></div>
+
+  <!-- 毛玻璃音波竖条 -->
+  <div class="audio-wave-container" id="audioWaveContainer"></div>
+</div>
+
+<!-- ============================================================
+     Three.js：微妙波浪线背景
+     ============================================================ -->
+<script>
+  (function initWaveBackground() {
+    const canvas = document.getElementById('waveCanvas');
+    if (!canvas || typeof THREE === 'undefined') return;
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'low-power'
+      });
+    } catch (err) {
+      canvas.style.display = 'none';
+      return;
+    }
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+    const FOV = 55;
+    const BASE_DIST = 34;
+    const SPAN = 74;
+    const WAVE_COUNT = 18;
+    const SEGMENTS = 160;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.1, 400);
+    camera.position.set(0, 0, BASE_DIST);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    const lines = [];
+    const HALF_SPAN_Y = 17;
+
+    for (let i = 0; i < WAVE_COUNT; i++) {
+      const positions = new Float32Array((SEGMENTS + 1) * 3);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      const isAccent = (i % 6) === 3;
+      const material = new THREE.LineBasicMaterial({
+        color: isAccent ? 0xFFDE00 : 0x111111,
+        transparent: true,
+        opacity: isAccent ? 0.07 : (0.045 + Math.random() * 0.06),
+        depthWrite: false,
+        blending: THREE.NormalBlending
+      });
+
+      const line = new THREE.Line(geometry, material);
+      line.frustumCulled = false;
+      line.position.z = -4 - Math.random() * 18;
+
+      const t0 = (i + 0.5) / WAVE_COUNT;
+
+      line.userData = {
+        positions: positions,
+        baseY: (t0 - 0.5) * HALF_SPAN_Y * 2 + (Math.random() - 0.5) * 0.8,
+        amp: 0.35 + Math.random() * 1.05,
+        freq: 0.75 + Math.random() * 0.65,
+        speed: 0.16 + Math.random() * 0.30,
+        phase: Math.random() * Math.PI * 2,
+        waveA: 0.070 + Math.random() * 0.040,
+        waveB: 0.180 + Math.random() * 0.090
+      };
+
+      group.add(line);
+      lines.push(line);
+    }
+
+    function updateLines(t) {
+      for (let l = 0; l < lines.length; l++) {
+        const line = lines[l];
+        const d = line.userData;
+        const pos = d.positions;
+
+        for (let i = 0; i <= SEGMENTS; i++) {
+          const x = (i / SEGMENTS - 0.5) * SPAN;
+
+          const y =
+            Math.sin(x * d.waveA * d.freq + t * d.speed + d.phase) * d.amp +
+            Math.sin(x * d.waveB * d.freq - t * d.speed * 1.35 + d.phase * 1.7) * d.amp * 0.45 +
+            Math.sin(x * 0.035 + t * 0.14 + d.phase * 0.5) * d.amp * 0.90;
+
+          const k = i * 3;
+          pos[k]     = x;
+          pos[k + 1] = d.baseY + y;
+          pos[k + 2] = 0;
+        }
+
+        line.geometry.attributes.position.needsUpdate = true;
+      }
+    }
+
+    function animateScene(t) {
+      updateLines(t);
+
+      group.rotation.z = Math.sin(t * 0.055) * 0.012;
+      group.rotation.x = Math.sin(t * 0.040) * 0.018;
+
+      camera.position.x = Math.sin(t * 0.050) * 1.1;
+      camera.position.y = Math.cos(t * 0.037) * 0.7;
+      camera.lookAt(0, 0, 0);
+    }
+
+    function resize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(w, h, false);
+
+      camera.aspect = w / h;
+
+      const vH = 2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)) * BASE_DIST;
+      const vW = vH * camera.aspect;
+      camera.position.z = vW < SPAN ? BASE_DIST * (SPAN / vW) : BASE_DIST;
+
+      camera.updateProjectionMatrix();
+    }
+
+    window.addEventListener('resize', resize, { passive: true });
+    resize();
+
+    const clock = new THREE.Clock();
+    let rafId = null;
+
+    function loop() {
+      rafId = requestAnimationFrame(loop);
+      animateScene(clock.getElapsedTime());
+      renderer.render(scene, camera);
+    }
+
+    if (reduceMotion) {
+      animateScene(0);
+      renderer.render(scene, camera);
+    } else {
+      loop();
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      if (reduceMotion) return;
+      if (document.hidden) {
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      } else if (rafId === null) {
+        clock.getDelta();
+        loop();
+      }
+    });
+  })();
+</script>
+
+<!-- ============================================================
+     交互脚本（打字机 / 玻璃栏入场 / 融球圆点 / 音波 / 背景联动 / 蒙版洞）
+     ============================================================ -->
+<script>
+  (function() {
+    // ----- 配置参数 -----
+    const TYPE_SPEED = 100;
+    const DELETE_SPEED = 50;
+    const PAUSE_AFTER_TYPE = 3000;
+    const PAUSE_BETWEEN_CYCLES = 500;
+
+    const line1 = document.getElementById('line1');
+    const line2 = document.getElementById('line2');
+    const subtitleLine = document.getElementById('subtitleLine');
+    const spiralContainer = document.getElementById('spiralContainer');
+    const spiralContainerLeft = document.getElementById('spiralContainerLeft');
+    const audioWaveContainer = document.getElementById('audioWaveContainer');
+    const glassBar = document.getElementById('glassBar');
+    const buttons = Array.from(document.querySelectorAll('.nav-btn'));
+    const navButtonsContainer = document.getElementById('navButtonsContainer');
+
+    // 背景与光晕节点
+    const bgGlow = document.getElementById('bgGlow');
+    const containerEl = document.querySelector('.container');
+
+    // 所有融球圆点的内层引用（供鼠标交互 / 质心计算 / 蒙版洞使用）
+    const dotCores = [];
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    /* ============================================================
+       玻璃栏入场（仅一次）
+       ============================================================ */
+    let glassBarVisible = false;
+    let glassBarHasEntered = false;
+
+    function glassBarEnter() {
+      if (glassBarHasEntered) return;
+      glassBarHasEntered = true;
+      glassBarVisible = true;
+
+      anime.set(glassBar, { opacity: 0, translateY: 16 });
+      anime.set(buttons, { opacity: 0, translateY: 12 });
+
+      anime({
+        targets: glassBar,
+        opacity: 1,
+        translateY: 0,
+        duration: 800,
+        easing: 'easeOutCubic'
+      });
+
+      anime({
+        targets: buttons,
+        opacity: 1,
+        translateY: 0,
+        delay: anime.stagger(70, { start: 260 }),
+        duration: 800,
+        easing: 'easeOutCubic',
+        complete: function () {
+          updateNavMask();
+        }
+      });
+    }
+
+    function glassBarExit() {
+      glassBarVisible = false;
+      glassBarHasEntered = false;
+
+      return new Promise(resolve => {
+        anime({
+          targets: buttons,
+          opacity: 0,
+          translateY: 10,
+          delay: anime.stagger(45, { from: 'last' }),
+          duration: 420,
+          easing: 'easeInCubic'
+        });
+
+        anime({
+          targets: glassBar,
+          opacity: 0,
+          translateY: 14,
+          delay: 220,
+          duration: 520,
+          easing: 'easeInCubic',
+          complete: resolve
+        });
+      });
+    }
+
+    /* ============================================================
+       横向滚动导航逻辑
+       ============================================================ */
+    let navScrollTween = null;
+    let navIsDragging = false;
+    let navStartX = 0;
+    let navScrollLeft = 0;
+    let navSuppressClick = false;
+
+    function updateNavMask() {
+      if (!navButtonsContainer) return;
+
+      const hasOverflow = navButtonsContainer.scrollWidth > navButtonsContainer.clientWidth + 2;
+
+      if (!hasOverflow) {
+        navButtonsContainer.classList.remove('has-mask', 'no-left', 'no-right');
+        return;
+      }
+
+      navButtonsContainer.classList.add('has-mask');
+
+      const atLeft  = navButtonsContainer.scrollLeft <= 1;
+      const atRight = navButtonsContainer.scrollLeft + navButtonsContainer.clientWidth >= navButtonsContainer.scrollWidth - 1;
+
+      if (atLeft)  navButtonsContainer.classList.add('no-left');
+      else         navButtonsContainer.classList.remove('no-left');
+
+      if (atRight) navButtonsContainer.classList.add('no-right');
+      else         navButtonsContainer.classList.remove('no-right');
+    }
+
+    function animateNavScrollTo(target) {
+      if (!navButtonsContainer) return;
+      target = Math.max(0, Math.min(target, navButtonsContainer.scrollWidth - navButtonsContainer.clientWidth));
+
+      const from = navButtonsContainer.scrollLeft;
+      if (Math.abs(target - from) < 1) return;
+
+      if (navScrollTween) navScrollTween.pause();
+
+      const proxy = { v: from };
+      navScrollTween = anime({
+        targets: proxy,
+        v: target,
+        duration: 460,
+        easing: 'cubicBezier(0.4, 0, 0.2, 1)',
+        update: function () {
+          navButtonsContainer.scrollLeft = proxy.v;
+        },
+        complete: function () {
+          navScrollTween = null;
+          updateNavMask();
+        }
+      });
+    }
+
+    function initNavScroller() {
+      if (!navButtonsContainer) return;
+
+      navButtonsContainer.addEventListener('wheel', function (e) {
+        if (navButtonsContainer.scrollWidth <= navButtonsContainer.clientWidth) return;
+        e.preventDefault();
+
+        if (navScrollTween) {
+          navScrollTween.pause();
+          navScrollTween = null;
+        }
+        navButtonsContainer.scrollLeft += e.deltaY;
+        updateNavMask();
+      }, { passive: false });
+
+      function navMouseDown(e) {
+        navIsDragging = true;
+        navStartX = e.pageX - navButtonsContainer.offsetLeft;
+        navScrollLeft = navButtonsContainer.scrollLeft;
+        navButtonsContainer.style.cursor = 'grabbing';
+        navButtonsContainer.style.userSelect = 'none';
+        navSuppressClick = false;
+      }
+      function navMouseMove(e) {
+        if (!navIsDragging) return;
+        e.preventDefault();
+        const x = e.pageX - navButtonsContainer.offsetLeft;
+        const walk = (x - navStartX) * 2;
+        if (Math.abs(walk) > 4) navSuppressClick = true;
+        navButtonsContainer.scrollLeft = navScrollLeft - walk;
+      }
+      function navMouseUp() {
+        if (!navIsDragging) return;
+        navIsDragging = false;
+        navButtonsContainer.style.cursor = '';
+        navButtonsContainer.style.userSelect = '';
+        updateNavMask();
+        if (navSuppressClick) {
+          setTimeout(function () { navSuppressClick = false; }, 60);
+        }
+      }
+
+      navButtonsContainer.addEventListener('mousedown', navMouseDown);
+      document.addEventListener('mousemove', navMouseMove);
+      document.addEventListener('mouseup', navMouseUp);
+      navButtonsContainer.addEventListener('mouseleave', navMouseUp);
+
+      navButtonsContainer.addEventListener('touchstart', function (e) {
+        const touch = e.touches[0];
+        navIsDragging = true;
+        navStartX = touch.pageX - navButtonsContainer.offsetLeft;
+        navScrollLeft = navButtonsContainer.scrollLeft;
+        navSuppressClick = false;
+      }, { passive: true });
+
+      navButtonsContainer.addEventListener('touchmove', function (e) {
+        if (!navIsDragging) return;
+        const touch = e.touches[0];
+        const x = touch.pageX - navButtonsContainer.offsetLeft;
+        const walk = (x - navStartX) * 2;
+        if (Math.abs(walk) > 4) navSuppressClick = true;
+        navButtonsContainer.scrollLeft = navScrollLeft - walk;
+      }, { passive: true });
+
+      navButtonsContainer.addEventListener('touchend', function () {
+        navIsDragging = false;
+        updateNavMask();
+        if (navSuppressClick) {
+          setTimeout(function () { navSuppressClick = false; }, 60);
+        }
+      });
+
+      navButtonsContainer.addEventListener('click', function (e) {
+        if (navSuppressClick) {
+          e.preventDefault();
+          e.stopPropagation();
+          navSuppressClick = false;
+        }
+      }, true);
+
+      navButtonsContainer.addEventListener('scroll', updateNavMask);
+      window.addEventListener('resize', updateNavMask);
+    }
+
+    /* ============================================================
+       初始化玻璃栏（隐藏 + 涟漪交互）
+       ============================================================ */
+    function initGlassBar() {
+      anime.set(glassBar, { opacity: 0, translateY: 16 });
+      anime.set(buttons, { opacity: 0, translateY: 12 });
+
+      buttons.forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          const ripple = document.createElement('span');
+          ripple.style.position = 'absolute';
+          ripple.style.width = '20px';
+          ripple.style.height = '20px';
+          ripple.style.borderRadius = '50%';
+          ripple.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+          ripple.style.pointerEvents = 'none';
+          ripple.style.left = (e.offsetX - 10) + 'px';
+          ripple.style.top = (e.offsetY - 10) + 'px';
+          ripple.style.transform = 'scale(0)';
+          ripple.style.opacity = '0.8';
+          this.style.position = 'relative';
+          this.style.overflow = 'hidden';
+          this.appendChild(ripple);
+
+          anime({
+            targets: ripple,
+            scale: [0, 8],
+            opacity: [0.8, 0],
+            duration: 800,
+            easing: 'easeOutQuad',
+            complete: () => {
+              if (ripple.parentNode) ripple.remove();
+            }
+          });
+        });
+      });
+    }
+
+    // ----- 打字机效果 -----
+    async function typeWriter(element, text, speed, showCursor = false) {
+      element.innerHTML = '';
+      if (showCursor) {
+        for (let i = 0; i < text.length; i++) {
+          element.innerHTML = text.substring(0, i + 1) + '<span class="cursor"></span>';
+          await sleep(speed);
+        }
+      } else {
+        for (let i = 0; i < text.length; i++) {
+          element.innerHTML += text.charAt(i);
+          await sleep(speed);
+        }
+      }
+    }
+
+    async function deleteText(element, speed) {
+      let text = element.innerHTML;
+      while (text.length > 0) {
+        if (text.includes('<span class="cursor"></span>')) {
+          let textPart = text.replace(/<span class="cursor"><\/span>$/, '');
+          textPart = textPart.slice(0, -1);
+          element.innerHTML = textPart + '<span class="cursor"></span>';
+        } else {
+          text = text.slice(0, -1);
+          element.innerHTML = text;
+        }
+        await sleep(speed);
+      }
+    }
+
+    // ============================================================
+    // 打字机 + 玻璃栏 同步演出序列
+    // ============================================================
+    async function runTypewriterSequence() {
+      await sleep(500);
+
+      while (true) {
+        glassBarEnter();
+        await typeWriter(line1, "DESIGN", TYPE_SPEED);
+
+        await sleep(500);
+        await typeWriter(line2, "EVERYDAY.", TYPE_SPEED);
+
+        await sleep(PAUSE_AFTER_TYPE);
+
+        await deleteText(line2, DELETE_SPEED);
+        await deleteText(line1, DELETE_SPEED);
+
+        await sleep(PAUSE_BETWEEN_CYCLES);
+
+        await typeWriter(line1, "IGNORE", TYPE_SPEED);
+
+        await sleep(500);
+        await typeWriter(line2, "DONE.SPACE", TYPE_SPEED);
+
+        await sleep(PAUSE_AFTER_TYPE);
+
+        await deleteText(line2, DELETE_SPEED);
+        await deleteText(line1, DELETE_SPEED);
+
+        await sleep(PAUSE_BETWEEN_CYCLES);
+      }
+    }
+
+    // ============================================================
+    // 【新增】左上角小字打字机（思源黑体）
+    // 与主标题保持一致的光标 + 打字/删除节奏，循环播放
+    // ============================================================
+    async function runSubtitleTypewriter() {
+      if (!subtitleLine) return;
+
+      const TEXT = '在这里，展开设计的翅膀';
+      const SUB_TYPE_SPEED = 130;     // 单字打出速度
+      const SUB_DELETE_SPEED = 55;    // 单字删除速度
+      const SUB_HOLD = 2600;          // 打完停留
+      const SUB_GAP = 700;            // 删完停顿
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduceMotion) {
+        subtitleLine.textContent = TEXT;
+        return;
+      }
+
+      await sleep(900);
+
+      while (true) {
+        // 打字
+        for (let i = 1; i <= TEXT.length; i++) {
+          subtitleLine.innerHTML = TEXT.substring(0, i) + '<span class="cursor"></span>';
+          await sleep(SUB_TYPE_SPEED);
+        }
+
+        await sleep(SUB_HOLD);
+
+        // 删除
+        for (let i = TEXT.length - 1; i >= 0; i--) {
+          subtitleLine.innerHTML = TEXT.substring(0, i) + '<span class="cursor"></span>';
+          await sleep(SUB_DELETE_SPEED);
+        }
+
+        await sleep(SUB_GAP);
+      }
+    }
+
+    // ----- 通用：创建圆点（外层 + 内层） -----
+    function createSpiralDot(container, id, side, isMaskHole) {
+      const dot = document.createElement('div');
+      dot.className = 'spiral-dot';
+      dot.id = id;
+      if (isMaskHole) dot.classList.add('is-mask-hole');
+
+      const core = document.createElement('div');
+      core.className = 'spiral-dot-core';
+      if (isMaskHole) {
+        core.style.opacity = '0';
+        core.style.background = 'transparent';
+      }
+      dot.appendChild(core);
+
+      container.appendChild(dot);
+
+      dotCores.push({
+        parent: dot,
+        core: core,
+        side: side,
+        isMaskHole: !!isMaskHole,
+        cx: 0,   // 当前鼠标偏移 X（平滑值）
+        cy: 0,   // 当前鼠标偏移 Y（平滑值）
+        cs: 1    // 当前缩放（平滑值）
+      });
+    }
+
+    // ----- 螺旋扩散黄色圆点 (右侧 16 个，索引 2/6/10/14 为蒙版洞) -----
+    const MASK_HOLES_RIGHT = [2, 6, 10, 14];
+    const MASK_HOLES_LEFT  = [1, 4];
+
+    function initSpiralDotsRight() {
+      const DOT_COUNT = 16;
+      const angles = Array.from({ length: DOT_COUNT }, (_, i) => i * (360 / DOT_COUNT));
+      spiralContainer.innerHTML = '';
+
+      angles.forEach((angle, i) => {
+        createSpiralDot(
+          spiralContainer,
+          `spiralRight${i + 1}`,
+          'right',
+          MASK_HOLES_RIGHT.indexOf(i) !== -1
+        );
+      });
+
+      const wanderRangeX = 12;
+      const wanderRangeY = 12;
+      anime({
+        targets: '#spiralContainer',
+        translateX: [
+          { value: 0, duration: 0 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: 0, duration: 2000 }
+        ],
+        translateY: [
+          { value: 0, duration: 0 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: 0, duration: 2000 }
+        ],
+        easing: 'easeInOutSine',
+        loop: true,
+        duration: 10000
+      });
+
+      angles.forEach((angle, i) => {
+        const rad = angle * Math.PI / 180;
+        const dotId = `#spiralRight${i + 1}`;
+
+        const baseRadius = 420;
+        const radiusVariation = 700;
+        const randomRadius = baseRadius + (Math.random() * radiusVariation * 2 - radiusVariation);
+        const baseDuration = 2200;
+        const durationVariation = 1200;
+        const randomDuration = baseDuration + (Math.random() * durationVariation * 2 - durationVariation);
+        const baseDelay = i * 100;
+        const randomExtraDelay = Math.random() * 200;
+        const finalDelay = baseDelay + randomExtraDelay;
+
+        const targetX = Math.cos(rad) * randomRadius;
+        const targetY = Math.sin(rad) * randomRadius;
+
+        anime({
+          targets: dotId,
+          translateX: targetX,
+          translateY: targetY,
+          scale: [0.6, 1.3, 0.6],
+          duration: randomDuration,
+          delay: finalDelay,
+          loop: true,
+          direction: 'alternate',
+          easing: 'easeInOutSine'
+        });
+      });
+    }
+
+    // ----- 左侧螺旋扩散 (6 个圆点，索引 1/4 为蒙版洞) -----
+    function initSpiralDotsLeft() {
+      const DOT_COUNT = 6;
+      const angles = Array.from({ length: DOT_COUNT }, (_, i) => i * (360 / DOT_COUNT));
+      spiralContainerLeft.innerHTML = '';
+
+      angles.forEach((angle, i) => {
+        createSpiralDot(
+          spiralContainerLeft,
+          `spiralLeft${i + 1}`,
+          'left',
+          MASK_HOLES_LEFT.indexOf(i) !== -1
+        );
+      });
+
+      const wanderRangeX = 12;
+      const wanderRangeY = 12;
+      anime({
+        targets: '#spiralContainerLeft',
+        translateX: [
+          { value: 0, duration: 0 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeX + 'vw', duration: 2000 },
+          { value: 0, duration: 2000 }
+        ],
+        translateY: [
+          { value: 0, duration: 0 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: () => (Math.random() * 2 - 1) * wanderRangeY + 'vh', duration: 2000 },
+          { value: 0, duration: 2000 }
+        ],
+        easing: 'easeInOutSine',
+        loop: true,
+        duration: 10000
+      });
+
+      angles.forEach((angle, i) => {
+        const rad = angle * Math.PI / 180;
+        const dotId = `#spiralLeft${i + 1}`;
+
+        const baseRadius = 450;
+        const radiusVariation = 300;
+        const randomRadius = baseRadius + (Math.random() * radiusVariation * 2 - radiusVariation);
+        const baseDuration = 2200;
+        const durationVariation = 1200;
+        const randomDuration = baseDuration + (Math.random() * durationVariation * 2 - durationVariation);
+        const baseDelay = i * 130;
+        const randomExtraDelay = Math.random() * 200;
+        const finalDelay = baseDelay + randomExtraDelay;
+
+        const targetX = Math.cos(rad) * randomRadius;
+        const targetY = Math.sin(rad) * randomRadius;
+
+        anime({
+          targets: dotId,
+          translateX: targetX,
+          translateY: targetY,
+          scale: [0.6, 1.3, 0.6],
+          duration: randomDuration,
+          delay: finalDelay,
+          loop: true,
+          direction: 'alternate',
+          easing: 'easeInOutSine'
+        });
+      });
+    }
+
+    // ----- 音波频率视觉效果 (毛玻璃版本) -----
+    function initAudioWave() {
+      audioWaveContainer.innerHTML = '';
+
+      const BAR_COUNT = 30;
+      const BAR_WIDTH = 8;
+      const BASE_HEIGHT = 60;
+      const MAX_EXTRA_HEIGHT = 60;
+      const GAP = 10;
+
+      const totalWidth = BAR_COUNT * (BAR_WIDTH + GAP) - GAP;
+      const startX = -totalWidth / 2;
+
+      const bars = [];
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'audio-bar';
+        const leftPos = startX + i * (BAR_WIDTH + GAP);
+        bar.style.transform = `translateX(${leftPos}px)`;
+        bar.style.width = BAR_WIDTH + 'px';
+        bar.style.height = BASE_HEIGHT + 'px';
+        bar.style.background = 'rgba(255, 255, 255, 0.25)';
+        bar.style.backdropFilter = 'blur(8px) saturate(150%)';
+        bar.style.webkitBackdropFilter = 'blur(8px) saturate(150%)';
+        bar.style.border = '0.5px solid rgba(255, 255, 255, 0.42)';
+        bar.style.borderRadius = (BAR_WIDTH / 2) + 'px';
+        bar.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.5)';
+        bar.dataset.index = i;
+        audioWaveContainer.appendChild(bar);
+        bars.push(bar);
+      }
+
+      bars.forEach((bar, idx) => {
+        const centerIndex = (BAR_COUNT - 1) / 2;
+        const distanceToCenter = Math.abs(idx - centerIndex) / centerIndex;
+        const amplitudeFactor = 1 - distanceToCenter * 0.6;
+
+        const duration = 400 + Math.random() * 800;
+        const delay = Math.random() * 400;
+
+        const minHeight = BASE_HEIGHT * 0.6;
+        const maxHeight = BASE_HEIGHT + MAX_EXTRA_HEIGHT * amplitudeFactor * (0.6 + Math.random() * 0.5);
+
+        anime({
+          targets: bar,
+          height: [
+            { value: minHeight, duration: 0 },
+            { value: maxHeight, duration: duration / 2 },
+            { value: minHeight, duration: duration / 2 }
+          ],
+          scaleX: [
+            { value: 0.9, duration: 0 },
+            { value: 1.2, duration: duration / 2 },
+            { value: 0.9, duration: duration / 2 }
+          ],
+          duration: duration,
+          delay: delay,
+          loop: true,
+          direction: 'alternate',
+          easing: 'easeInOutQuad'
+        });
+      });
+    }
+
+    /* ============================================================
+       【核心】圆点交互 + 背景暖光 + 蒙版洞
+       ① 背景图片固定不动（方案一：无任何位移）
+       ② 黄色圆点被鼠标"推开"（即时响应，独立于 anime 轨道）
+       ③ 两组圆点的实时质心驱动背景暖光位置
+       ④ 蒙版圆点的实时位置写入 .container::before 的 mask，
+          洞口处直接透出最底层的 .bg-image（因 -5 紧贴 -6，中间无夹层）
+       ============================================================ */
+    function initBackgroundInteraction() {
+      if (!bgGlow) return;
+
+      const lerp = (a, b, n) => a + (b - a) * n;
+
+      // 指针状态（目标值 + 平滑值）
+      const pointer = {
+        tx: window.innerWidth / 2,
+        ty: window.innerHeight / 2,
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+        active: false
+      };
+
+      window.addEventListener('mousemove', function (e) {
+        pointer.tx = e.clientX;
+        pointer.ty = e.clientY;
+        pointer.active = true;
+      }, { passive: true });
+
+      window.addEventListener('mouseleave', function () {
+        pointer.active = false;
+      });
+
+      window.addEventListener('touchmove', function (e) {
+        if (!e.touches.length) return;
+        const t = e.touches[0];
+        pointer.tx = t.clientX;
+        pointer.ty = t.clientY;
+        pointer.active = true;
+      }, { passive: true });
+
+      window.addEventListener('touchend', function () {
+        pointer.active = false;
+      }, { passive: true });
+
+      // 鼠标排斥参数
+      const REPEL_RADIUS = 300;      // 影响半径
+      const REPEL_STRENGTH = 55;     // 最大位移 px
+      const REPEL_SCALE = 0.5;       // 最大额外缩放
+
+      // 收集蒙版洞圆点的索引（在 dotCores 中的位置）
+      const maskHoleIndexes = [];
+      for (let i = 0; i < dotCores.length; i++) {
+        if (dotCores[i].isMaskHole) maskHoleIndexes.push(i);
+      }
+
+      let lastMaskValue = '';
+
+      /* 把蒙版洞的实时位置写进 CSS 变量，交由 .container::before 的 mask 使用 */
+      function updateMaskHoles(rects) {
+        if (!containerEl || maskHoleIndexes.length === 0) return;
+
+        const parts = [];
+        for (let k = 0; k < maskHoleIndexes.length; k++) {
+          const rect = rects[maskHoleIndexes[k]];
+          if (!rect || rect.width <= 0) continue;
+
+          const cx = rect.left + rect.width * 0.5;
+          const cy = rect.top + rect.height * 0.5;
+          const rad = rect.width * 0.5;
+
+          parts.push(
+            'radial-gradient(circle at ' +
+            cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px, ' +
+            'rgba(0,0,0,0) 0px, ' +
+            'rgba(0,0,0,0) ' + rad.toFixed(1) + 'px, ' +
+            '#000 ' + (rad + 1).toFixed(1) + 'px)'
+          );
+        }
+
+        const value = parts.length ? parts.join(', ') : 'none';
+        if (value !== lastMaskValue) {
+          lastMaskValue = value;
+          containerEl.style.setProperty('--mask-holes', value);
+        }
+      }
+
+      function frame() {
+        /* ---- 1. 批量读取布局（避免读写交错导致反复强制重排） ---- */
+        const rects = new Array(dotCores.length);
+        for (let i = 0; i < dotCores.length; i++) {
+          rects[i] = dotCores[i].parent.getBoundingClientRect();
+        }
+
+        /* ---- 2. 指针平滑 ---- */
+        pointer.x = lerp(pointer.x, pointer.tx, 0.10);
+        pointer.y = lerp(pointer.y, pointer.ty, 0.10);
+
+        /* ---- 3. 圆点交互 + 质心统计 ---- */
+        let rSumX = 0, rSumY = 0, rN = 0;
+        let lSumX = 0, lSumY = 0, lN = 0;
+
+        for (let i = 0; i < dotCores.length; i++) {
+          const item = dotCores[i];
+          const rect = rects[i];
+          const cx = rect.left + rect.width * 0.5;
+          const cy = rect.top + rect.height * 0.5;
+
+          // 质心累加（蒙版洞同样参与，暖光位置与整簇圆点一致）
+          if (item.side === 'right') { rSumX += cx; rSumY += cy; rN++; }
+          else                        { lSumX += cx; lSumY += cy; lN++; }
+
+          // 蒙版洞本身不可见，跳过鼠标排斥与缩放
+          if (item.isMaskHole) continue;
+
+          let targetOffsetX = 0;
+          let targetOffsetY = 0;
+          let targetScale = 1;
+
+          if (pointer.active) {
+            const dx = cx - pointer.x;
+            const dy = cy - pointer.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+
+            if (dist < REPEL_RADIUS) {
+              const f = 1 - dist / REPEL_RADIUS;
+              // smoothstep 缓动，让靠近时推力更自然
+              const ease = f * f * (3 - 2 * f);
+              targetOffsetX = (dx / dist) * ease * REPEL_STRENGTH;
+              targetOffsetY = (dy / dist) * ease * REPEL_STRENGTH;
+              targetScale = 1 + ease * REPEL_SCALE;
+            }
+          }
+
+          item.cx = lerp(item.cx, targetOffsetX, 0.18);
+          item.cy = lerp(item.cy, targetOffsetY, 0.18);
+          item.cs = lerp(item.cs, targetScale, 0.18);
+
+          item.core.style.transform =
+            'translate3d(' + item.cx.toFixed(2) + 'px, ' +
+            item.cy.toFixed(2) + 'px, 0) scale(' + item.cs.toFixed(3) + ')';
+        }
+
+        /* ---- 4. 用圆点质心驱动背景暖光 ---- */
+        if (rN > 0) {
+          bgGlow.style.setProperty('--glow-right-x', (rSumX / rN).toFixed(1) + 'px');
+          bgGlow.style.setProperty('--glow-right-y', (rSumY / rN).toFixed(1) + 'px');
+        }
+        if (lN > 0) {
+          bgGlow.style.setProperty('--glow-left-x', (lSumX / lN).toFixed(1) + 'px');
+          bgGlow.style.setProperty('--glow-left-y', (lSumY / lN).toFixed(1) + 'px');
+        }
+
+        /* ---- 5. 更新蒙版洞（透出最底层的 .bg-image） ---- */
+        updateMaskHoles(rects);
+
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    // 初始化所有
+    window.onload = () => {
+      initGlassBar();
+      initNavScroller();
+      initSpiralDotsRight();
+      initSpiralDotsLeft();
+      initAudioWave();
+      initBackgroundInteraction();   // 背景固定 + 波点交互 + 蒙版洞
+      runTypewriterSequence();
+      runSubtitleTypewriter();       // 左上角小字打字机
+    };
+  })();
+</script>
+
+<footer class="wp-block-template-part">
+<div class="wp-block-group has-base-2-color has-contrast-background-color has-text-color has-background has-link-color wp-elements-2 has-global-padding is-layout-constrained wp-block-group-is-layout-constrained" style="padding-top:var(--wp--preset--spacing--50);padding-bottom:var(--wp--preset--spacing--50)">
+<div class="wp-block-columns alignwide is-layout-flex wp-container-core-columns-is-layout-3a88641f wp-block-columns-is-layout-flex">
+<div class="wp-block-column is-layout-flow wp-block-column-is-layout-flow" style="flex-basis:30%">
+<div class="wp-block-group is-vertical is-layout-flex wp-container-core-group-is-layout-831b2db5 wp-block-group-is-layout-flex"><div class="wp-block-site-logo"><a href="https://www.ignoredone.space/" class="custom-logo-link" rel="home" aria-current="page"><img loading="lazy" width="20" height="20" src="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png" class="custom-logo" alt="ignoredone&#039;s space" decoding="async" srcset="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png 512w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-300x300.png 300w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-150x150.png 150w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-270x270.png 270w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-192x192.png 192w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-180x180.png 180w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-32x32.png 32w" sizes="auto, (max-width: 20px) 100vw, 20px" /></a></div>
+
+<p class="wp-block-site-title has-large-font-size"><a href="https://www.ignoredone.space" target="_self" rel="home" aria-current="page">ignoredone&#039;s space</a></p>
+
+<div class="wp-block-site-logo"><a href="https://www.ignoredone.space/" class="custom-logo-link" rel="home" aria-current="page"><img loading="lazy" width="35" height="35" src="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png" class="custom-logo" alt="ignoredone&#039;s space" decoding="async" srcset="https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1.png 512w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-300x300.png 300w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-150x150.png 150w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-270x270.png 270w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-192x192.png 192w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-180x180.png 180w, https://cdn.ignoredone.cn/wp-content/uploads/2025/02/cropped-LOGO-1-32x32.png 32w" sizes="auto, (max-width: 35px) 100vw, 35px" /></a></div>
+
+</div>
+</div>
+
+
+
+<div class="wp-block-column is-layout-flow wp-block-column-is-layout-flow" style="flex-basis:20%"></div>
+
+
+
+<div class="wp-block-column is-layout-flow wp-block-column-is-layout-flow" style="flex-basis:50%">
+<div class="wp-block-group is-content-justification-space-between is-layout-flex wp-container-core-group-is-layout-cf54d0a6 wp-block-group-is-layout-flex">
+<div class="wp-block-group is-vertical is-content-justification-stretch is-layout-flex wp-container-core-group-is-layout-d8dce8eb wp-block-group-is-layout-flex">
+<h2 class="wp-block-heading has-medium-font-size has-body-font-family" style="font-style:normal;font-weight:600">关于</h2>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>其他的个人账户</strong></p>
+
+
+
+<div class="wp-block-group is-vertical is-layout-flex wp-container-core-group-is-layout-bce0c455 wp-block-group-is-layout-flex"><nav style="font-style:normal;font-weight:400" class="has-small-font-size is-vertical wp-block-navigation is-layout-flex wp-container-core-navigation-is-layout-bce0c455 wp-block-navigation-is-layout-flex" aria-label="页脚 导航 2"><ul style="font-style:normal;font-weight:400" class="wp-block-navigation__container has-small-font-size is-vertical wp-block-navigation"><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://space.bilibili.com/4073074"><span class="wp-block-navigation-item__label">bilibili</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://x.com/Ignore_done"><span class="wp-block-navigation-item__label">X/Twitter</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://jp.pinterest.com/ignoredone/"><span class="wp-block-navigation-item__label">Pinterest</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="#"><span class="wp-block-navigation-item__label">Bluesky</span></a></li><li class="wp-block-navigation-item wp-block-navigation-link"><a class="wp-block-navigation-item__content"  href="https://ignor.lofter.com/"><span class="wp-block-navigation-item__label">Lofter</span></a></li></ul></nav></div>
+</div>
+
+
+
+<div class="wp-block-group is-vertical is-content-justification-stretch is-layout-flex wp-container-core-group-is-layout-d8dce8eb wp-block-group-is-layout-flex">
+<h2 class="wp-block-heading has-medium-font-size has-body-font-family" style="font-style:normal;font-weight:600">隐私</h2>
+</div>
+
+
+
+<div class="wp-block-group is-vertical is-content-justification-stretch is-layout-flex wp-container-core-group-is-layout-d8dce8eb wp-block-group-is-layout-flex">
+<h2 class="wp-block-heading has-medium-font-size has-body-font-family" style="font-style:normal;font-weight:600">社交</h2>
+
+
+
+<div class="wp-block-group is-vertical is-layout-flex wp-container-core-group-is-layout-bce0c455 wp-block-group-is-layout-flex"><nav style="font-style:normal;font-weight:400" class="has-small-font-size is-vertical wp-block-navigation is-layout-flex wp-container-core-navigation-is-layout-bce0c455 wp-block-navigation-is-layout-flex" aria-label="页脚 导航">
+<div class="wp-block-buttons is-layout-flex wp-block-buttons-is-layout-flex">
+<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="http://www.ignoredone.space/index.php/portfolio/"><strong>作品库</strong></a></div>
+</div>
+
+<div class="wp-block-buttons is-layout-flex wp-block-buttons-is-layout-flex">
+<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="http://www.ignoredone.space/index.php/graphic-design/"><strong>学方舟做设计</strong></a></div>
+</div>
+
+<div class="wp-block-buttons is-layout-flex wp-block-buttons-is-layout-flex">
+<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="http://www.ignoredone.space/index.php/article-arrangement/"><strong>图文教程</strong></a></div>
+</div>
+
+<div class="wp-block-buttons is-layout-flex wp-block-buttons-is-layout-flex">
+<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="https://www.ignoredone.space/index.php/ignoredone-project/"><strong>学习端口</strong></a></div>
+</div>
+
+<div class="wp-block-buttons is-content-justification-right is-layout-flex wp-container-core-buttons-is-layout-bf881693 wp-block-buttons-is-layout-flex">
+<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="http://www.ignoredone.space/index.php/resource/"><strong>资源共享</strong></a></div>
+</div>
+</nav></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</footer></div>
+<script type="speculationrules">
+{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/wp-*.php","/wp-admin/*","/wp-content/uploads/*","/wp-content/*","/wp-content/plugins/*","/wp-content/themes/twentytwentyfour/*","/*\\?(.+)"]}},{"not":{"selector_matches":"a[rel~=\"nofollow\"]"}},{"not":{"selector_matches":".no-prefetch, .no-prefetch a"}}]},"eagerness":"conservative"}]}
+</script>
+<!-- 自定义光标 HTML：放在 footer 前或 body 最后 -->
+<div id="custom-cursor" class="custom-cursor"></div>
+
+<style>
+  /* 默认隐藏系统光标（桌面端） */
+  @media (pointer: fine) {
+    *:not(input):not(textarea):not(.custom-cursor),
+    *:not(input):not(textarea):not(.custom-cursor)::before,
+    *:not(input):not(textarea):not(.custom-cursor)::after {
+      cursor: none !important;
+    }
+
+    #custom-cursor {
+      display: block;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 20px;
+      height: 20px;
+      background-color: #E3E3E3;
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      transition: background-color 0.3s ease, transform 0.2s ease;
+      z-index: 999999;
+      opacity: 1;
+      mix-blend-mode: normal;
+    }
+
+    #custom-cursor.active {
+      transform: translate(-50%, -50%) scale(0.8);
+      background-color: #999;
+    }
+  }
+
+  /* 移动端隐藏自定义光标 */
+  @media (pointer: coarse) {
+    #custom-cursor {
+      display: none !important;
+    }
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // 检查是否是桌面端（pointer: fine）
+    const isDesktop = window.matchMedia("(pointer: fine)").matches;
+    if (!isDesktop) return;
+
+    const cursor = document.getElementById("custom-cursor");
+    let mouseX = window.innerWidth / 2;
+    let mouseY = window.innerHeight / 2;
+
+    if (cursor) {
+      cursor.style.left = mouseX + "px";
+      cursor.style.top = mouseY + "px";
+
+      document.addEventListener("mousemove", (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+        cursor.style.left = mouseX + "px";
+        cursor.style.top = mouseY + "px";
+      });
+
+      document.addEventListener("mousedown", () => {
+        cursor.classList.add("active");
+      });
+
+      document.addEventListener("mouseup", () => {
+        cursor.classList.remove("active");
+      });
+    }
+  });
+</script>
+
+<!-- 回到顶部按钮 -->
+<style>
+  #back-to-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 40px;
+    height: 40px;
+    background-color: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 9999;
+    display: none;
+    transition: all 0.3s ease;
+    padding: 10px;
+  }
+
+  #back-to-top img {
+    width: 100%;
+    height: 100%;
+    filter: invert(0); /* 黑色箭头 */
+    transition: filter 0.3s ease;
+  }
+
+  #back-to-top:hover {
+    background-color: #000;
+  }
+
+  #back-to-top:hover img {
+    filter: invert(1); /* 白色箭头 */
+  }
+
+  @media screen and (max-width: 768px) {
+    #back-to-top {
+      bottom: 20px;
+      right: 20px;
+    }
+  }
+</style>
+
+<!-- 替换 src 中的 URL 为你的 SVG 图标地址 -->
+<button id="back-to-top" title="回到顶部" aria-label="回到顶部">
+  <img src="https://www.ignoredone.space/wp-content/uploads/2025/07/iconmonstr-arrow-up-lined-240.png" alt="回到顶部箭头">
+</button>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const btn = document.getElementById('back-to-top');
+
+    window.addEventListener('scroll', function () {
+      if (window.scrollY > 300) {
+        btn.style.display = 'block';
+      } else {
+        btn.style.display = 'none';
+      }
+    });
+
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+</script>
+
+<script>
+  const startTime = Date.now(); // 记录启动时间
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const preloader = document.getElementById("preloader");
+
+    // 只在首页执行启动页动画，判断条件：
+    // 严格等于 https://www.ignoredone.space/ （末尾带斜杠）
+    if (window.location.href === "https://www.ignoredone.space/") {
+      // 显示启动页
+      preloader.style.display = "flex";
+
+      let mouseX = window.innerWidth / 2;
+      let mouseY = window.innerHeight / 2;
+
+      // 监听鼠标移动，更新圆形蒙版的位置
+      document.addEventListener("mousemove", (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+      });
+
+      window.addEventListener("load", () => {
+        const elapsed = Date.now() - startTime;
+        const minDuration = 500; // 启动页最短显示时间（ms）
+        const delay = elapsed < minDuration ? (minDuration - elapsed) : 0;
+
+        setTimeout(() => {
+          preloader.style.transition = "clip-path 1s ease";
+          preloader.style.clipPath = `circle(0px at ${mouseX}px ${mouseY}px)`;
+
+          // 动画结束后隐藏启动页容器
+          preloader.addEventListener("transitionend", () => {
+            preloader.style.display = "none";
+          }, { once: true });
+        }, delay);
+      });
+    } else {
+      // 非首页隐藏启动页，避免影响页面
+      preloader.style.display = "none";
+    }
+  });
+</script>
+<script>
+document.addEventListener('click', function(e){
+
+    const link = e.target.closest('a');
+    if(!link) return;
+
+    const href = link.href || '';
+
+    // 需要下载的文件类型
+    const downloadTypes = [
+        '.apk',
+        '.zip',
+        '.rar',
+        '.7z',
+        '.pdf',
+        '.dmg',
+        '.exe'
+    ];
+
+    const isDownload = downloadTypes.some(type =>
+        href.toLowerCase().includes(type)
+    );
+
+    if(!isDownload) return;
+
+    e.preventDefault();
+
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = href;
+
+    document.body.appendChild(iframe);
+
+    setTimeout(()=>{
+        iframe.remove();
+    },5000);
+
+});
+</script>
+<script>
+(function () {
+    const isMobile = window.innerWidth <= 768;
+
+    if (
+        isMobile &&
+        !window.location.pathname.includes('mobile-homepage-2')
+    ) {
+        window.location.href = "https://www.ignoredone.space/index.php/mobile-homepage-2/";
+    }
+})();
+</script>
+<script data-wp-router-options="{&quot;loadOnClientNavigation&quot;:true}" fetchpriority="low" id="@wordpress/block-library/navigation/view-js-module" src="https://www.ignoredone.space/wp-includes/js/dist/script-modules/block-library/navigation/view.min.js?ver=1bf28ded04f9f188bdcb" type="module"></script>
+<script id="gsap-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/gsap/gsap.min.js?ver=1.1.0"></script>
+<script id="DrawSVG-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/gsap/DrawSVG.min.js?ver=1.1.0"></script>
+<script id="SplitText3-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/gsap/SplitText3.min.js?ver=1.1.0"></script>
+<script id="ScrollMagic-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/scrollmagic/minified/ScrollMagic.min.js?ver=1.1.0"></script>
+<script id="animation-gsap-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/scrollmagic/minified/plugins/animation.gsap.min.js?ver=1.1.0"></script>
+<script id="debug-addIndicators-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/lib/scrollmagic/minified/plugins/debug.addIndicators.min.js?ver=1.1.0"></script>
+<script id="wpmp-js-js" src="https://www.ignoredone.space/wp-content/plugins/scroll-magic-addon-for-elementor/assets/public/js/wpmp.js?ver=1.1.0"></script>
+<script id="wp-emoji-settings" type="application/json">
+{"baseUrl":"https://s.w.org/images/core/emoji/17.0.2/72x72/","ext":".png","svgUrl":"https://s.w.org/images/core/emoji/17.0.2/svg/","svgExt":".svg","source":{"concatemoji":"https://www.ignoredone.space/wp-includes/js/wp-emoji-release.min.js?ver=7.1.3"}}
+</script>
+<script type="module">
+/*! This file is auto-generated */
+var e="script#wp-emoji-settings",t=document.querySelector(e);if(!(t instanceof HTMLScriptElement))throw new Error("Element missing: "+e);const r=JSON.parse(t.text),s=(window._wpemojiSettings=r,"wpEmojiSettingsSupports"),o=["flag","emoji"];function i(e){try{var t={supportTests:e,timestamp:(new Date).valueOf()};sessionStorage.setItem(s,JSON.stringify(t))}catch(e){}}function c(e,t,n){e.clearRect(0,0,e.canvas.width,e.canvas.height),e.fillText(t,0,0);t=new Uint32Array(e.getImageData(0,0,e.canvas.width,e.canvas.height).data);e.clearRect(0,0,e.canvas.width,e.canvas.height),e.fillText(n,0,0);const r=new Uint32Array(e.getImageData(0,0,e.canvas.width,e.canvas.height).data);return t.every((e,t)=>e===r[t])}function p(e,t){e.clearRect(0,0,e.canvas.width,e.canvas.height),e.fillText(t,0,0);var n=e.getImageData(16,16,1,1);for(let e=0;e<n.data.length;e++)if(0!==n.data[e])return!1;return!0}function u(e,t,n,r){switch(t){case"flag":return n(e,"\ud83c\udff3\ufe0f\u200d\u26a7\ufe0f","\ud83c\udff3\ufe0f\u200b\u26a7\ufe0f")?!1:!n(e,"\ud83c\udde8\ud83c\uddf6","\ud83c\udde8\u200b\ud83c\uddf6")&&!n(e,"\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc65\udb40\udc6e\udb40\udc67\udb40\udc7f","\ud83c\udff4\u200b\udb40\udc67\u200b\udb40\udc62\u200b\udb40\udc65\u200b\udb40\udc6e\u200b\udb40\udc67\u200b\udb40\udc7f");case"emoji":return!r(e,"\ud83e\u1fac8")}return!1}function f(e,t,n,r){let a;const s=(a="undefined"!=typeof WorkerGlobalScope&&self instanceof WorkerGlobalScope?new OffscreenCanvas(300,150):document.createElement("canvas")).getContext("2d",{willReadFrequently:!0}),o=(s.textBaseline="top",s.font="600 32px Arial",{});return e.forEach(e=>{o[e]=t(s,e,n,r)}),o}function a(e){var t=document.createElement("script");t.src=e,t.defer=!0,document.head.appendChild(t)}r.supports={everything:!0,everythingExceptFlag:!0},new Promise(t=>{let n=function(){try{var e=JSON.parse(sessionStorage.getItem(s));if("object"==typeof e&&"number"==typeof e.timestamp&&(new Date).valueOf()<e.timestamp+604800&&"object"==typeof e.supportTests)return e.supportTests}catch(e){}return null}();if(!n){if("undefined"!=typeof Worker&&"undefined"!=typeof OffscreenCanvas&&"undefined"!=typeof URL&&URL.createObjectURL&&"undefined"!=typeof Blob)try{var e="postMessage("+f.toString()+"("+[JSON.stringify(o),u.toString(),c.toString(),p.toString()].join(",")+"));",r=new Blob([e],{type:"text/javascript"});const a=new Worker(URL.createObjectURL(r),{name:"wpTestEmojiSupports"});return void(a.onmessage=e=>{i(n=e.data),a.terminate(),t(n)})}catch(e){}i(n=f(o,u,c,p))}t(n)}).then(e=>{for(const n in e)r.supports[n]=e[n],r.supports.everything=r.supports.everything&&r.supports[n],"flag"!==n&&(r.supports.everythingExceptFlag=r.supports.everythingExceptFlag&&r.supports[n]);var t;r.supports.everythingExceptFlag=r.supports.everythingExceptFlag&&!r.supports.flag,r.supports.everything||((t=r.source||{}).concatemoji?a(t.concatemoji):t.wpemoji&&t.twemoji&&(a(t.twemoji),a(t.wpemoji)))});
+//# sourceURL=https://www.ignoredone.space/wp-includes/js/wp-emoji-loader.min.js
+</script>
+</body>
+</html>

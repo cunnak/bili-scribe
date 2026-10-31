@@ -1,0 +1,97 @@
+{
+ "tasks": 80,
+ "by_status": [
+  {
+   "status": "failed",
+   "n": 16
+  },
+  {
+   "status": "ready",
+   "n": 64
+  }
+ ],
+ "videos": 36,
+ "source": [
+  {
+   "source_kind": null,
+   "n": 1
+  },
+  {
+   "source_kind": "danmaku",
+   "n": 4
+  },
+  {
+   "source_kind": "meta",
+   "n": 7
+  },
+  {
+   "source_kind": "subtitle_ai",
+   "n": 47
+  },
+  {
+   "source_kind": "subtitle_user",
+   "n": 21
+  }
+ ],
+ "versions": 64,
+ "ver_role": [
+  {
+   "role": "fenxi",
+   "n": 1
+  },
+  {
+   "role": "shensi",
+   "n": 1
+  },
+  {
+   "role": "standard",
+   "n": 1
+  },
+  {
+   "role": "wengao",
+   "n": 60
+  },
+  {
+   "role": "xiezuo",
+   "n": 1
+  }
+ ],
+ "pub": [
+  {
+   "status": "blocked",
+   "n": 1
+  },
+  {
+   "status": "published",
+   "n": 37
+  }
+ ],
+ "pub_cols": [
+  "id",
+  "task_id",
+  "bvid",
+  "aid",
+  "rpid",
+  "content",
+  "status",
+  "message",
+  "created_at",
+  "deleted_at"
+ ],
+ "tokens": {
+  "prompt": 3302771,
+  "completion": 495473,
+  "total": 3798244,
+  "calls": 302
+ },
+ "elapsed": {
+  "n": 60,
+  "median": 111.2,
+  "min": 37.4,
+  "max": 457.2
+ },
+ "date_range": {
+  "a": "2026-09-19T13:55:39+08:00",
+  "b": "2026-10-27T21:16:58+08:00"
+ }
+}

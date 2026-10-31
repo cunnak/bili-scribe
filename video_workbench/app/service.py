@@ -1614,9 +1614,30 @@ class WorkbenchService:
         """
         base_url = (base_url or "").strip()
         api_key = (api_key or "").strip()
-        if not base_url and not api_key:
-            if provider:
-                return ChatClient.from_config(self.cfg, provider=provider, task=task)
+        if provider:
+            # 指名了某一家的情形，**不许**静默退到「当前生效服务商」：
+            # 用户看着「本机 magpie」这张卡点「获取可用模型」，实际却打到了另一家的地址，
+            # 报出来是「被 CDN 拦了」——排查方向全错。地址空就直接说这张卡缺地址。
+            card = find_provider(self.cfg.llm, provider)
+            if card is None:
+                raise WBError(
+                    "LLM_NOT_CONFIGURED",
+                    f"找不到服务商「{provider}」（可能是刚删掉还没保存）",
+                    "刷新页面后重试；或先在卡片里保存这家",
+                )
+            if not base_url and not (card.base_url or "").strip():
+                raise WBError(
+                    "LLM_NOT_CONFIGURED",
+                    f"「{card.name or card.id}」还没填 API 地址",
+                    "填好地址和密钥再点；本机网关的地址形如 http://127.0.0.1:3425/v1",
+                )
+            if not api_key and not (card.api_key or "").strip():
+                raise WBError(
+                    "LLM_NOT_CONFIGURED",
+                    f"「{card.name or card.id}」还没填 API Key",
+                    "填好再点",
+                )
+        if not base_url and not api_key and not provider:
             return self._llm_client(task)
         cfg = copy.deepcopy(self.cfg)
         card = find_provider(cfg.llm, provider) if provider else None
@@ -1626,10 +1647,24 @@ class WorkbenchService:
             if api_key:
                 card.api_key = api_key
         else:
+            # 没指名哪一家：改「当前生效那张卡」+ 扁平字段两处。
+            # 只改扁平字段是不够的——``resolve_task_model`` 优先用生效卡里的地址，
+            # 于是「界面上填了新地址、点测试连接」实际打到的还是老地址。
             if base_url:
                 cfg.llm.base_url = base_url
             if api_key:
                 cfg.llm.api_key = api_key
+            try:
+                from video_workbench.config import resolve_task_model
+
+                target, _ = resolve_task_model(cfg.llm, task)
+                if target is not None:
+                    if base_url:
+                        target.base_url = base_url
+                    if api_key:
+                        target.api_key = api_key
+            except Exception:  # noqa: BLE001 - 取不到就退回扁平字段，不因这个把请求打死
+                pass
         return ChatClient.from_config(cfg, provider=provider, task=task)
 
     def llm_test(

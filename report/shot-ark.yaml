@@ -1,0 +1,85 @@
+# bili-scribe 配置
+#
+# 这个文件由网页上的设置页面生成。手动修改同样有效，
+# 但下次在页面上点保存时会被整体覆盖（覆盖前会备份为 config.yaml.bak）。
+# 带完整说明的原始示例在 config.example.yaml。
+#
+# 本文件已被 .gitignore 排除，不会随仓库外传。
+
+server:
+  # 只监听本机。不要改成 0.0.0.0 —— 这个进程持有你的 B站 登录凭据。
+  # 改这两项需要重启程序才生效。
+  host: "127.0.0.1"
+  port: 56019
+
+llm:
+  # 任意 OpenAI 兼容端点。默认 DeepSeek。
+  base_url: "https://aihubmix.com/v1"
+  api_key: "sk-MsJrYB6cFakT2Sia2d00D3E12cA14f6295352b561fA56702"
+  model: "qwen3.8-omni-flash"
+  temperature: 0.3
+  max_tokens: 4096
+  # 思考模型（Qwen3 系列等）先产出一大段推理再作答，而这段推理不吃 max_tokens。
+  # 后果是耗时失控撞上读超时，或者预算被思考吃光、正文返回空。
+  # auto=不发相关参数 / off=显式关闭思考（思考模型建议用这个）/ on=显式开启。
+  # 即使填 auto 或 on，客户端发现「空正文 + 有思考 token」时也会自动关掉重试一次。
+  thinking: "off"
+  # 单次请求的读超时（秒）。思考模型开着的话调大它只是缓解，根治靠关思考。
+  timeout_seconds: 300
+  # 调用模型时走的 HTTP 代理。留空 = 直连，并且不读 HTTP_PROXY/HTTPS_PROXY 环境变量。
+  # 有些站点（DNS 被污染的那些）必须走代理才能连上，填上你的代理地址，例如：
+  #   proxy: "http://127.0.0.1:7897"
+  proxy: "http://127.0.0.1:7897"
+  # 总结角色。可选：standard / xueshu（学术分析）/ wengao（文稿编辑）/
+  # xiezuo（写作专家）/ fenxi（分析报告）/ jinglian（首席思想精炼师）。
+  # 除 standard 外都是三轮回（生成→自我批判→修订），调用数与耗时约为三倍。
+  role: "wengao"
+  # 素材超过这个长度就走分块归约
+  max_input_chars: 24000
+  chunk_size: 6000
+  chunk_overlap: 400
+
+collect:
+  # 字幕语言优先级。ai-zh 是平台语音识别，误差高于人工字幕。
+  prefer_subtitle_lang: ["zh-CN", "zh-Hans", "zh-Hant", "ai-zh"]
+  # 平台自带的 AI 摘要，仅作对照展示，不参与生成
+  include_platform_summary: true
+  danmaku:
+    enabled: true
+    # 有字幕时是否也抓弹幕。开启会显著增加 token 消耗。
+    also_with_subtitle: false
+    max_items: 800
+    # 取高频弹幕条数（反映观众情绪高点）
+    hot_items: 200
+    # 沿时间轴均匀采样条数（保留叙事推进）
+    sample_items: 200
+  frames:
+    # 全片抽帧（画面）。不下载视频，从平台的抽帧拼图里裁出单格。
+    # 成本很低：12 帧约 1464 image_tokens，约为一条 4 小时视频总输入的 1.7%。
+    # 但价值取决于内容类型——有 PPT／图表的讲座能读到字幕里没有的信息；
+    # 纯口播直播（人像小窗 + 字幕 + 壁纸）里画面文字就是字幕本身，增量接近零。
+    enabled: true
+    # 送出多少帧，等距铺满整条视频，所以它决定画面的时间分辨率。
+    # 4 小时视频给 12 帧 ≈ 每 20 分钟一帧。这也是这条路上唯一的刹车。
+    max_frames: 12
+    quality: 85
+
+publish:
+  # 人工闸门。关掉等于放弃最后一道防线：
+  # 总结生成后会直接发到视频评论区，没有确认环节。
+  require_confirm: true
+  # 两次发布之间的最短间隔，防止触发 -509 限流
+  min_interval_seconds: 60
+  # 平台评论上限 1000 字符，这里默认留出余量
+  max_comment_chars: 900
+  # 是否在评论里注明 AI 生成
+  disclose_ai: false
+  disclosure_text: "（本总结由 AI 依据视频字幕／弹幕生成）"
+
+storage:
+  db_path: "~/.bili-scribe/bili-scribe.db"
+  # 凭据加密密钥，单独存放
+  key_path: "~/.bili-scribe/key.bin"
+
+ui:
+  skin: ark

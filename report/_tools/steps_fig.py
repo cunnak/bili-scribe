@@ -1,0 +1,10 @@
+await s.cmd("Page.navigate", url="file:///C:/Users/b1596/Desktop/%E8%A7%86%E9%A2%91%E5%86%85%E5%AE%B9%E6%80%BB%E7%BB%93/report/%E5%AE%9E%E9%AA%8C%E6%8A%A5%E5%91%8A.html")
+await asyncio.sleep(2.5)
+# 定位第一张图
+y = await s.js("document.querySelectorAll('figure')[0].getBoundingClientRect().top + window.scrollY")
+print("fig1 y", y)
+await s.js(f"window.scrollTo(0,{y-80})")
+await asyncio.sleep(1.0)
+await s.shot("f1")
+n = await s.js("document.querySelectorAll('img').length + '/' + Array.from(document.images).filter(i=>i.complete&&i.naturalWidth>0).length")
+print("images loaded", n)

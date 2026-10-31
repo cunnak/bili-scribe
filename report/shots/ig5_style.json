@@ -1,0 +1,27 @@
+{
+  "body": {
+    "sel": "body",
+    "tag": "BODY",
+    "text": "",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgba(0, 0, 0, 0)",
+    "bgImage": "none",
+    "fontFamily": "\"Segoe UI\", Arial, \"Microsoft Yahei\", sans-serif",
+    "fontSize": "12px",
+    "fontWeight": "400",
+    "lineHeight": "normal",
+    "letterSpacing": "normal",
+    "borderRadius": "0px",
+    "boxShadow": "none",
+    "padding": "0px",
+    "margin": "8px",
+    "w": 1424,
+    "h": 2384
+  },
+  "_meta": {
+    "title": "",
+    "url": "chrome-extension://nkeimhogjdpnpccoofpliimaahmaaome/background.html",
+    "docH": 2400,
+    "bodyBg": "rgba(0, 0, 0, 0)"
+  }
+}

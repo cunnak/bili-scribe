@@ -223,6 +223,19 @@ def test_rpc_llm_models_not_configured_keeps_its_code(service, monkeypatch):
 
 
 def test_rpc_llm_models_provider_is_forwarded(service, monkeypatch):
+    """指名一家真实存在的服务商：名字必须原样传给 ChatClient。"""
+    from video_workbench.config import LlmProviderConfig
+
+    service.cfg.llm.providers = [
+        LlmProviderConfig(
+            id="moonshot",
+            name="Kimi",
+            protocol="openai",
+            base_url="https://api.moonshot.cn/v1",
+            api_key="sk-moon",
+            models=["moonshot-v1-8k"],
+        )
+    ]
     seen: dict = {}
 
     def fake_from_config(cfg, *, transport=None, task="", provider=""):
@@ -235,6 +248,40 @@ def test_rpc_llm_models_provider_is_forwarded(service, monkeypatch):
     out = service.dispatch("llm.models", {"provider": "moonshot"})
     assert out["ok"] is True
     assert seen["provider"] == "moonshot"
+
+
+def test_rpc_llm_models_unknown_provider_does_not_fall_back(service, monkeypatch):
+    """指名一家不存在的服务商：不许悄悄改用别家。
+
+    以前这里会退回「生效卡」，于是用户盯着「本机 magpie」这张卡，收到的却是
+    另一家（被 CDN 拦的）网关的报错——排障方向被带偏一整条链路。
+    """
+    from video_workbench.config import LlmProviderConfig
+
+    service.cfg.llm.providers = [
+        LlmProviderConfig(
+            id="deepseek",
+            name="DeepSeek 官方",
+            protocol="openai",
+            base_url="https://api.deepseek.com/v1",
+            api_key="sk-old",
+            models=["deepseek-chat"],
+        )
+    ]
+    called: list[str] = []
+
+    def fake_from_config(cfg, *, transport=None, task="", provider=""):
+        called.append(provider)
+        return StubModelsClient()
+
+    monkeypatch.setattr(
+        "video_workbench.app.service.ChatClient.from_config", staticmethod(fake_from_config)
+    )
+    out = service.dispatch("llm.models", {"provider": "magpie"})
+    assert out["ok"] is False
+    assert out["error"]["code"] == "LLM_NOT_CONFIGURED"
+    assert "magpie" in out["error"]["message"]
+    assert called == [], "指名不存在的服务商时不该发出任何请求"
 
 def test_llm_models_uses_unsaved_values(service, monkeypatch) -> None:
     """设置页会先敲地址/密钥再点「获取可用模型」——那会儿还没保存。
@@ -388,3 +435,95 @@ def test_forbidden_is_not_auth_error() -> None:
 
     assert client._error_for(401, "x").code == "LLM_AUTH"
 
+
+# ── 本机网关：两处「看起来连了、其实打错了地方」────────────────────────────
+
+def test_loopback_request_ignores_env_proxy(monkeypatch):
+    """本机地址不许走代理。
+
+    Windows 上 urllib 的两半是分裂的：``getproxies()`` 认 ``HTTP_PROXY``，
+    而 ``proxy_bypass()`` 读 IE 注册表、**不认 ``NO_PROXY``**。于是「发了
+    ``HTTP_PROXY=127.0.0.1:7897`` 又写了 ``NO_PROXY=127.0.0.1``」这种最常见的配置，
+    发往本机网关的请求仍被塞进代理，拿回一个 Cloudflare 403 ——报的是
+    「CDN 判定你是机器人」，跟真实原因（请求根本没到本机）隔着一整条链路。
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from video_workbench.infra.llm import _urllib_get
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = b'{"data":[{"id":"auto/ping"}]}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # noqa: D102
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        # 一个必然连不上、且会拒绝本机目标的环境代理
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        monkeypatch.delenv("no_proxy", raising=False)
+        code, body = _urllib_get("")(f"http://127.0.0.1:{port}/v1/models", {}, 10)
+        assert code == 200, f"本机地址被代理劫持了：{code} {body[:120]}"
+        assert "auto/ping" in body
+    finally:
+        server.shutdown()
+
+
+def test_unsaved_base_url_overrides_active_card(tmp_path):
+    """界面上改的地址必须真的用上，哪怕当前生效的是另一家。
+
+    ``resolve_task_model`` 优先取「生效卡」里的地址，而设置页改的是界面上的值；
+    只把值写进扁平字段（``llm.base_url``）是**不生效**的——请求照旧打到老地址，
+    症状是「改了地址还是报原来那家的错」。
+    """
+    from video_workbench.app.service import WorkbenchService
+
+    NL = chr(10)
+    media = str(tmp_path / "media")
+    cache = str(tmp_path / "cache")
+    models = str(tmp_path / "models")
+    db = str(tmp_path / "wb.db")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        NL.join([
+            "llm:",
+            "  base_url: https://api.deepseek.com/v1",
+            "  api_key: sk-old",
+            "  model: deepseek-chat",
+            "  providers:",
+            "    - id: deepseek",
+            "      name: DeepSeek",
+            "      protocol: openai",
+            "      base_url: https://api.deepseek.com/v1",
+            "      api_key: sk-old",
+            "      models: [deepseek-chat]",
+            "  active_provider: deepseek",
+            "storage:",
+            "  db_path: " + db,
+            "  media_root: " + media,
+            "  cache_root: " + cache,
+            "  models_root: " + models,
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    service = WorkbenchService(config_path=cfg)
+    try:
+        client = service._llm_client_for(base_url="http://127.0.0.1:3425/v1", api_key="magpie")
+        assert client.base_url == "http://127.0.0.1:3425/v1", client.base_url
+        assert client.api_key == "magpie"
+        # 磁盘配置不能被这次请求改脏
+        assert service.cfg.llm.providers[0].base_url == "https://api.deepseek.com/v1"
+    finally:
+        service.close()

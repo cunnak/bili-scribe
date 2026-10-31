@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>小组 8 · 视频内容总结 · bili-scribe · 综合大作业实验报告</title>
+<style>
+/* ===================================================================
+   视觉语言：ignoredone.space「明日方舟美术资源库」索引页
+   实测规格（report/shots/rs_style.json / rs_deep.json / rs_card.json）：
+     body      bg #FFFFFF / color rgb(17,17,17) / Jost 16.8px / lh 26.04
+     main      bg rgb(241,254,251) 薄荷绿，整页 51939px
+     h1        Instrument Sans 56px / 600 / letter-spacing 2.24px
+     p         20px / letter-spacing 2.4px / lh 31px
+     .card     bg rgba(255,255,255,.12) / br 20px / 1px solid rgba(255,255,255,.25)
+               shadow rgba(0,0,0,.15) 0 8px 32px 0, rgba(255,255,255,.05) 0 0 20px 0 inset
+               842x842 正方形，单列居中，纵向步进 882（= 842 + 40 gap）
+     .pill     br 100px / bg rgb(241,254,251) / 14.4px 500 / pad 9.6px 24px
+               shadow rgba(0,0,0,.2) 6px 6px 9px
+     .cover-btn 34x34 / br 50% / bg rgba(255,255,255,.15) / 白色 ⋮
+   两枚字体文件已下载到 report/fonts/，此处直接本地引用。
+   报告沿用这套语言：薄荷绿纸面 + 白色圆角卡 + 巨字标题 + 药丸 + 图卡网格。
+   =================================================================== */
+
+@font-face{
+  font-family:"Instrument Sans";
+  src:url("fonts/InstrumentSans.woff2") format("woff2");
+  font-weight:400 700;font-style:normal;font-display:swap;
+}
+@font-face{
+  font-family:"Jost";
+  src:url("fonts/Jost.woff2") format("woff2");
+  font-weight:100 900;font-style:normal;font-display:swap;
+}
+
+:root{
+  --mint:#F1FEFB;          /* main 背景，实测 rgb(241,254,251) */
+  --mint-2:#DFF7F1;
+  --mint-3:#C4EEE4;
+  --mint-deep:#1B6B5B;
+  --paper:#FFFFFF;
+  --ink:#111111;
+  --ink-2:#212529;         /* 图集页正文色，实测 rgb(33,37,41) */
+  --ink-3:#57616A;
+  --mute:#8B959C;
+  --rule:#E2EFEB;
+  --rule-2:#EFF8F5;
+  --wash:#F7FDFB;
+
+  --sans:"Instrument Sans","Noto Sans SC","Microsoft YaHei","PingFang SC",Arial,sans-serif;
+  --body:"Jost","Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif;
+  --cn:"Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono:"Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
+
+  --card-shadow:0 8px 32px rgba(0,0,0,.10), 0 0 20px rgba(255,255,255,.55) inset;
+  --card-shadow-sm:0 2px 10px rgba(0,0,0,.06);
+  --pill-shadow:rgba(0,0,0,.16) 4px 4px 9px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--mint)}
+body{
+  background:var(--mint);color:var(--ink-2);
+  font-family:var(--body);font-size:14.5px;line-height:1.9;
+  letter-spacing:.012em;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  padding:0 0 0;
+}
+@page{size:A4;margin:12mm 11mm 15mm}
+
+/* ============ 顶栏：白底药丸条 ============ */
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:rgba(255,255,255,.86);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(0,0,0,.06);
+}
+.topbar .in{
+  max-width:1120px;margin:0 auto;padding:10px 30px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+}
+.topbar .l{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.2em;color:var(--ink)}
+.topbar .l i{width:9px;height:9px;background:var(--mint-3);border:1px solid var(--mint-deep);display:block;border-radius:50%}
+.topbar .r{display:flex;gap:7px;color:var(--mute)}
+.topbar .r span{
+  background:var(--mint);border-radius:100px;padding:4px 13px;
+  color:var(--ink-3);font-weight:500;letter-spacing:.1em;
+}
+
+.wrap{max-width:1120px;margin:0 auto;padding:0 30px 56px}
+
+/* ============ 封面：薄荷纸 + 白色巨卡 ============ */
+.cover{
+  position:relative;
+  background:var(--paper);border-radius:28px;
+  box-shadow:var(--card-shadow);
+  margin:26px 0 0;padding:52px 54px 46px;
+  overflow:hidden;
+}
+.blob{
+  position:absolute;right:-90px;top:-110px;width:420px;height:400px;z-index:0;
+  background:var(--mint-3);
+  border-radius:58% 42% 46% 54% / 52% 48% 52% 48%;
+  transform:rotate(-9deg);opacity:.55;
+}
+.blob.b2{
+  right:auto;left:-140px;bottom:-120px;top:auto;
+  width:300px;height:280px;opacity:.35;transform:rotate(14deg);
+}
+.cover > :not(.blob){position:relative;z-index:1}
+
+.eyebrow{
+  font-family:var(--sans);font-size:11px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.eyebrow b{
+  background:var(--ink);color:var(--paper);padding:4px 13px;border-radius:100px;
+  letter-spacing:.16em;font-weight:600;
+}
+
+h1{
+  font-family:var(--sans);font-weight:600;
+  font-size:68px;line-height:1.02;letter-spacing:.035em;
+  color:var(--ink);margin:0 0 4px;
+}
+h1 .word{display:block}
+h1 .mark{
+  font-family:var(--sans);font-size:23px;letter-spacing:.22em;font-weight:500;
+  color:var(--ink-3);margin-top:18px;display:block;text-transform:uppercase;
+}
+h1 .mark em{
+  font-style:normal;background:var(--mint-2);padding:3px 12px;color:var(--ink);
+  border-radius:100px;letter-spacing:.16em;
+}
+
+.sub{
+  font-family:var(--body);font-size:16.5px;color:var(--ink-2);
+  margin:22px 0 0;max-width:660px;line-height:1.85;letter-spacing:.03em;
+}
+.sub b{font-weight:600;color:var(--ink);box-shadow:inset 0 -.36em 0 var(--mint-3)}
+
+/* 药丸：实测 br 100px / shadow 6px 6px 9px */
+.pills{display:flex;flex-wrap:wrap;gap:10px;margin:30px 0 0}
+.pill{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--sans);font-size:12.5px;font-weight:500;letter-spacing:.06em;
+  border-radius:100px;padding:8px 22px;
+  background:var(--mint);color:var(--ink);text-decoration:none;
+  box-shadow:var(--pill-shadow);
+  transition:background .18s ease,color .18s ease;
+}
+.pill.k{background:var(--ink);color:var(--paper);box-shadow:rgba(0,0,0,.28) 4px 4px 9px}
+.pill.y{background:var(--mint-3);color:var(--ink);font-weight:600}
+.pill .lb{color:var(--mute);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:400}
+.pill.k .lb{color:#9BA3A8}
+.pill:hover{background:var(--mint-3);color:var(--ink)}
+
+/* ============ 信息格：白卡内细线网格 ============ */
+.grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  border-top:1px solid var(--rule);border-left:1px solid var(--rule);
+  margin:34px 0 0;border-radius:16px;overflow:hidden;
+}
+.grid div{
+  border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:13px 16px 14px;background:var(--wash);
+}
+.grid .k{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);display:block;margin-bottom:5px;
+}
+.grid .v{font-family:var(--body);font-size:13px;color:var(--ink);font-weight:500;letter-spacing:.02em}
+.grid .v.blank{display:block;height:19px;border-bottom:1px dashed #C9D6D2;color:transparent}
+.grid .v .hl{background:var(--mint-3);padding:1px 7px;border-radius:100px}
+
+/* ============ 组员 ============ */
+.roster{
+  margin:14px 0 0;border-radius:16px;padding:17px 19px 16px;
+  background:var(--wash);border:1px solid var(--rule);
+}
+.roster .h{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);margin-bottom:12px;display:flex;justify-content:space-between;
+}
+.roster .h .cnt{color:var(--ink);font-weight:600}
+.roster .names{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:7px}
+.roster .names li{
+  font-family:var(--body);font-size:12.5px;color:var(--ink);
+  border-radius:100px;padding:4px 14px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);letter-spacing:.03em;
+}
+.roster .names li .i{
+  font-family:var(--mono);font-size:9px;color:var(--mute);
+  margin-right:6px;letter-spacing:.06em;
+}
+
+/* ============ 摘要：薄荷实色大块 ============ */
+.abstract{
+  margin:34px 0 0;background:var(--mint-2);border-radius:24px;
+  padding:32px 34px 28px;position:relative;overflow:hidden;
+}
+.abstract:after{
+  content:"";position:absolute;right:-70px;bottom:-80px;width:220px;height:210px;
+  background:var(--mint-3);border-radius:52% 48% 44% 56% / 46% 54% 46% 54%;opacity:.6;
+}
+.abstract > *{position:relative;z-index:1}
+.abstract .h{
+  font-family:var(--sans);font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--mint-deep);margin-bottom:15px;font-weight:600;
+}
+.abstract p{font-family:var(--body);font-size:14px;line-height:1.95;color:var(--ink-2);margin-bottom:12px;letter-spacing:.03em}
+.abstract p:last-of-type{margin-bottom:0}
+.abstract b{font-weight:600;color:var(--ink)}
+.abstract em{font-style:normal;box-shadow:inset 0 -.36em 0 rgba(255,255,255,.9)}
+.abstract .kw{
+  font-family:var(--mono);font-size:11px;color:var(--mint-deep);margin-top:18px;padding-top:14px;
+  border-top:1px solid rgba(27,107,91,.18);letter-spacing:.02em;
+}
+.abstract .kw b{color:var(--ink);font-weight:600}
+
+/* ============ 章节：白卡 ============ */
+section{
+  background:var(--paper);border-radius:28px;box-shadow:var(--card-shadow);
+  margin:26px 0 0;padding:44px 54px 46px;
+}
+.sec-head{display:flex;align-items:flex-start;gap:18px;margin-bottom:28px}
+.sec-head .num{
+  flex:0 0 auto;width:56px;height:56px;background:var(--mint-2);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--sans);font-size:20px;font-weight:600;letter-spacing:.02em;
+  border-radius:18px;color:var(--mint-deep);
+}
+.sec-head .tt{flex:1;min-width:0}
+.sec-head h2{
+  font-family:var(--sans);font-weight:600;font-size:32px;line-height:1.2;
+  letter-spacing:.03em;margin:0;color:var(--ink);
+}
+.sec-head small{
+  display:block;font-family:var(--body);font-size:13px;font-weight:400;
+  color:var(--mute);letter-spacing:.04em;line-height:1.7;margin-top:8px;
+}
+
+h3{
+  font-family:var(--sans);font-weight:600;font-size:18px;letter-spacing:.045em;
+  margin:36px 0 14px;padding-left:14px;border-left:4px solid var(--mint-3);
+  line-height:1.45;color:var(--ink);
+}
+h3 .x{
+  font-family:var(--mono);font-size:11px;color:var(--mute);font-weight:400;
+  margin-left:10px;letter-spacing:0;
+}
+
+p{margin-bottom:14px;color:var(--ink-2);letter-spacing:.02em}
+p.lead{font-size:16px;color:var(--ink);line-height:1.88;letter-spacing:.03em}
+strong,b{color:var(--ink);font-weight:600}
+em{color:var(--ink);font-style:normal;box-shadow:inset 0 -.4em 0 var(--mint-2)}
+code{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink);
+  background:var(--wash);border:1px solid var(--rule);border-radius:6px;padding:1px 6px;
+  letter-spacing:0;
+}
+a{color:var(--ink);text-decoration:none;border-bottom:2px solid var(--mint-3)}
+a:hover{background:var(--mint-2)}
+
+ul,ol{margin:0 0 15px 0;padding-left:22px}
+li{margin-bottom:8px;color:var(--ink-2)}
+li::marker{color:var(--mint-deep);font-weight:600}
+ul.plain{list-style:none;padding-left:0}
+ul.plain li{padding-left:18px;position:relative}
+ul.plain li:before{
+  content:"";position:absolute;left:1px;top:10px;width:8px;height:8px;
+  background:var(--mint-3);border-radius:50%;
+}
+
+/* ============ 流水线 ============ */
+.flow{
+  margin:24px 0 12px;border-radius:20px;padding:24px 20px 20px;
+  background:var(--wash);border:1px solid var(--rule);
+}
+.flow .row{display:flex;align-items:stretch;gap:0;min-width:0}
+.stage{
+  flex:1;min-width:0;background:var(--paper);border-radius:14px;
+  padding:14px 13px;box-shadow:var(--card-shadow-sm);
+}
+.stage .i{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.2em;color:var(--mute);margin-bottom:7px;
+}
+.stage .n{font-family:var(--body);font-size:13px;font-weight:600;color:var(--ink);margin-bottom:5px;letter-spacing:.03em}
+.stage .d{font-size:10.5px;color:var(--ink-3);line-height:1.65;letter-spacing:.02em}
+.stage.hot{background:var(--mint-2)}
+.stage.hot .i{color:var(--mint-deep)}
+.stage.hot .n,.stage.hot .d{color:var(--ink)}
+.arrow{
+  align-self:center;color:var(--mint-deep);font-family:var(--mono);font-size:13px;
+  padding:0 6px;flex:0 0 auto;
+}
+.loop{
+  margin-top:15px;padding-top:12px;border-top:1px dashed #CFE2DC;
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:center;
+}
+
+/* ============ 表格 ============ */
+table{
+  width:100%;border-collapse:separate;border-spacing:0;margin:18px 0 22px;
+  font-size:12.5px;font-family:var(--body);
+  border-radius:14px;overflow:hidden;box-shadow:var(--card-shadow-sm);
+}
+thead th{
+  background:var(--mint-2);color:var(--ink);font-weight:600;
+  text-align:left;padding:11px 13px;font-size:11px;letter-spacing:.1em;
+  white-space:nowrap;border-bottom:1px solid var(--rule);
+}
+tbody td{
+  padding:9px 13px;border-bottom:1px solid var(--rule-2);
+  color:var(--ink-2);vertical-align:top;letter-spacing:.02em;
+}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:nth-child(even) td{background:var(--wash)}
+tbody td.num{font-family:var(--mono);text-align:right;white-space:nowrap;color:var(--ink);font-weight:600}
+tbody td.dim{color:var(--mute);font-family:var(--mono);font-size:11.5px}
+tbody td b{color:var(--ink);font-weight:600}
+td .cn,th .cn{font-family:var(--body);font-size:12px;letter-spacing:.02em}
+tbody tr.mark td{background:var(--mint-2)}
+tbody tr.mark td.num{color:var(--ink)}
+
+/* ============ 代码 ============ */
+pre{
+  background:var(--wash);border:1px solid var(--rule);border-left:4px solid var(--mint-3);
+  border-radius:12px;padding:16px 18px;overflow-x:auto;margin:16px 0 20px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.8;color:var(--ink-2);
+  letter-spacing:0;
+}
+pre .c{color:#9AA6A2}
+pre .k{color:var(--mint-deep);font-weight:700}
+pre .s{color:#3F6B4E}
+pre .o{color:#8A5A00;font-weight:700}
+
+/* ============ 图卡：复刻 postimg 图集的「缩略图 + 底部文件名条」 ============ */
+/* 参考站点的图集单元格 = 图片 + 下方白底细条（实测格间 10px 缝、条高 44px）。
+   这里把每张截图做成一整块卡：上圆角图、下白底说明条，与索引页的 20px 圆角一致。 */
+figure{margin:24px 0 28px}
+figure .frame{
+  border-radius:20px 20px 0 0;overflow:hidden;
+  background:#0B0C0D;padding:0;
+}
+figure img{display:block;width:100%;height:auto}
+figcaption{
+  background:var(--paper);border:1px solid var(--rule);border-top:0;
+  border-radius:0 0 20px 20px;padding:14px 18px 15px;
+  font-size:11.5px;color:var(--ink-3);line-height:1.85;
+  display:flex;gap:10px;letter-spacing:.02em;
+  box-shadow:var(--card-shadow-sm);
+}
+figcaption .no{
+  flex:0 0 auto;background:var(--ink);color:var(--paper);border-radius:100px;
+  font-family:var(--sans);font-size:9.5px;padding:2px 11px;height:20px;line-height:16px;
+  letter-spacing:.12em;
+}
+
+/* ============ 图卡网格（美术资源库式铺图） ============ */
+/* 参考站点用 6 列缩略图网格，但那是美术资源、读者只需看整体。
+   这里是 1440x900 的界面截图，格内文字是报告的证据，缩到半宽就读不出来了，
+   所以取单列、保留「图在上、白底说明条在下」的单元格结构。 */
+.gal{
+  display:grid;grid-template-columns:1fr;gap:24px;
+  margin:24px 0 28px;align-items:start;
+}
+.gal figure{margin:0}
+.gal figure .frame{border-radius:18px 18px 0 0}
+.gal figcaption{
+  display:block;padding:13px 17px 14px;font-size:11.5px;line-height:1.85;
+  border-radius:0 0 18px 18px;
+}
+.gal figcaption .no{
+  display:inline-block;background:var(--mint-2);color:var(--mint-deep);
+  font-family:var(--sans);font-size:9px;padding:2px 9px;height:18px;line-height:14px;
+  letter-spacing:.12em;margin-right:7px;border-radius:100px;
+}
+.gal .cap-t{
+  font-family:var(--body);font-weight:600;color:var(--ink);font-size:12.5px;
+  letter-spacing:.03em;display:block;margin-bottom:5px;
+}
+.duo figure .frame{border-radius:20px}
+
+/* ============ 提示块 ============ */
+.note{
+  border-radius:18px;background:var(--wash);border:1px solid var(--rule);
+  border-left:5px solid var(--mint-3);padding:17px 20px;margin:20px 0;
+  font-size:13px;color:var(--ink-2);
+}
+.note .h{
+  font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--mint-deep);font-weight:600;margin-bottom:8px;
+}
+.note.y{border-left-color:var(--mint-deep);background:var(--mint)}
+
+/* ============ 数据卡 ============ */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0 28px}
+.stats .c{
+  border-radius:18px;padding:17px 15px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);
+}
+.stats .c.hi{background:var(--mint-2);box-shadow:none}
+.stats .k{
+  font-family:var(--sans);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);display:block;margin-bottom:9px;
+}
+.stats .c.hi .k{color:var(--mint-deep)}
+.stats .v{
+  font-family:var(--sans);font-weight:600;font-size:28px;line-height:1;
+  letter-spacing:-.01em;color:var(--ink);
+}
+.stats .v small{font-size:12.5px;font-weight:500;margin-left:2px;letter-spacing:0}
+.stats .u{font-size:10.5px;color:var(--mute);margin-top:8px;font-family:var(--mono);letter-spacing:0}
+.stats .c.hi .u{color:var(--mint-deep)}
+
+/* ============ 图注并排 ============ */
+.duo{display:grid;grid-template-columns:.86fr 1.14fr;gap:26px;align-items:start;margin:26px 0 30px}
+.duo figure{margin:0}
+.duo .duo-cap{
+  font-size:11.5px;line-height:1.9;color:var(--ink-3);
+  padding-left:14px;border-left:3px solid var(--mint-3);margin-bottom:14px;letter-spacing:.02em;
+}
+.duo .duo-cap .no{
+  background:var(--ink);color:var(--paper);border-radius:100px;
+  font-family:var(--sans);font-size:9.5px;padding:2px 10px;margin-right:8px;letter-spacing:.12em;
+}
+.duo .duo-t p{font-size:13px;line-height:1.88}
+
+/* ============ 页脚 ============ */
+footer{
+  margin-top:34px;padding:22px 26px;border-radius:20px;background:var(--paper);
+  box-shadow:var(--card-shadow-sm);
+  font-family:var(--sans);font-size:10px;color:var(--mute);letter-spacing:.14em;
+  display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;text-transform:uppercase;
+}
+footer .r{color:var(--ink-3)}
+
+/* ============ 打印 ============ */
+@media print{
+  html,body{background:var(--mint)}
+  .topbar{display:none}
+  body{padding:0;font-size:12.5px;line-height:1.8}
+  .wrap{max-width:none;padding:0}
+  .cover{margin:0;padding:30px 30px 26px;border-radius:20px;box-shadow:none;break-inside:avoid}
+  .blob{right:-70px;top:-90px;width:290px;height:280px;opacity:.5}
+  .blob.b2{display:none}
+  h1{font-size:46px;letter-spacing:.02em}
+  h1 .mark{font-size:17px;letter-spacing:.16em;margin-top:12px}
+  .sub{font-size:13.5px;margin-top:14px;line-height:1.75}
+  .pills{margin-top:18px;gap:7px}
+  .pill{font-size:10px;padding:5px 15px;box-shadow:rgba(0,0,0,.14) 3px 3px 6px}
+  .pill .lb{font-size:8px}
+  .grid{margin-top:20px}
+  .grid div{padding:9px 11px 10px}
+  .grid .k{font-size:8.5px}
+  .grid .v{font-size:11px}
+  .roster{padding:12px 14px 11px;margin-top:10px}
+  .roster .names li{font-size:10.5px;padding:3px 11px}
+  .abstract{margin-top:18px;padding:20px 22px 17px;border-radius:16px}
+  .abstract p{font-size:11.5px;line-height:1.82}
+  .abstract .kw{font-size:9.5px;margin-top:13px;padding-top:10px}
+
+  section{
+    margin:8mm 0 0;padding:22px 26px 24px;border-radius:18px;
+    box-shadow:none;border:1px solid var(--rule);
+  }
+  .sec-head{margin-bottom:16px;gap:13px;break-after:avoid;break-inside:avoid}
+  .sec-head .num{width:40px;height:40px;font-size:15px;border-radius:12px}
+  .sec-head h2{font-size:22px}
+  .sec-head small{font-size:11px;margin-top:5px}
+  h3{font-size:14.5px;margin:20px 0 9px;padding-left:11px;border-left-width:3px}
+  h3 .x{font-size:9px}
+  p{margin-bottom:9px}
+  p.lead{font-size:12.5px}
+  li{margin-bottom:5px}
+  ul,ol{margin-bottom:10px}
+
+  table{font-size:10.5px;margin:12px 0 15px;border-radius:10px}
+  thead th{font-size:9px;padding:7px 8px;white-space:normal;letter-spacing:.06em}
+  tbody td{padding:6px 8px}
+  td .cn,th .cn{font-size:10px}
+  pre{font-size:9px;padding:11px 12px;white-space:pre-wrap;word-break:break-word;border-radius:8px}
+  .note{padding:11px 13px;font-size:11px;margin:12px 0;border-radius:12px}
+  .note .h{font-size:8px}
+
+  figure{margin:14px 0 16px}
+  figure .frame{border-radius:14px;box-shadow:var(--card-shadow-sm)}
+  figure img{max-height:380px;width:auto;max-width:100%;margin:0 auto}
+  figcaption{font-size:9.5px;line-height:1.7;margin-top:0;padding:10px 13px 11px}
+  .gal{gap:12px;margin:12px 0 14px}
+  .gal figure img{max-height:236px}
+
+/* 竖版截图（设置抽屉）按 16:9 画框铺开会两侧留大片黑边，
+   改成画框贴合图片本身宽度 */
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.pair figure{margin:0}
+.pair figure .frame{background:transparent;display:flex;justify-content:center}
+.pair figure .frame img{width:100%;height:auto;border-radius:16px 16px 0 0}
+.pair figcaption{border-radius:0 0 16px 16px}
+.pair .cap-t{font-size:12px}
+.pair figcaption{font-size:10.5px;line-height:1.72}
+  .gal figcaption{padding:9px 12px 10px;font-size:9.5px;line-height:1.72}
+  .gal .cap-t{font-size:10.5px;margin-bottom:4px}
+  .gal figcaption .no{font-size:8px;height:15px;line-height:12px;padding:2px 7px}
+  .duo{gap:16px;margin:14px 0 18px;grid-template-columns:.44fr 1.56fr}
+  .duo figure img{max-height:165mm;width:100%;object-fit:contain}
+  .duo .duo-cap{font-size:9.5px;line-height:1.75}
+  .duo .duo-t p{font-size:11px;line-height:1.72;margin-bottom:6px}
+
+  .stats{gap:8px;margin:15px 0 18px}
+  .stats .c{padding:11px 10px;border-radius:13px}
+  .stats .v{font-size:21px}
+  .stats .k{font-size:8px}
+  .stats .u{font-size:8.5px}
+  .flow{padding:15px 13px 12px;border-radius:14px}
+  .flow .row{min-width:0}
+  .stage{padding:9px 8px;border-radius:10px}
+  .stage .n{font-size:10.5px}
+  .stage .d{font-size:9px;line-height:1.5}
+  .stage .i{font-size:8px;margin-bottom:4px}
+  .arrow{padding:0 3px;font-size:10px}
+  .loop{font-size:9px;min-width:0}
+
+  footer{margin-top:8mm;padding:14px 18px;font-size:8.5px;border-radius:14px}
+
+  /* 附录四节压在一页：条目多、段落短，收紧行距即可整体收进 A4 */
+  section.appendix{padding:16px 20px 14px}
+  section.appendix p{font-size:9.6px;line-height:1.68;margin-bottom:7px}
+  section.appendix h3{font-size:12.4px;margin:11px 0 6px}
+  section.appendix table{font-size:9.2px;margin:7px 0 9px}
+  section.appendix thead th{font-size:8.2px;padding:4px 6px}
+  section.appendix tbody td{padding:3px 6px;line-height:1.5}
+  section.appendix pre{font-size:7.8px;line-height:1.46;padding:7px 9px;margin:7px 0 8px}
+  section.appendix pre.tall{font-size:7.6px;line-height:1.5;padding:7px 9px}
+  section.appendix ol,section.appendix ul{padding-left:17px;margin-bottom:6px}
+  section.appendix li{margin-bottom:1px;line-height:1.56;font-size:9.6px}
+  section.appendix .v-blank{color:var(--mute);border-bottom:1px dashed var(--rule)}
+  h2,h3{break-after:avoid;break-inside:avoid}
+  p,li{orphans:3;widows:3}
+  pre,table,.flow,.stats,.roster,.duo{break-inside:avoid}
+  /* 长表格允许跨页，否则整张被推到下一页留下半页空白；但单行不许拆开 */
+  table.long{break-inside:auto}
+  /* 目录树整块留在一页内：字号压到 8.2px 才放得下附录全篇 */
+  pre.tall{break-inside:avoid;font-size:8.2px;line-height:1.58;padding:9px 11px}
+  table.long tr{break-inside:avoid}
+  table.long thead{display:table-header-group}
+  figure{break-inside:avoid}
+  .gal{break-inside:auto}
+  .gal figure{break-inside:avoid}
+  .abstract,section{break-inside:auto}
+  /* 提示块都是 2-4 行，允许拆页会出现「只有标题落在页底」的孤行，故整块保留 */
+  .note{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar"><div class="in">
+  <div class="l"><i></i>bili·scribe&nbsp;&nbsp;视频内容总结</div>
+  <div class="r"><span>第 08 组</span><span>综合大作业</span><span>v0.6.1</span><span>2026-10-27</span></div>
+</div></div>
+
+<div class="wrap">
+
+<!-- ==================== 封面 ==================== -->
+<header class="cover">
+  <div class="blob"></div>
+  <div class="blob b2"></div>
+
+  <div class="eyebrow">实验报告 / experiment report &nbsp;·&nbsp; <b>第 8 组</b> &nbsp;·&nbsp; artificial intelligence</div>
+
+  <h1>
+    <span class="word">视频内容总结</span>
+    <span class="mark">BILI<em>·</em>SCRIBE &nbsp;/&nbsp; 把一条几小时的视频读成一篇能发出去的文字</span>
+  </h1>
+
+  <p class="sub">给它一条 B 站视频链接，它把字幕、画面和元信息读一遍，写成一份<b>可核对、可修改、可撤回</b>的总结，发到那条视频的评论区。</p>
+
+  <div class="pills">
+    <a class="pill k" href="https://github.com/cunnak/bili-scribe"><span class="lb">github</span>cunnak / bili-scribe</a>
+    <span class="pill y">v0.6.1</span>
+    <span class="pill"><span class="lb">stack</span>Python 3.12 · FastAPI · SQLite</span>
+    <span class="pill"><span class="lb">ui</span>pywebview 桌面壳</span>
+    <span class="pill"><span class="lb">model</span>OpenAI 兼容端点</span>
+  </div>
+
+  <div class="grid">
+    <div><span class="k">课程</span><span class="v blank">—</span></div>
+    <div><span class="k">班级</span><span class="v blank">—</span></div>
+    <div><span class="k">组别</span><span class="v"><span class="hl">第 8 组 · 10 人</span></span></div>
+    <div><span class="k">组长</span><span class="v blank">—</span></div>
+    <div><span class="k">指导教师</span><span class="v blank">—</span></div>
+    <div><span class="k">提交日期</span><span class="v"><span class="hl">2026-10-27</span></span></div>
+    <div><span class="k">项目形态</span><span class="v">桌面程序 + 本地 SQLite</span></div>
+    <div><span class="k">代码规模</span><span class="v">11,070 行 · 11 次提交</span></div>
+    <div><span class="k">测试</span><span class="v">256 项断言 · 全过</span></div>
+  </div>
+
+  <div class="roster">
+    <div class="h">小组成员 / members <span class="cnt">第 8 组 · 10 人</span></div>
+    <ul class="names">
+      <li><span class="i">01</span>廖黎倩</li>
+      <li><span class="i">02</span>曹晶</li>
+      <li><span class="i">03</span>李政霖</li>
+      <li><span class="i">04</span>林晨</li>
+      <li><span class="i">05</span>李乐彤</li>
+      <li><span class="i">06</span>尚宇硕</li>
+      <li><span class="i">07</span>熊波</li>
+      <li><span class="i">08</span>邓光莹</li>
+      <li><span class="i">09</span>刘怡</li>
+      <li><span class="i">10</span>刘雨迪</li>
+    </ul>
+  </div>
+
+  <div class="abstract">
+    <div class="h">摘要 / abstract</div>
+    <p>本项目实现了一个本地的<b>视频内容总结</b>工具：给一条 B 站视频链接，程序自动完成<em>素材采集 → 大模型总结 → 人工预览确认 → 发布评论</em>四段流程，并在发布前留出一道必须由人勾选的闸门。它要解决的不是"能不能总结"，而是三个更麻烦的问题：<b>几小时的视频塞不进一次上下文</b>、<b>模型一次成稿必然有幻觉和失真</b>、<b>生成完就不能再改，人只能全部重来</b>。</p>
+    <p>针对这三点，系统设计了 <b>分段预读 + 归约生成</b> 的两段式流水线（MAP-REDUCE 的文本变体）、<b>角色系统 + 三轮回自省</b>（生成 → 自我批判 → 按诊断修订）、以及 <b>版本史 + 字段级 diff</b>（把"重来"变成"改一句"）。画面信息用等距抽帧，只送进归约那一次调用，因此只付一次钱。</p>
+    <p>系统实测运行 39 天，累计处理 <b>80 条任务 / 36 个不同视频</b>，产生 <b>65 个总结版本</b>、<b>37 条已发布评论</b>，累计消耗 <b>3,832,455 tokens</b>（305 次调用）。测试体系共 <b>256 项断言</b>（离线 39 + HTTP 46 + 前端 171），全部通过。</p>
+    <div class="kw"><b>关键词：</b>大语言模型 · 长文本分块 · MAP-REDUCE 摘要 · 提示词工程 · 多模态抽帧 · 人机协同闸门 · 版本化生成</div>
+  </div>
+</header>
+
+
+<!-- ==================== 02 ==================== -->
+<section>
+  <div class="sec-head">
+    <div class="num">02</div>
+    <div class="tt">
+      <h2>系统设计</h2>
+      <small>分层、流水线、数据模型，以及每一处选择背后的理由。</small>
+    </div>
+  </div>
+
+  <h3>2.1 总体流水线</h3>
+  <p>整条链路五个阶段，其中 <b>第 4 阶段是人为闸门</b>，其余四段自动。第 5 阶段之后有一条回边——不满意就回到第 3 阶段，但复用同一份素材笔记，不再重新采集、不再重新预读。</p>
+
+  <div class="flow">
+    <div class="row">
+      <div class="stage"><div class="i">01</div><div class="n">输入解析</div><div class="d">链接 / BV / 分享文案 / 本地 SRT</div></div>
+      <div class="arrow">→</div>
+      <div class="stage"><div class="i">02</div><div class="n">内容采集</div><div class="d">字幕优先，退弹幕与简介；等距抽帧</div></div>
+      <div class="arrow">→</div>
+      <div class="stage hot"><div class="i">03</div><div class="n">大模型总结</div><div class="d">预读 → 归约 → 三轮回自省</div></div>
+      <div class="arrow">→</div>
+      <div class="stage"><div class="i">04</div><div class="n">人工确认</div><div class="d">预览 + 版本对比 + 勾选闸门</div></div>
+      <div class="arrow">→</div>
+      <div class="stage"><div class="i">05</div><div class="n">发表评论</div><div class="d">超限降级为笔记通道，可撤回</div></div>
+    </div>
+    <div class="loop">↑ 不满意 · 写一句话说明哪里不对 · 回到 03（复用素材笔记，不重新采集）</div>
+  </div>
+
+  <h3>2.2 代码分层</h3>
+  <p>三层加一个前端，依赖方向单一，不允许下层反向依赖：</p>
+  <table>
+    <thead><tr><th>层</th><th>文件</th><th>行数</th><th class="cn">职责</th></tr></thead>
+    <tbody>
+      <tr><td class="dim">app</td><td>service.py</td><td class="num">1,471</td><td class="cn">业务编排：建任务、跑后台线程、迭代打磨、发布</td></tr>
+      <tr><td class="dim">app</td><td>main.py</td><td class="num">280</td><td class="cn">HTTP 路由（FastAPI），只做参数校验与转发</td></tr>
+      <tr><td class="dim">app</td><td>static/index.html</td><td class="num">2,860</td><td class="cn">单文件前端，无构建、无框架、无 node_modules</td></tr>
+      <tr><td class="dim">core</td><td>summarizer.py</td><td class="num">637</td><td class="cn">分块、预读、归约、修订、diff</td></tr>
+      <tr><td class="dim">core</td><td>roles.py</td><td class="num">666</td><td class="cn">8 套角色方法论 + 输出契约</td></tr>
+      <tr><td class="dim">core</td><td>collector.py</td><td class="num">590</td><td class="cn">字幕 / 弹幕 / 标签 / 简介的采集与降级</td></tr>
+      <tr><td class="dim">core</td><td>frames.py</td><td class="num">480</td><td class="cn">抽帧、裁单格、独占缓存与过期清理</td></tr>
+      <tr><td class="dim">core</td><td>composer.py</td><td class="num">192</td><td class="cn">总结 → 评论文本 / 长文 / Delta</td></tr>
+      <tr><td class="dim">core</td><td>publisher.py</td><td class="num">384</td><td class="cn">发布、撤回、超限降级</td></tr>
+      <tr><td class="dim">core</td><td>srt.py / resolver.py</td><td class="num">330</td><td class="cn">本地字幕解析、链接与 BV 号归一</td></tr>
+      <tr><td class="dim">infra</td><td>store.py</td><td class="num">599</td><td class="cn">SQLite：任务、版本史、发布记录、凭证</td></tr>
+      <tr><td class="dim">infra</td><td>llm.py</td><td class="num">476</td><td class="cn">OpenAI 兼容客户端、重试、用量统计</td></tr>
+      <tr><td class="dim">infra</td><td>bili_client.py</td><td class="num">340</td><td class="cn">接口封装、WBI 签名、错误码归一</td></tr>
+      <tr><td class="dim">infra</td><td>notecache.py</td><td class="num">226</td><td class="cn">笔记内存缓存（可丢，丢了重算）</td></tr>
+      <tr><td class="dim">—</td><td>desktop.py</td><td class="num">776</td><td class="cn">pywebview 外壳、单实例、日志接管</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--mono);font-size:11px;color:var(--mute)">源码合计 11,070 行；另有测试 4,970 行（smoke_test.py 3,541 + frontend_test.js 1,429）。</p>
+
+  <h3>2.3 数据模型</h3>
+  <p>五张表。设计上最关键的一条判断是：<b>什么能重建、什么不能</b>——能重建的放内存，不能重建的必须落库。</p>
+<pre><span class="k">kv</span>              键值对（界面偏好等琐碎状态）
+<span class="k">credential</span>      单行表，账号凭证 BLOB 加密存储，密钥单独放 key.bin
+<span class="k">task</span>            一次总结任务：原始输入、BV、标题、素材类型与可信度、结构化结果
+<span class="k">publish</span>         一次发布尝试：rpid、状态（published / blocked）、撤回时间
+<span class="k">summary_version</span> 版本史：source(initial|refine|restore)、requirement、metrics</pre>
+  <div class="note y">
+    <div class="h">设计判断 · 为什么版本史必须落库</div>
+    <p style="margin:0">素材笔记丢了可以重算（只是贵一点）；但一段已经生成、已经被人逐条改过的文字，<b>重跑模型不会给出同一个结果</b>——那是丢劳动，不是丢缓存。所以笔记留在内存（72 小时），版本史和发布记录落库。这条判断直接写在 <code>store.py</code> 的建表注释里。</p>
+  </div>
+</section>
+
+<!-- ==================== 03 ==================== -->
+<section>
+  <div class="sec-head">
+    <div class="num">03</div>
+    <div class="tt">
+      <h2>关键实现</h2>
+      <small>七处真正花了时间的算法与取舍。每一处都先说"为什么不能这么做"。</small>
+    </div>
+  </div>
+
+  <h3>3.1 素材采集：一条有优先级的降级链 <span class="x">collector.py</span></h3>
+  <p>总结的质量上限由素材决定，所以采集不是"抓到什么算什么"，而是一条明确排序的链：</p>
+  <table>
+    <thead><tr><th>优先级</th><th>素材</th><th class="cn">可信度</th><th class="cn">为什么在这个位置</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>人上传的字幕 / SRT</td><td class="cn">高</td><td class="cn">有人校对过，标点与断句正确</td></tr>
+      <tr><td class="num">2</td><td>UP 主上传字幕</td><td class="cn">高</td><td class="cn">作者本人确认过</td></tr>
+      <tr><td class="num">3</td><td>平台 AI 字幕</td><td class="cn">中</td><td class="cn">有语音识别错误，必须在局限段落声明</td></tr>
+      <tr><td class="num">4</td><td>弹幕 + 简介 + 标签</td><td class="cn">低</td><td class="cn">没有完整句子，只能当补充气氛与反应</td></tr>
+    </tbody>
+  </table>
+  <p>选中的素材类型会一路传到最后——<b>不是为了展示，而是因为它要写进"素材局限"那一段</b>。用 AI 字幕生成时，模型被明确要求指出"存在语音识别错误，人名地名可能有音译偏差"。这就是前面说的"敢公开"的代价：得先承认自己站得不稳。</p>
+
+  <h3>3.2 长文本分块：一个被忽略的边界 <span class="x">summarizer._split()</span></h3>
+  <p>最直觉的分块写法是按 <code>size − overlap</code> 逐步长推进。它有一个不起眼但必然发生的缺陷：当素材长度不是步长的整数倍时，末尾会多出一个很短的残块，而分块数有硬上限（<code>MAX_CHUNKS = 8</code>），多出来的那一块会把前面挤掉。</p>
+  <p>这里改成<b>先反推步长下限，再定窗口宽度</b>：K 个窗口要覆盖 N 个字符，步长至少是 (N−1)/(K−1)；窗口宽度取「步长 + overlap」，于是既保住块间重叠，又不会因为末尾残段多切一块。</p>
+<pre><span class="k">minimum_step</span> = ceil((length - 1) / (max_chunks - 1))
+<span class="k">step</span>         = max(1, minimum_step, size - max(0, overlap))
+<span class="k">window</span>       = step + max(0, overlap)</pre>
+  <p>把函数直接跑一遍，五种长度下的实测输出：</p>
+  <table>
+    <thead><tr><th>输入字符数</th><th>块数</th><th>各块长度</th><th class="cn">读出来的东西</th></tr></thead>
+    <tbody>
+      <tr><td class="num">5,000</td><td class="num">1</td><td class="dim">[5000]</td><td class="cn">不超限，不切</td></tr>
+      <tr><td class="num">12,000</td><td class="num">3</td><td class="dim">[6000, 6000, 800]</td><td class="cn">短素材走原尺寸，末块是自然余量</td></tr>
+      <tr><td class="num">24,000</td><td class="num">5</td><td class="dim">[6000×4, 1600]</td><td class="cn">刚好在 <code>max_input_chars</code> 边界</td></tr>
+      <tr class="mark"><td class="num">40,918</td><td class="num">7</td><td class="dim">[6246×6, 5842]</td><td class="cn"><b>末块 5,842 字符，不是残句</b></td></tr>
+      <tr><td class="num">60,000</td><td class="num">7</td><td class="dim">[8972×6, 8568]</td><td class="cn">块变宽而不再变多，被上限锁住</td></tr>
+    </tbody>
+  </table>
+  <p>关键在第 4、5 行：按传统写法，40,918 字符会切成 8 块且最后一块只有几百字符——等于让模型为一段残句付一次完整调用；超过 6 万字时块数还会继续涨，撞上 <code>MAX_CHUNKS</code> 就把前面的块挤掉。现在块数被锁住，多出来的长度摊到每块的宽度上。</p>
+
+  <h3>3.3 两段式生成：预读与归约的分工</h3>
+  <p>一次调用塞不下四小时的字幕，所以拆成两步。第一步 <em>MAP</em>：对每一块抽"这一段讲了什么"的结构化笔记；第二步 <em>REDUCE</em>：把所有笔记合成一篇结构化的总结 JSON。</p>
+  <p>预读的提示词里有一句关键约束：<b>「笔记要能让人仅凭它还原这段内容，不要压缩成一堆语义模糊的关键词」</b>。这带来一个反直觉的结果——压缩比只有 38%–55%，笔记几乎和素材一样长。</p>
+  <p>这是刻意的：<b>省在预读上没有意义，因为真正被反复使用的是笔记，而不是素材</b>。笔记保真，后面三轮自省和多次迭代才有正确的原料；笔记压得太狠，每一轮都在失真的基础上继续失真。</p>
+  <div class="note y">
+    <div class="h">为什么本次演示案例没有预读</div>
+    <p style="margin:0">这次实测的《新闻周刊》时长 43:50，平台 AI 字幕原始 915 条、聚合为 150 段，聚合后的长度<b>没有超过 <code>max_input_chars = 24000</code></b>，所以 <code>chunks = 1</code>，素材一次直送归约，不触发预读——界面上"素材预读"一行显示<b>未触发</b>。同一套代码在长素材上会自动走预读，两条路径都在实际使用。</p>
+  </div>
+
+  <h3>3.4 三轮回自省：把"一次成稿"变成"能收敛的过程"</h3>
+  <p>角色 <code>wengao</code>（文稿编辑）不是一次调用，而是三轮：<b>生成 → 自我批判 → 按诊断修订</b>。批判那一轮输出的不是散文，是一份结构化诊断清单（哪一句失真、哪一处删了不该删的、哪一段口径跑偏）；修订那一轮拿这份清单去改，并被要求<b>只改该改的地方</b>。</p>
+  <p>这个结构带来两个可以直接量化的好处：<b>改动可解释</b>（诊断清单本身就是改动理由）、<b>改动可度量</b>（系统算出字段级相似度）。第 5.3 节会用一次真实迭代把这两点摊开看。</p>
+  <div class="note">
+    <div class="h">一个真实踩到的坑</div>
+    <p style="margin:0">判断"要不要预读"<b>不能看素材长度</b>。笔记本身也可能超限——一条 4 小时视频的笔记约 19,772 字符，而 <code>max_input_chars</code> 是 24,000，只差一点；素材再长一些，笔记就会被当成"新素材"<b>又预读一遍</b>。那是二次压缩，信息在没人察觉的情况下再掉一层，成本还翻倍。所以判据改成只认「有没有传 prepared」，不看长度。</p>
+  </div>
+
+  <h3>3.5 画面抽帧：只为一次调用付费</h3>
+  <p>字幕抓不到 PPT、图表、屏幕上的字。所以系统会等距抽帧（默认上限 12 张）。这里有一个必须先解决的两难：接口返回的是 10×10 网格拼图，整张交上去，不缩就 15.2 MB 发不出去，缩到能发出去单格只剩 160×90——<b>画面上的字就糊了，而字正是加画面的全部价值</b>。</p>
+  <p>解法是<b>裁单格</b>：体积只有整张的约 1/88，分辨率还是原生的 480×270。两条路都量过，成本差十倍：</p>
+  <table>
+    <thead><tr><th>方案</th><th>12 帧的 image_tokens</th><th class="cn">相对一条 4 小时视频的总输入（86,428）</th><th class="cn">结论</th></tr></thead>
+    <tbody>
+      <tr><td>整张拼图</td><td class="num">14,688</td><td class="num">+17.0%</td><td class="cn">单格缩到 160×90，字读不出来</td></tr>
+      <tr class="mark"><td><b>裁单格（采用）</b></td><td class="num">1,464</td><td class="num">+1.7%</td><td class="cn">原生 480×270，字可读</td></tr>
+    </tbody>
+  </table>
+  <p>第二个取舍在于<b>送在哪一步</b>。如果帧进入预读或三轮回，同一批图会被反复送好几遍（预读最多 7 次、三轮回再 2 次）；而归约是唯一"把全部素材合起来看一遍"的调用，画面在那里最有价值，也只需要付一次钱。本次案例只有 1 块、没有预读，12 帧的 1,464 image_tokens 占 v1 输入 26,874 的 <b>5.4%</b>——短视频里画面反而更贵，因为没有预读来摊薄。</p>
+
+  <h3>3.7 发布闸门：最后一道人力拦截</h3>
+  <p>评论一旦发出去，改不了。所以发布这一步有三重约束同时成立才允许点击：</p>
+  <ul class="plain">
+    <li><b>必须有内容</b>：文本框非空。</li>
+    <li><b>必须人手勾选</b>：勾选框是硬闸门，配置里可以关，但默认开。</li>
+    <li><b>必须是当前版本</b>：正在回看第 1 版时，整个发布区会收起——否则会出现"预览里是第 1 版、发布框里是第 2 版"这种最危险的组合。</li>
+  </ul>
+  <p>另外两道保护：评论超过字数上限时自动降级走"笔记通道"（发一条动态指向视频）；发帖间隔有最小值，防止连续操作被判为机器行为。已发布的总结会自动关闭打磨入口——撤回前不能再改。</p>
+</section>
+
+<!-- ==================== 04 ==================== -->
+<section>
+  <div class="sec-head">
+    <div class="num">04</div>
+    <div class="tt">
+      <h2>功能展示</h2>
+      <small>以下全部是程序真实运行界面的截图，不是设计稿。截图里的任务就是第 5 章要拆解的那一条。</small>
+    </div>
+  </div>
+
+  <figure>
+    <div class="frame"><img src="img/01-home.jpg" alt="主界面"></div>
+    <figcaption><span class="no">图 1</span><span>主界面。顶部是刻度尺与状态条（登录身份 UID 3493091562490155 · Che-Vuei、当前模型 qwen3.8-omni-flash、历史 80 条、当前角色、设置）。左侧工作面是一条真实任务：标题《新闻周刊》20261024期 完整版、UP 小逸Xiaoyi2026、素材「B站 AI 字幕（中）」、<b>第 2 版 · 共 2 版 · 文稿编辑 · 3 轮</b>、进度 100%「已按你的要求改好一版，等待确认」；橙色条是采集提示（AI 字幕存在同音字与断句误差）。正文按 <code>一句话 / 主体 / 要点 / 时间轴 / 素材局限</code> 分块。右栏是版本面板。</span></figcaption>
+  </figure>
+
+  <div class="duo">
+  <figure>
+    <div class="frame"><img src="img/06-version-diff.jpg" alt="版本面板特写"></div>
+  </figure>
+  <div class="duo-t">
+    <p class="duo-cap"><span class="no">图 2</span>版本面板特写。上半是模型自己写的修订说明（「它说」）；下半是系统算出来的<b>实际改动</b>：<b>正文 1121 → 1105 字，相似度 0.93 · 时间轴 6 项 → 7 项，其中 2 项内容不同</b>；再下面是迭代打磨输入框与「改这一版」，以及这一版的开销（输入 30,119 / 输出 4,092 / 调用 3 次 / 耗时 81 s / 素材预读未触发 / 画面帧 12）。</p>
+    <p>「它说」和「实际改动」必须放在一起看。模型的自我描述也是会失真的：一句"已按要求修订"可能什么都没改，也可能改坏了别的地方。所以每一版都附带一个<b>可计算的指标</b>去校验它，人只需要看数字对不对得上，不用重读全文。</p>
+    <p>这一栏在本次案例里就抓到了实情：模型说它改了两处保真度问题，而 diff 显示只有正文和时间轴两个字段动过，一句话、要点、短版<b>逐字节没变</b>——正是"只改该改的地方"应有的样子。</p>
+  </div>
+  </div>
+
+  <p>其余六个界面按资源库索引页的单元格结构逐个铺开——每一格是「一张真截图在上、一条白底说明条在下」，与参考站点里「缩略图 + 文件名条」的卡片同构。这里不并排缩成两列，因为 1440×900 的界面截图缩到半宽后格内文字就读不出来了，而这些字正是报告的证据：</p>
+
+  <div class="gal">
+    <figure>
+      <div class="frame"><img src="img/02-history.jpg" alt="历史面板"></div>
+      <figcaption>
+        <span class="cap-t"><span class="no">图 3</span>历史总结浮层</span>
+        左侧索引列表（标题 / 时间 / 版本号 / 角色 / 一句话结论），支持按标题、UP、BV 或结论全文搜索；右侧是选中那条的预览与两个动作（在工作区打开 / 重新总结）。列表里能看到一条<b>橙色失败</b>记录——失败也留痕，不静默吞掉。底部写明数据库位置与迁移方式。
+      </figcaption>
+    </figure>
+    <figure>
+      <div class="frame"><img src="img/03-role.jpg" alt="角色浮层"></div>
+      <figcaption>
+        <span class="cap-t"><span class="no">图 4</span>角色选择浮层</span>
+        8 套角色各自代表一套方法论：标准（单轮）、学术分析、说人话、超强思考模式总结、文稿编辑、写作专家、分析报告、首席思想精炼师。副标题写明轮数与适用场景；当前角色高亮；底部提示「选中角色对下一次总结生效，三轮回的角色会多花两倍调用成本；已经生成的内容可以用「迭代打磨」单独改」——成本与灵活性的取舍被直接写在了界面上。
+      </figcaption>
+    </figure>
+    <figure>
+      <div class="frame"><img src="img/05-publish.jpg" alt="发布区"></div>
+      <figcaption>
+        <span class="cap-t"><span class="no">图 5</span>正文底部与发布区</span>
+        <b>素材局限</b>一段用橙色标出——橙色在这个界面里只给需要立刻看一眼的东西（另一处是采集告警）。发布区显示这段正文 <b>1625 字</b>、提示「超普通评论上限 · 走笔记」（配置里评论字数上限是 900，平台级上限 1000），所以自动降级为笔记通道；下方是硬闸门勾选框「我已核对上面这段文字，确认发到这条视频的评论区」，未勾选时<b>发布按钮为禁用态</b>。这一版还没有点发布，所以发布记录为空。
+      </figcaption>
+    </figure>
+    <div class="pair">
+<figure class="p">
+      <div class="frame"><img src="img/04-settings.jpg" alt="设置抽屉 · 大模型与采集"></div>
+      <figcaption>
+        <span class="cap-t"><span class="no">图 6</span>设置抽屉上半</span>
+        大模型配置（接口地址、API Key、模型名、温度 0.3、单次输出上限 4096、素材送入上限 24000、分块大小 6000、分块重叠 400、思考模式 off·显式关闭、超时 300、代理）与采集策略（字幕语言优先级、平台侧摘要「仅作对照，不参与生成」、弹幕开关、弹幕条数）。每一项右侧都标了单位或范围。底部固定显示配置文件路径与「保存并生效」。
+      </figcaption>
+    </figure>
+    <figure class="p">
+      <div class="frame"><img src="img/07-settings-2.jpg" alt="设置抽屉 · 发布与存储"></div>
+      <figcaption>
+        <span class="cap-t"><span class="no">图 7</span>设置抽屉下半</span>
+        抽帧参数（帧数上限、帧质量）、发布（人工确认闸门、发帖最小间隔、评论字数上限、是否署名 AI 生成及声明文字）、存储（数据库路径、密钥文件、预览缓存大小与命中数、数据目录）、服务器（仅命令行模式生效）。每个分组都有一句说明它约束什么。
+      </figcaption>
+    </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 05 ==================== -->
+<section>
+  <div class="sec-head">
+    <div class="num">05</div>
+    <div class="tt">
+      <h2>验证与实测</h2>
+      <small>这一节所有数字都来自实跑与本地数据库查询，没有估算。</small>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="c hi"><span class="k">test asserts</span><span class="v">256<small>项</small></span><div class="u">全部通过</div></div>
+    <div class="c"><span class="k">tasks</span><span class="v">80</span><div class="u">36 个不同视频</div></div>
+    <div class="c"><span class="k">tokens</span><span class="v">3.83<small>M</small></span><div class="u">305 次调用</div></div>
+    <div class="c"><span class="k">median</span><span class="v">109.5<small>s</small></span><div class="u">单次端到端中位耗时</div></div>
+  </div>
+
+  <h3>5.1 测试体系</h3>
+  <p>三套测试跑在不同层面，任何一次改动都要三套全过：</p>
+  <table>
+    <thead><tr><th>套件</th><th>文件</th><th>行数</th><th>断言</th><th class="cn">覆盖什么</th></tr></thead>
+    <tbody>
+      <tr><td>离线</td><td>smoke_test.py</td><td class="num">3,541</td><td class="num">39 / 39</td><td class="cn">纯函数与流水线：分块、JSON 修复、diff、合并、降级</td></tr>
+      <tr><td>HTTP</td><td>smoke_test.py</td><td class="dim">同上</td><td class="num">46 / 46</td><td class="cn">真实 FastAPI 应用：路由、状态码、版本冲突、闸门</td></tr>
+      <tr><td>前端</td><td>frontend_test.js</td><td class="num">1,429</td><td class="num">171 / 171</td><td class="cn">jsdom 渲染、交互、对比度、禁用态</td></tr>
+    </tbody>
+  </table>
+  <p>实跑输出：<code>离线 39/39 通过，HTTP 46/46 通过</code> · <code>前端测试：171 通过 / 0 失败 / 共 171 项</code>。前端测试里有一组专门算颜色对比度的用例（"最弱一档文字对比度 ≥ 3"），是因为曾经把辅助信息调到 2.39:1 导致读不出来，改到 4.08:1 后才过的——<b>可读性被写成了断言，而不是靠自觉</b>。</p>
+
+  <h3>5.2 真实运行统计</h3>
+  <p>从本地数据库直接统计（2026-09-19 13:55 至 2026-10-27 21:16，39 天）：</p>
+  <table>
+    <thead><tr><th>指标</th><th>值</th><th class="cn">说明</th></tr></thead>
+    <tbody>
+      <tr><td>任务总数</td><td class="num">80</td><td class="cn">其中成功 64、失败 16（失败率 20.0%）</td></tr>
+      <tr><td>不同视频</td><td class="num">36</td><td class="cn">平均每个视频被总结 2.2 次（同一视频反复磨）</td></tr>
+      <tr><td>素材来源分布</td><td class="num">47 / 21 / 7 / 4</td><td class="cn">AI 字幕 / 人上传 / 仅元信息 / 弹幕</td></tr>
+      <tr><td>总结版本</td><td class="num">65</td><td class="cn">61 版为文稿编辑，其余为其他角色</td></tr>
+      <tr><td>发布记录</td><td class="num">38</td><td class="cn">已发布 37 / 被拦截 1，无一条误发或事后撤回</td></tr>
+      <tr><td>累计 tokens</td><td class="num">3,832,455</td><td class="cn">输入 3,332,890 + 输出 499,565</td></tr>
+      <tr><td>单次耗时</td><td class="num">109.5 s</td><td class="cn">中位数；最快 37.4 s，最慢 457.2 s（n=61）</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <div class="h">关于 20.0% 的失败率，不算漂亮但要说清楚</div>
+    <p style="margin:0">16 次失败主要是三类：（1）评论发送被平台限制（评论区关闭 <code>12002</code> / <code>12052</code>、账号状态 <code>-102</code>，均设计为硬停不重试）；（2）字幕缺失且未开弹幕兜底；（3）网络或代理瞬断。这三类都是<b>外部条件问题，不是算法问题</b>，且失败全部留痕在历史列表里（图 3 可见），用户能看见失败原因并重试。</p>
+  </div>
+
+  <h3>5.3 一次完整生命周期：从一条链接到第 2 版</h3>
+  <p>下面这条是本次实测案例，全部数字取自本地库与界面：</p>
+  <table>
+    <thead><tr><th>字段</th><th>值</th></tr></thead>
+    <tbody>
+      <tr><td>视频</td><td><b>《新闻周刊》20261024期 完整版</b> · <code>BV1eAHG6LE4Y</code></td></tr>
+      <tr><td>UP 主 / 时长</td><td>小逸Xiaoyi2026 · 43:50 · 未分区 · 第 1/1 P</td></tr>
+      <tr><td>素材</td><td>B 站 AI 字幕（可信度：中）· 原始 915 条 → 聚合 <b>150 段</b></td></tr>
+      <tr><td>提示</td><td class="cn">「本次用的是平台 AI 字幕（语音识别），存在同音字与断句误差，总结中的专有名词与数字需自行复核」</td></tr>
+      <tr><td>规模</td><td>分块 <b>1</b>（未触发预读）· 画面帧 <b>12</b> · 角色 文稿编辑（三轮回）</td></tr>
+      <tr><td>产出</td><td>正文 1,105 字符 · 要点 5 条 · 时间轴 7 条 · 短评论 287 字符 · 发布正文 1,625 字符</td></tr>
+    </tbody>
+  </table>
+
+  <p>两版的开销与结果：</p>
+  <table>
+    <thead><tr><th>版本</th><th>来源</th><th>调用</th><th>输入 tokens</th><th>输出 tokens</th><th>耗时</th><th>正文字数</th></tr></thead>
+    <tbody>
+      <tr><td class="num">v1</td><td>initial</td><td class="num">3</td><td class="num">26,874</td><td class="num">3,859</td><td class="num">107.3 s</td><td class="num">1121</td></tr>
+      <tr><td class="num">v2</td><td>refine</td><td class="num">3</td><td class="num">30,119</td><td class="num">4,092</td><td class="num">81.0 s</td><td class="num">1105</td></tr>
+      <tr class="mark"><td>合计</td><td class="dim">—</td><td class="num">6</td><td class="num">56,993</td><td class="num">7,951</td><td class="num">188.3 s</td><td class="dim">—</td></tr>
+    </tbody>
+  </table>
+
+  <p>第二版是被这句话改出来的（用户原话，103 个汉字）：</p>
+  <div class="note y">
+    <p style="margin:0;font-size:12.5px;line-height:1.9">「第二个小标题<b>「AI造假维权之困与法律博弈」</b>现在有三段，读起来太密。<b>把这段压成两段</b>，法律条文那半段只留最高法的两条明确规则（可识别标准、惩罚性赔偿），其余展开删掉。另外时间轴现在只有六条，从 25:29 直接跳到 26:33，<b>补一条萨维在伦敦马拉松破二的那个瞬间</b>。」</p>
+  </div>
+
+  <p>这句话提了两个可核对的要求，两个都做到了，而且<b>只有被点名的部分动了</b>：</p>
+  <table>
+    <thead><tr><th class="cn">小节</th><th>v1 段落数</th><th>v2 段落数</th><th>v1 字符</th><th>v2 字符</th><th class="cn">是否被要求改</th></tr></thead>
+    <tbody>
+      <tr><td class="cn">民生调查：假冒售后电话围猎老人</td><td class="num">2</td><td class="num">2</td><td class="num">281</td><td class="num">281</td><td class="cn">没提 → 一字未动</td></tr>
+      <tr class="mark"><td class="cn">AI 造假维权之困与法律博弈</td><td class="num">3</td><td class="num"><b>2</b></td><td class="num">462</td><td class="num">443</td><td class="cn">要求「压成两段」→ 真压成两段</td></tr>
+      <tr><td class="cn">本周人物：不止 1 小时 59 分 30 秒</td><td class="num">3</td><td class="num">3</td><td class="num">376</td><td class="num">379</td><td class="cn">没提 → 只差 3 个字符</td></tr>
+    </tbody>
+  </table>
+  <p>时间轴那条要求也对上了：新增 <code>25:59</code>「重现萨维在伦敦马拉松冲线瞬间，跑出 1 小时 59 分 30 秒创造历史」，正好补在 25:29 与 26:33 之间；其余六条<b>逐字未变</b>。</p>
+
+  <p>系统的字段级 diff 只报了两个字段变化（与图 2 界面上的数字完全一致）：</p>
+<pre><span class="c">// 程序自己的 diff_fields() 输出，非人工整理</span>
+正文    <span class="o">1121 → 1105 字</span>   相似度 <span class="o">0.93</span>
+时间轴  <span class="o">6 项 → 7 项</span>      其中 <span class="o">2 项</span>内容不同
+<span class="c">// 一句话 36 字、要点 5 项、短版 287 字符 —— 完全未变，因此不进列表</span></pre>
+  <p>这里有个值得单独说的细节：界面报"2 项内容不同"，但逐条比对会发现真正新增的只有 <code>25:59</code> 一条，其余六条一字未改。原因是 <code>diff_fields</code> 对列表<b>按位置配对</b>（<code>zip</code>）——插入一条后，第 6 位从 26:33 变成 25:59，于是被计为"不同"。<b>程序如实报出了它能算出的东西，而没有假装自己知道语义</b>：它只报客观事实（哪个字段变了、变了多少、举一个例子），至于"这算不算顺手改的"，留给看的人判断。</p>
+
+  <p>最后是模型自己的修订说明（「它说」），可以拿去和上面的 diff 对照：</p>
+  <div class="note">
+    <p style="margin:0;font-size:12.5px;line-height:1.9">「根据诊断清单修正两处保真度问题：1. 在「AI造假维权之困」段落补回温峥嵘被拉黑的微观案例，避免泛化丢失关键情节；2. 将「本周人物」中"打破了基普图姆保持的世界纪录"修正为"将基普图姆创造的纪录向前推进 65 秒"，严格贴合素材原意，消除错误归因。其他部分保持不变。」</p>
+  </div>
+  <p>它说了两件事，diff 说了一件事，段落统计说了另一件事。三者对上之后才能确认：<b>要求的两个动作都做了，没要求的地方没被顺手改坏</b>。这正是把"自述"和"可计算指标"并排放的意义。</p>
+
+  <h3>5.4 两条路径的成本解剖</h3>
+  <p>同一套代码在实际使用中走了两条路，成本结构完全不同：</p>
+  <table>
+    <thead><tr><th>路径</th><th class="cn">触发条件</th><th>一次生成的输入 tokens</th><th>调用次数</th><th class="cn">成本大头在哪</th></tr></thead>
+    <tbody>
+      <tr><td>短视频（本次案例）</td><td class="cn">聚合素材 ≤ 24,000 字符，<code>chunks = 1</code></td><td class="num">26,874</td><td class="num">3</td><td class="cn">三轮回把同一份素材送了三遍</td></tr>
+      <tr><td>长视频（4 小时直播）</td><td class="cn">素材 40,918 字符，切 7 块走预读</td><td class="num">86,428</td><td class="num">10</td><td class="cn">预读 38% + 三轮回 62%</td></tr>
+    </tbody>
+  </table>
+  <p>把长视频那 86,428 拆开看，结论很直接：</p>
+  <table>
+    <thead><tr><th>环节</th><th class="cn">输入内容</th><th>输入 tokens</th><th>占比</th></tr></thead>
+    <tbody>
+      <tr><td>7 段预读</td><td class="cn">43,318 字符素材 + 1,365 字符提示开销</td><td class="num">32,663</td><td class="num">38%</td></tr>
+      <tr><td>归约</td><td class="cn">system 1,456 + 模板 687 + 笔记 19,772 + 12 帧 1,464</td><td class="num">17,484</td><td class="num">20%</td></tr>
+      <tr><td>自我批判</td><td class="cn">system 219 + 笔记 19,772 + draft 4,513</td><td class="num">17,928</td><td class="num">21%</td></tr>
+      <tr><td>修订</td><td class="cn">system 1,456 + 修订指令 137 + 诊断 1,200 + 笔记 + draft</td><td class="num">19,817</td><td class="num">23%</td></tr>
+      <tr class="mark"><td><b>合计</b></td><td class="cn">对照：单轮角色只需 47,845</td><td class="num"><b>86,428</b></td><td class="num">100%</td></tr>
+    </tbody>
+  </table>
+  <p><b>成本大头是"三轮回把同一份笔记送了三遍"（62%），不是预读（38%）。</b>所以想砍成本的杠杆在<b>轮数</b>，不在分块——这条结论后来直接决定了"标准角色单轮"这个选项的存在意义。</p>
+  <p>迭代的增量也是量出来的：v2 输入 30,119 比 v1 的 26,874 多 <b>3,245</b>（+12.1%），多出来的部分是"上一版全文 + 这次的要求"，而<b>素材笔记没有重算</b>。换句话说，改一次的钱约等于重新生成一次的 1.12 倍，而不是两倍。</p>
+</section>
+
+
+
+<!-- ==================== 08 ==================== -->
+<section>
+  <div class="sec-head">
+    <div class="num">08</div>
+    <div class="tt">
+      <h2>结论</h2>
+      <small>这个项目最终证明了什么。</small>
+    </div>
+  </div>
+
+  <p class="lead">一个"AI 总结视频"的 demo 可以在一天内做出来：调一次接口，把字幕丢进去，把结果打印出来。本项目真正花时间的部分是<b>把一次不可靠的调用，做成一条可靠、可核对、可修改、可撤回的流水线</b>——而这恰好是"能用"和"敢用"之间的距离。</p>
+
+  <p>具体来说，项目验证了四个判断：</p>
+  <ol>
+    <li><b>长文本必须分两段处理，而且省在预读上没有意义。</b>笔记保真（压缩比只有 38%–55%）看似浪费，实际是后面所有环节正确性的地基。反过来，短视频不该硬走预读——判据是"素材有没有超限"，不是"想不想省"。</li>
+    <li><b>自我批判必须结构化。</b>让模型"再检查一遍"没有用，让它输出一份可执行的诊断清单才有用——清单是改动的理由，也是改动的证据。但清单仍然只是"它说"，必须再配一个纯本地的 <code>diff_fields()</code> 去校验，两者对上才算数。</li>
+    <li><b>成本结构决定设计。</b>总成本 62% 花在"重复送同一份笔记"，所以杠杆在轮数不在分块；帧只送一次，成本从 17% 降到 1.7%。这两条都是先量出来、再改架构的。</li>
+    <li><b>人必须在环里，而且环要设在不可逆操作之前。</b>发布是唯一不可逆的动作，所以闸门设在那里；生成可逆，所以放开让人反复试。判据不是"哪里需要人"，而是"哪里错了没法改"。</li>
+  </ol>
+
+  <p>最终交付的程序在 39 天里跑了 80 次、36 个视频、65 个版本、37 条公开评论，测试 256 项全过。它解决的不是"AI 能不能总结视频"这个问题——那个问题早就不是问题了——而是<b>一份由模型生成的文字，在什么条件下可以被当作资料留下来</b>。</p>
+</section>
+
+<!-- ==================== 附录 ==================== -->
+<section class="appendix">
+  <div class="sec-head">
+    <div class="num">A</div>
+    <div class="tt">
+      <h2>附录 · 运行环境与复现</h2>
+      <small>换一台机器怎么把它跑起来、怎么验证它真的能跑。</small>
+    </div>
+  </div>
+
+  <h3>A.1 环境</h3>
+  <table>
+    <thead><tr><th>项</th><th>值</th></tr></thead>
+    <tbody>
+      <tr><td>操作系统</td><td>Windows 10 / 11（主开发与验证环境）</td></tr>
+      <tr><td>运行时</td><td>Python 3.12</td></tr>
+      <tr><td>核心依赖</td><td>fastapi ≥ 0.115 · uvicorn[standard] ≥ 0.32 · requests · pywebview · Pillow</td></tr>
+      <tr><td>存储</td><td>SQLite（单文件，位置 <code>~/.bili-scribe/bili-scribe.db</code>）</td></tr>
+      <tr><td>凭证</td><td>评论用 Cookie 加密存库，密钥单独存 <code>~/.bili-scribe/key.bin</code></td></tr>
+      <tr><td>模型接口</td><td>任何 OpenAI 兼容端点（配置里填 base_url / api_key / model）</td></tr>
+      <tr><td>网络</td><td>支持 HTTP 代理（只读配置文件，不继承环境变量）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>A.2 三种启动方式与验证命令</h3>
+<pre><span class="c"># 三种启动方式</span>
+bili-scribe.exe                                  <span class="c"># 直接双击（打包版）</span>
+python run.py                                    <span class="c"># 源码启动，打开桌面窗口</span>
+python -m bili_scribe.app.main                   <span class="c"># 只跑 HTTP 服务 → 浏览器访问 :8818</span>
+<span class="c"># 三套测试，预期输出如下</span>
+python tests/smoke_test.py    <span class="c"># 离线 39/39 通过 · HTTP 46/46 通过</span>
+node   tests/frontend_test.js <span class="c"># 171 通过 / 0 失败 / 共 171 项</span></pre>
+
+  <h3>A.3 最短使用路径</h3>
+  <ol>
+    <li>打开程序 → 顶栏「未连接」扫码登录（只读公开信息，不登录也能总结）→ 在「设置」填入接口地址、API Key、模型名 → 点「测试连通」→ 保存。</li>
+    <li>粘一条视频链接到输入框 → 点「开始总结」→ 等进度条跑完（本次 43:50 的素材约 107 秒）→ 在预览区逐段核对。</li>
+    <li>不满意就在下方写一句话说明哪里不对 → 点「改这一版」，生成新版本；旧版仍可回退。</li>
+    <li>满意后勾选确认 → 点发布。发出去的评论可在「发布记录」里撤回。</li>
+  </ol>
+
+  <h3>A.4 目录结构</h3>
+<pre class="tall"><span class="c">bili-scribe/</span>
+├─ <span class="k">bili_scribe/</span>
+│   ├─ app/          service.py 业务编排 · main.py 路由 · static/index.html 单文件前端
+│   ├─ core/         summarizer 分块与三轮回 · roles 8 套方法论 · collector 采集降级
+│   │                frames 抽帧裁单格 · composer 组装 · publisher 发布撤回 · srt 本地字幕
+│   ├─ infra/        store SQLite · llm 客户端 · bili_client 接口与签名 · notecache 笔记缓存
+│   ├─ config.py     配置读写与校验（带注释的 yaml）
+│   └─ desktop.py    pywebview 外壳、单实例、日志接管
+├─ <span class="k">tests/</span>          smoke_test.py（离线 39 + HTTP 46）· frontend_test.js（171）
+├─ <span class="k">report/</span>         本报告与全部界面截图
+└─ config.example.yaml</pre>
+
+</section>
+
+<footer>
+  <div>第 8 组 &nbsp;·&nbsp; bili-scribe &nbsp;·&nbsp; 视频内容总结 &nbsp;·&nbsp; 综合大作业实验报告</div>
+  <div class="r">github.com/cunnak/bili-scribe &nbsp;·&nbsp; v0.6.1 &nbsp;·&nbsp; 2026-10-27</div>
+</footer>
+
+</div>
+</body>
+</html>

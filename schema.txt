@@ -1,0 +1,71 @@
+## kv
+CREATE TABLE kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+## credential
+CREATE TABLE credential (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    payload    BLOB    NOT NULL,
+    encrypted  INTEGER NOT NULL DEFAULT 1,
+    mid        TEXT,
+    uname      TEXT,
+    updated_at TEXT    NOT NULL
+)
+## task
+CREATE TABLE task (
+    id           TEXT PRIMARY KEY,
+    raw_input    TEXT,
+    bvid         TEXT,
+    aid          INTEGER,
+    cid          INTEGER,
+    page         INTEGER,
+    title        TEXT,
+    up_name      TEXT,
+    up_mid       INTEGER,
+    status       TEXT NOT NULL,
+    progress     TEXT,
+    source_kind  TEXT,
+    source_label TEXT,
+    source_trust TEXT,
+    warnings     TEXT,
+    candidates   TEXT,
+    summary_json TEXT,
+    comment_text TEXT,
+    preview_md   TEXT,
+    platform_summary TEXT,
+    error        TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+)
+## publish
+CREATE TABLE publish (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    TEXT,
+    bvid       TEXT NOT NULL,
+    aid        INTEGER,
+    rpid       TEXT,
+    content    TEXT,
+    status     TEXT NOT NULL,
+    message    TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+)
+## sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq)
+## summary_version
+CREATE TABLE summary_version (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id      TEXT    NOT NULL,
+    version_no   INTEGER NOT NULL,
+    source       TEXT    NOT NULL,   -- initial 初版 / refine 按要求改的 / restore 以旧版为底稿
+    requirement  TEXT,               -- 这一版是被什么要求改出来的（初版为空）
+    role         TEXT,
+    summary_json TEXT,
+    preview_md   TEXT,
+    comment_text TEXT,
+    -- 这一版的消耗：{usage: {...}, chunks, frames, model, elapsed}。JSON 而不是拆成列，
+    -- 因为这些字段会随着流水线变化增删，而它们只是给人看的账，不参与查询。
+    metrics      TEXT,
+    created_at   TEXT    NOT NULL
+)

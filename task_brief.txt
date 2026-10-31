@@ -1,0 +1,9 @@
+TASK 2c7ff315bcdb  status=ready
+title: 《新闻周刊》 20261024期 完整版
+up: 小逸Xiaoyi2026
+source: subtitle_ai / B站 AI 字幕
+warnings: ["本次用的是平台 AI 字幕（语音识别），存在同音字与断句误差，总结中的专有名词与数字需自行复核"]
+comment len: 287
+preview len: 1924
+platform_summary len: 0
+summary_json keys: ['one_line', 'summary_md', 'key_points', 'timeline', 'caution', 'comment_short', 'chunks', 'model', 'role', 'frames', 'revise_note']

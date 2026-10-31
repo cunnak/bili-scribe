@@ -19,6 +19,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from ..app.errors import WBError
@@ -53,10 +54,7 @@ def _urllib_transport(proxy: str = "") -> Transport:
 
     def send(url: str, payload: bytes, headers: Mapping[str, str], timeout: float) -> tuple[int, str]:
         request = urllib.request.Request(url, data=payload, headers=dict(headers), method="POST")
-        handlers: list[urllib.request.BaseHandler] = []
-        if proxy:
-            handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-        opener = urllib.request.build_opener(*handlers)
+        opener = _opener_for(proxy, url)
         try:
             with opener.open(request, timeout=timeout) as resp:
                 return int(resp.status), resp.read().decode("utf-8", "replace")
@@ -71,15 +69,55 @@ def _urllib_transport(proxy: str = "") -> Transport:
     return send
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", ""}
+
+
+def _is_local_url(url: str) -> bool:
+    """判断目标是不是本机/内网地址（这类请求永远不该走代理）。"""
+    try:
+        host = (urlsplit(url).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    if host in _LOCAL_HOSTS or host.endswith(".local"):
+        return True
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        a, b = int(parts[0]), int(parts[1])
+        if a == 127 or a == 10 or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31):
+            return True
+        if a == 169 and b == 254:
+            return True
+    return False
+
+
+def _opener_for(proxy: str, url: str) -> urllib.request.OpenerDirector:
+    """按「目标地址 + llm.proxy」装配 opener，**不让环境变量偷偷决定走向**。
+
+    Windows 上 ``urllib`` 的两半是分裂的：``getproxies()`` 认 ``HTTP_PROXY`` 环境变量，
+    而 ``proxy_bypass()`` 读的是 IE/注册表设置、**不认 ``NO_PROXY``**。于是
+    「发了 ``HTTP_PROXY=127.0.0.1:7897``、又写了 ``NO_PROXY=127.0.0.1``」这种最常见的配置，
+    发往本机网关的请求仍会被塞进代理，最后拿回一个 Cloudflare 403 ——
+    报的是「CDN 判定你是机器人」，跟真实原因（请求根本没到本机）隔着一整条链路。
+
+    所以：本机/内网地址一律 ``ProxyHandler({})`` 直连；对端是公网时才按 ``llm.proxy`` 走，
+    没配就沿用环境变量（那是用户唯一能表达「我要走代理」的地方）。
+    """
+    proxy = (proxy or "").strip()
+    if _is_local_url(url):
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    if proxy:
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    return urllib.request.build_opener()
+
+
 def _urllib_get(proxy: str = "") -> Getter:
     """默认 GET：列模型用。和 ``_urllib_transport`` 共用代理规则（只认 llm.proxy）。"""
 
     def send(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, str]:
         request = urllib.request.Request(url, headers=dict(headers), method="GET")
-        handlers: list[urllib.request.BaseHandler] = []
-        if proxy:
-            handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-        opener = urllib.request.build_opener(*handlers)
+        opener = _opener_for(proxy, url)
         try:
             with opener.open(request, timeout=timeout) as resp:
                 return int(resp.status), resp.read().decode("utf-8", "replace")

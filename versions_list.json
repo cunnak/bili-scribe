@@ -1,0 +1,82 @@
+{
+ "current": 2,
+ "total": {
+  "calls": 6,
+  "prompt_tokens": 56993,
+  "completion_tokens": 7951,
+  "reasoning_tokens": 0,
+  "total_tokens": 64944,
+  "unpriced": 0,
+  "untracked": 0
+ },
+ "versions": [
+  {
+   "version_no": 1,
+   "source": "initial",
+   "requirement": "",
+   "role": "wengao",
+   "created_at": "2026-10-27T21:18:45+08:00",
+   "one_line": "央视《新闻周刊》聚焦AI换脸侵权与黑维修乱象，并专访马拉松破二第一人塞巴斯蒂安·萨维。",
+   "revise_note": "",
+   "changed_fields": null,
+   "chars": 287,
+   "metrics": {
+    "usage": {
+     "calls": 3,
+     "prompt_tokens": 26874,
+     "completion_tokens": 3859,
+     "reasoning_tokens": 0,
+     "total_tokens": 30733,
+     "unpriced": 0
+    },
+    "elapsed": 107.3,
+    "chunks": 1,
+    "frames": 12,
+    "cached_material": false
+   },
+   "current": false
+  },
+  {
+   "version_no": 2,
+   "source": "refine",
+   "requirement": "第二个小标题「AI造假维权之困与法律博弈」现在有三段，读起来太密。把这段压成两段，法律条文那半段只留最高法的两条明确规则（可识别标准、惩罚性赔偿），其余展开删掉。另外时间轴现在只有六条，从 25:29 直接跳到 26:33，补一条萨维在伦敦马拉松破二的那个瞬间。",
+   "role": "wengao",
+   "created_at": "2026-10-27T21:35:30+08:00",
+   "one_line": "央视《新闻周刊》聚焦AI换脸侵权与黑维修乱象，并专访马拉松破二第一人塞巴斯蒂安·萨维。",
+   "revise_note": "根据诊断清单修正两处保真度问题：1. 在「AI造假维权之困」段落补回温峥嵘被拉黑的微观案例，避免泛化丢失关键情节；2. 将「本周人物」中“打破了基普图姆保持的世界纪录”修正为“将基普图姆创造的纪录向前推进65秒”，严格贴合素材原意，消除错误归因。其他部分保持不变。",
+   "changed_fields": [
+    {
+     "field": "summary_md",
+     "label": "正文",
+     "kind": "text",
+     "detail": "1121 → 1105 字",
+     "ratio": 0.93,
+     "example": "「（空）」→「演员温峥嵘在发现假冒直播后试图沟通，结果“一下就被拉黑了”，她感慨“很难证明我是」"
+    },
+    {
+     "field": "timeline",
+     "label": "时间轴",
+     "kind": "list",
+     "detail": "6 项 → 7 项，其中 2 项内容不同",
+     "ratio": null,
+     "example": "「26:33 提及萨维10月18日亮相北马现场及邀请中国选手训练的行程细节」→「25:59 重现萨维在伦敦马拉松冲线瞬间，跑出1小时59分30秒创造历史」"
+    }
+   ],
+   "chars": 287,
+   "metrics": {
+    "usage": {
+     "calls": 3,
+     "prompt_tokens": 30119,
+     "completion_tokens": 4092,
+     "reasoning_tokens": 0,
+     "total_tokens": 34211,
+     "unpriced": 0
+    },
+    "elapsed": 81.0,
+    "chunks": 1,
+    "frames": 12
+   },
+   "current": true
+  }
+ ]
+}

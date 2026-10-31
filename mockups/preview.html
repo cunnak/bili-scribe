@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工作台信息架构预览</title>
+<style>
+:root{
+  --void:#08090A;--bg:#0D0F10;--panel:#131617;--panel2:#191D1E;
+  --line:rgba(255,255,255,.10);--line-s:rgba(255,255,255,.055);
+  --acid:#D8F24B;--acid-d:#8A9B22;--ember:#FF6B35;--paper:#E8E2D4;
+  --text:#F2F4F2;--muted:#8B9490;--dim:#6B7672;
+  --mono:'Cascadia Mono','Consolas','SF Mono',monospace;
+  --sans:'Segoe UI','Microsoft YaHei',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:48px 48px;
+}
+button{font-family:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}.dim{color:var(--dim)}
+.acid{color:var(--acid)}
+.small{font-size:11px;letter-spacing:.08em}
+.tag{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--line);border-radius:3px;font-size:11px;color:var(--muted);background:rgba(255,255,255,.02)}
+.tag i{width:5px;height:5px;border-radius:50%;background:var(--acid);display:block}
+.tag.warn i{background:var(--ember)}
+.btn{height:34px;padding:0 16px;border-radius:3px;background:var(--acid);color:#0A0B08;font-size:13px;font-weight:700}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:500}
+.btn.sm{height:28px;padding:0 10px;font-size:11px}
+
+/* top bar */
+.top{height:62px;display:flex;align-items:center;gap:18px;padding:0 22px;border-bottom:1px solid var(--line);background:rgba(13,15,16,.92);position:relative;z-index:20}
+.brand{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.brand b{font-family:var(--mono);font-size:15px;letter-spacing:.16em;font-weight:700}
+.brand b:before{content:"";display:inline-block;width:7px;height:16px;background:var(--acid);margin-right:9px;transform:skewX(-18deg) translateY(1px)}
+.brand span{font-size:10px;color:var(--dim);letter-spacing:.12em}
+.top .sp{flex:1}
+.chips{display:flex;gap:8px;align-items:center}
+
+/* shared bits */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px}
+.card-h{height:42px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line-s)}
+.card-h .t{font-size:12px;font-weight:600;letter-spacing:.04em}
+.card-h .n{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.card-b{padding:14px}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:7px 0;border-bottom:1px dashed var(--line-s)}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--dim)}
+.kv span:last-child{font-family:var(--mono);font-size:11px}
+.hr{height:1px;background:var(--line);margin:12px 0}
+.mini-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+
+/* player */
+.player{position:relative;aspect-ratio:16/9;background:#000;overflow:hidden;border-radius:3px}
+.player .img{position:absolute;inset:0;background:
+  radial-gradient(ellipse at 30% 30%,rgba(216,242,75,.18),transparent 55%),
+  radial-gradient(ellipse at 70% 70%,rgba(255,107,53,.14),transparent 55%),
+  linear-gradient(135deg,#1b2020,#0a0c0c 60%,#141818)}
+.player .img:after{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px);background-size:100% 4px;opacity:.5}
+.player .play{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border:1px solid rgba(255,255,255,.4);border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.35);backdrop-filter:blur(4px)}
+.player .play:after{content:"";border-left:13px solid var(--text);border-top:8px solid transparent;border-bottom:8px solid transparent;margin-left:3px}
+.player .hud{position:absolute;left:14px;bottom:12px;right:14px;display:flex;justify-content:space-between;align-items:end;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.75)}
+.player .corner{position:absolute;right:12px;top:12px;font-family:var(--mono);font-size:10px;color:var(--acid);letter-spacing:.1em}
+
+/* timeline */
+.timeline{padding:10px 0 0}
+.wave{height:46px;display:flex;align-items:center;gap:2px;overflow:hidden}
+.wave i{flex:1;background:rgba(216,242,75,.34);border-radius:1px;min-width:1px}
+.wave i.hot{background:var(--acid)}
+.track{position:relative;height:26px;margin-top:6px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+.clip{position:absolute;top:4px;height:16px;border:1px solid var(--acid);background:rgba(216,242,75,.15);border-radius:2px}
+.clip span{position:absolute;left:4px;top:1px;font-family:var(--mono);font-size:9px;color:var(--acid)}
+.clip.b{border-color:var(--ember);background:rgba(255,107,53,.14)}
+.clip.b span{color:var(--ember)}
+.scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:4px}
+
+/* lists */
+.list{display:flex;flex-direction:column;gap:1px}
+.row{display:flex;gap:10px;padding:10px;border:1px solid transparent;border-radius:3px;cursor:pointer}
+.row:hover{background:rgba(255,255,255,.03)}
+.row.on{background:rgba(216,242,75,.07);border-color:rgba(216,242,75,.22)}
+.thumb{width:54px;height:34px;flex:0 0 auto;border-radius:2px;background:linear-gradient(135deg,#26302d,#111514);border:1px solid var(--line);position:relative}
+.thumb:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(216,242,75,.2),transparent 60%)}
+.row .meta{min-width:0;flex:1}
+.row .meta b{display:block;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .meta small{display:block;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* transcript */
+.trans{display:flex;flex-direction:column;gap:2px;max-height:210px;overflow:hidden}
+.line{display:grid;grid-template-columns:48px 1fr;gap:10px;padding:7px 8px;border-radius:2px;font-size:12px;line-height:1.55}
+.line:hover{background:rgba(255,255,255,.03)}
+.line .ts{font-family:var(--mono);font-size:10px;color:var(--dim);padding-top:2px}
+.line.hi{background:rgba(216,242,75,.07)}
+.line.hi .ts{color:var(--acid)}
+
+/* variant A overlay */
+.scrim{position:absolute;inset:62px 0 0 0;background:rgba(4,5,6,.62);backdrop-filter:blur(2px);z-index:30}
+.overlay{position:absolute;z-index:31;left:50%;top:14px;transform:translateX(-50%);width:1000px;height:800px;background:var(--panel);border:1px solid rgba(255,255,255,.16);border-radius:6px;box-shadow:0 28px 80px rgba(0,0,0,.7);display:flex;flex-direction:column;overflow:hidden}
+.overlay-h{height:54px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line)}
+.overlay-h .t{font-size:14px;font-weight:700}
+.overlay-b{display:grid;grid-template-columns:300px 1fr;flex:1;min-height:0}
+.overlay-l{border-right:1px solid var(--line);padding:12px;overflow:hidden}
+.overlay-r{padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.tabs{display:flex;gap:2px;border:1px solid var(--line);border-radius:3px;padding:2px}
+.tabs button{height:26px;padding:0 12px;font-size:11px;color:var(--muted);border-radius:2px}
+.tabs button.on{background:var(--acid);color:#0A0B08;font-weight:700}
+
+/* variant B/C shell */
+.shell{display:flex;height:calc(100vh - 62px);min-height:0}
+.rail{width:224px;flex:0 0 auto;border-right:1px solid var(--line);background:rgba(10,12,13,.72);display:flex;flex-direction:column;padding:16px 12px}
+.rail .group{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--dim);margin:12px 10px 8px}
+.nav{display:flex;align-items:center;gap:10px;height:38px;padding:0 10px;border-radius:3px;color:var(--muted);font-size:12px;position:relative}
+.nav:hover{background:rgba(255,255,255,.03);color:var(--text)}
+.nav.on{background:rgba(216,242,75,.09);color:var(--text)}
+.nav.on:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;background:var(--acid)}
+.nav .ic{width:16px;height:16px;border:1px solid currentColor;border-radius:2px;opacity:.65;flex:0 0 auto}
+.nav .bd{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--acid);background:rgba(216,242,75,.12);padding:2px 5px;border-radius:8px}
+.rail .foot{margin-top:auto;padding-left:10px;border-top:1px solid var(--line);padding-top:12px;font-size:10px;color:var(--dim);line-height:1.7}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.main-h{height:66px;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--line);flex:0 0 auto}
+.main-h .ttl{font-size:16px;font-weight:700;letter-spacing:.02em}
+.main-h .sub{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.main-h .sp{flex:1}
+.work{flex:1;min-height:0;display:grid;grid-template-columns:286px minmax(0,1fr) 318px;gap:12px;padding:14px 18px 16px;overflow:hidden}
+.col{min-width:0;min-height:0;display:flex;flex-direction:column;gap:12px}
+.col.mid{overflow:hidden}
+.col.right{overflow:hidden}
+.scroll{overflow:hidden}
+
+/* variant C tabs */
+.subtabs{height:46px;display:flex;align-items:center;gap:2px;padding:0 22px;border-bottom:1px solid var(--line);background:rgba(10,12,13,.55)}
+.subtabs button{height:30px;padding:0 14px;font-size:12px;color:var(--muted);border-radius:3px}
+.subtabs button.on{color:var(--acid);background:rgba(216,242,75,.08)}
+.subtabs .sp{flex:1}
+
+.badge{font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--line);border-radius:2px;color:var(--dim)}
+.badge.hot{color:var(--ember);border-color:rgba(255,107,53,.35);background:rgba(255,107,53,.08)}
+.progress{height:3px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--acid)}
+.section-title{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.06em}
+.section-title .ln{flex:1;height:1px;background:var(--line)}
+.empty{display:grid;place-items:center;height:100%;color:var(--dim);font-size:12px;text-align:center;line-height:1.8}
+.col.mid .player{height:clamp(240px,34vh,330px);aspect-ratio:auto}
+.overlay .player{height:268px;aspect-ratio:auto}
+.overlay .trans{max-height:170px}
+.overlay .timeline{padding:6px 0 0}
+.overlay .wave{height:34px}
+.overlay .row{padding:6px 8px}
+.overlay .row .meta b{font-size:11px}
+.overlay .row .meta small{font-size:8px}
+.overlay .hr{margin:8px 0}
+body[data-variant="c"] .col.left .card:last-child{display:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+document.body.setAttribute('data-start','1');
+const q = new URLSearchParams(location.search);
+const v = (q.get('v')||'a').toLowerCase();
+const labels = {a:'单页 + 宽浮层', b:'左侧导航 + 主工作区', c:'顶部 Tab'};
+document.body.setAttribute('data-variant', v);
+
+function topbar(){
+  return `<div class="top">
+    <div class="brand"><b>BILI·SCRIBE</b><span>视频内容总结 / WORKBENCH</span></div>
+    <span class="tag" style="border-color:rgba(216,242,75,.35);color:var(--acid)">方案 ${v.toUpperCase()} · ${labels[v]}</span>
+    <div class="sp"></div>
+    <div class="chips">
+      <span class="tag"><i></i>模型 qwen3.8-omni</span>
+      <span class="tag warn"><i></i>队列 2</span>
+      <span class="tag">历史 78</span>
+      <span class="tag">角色 标准</span>
+      <button class="btn ghost sm">设置</button>
+    </div>
+  </div>`;
+}
+
+function assetList(){
+  return `<div class="list">
+    ${[
+      ['【4K】这可能是今年最好的国产独立游戏','BV1xx411c7mD','42:18','已转录'],
+      ['从零开始理解拉康：欲望的 graph','BV1Ab4y1Z7qR','1:18:42','已转录'],
+      ['经济学人精读：平台资本主义的尽头','BV1cd4y1X7wS','28:06','待转录'],
+      ['深夜闲聊：为什么我们越来越累','BV1ef4y1A7bT','56:30','已切片'],
+    ].map((x,i)=>`<div class="row ${i===0?'on':''}">
+      <div class="thumb"></div>
+      <div class="meta"><b>${x[0]}</b><small>${x[1]} · ${x[2]} · ${x[3]}</small></div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function playerBlock(){
+  return `<div class="player"><div class="img"></div><div class="play"></div>
+    <div class="corner">SOURCE · 16:9</div>
+    <div class="hud"><span>12:04 / 42:18</span><span>1080P · 30fps</span></div>
+  </div>`;
+}
+
+function timeline(){
+  return `<div class="timeline">
+    <div class="wave">${Array.from({length:88},(_,i)=>`<i class="${[9,10,11,22,23,40,41,42,60,61,62,74].includes(i)?'hot':''}" style="height:${18+Math.abs(Math.sin(i*1.7))*34}%"></i>`).join('')}</div>
+    <div class="track">
+      <div class="clip" style="left:18%;width:17%"><span>00:07:42 – 00:08:55</span></div>
+      <div class="clip b" style="left:46%;width:13%"><span>00:19:20 – 00:20:44</span></div>
+      <div class="clip" style="left:72%;width:9%"><span>00:30:08</span></div>
+    </div>
+    <div class="scale"><span>00:00</span><span>10:30</span><span>21:00</span><span>31:30</span><span>42:18</span></div>
+  </div>`;
+}
+
+function transcript(){
+  return `<div class="trans">
+    ${[
+      ['12:04','所以这里其实有一个很关键的转向：平台不再只是中介，它开始定义什么算“内容”。'],
+      ['12:18','当你以为自己在选择的时候，推荐系统已经把可选集合缩小了。'],
+      ['12:31','这不是阴谋论，它更像是一种结构性的筛选。'],
+      ['12:47','我们接下来要看的是，这种筛选如何反过来塑造创作者。'],
+      ['13:02','注意，这里有一个反直觉的地方——流量越大，创作反而越保守。'],
+    ].map((x,i)=>`<div class="line ${i===2?'hi':''}"><span class="ts">${x[0]}</span><span>${x[1]}</span></div>`).join('')}
+  </div>`;
+}
+
+function clipPanel(){
+  return `<div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div class="card-h"><span class="t">切片候选</span><span class="n">AI 草稿 · 6</span><span style="flex:1"></span><span class="badge hot">待确认</span></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:8px;overflow:hidden">
+      ${[
+        ['01','平台如何定义“内容”','00:07:42 – 00:08:55','1:13','高光'],
+        ['02','流量越大，创作越保守','00:19:20 – 00:20:44','1:24','高光'],
+        ['03','推荐系统不是阴谋，是结构','00:30:08 – 00:31:02','0:54','高光'],
+        ['04','长文分段 · 平台资本主义','00:12:04 – 00:18:30','6:26','长文'],
+      ].map((x,i)=>`<div class="row ${i===0?'on':''}" style="padding:8px;border:1px solid ${i===0?'rgba(216,242,75,.22)':'var(--line-s)'};background:${i===0?'rgba(216,242,75,.06)':'transparent'}">
+        <div class="mono" style="font-size:10px;color:var(--dim);padding-top:2px">${x[0]}</div>
+        <div class="meta"><b style="font-size:12px">${x[1]}</b><small>${x[2]} · ${x[3]}</small></div>
+        <span class="badge" style="align-self:center">${x[4]}</span>
+      </div>`).join('')}
+      <div class="hr"></div>
+      <div class="mini-label">导出预设</div>
+      <div style="display:flex;gap:6px;margin-top:2px">
+        <button class="btn ghost sm" style="flex:1">原比例 · 默认</button>
+        <button class="btn ghost sm" style="flex:1">9:16</button>
+      </div>
+      <button class="btn" style="height:34px;margin-top:2px">导出选中切片</button>
+    </div>
+  </div>`;
+}
+
+function variantA(){
+  return `${topbar()}
+  <div style="height:calc(100vh - 62px);position:relative;overflow:hidden">
+    <div style="width:840px;margin:0 auto;padding:24px 0;opacity:.55">
+      <div class="mini-label" style="margin-bottom:10px">新建总结 / NEW TASK</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;height:40px;border:1px solid var(--line);background:var(--panel);border-radius:3px;display:flex;align-items:center;padding:0 12px;color:var(--dim);font-size:12px">粘贴视频链接、BV 号，或整段分享文案</div>
+        <button class="btn ghost">字幕</button><button class="btn">开始总结</button>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <div class="card-h"><span class="t">任务 · BV1xx411c7mD</span><span class="n">已完成</span></div>
+        <div class="card-b">
+          <div style="font-size:18px;font-weight:700;line-height:1.45">这可能是今年最好的国产独立游戏</div>
+          <div style="display:flex;gap:8px;margin-top:10px"><span class="tag">42:18</span><span class="tag">字幕 612 段</span><span class="tag">弹幕 1.2 万</span><span class="tag">画面 8 帧</span></div>
+          <div class="hr"></div>
+          <div style="font-size:12px;line-height:1.9;color:var(--muted)">一句话总结会放在这里。下面是主体、要点、时间轴与素材局限——和现在的 bili-scribe 一模一样，只是右侧多了一个可以随时拉出来的素材/切片抽屉。</div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px"><div class="card-h"><span class="t">主体</span><span class="n">V3 · 标准</span></div><div class="card-b" style="color:var(--muted);font-size:12px;line-height:1.9">总结正文区域。单页结构保持不变，阅读时不会被侧栏打断。</div></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="overlay">
+      <div class="overlay-h"><span class="t">素材库 / 切片台</span><span class="badge">宽浮层 · 可关闭</span><span style="flex:1"></span><div class="tabs"><button class="on">素材</button><button>切片</button><button>字幕</button></div><button class="btn ghost sm">关闭</button></div>
+      <div class="overlay-b">
+        <div class="overlay-l">
+          <div class="mini-label" style="margin-bottom:8px">当前视频 / 4 个资产</div>
+          ${assetList()}
+          <div class="hr"></div>
+          <div class="kv"><span>下载</span><span>1080P · 1.2 GB</span></div>
+          <div class="kv"><span>转录</span><span>faster-whisper</span></div>
+          <div class="kv"><span>字幕</span><span>612 段 · 中英</span></div>
+        </div>
+        <div class="overlay-r">
+          ${playerBlock()}
+          ${timeline()}
+          <div style="display:flex;gap:10px;min-height:0;flex:1">
+            <div style="flex:1;min-width:0"><div class="section-title"><span>转录</span><span class="ln"></span><span class="dim mono" style="font-size:9px">612 段</span></div><div style="margin-top:8px">${transcript()}</div></div>
+            <div style="width:270px;flex:0 0 auto">${clipPanel()}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function rail(active){
+  const items=[['新建任务','＋'],['素材库','▦', '12'],['切片台','✂','6'],['发布记录','↗'],['设置','⚙']];
+  return `<div class="rail">
+    <div class="group">WORKSPACE</div>
+    ${items.map(x=>`<div class="nav ${x[0]===active?'on':''}"><span class="ic"></span><span>${x[0]}</span>${x[2]?`<span class="bd">${x[2]}</span>`:''}</div>`).join('')}
+    <div class="group" style="margin-top:22px">LIBRARY</div>
+    <div class="nav"><span class="ic"></span><span>下载队列</span><span class="bd">2</span></div>
+    <div class="nav"><span class="ic"></span><span>转录任务</span></div>
+    <div class="nav"><span class="ic"></span><span>发布草稿</span></div>
+    <div class="foot"><div style="display:flex;justify-content:space-between"><span>磁盘</span><span class="mono">68.4 GB</span></div><div class="progress" style="margin-top:6px"><i style="width:34%"></i></div><div style="margin-top:10px">本地优先 · 数据不出机</div></div>
+  </div>`;
+}
+
+function workArea(){
+  return `<div class="work">
+    <div class="col left">
+      <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+        <div class="card-h"><span class="t">素材库</span><span class="n">12</span><span style="flex:1"></span><button class="btn ghost sm">导入</button></div>
+        <div class="card-b" style="overflow:hidden">${assetList()}</div>
+      </div>
+      <div class="card"><div class="card-b" style="padding:10px 14px">
+        <div class="kv"><span>当前</span><span>BV1xx411c7mD</span></div>
+        <div class="kv"><span>时长</span><span>42:18</span></div>
+        <div class="kv"><span>字幕</span><span>612 段</span></div>
+      </div></div>
+    </div>
+    <div class="col mid">
+      <div class="card" style="padding:10px;flex:0 0 auto">${playerBlock()}</div>
+      <div class="card" style="padding:12px 14px;flex:0 0 auto">${timeline()}</div>
+      <div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div class="card-h"><span class="t">转录与字幕</span><span class="n">612 段 · 中英</span><span style="flex:1"></span><span class="badge">跟随播放</span></div>
+        <div class="card-b" style="overflow:hidden">${transcript()}</div>
+      </div>
+    </div>
+    <div class="col right">${clipPanel()}</div>
+  </div>`;
+}
+
+function variantB(){
+  return `${topbar()}<div class="shell">${rail('切片台')}
+    <div class="main">
+      <div class="main-h"><div><div class="ttl">切片台</div><div class="sub">BV1xx411c7mD · 这可能是今年最好的国产独立游戏</div></div><div class="sp"></div><span class="tag"><i></i>已转录</span><span class="tag">16:9 源</span><button class="btn ghost sm">重新分析</button><button class="btn sm">导出</button></div>
+      ${workArea()}
+    </div>
+  </div>`;
+}
+
+function variantC(){
+  return `${topbar()}
+  <div class="subtabs"><button>总结</button><button>素材</button><button class="on">切片</button><button>发布</button><span class="sp"></span><span class="mono dim" style="font-size:10px">BV1xx411c7mD · 42:18</span></div>
+  <div class="shell" style="height:calc(100vh - 108px)">${workArea()}</div>`;
+}
+
+try {
+  document.getElementById('app').innerHTML = v==='b'?variantB():v==='c'?variantC():variantA();
+} catch (e) {
+  document.body.innerHTML = '<pre style="color:#fff;padding:20px;white-space:pre-wrap">' + (e && e.stack ? e.stack : e) + '</pre>';
+}
+</script>
+</body>
+</html>
