@@ -1997,11 +1997,20 @@ select,
 /* 项目选择 / 角色选择：原生 select 的选中项默认靠左，加大宽度后看着像悬在半空。
    `text-align-last` 是真正管「选中项」的那条，`text-align` 兜底（部分平台只认前者）。*/
 #sum-project,
-#sum-role {
+#sum-role,
+#sum-model,
+#sum-coll-model {
   text-align: center;
   text-align-last: center;
   padding-left: var(--gap-3);
   padding-right: var(--gap-3);
+}
+
+/* 模型名比角色名长，不给宽度会截成「跟随设置 · deepseek-cha」 */
+#sum-model,
+#sum-coll-model {
+  min-width: 200px;
+  max-width: 280px;
 }
 
 /* 没有版本时那句提示，居中当空态文案读，而不是当左对齐的正文读 */

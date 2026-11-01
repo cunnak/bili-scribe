@@ -37,6 +37,8 @@ from video_workbench.config import (
     TRANSLATE_TARGETS,
     WorkbenchConfig,
     find_provider,
+    parse_model_spec,
+    resolve_task_model,
     render_yaml,
 )
 from video_workbench.core import resolver as resolver_mod
@@ -317,6 +319,7 @@ class SummaryStartParams(BaseModel):
     project_id: str = ""
     role: str = ""
     danmaku: list[str] = Field(default_factory=list)
+    model: str = ""
 
 
 class SummaryRefineParams(BaseModel):
@@ -790,6 +793,7 @@ class WorkbenchService:
         r.add("glossary.import_csv", self.glossary_import_csv, GlossaryCsvParams)
         r.add("glossary.export_csv", self.glossary_export_csv, GlossaryExportParams)
         r.add("subtitle.export", self.subtitle_export, SubtitleExportParams)
+        r.add("summary.models", self.summary_models)
         r.add("summary.start", self.summary_start, SummaryStartParams)
         r.add("summary.get", self.summary_get, IdParams)
         r.add("summary.versions", self.summary_versions, IdParams)
@@ -1603,7 +1607,8 @@ class WorkbenchService:
         return ChatClient.from_config(self.cfg, task=task)
 
     def _llm_client_for(
-        self, provider: str = "", base_url: str = "", api_key: str = "", task: str = ""
+        self, provider: str = "", base_url: str = "", api_key: str = "", task: str = "",
+        model: str = ""
     ):
         """按界面上**当前**的地址/密钥造客户端，允许它们还没保存。
 
@@ -1638,7 +1643,11 @@ class WorkbenchService:
                     "填好再点",
                 )
         if not base_url and not api_key and not provider:
-            return self._llm_client(task)
+            client = self._llm_client(task)
+            if model:
+                # 只选了模型、没指名服务商：还是这条早退路径，但模型照样要换
+                client.model = model
+            return client
         cfg = copy.deepcopy(self.cfg)
         card = find_provider(cfg.llm, provider) if provider else None
         if card is not None:
@@ -1665,7 +1674,11 @@ class WorkbenchService:
                         target.api_key = api_key
             except Exception:  # noqa: BLE001 - 取不到就退回扁平字段，不因这个把请求打死
                 pass
-        return ChatClient.from_config(cfg, provider=provider, task=task)
+        client = ChatClient.from_config(cfg, provider=provider, task=task)
+        if model:
+            # 「这一次用哪个模型」是调用方的显式选择，优先级高于任务映射与默认模型
+            client.model = model
+        return client
 
     def llm_test(
         self, provider: str = "", model: str = "", base_url: str = "", api_key: str = ""
@@ -2423,8 +2436,42 @@ class WorkbenchService:
             "default": (self.cfg.llm.role or summarizer.DEFAULT_ROLE),
         }
 
+    def _pick_model(self, spec: str, task: str) -> tuple[str, str]:
+        """把界面上选的模型翻成 (服务商 id, 模型名)。空串＝跟随设置。"""
+        raw = (spec or "").strip()
+        if not raw:
+            return "", ""
+        provider, model = parse_model_spec(raw)
+        if provider:
+            card = find_provider(self.cfg.llm, provider)
+            if card is None:
+                raise WBError(
+                    "VALIDATION",
+                    f"没有这个服务商：{provider}",
+                    "在 设置 → 模型 里添加这家，或刷新页面重选",
+                )
+            return card.id, model
+        return "", model
+
+    def summary_models(self) -> dict[str, Any]:
+        """列出总结能选的模型：所有服务商卡里的模型 + 当前的默认选择。"""
+        items: list[dict[str, Any]] = []
+        for card in self.cfg.llm.providers or []:
+            for name in card.models or []:
+                items.append({
+                    "spec": f"{card.id}/{name}",
+                    "provider": card.id,
+                    "provider_name": card.name or card.id,
+                    "model": name,
+                })
+        card_default, model_default = resolve_task_model(self.cfg.llm, "summary")
+        default = ""
+        if card_default is not None and model_default:
+            default = f"{card_default.id}/{model_default}"
+        return {"items": items, "default": default, "configured": bool(items)}
     def summary_start(self, project_id: str = "", role: str = "",
-                      danmaku: list[str] | None = None) -> dict[str, Any]:
+                      danmaku: list[str] | None = None,
+                      model: str = "") -> dict[str, Any]:
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
         project = self.repo.project_get(project_id)
@@ -2437,7 +2484,14 @@ class WorkbenchService:
                 "这条视频还没有字幕，先转录",
                 "总结只用素材里的信息；没有字幕就没有素材可用",
             )
-        client = self._require_llm("summary")
+        provider_id, model_name = self._pick_model(model, "summary")
+        client = self._llm_client_for(provider_id, task="summary", model=model_name)
+        if not client.configured:
+            raise WBError(
+                "LLM_NOT_CONFIGURED",
+                "还没有配置大模型",
+                "在 设置 → 模型 里填好地址与密钥再来",
+            )
         picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()
         if picked not in summarizer.ROLE_KEYS:
             raise WBError("VALIDATION", f"没有这个角色：{picked}")
@@ -2450,10 +2504,11 @@ class WorkbenchService:
                 "role": picked,
                 "danmaku": [str(item) for item in (danmaku or [])][:400],
                 "model": client.model,
+                "provider": provider_id,
             },
         )
         return {"job": job, "role": picked, "model": client.model,
-                "segments": len(row.get("segments") or [])}
+                "provider": provider_id, "segments": len(row.get("segments") or [])}
 
     def summary_get(self, id: str = "") -> dict[str, Any]:
         """读最新一版（``id`` 是项目 id）。没有总结时返回 ``found=False``。"""
@@ -2475,7 +2530,8 @@ class WorkbenchService:
         return {"versions": [_version_row(item) for item in rows]}
 
     def summary_refine(self, project_id: str = "", requirement: str = "",
-                       role: str = "", summary_id: str = "") -> dict[str, Any]:
+                       role: str = "", summary_id: str = "",
+                       model: str = "") -> dict[str, Any]:
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
         demand = (requirement or "").strip()
@@ -2490,7 +2546,15 @@ class WorkbenchService:
         base = self.repo.summary_get(summary_id) if summary_id else self.repo.summary_latest(project_id)
         if not base:
             raise WBError("CONFLICT", "还没有总结，先生成一版再改")
-        client = self._require_llm("summary")
+        provider_id, model_name = self._pick_model(model, "summary")
+        if not provider_id and not model_name:
+            # 没指定就用这一版当初用的模型，别悄悄换成别的
+            previous = str(base.get("model") or "")
+            if previous:
+                model_name = previous
+        client = self._llm_client_for(provider_id, task="summary", model=model_name)
+        if not client.configured:
+            raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         picked = (role or base.get("role") or self.cfg.llm.role
                   or summarizer.DEFAULT_ROLE)
         job = self.jobs.submit(
@@ -2503,6 +2567,7 @@ class WorkbenchService:
                 "requirement": demand,
                 "previous_id": str(base.get("id") or ""),
                 "model": client.model,
+                "provider": provider_id,
             },
         )
         return {"job": job, "requirement": demand, "base": base.get("version")}
@@ -2609,7 +2674,8 @@ class WorkbenchService:
         return {"collections": items}
 
     def summary_collection_overview(self, collection: str = "", role: str = "",
-                                    extra: str = "") -> dict[str, Any]:
+                                    extra: str = "",
+                                    model: str = "") -> dict[str, Any]:
         title = (collection or "").strip()
         if not title:
             raise WBError("VALIDATION", "缺少合集名")
@@ -2628,7 +2694,12 @@ class WorkbenchService:
                 f"有 {len(missing)} 集还没有总结，先给它们各出一版",
                 "缺总结的：" + "、".join(missing[:5]),
             )
-        client = self._require_llm("collection_overview")
+        provider_id, model_name = self._pick_model(model, "collection_overview")
+        client = self._llm_client_for(
+            provider_id, task="collection_overview", model=model_name
+        )
+        if not client.configured:
+            raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()
         # ``wb_job.project_id`` 有外键指向 ``wb_project``。合集的 ``col_xxx`` 不是项目，
         # 当 project_id 传进去会直接 FOREIGN KEY constraint failed —— 任务表就挂在这一步。
@@ -2641,10 +2712,11 @@ class WorkbenchService:
                 "role": picked,
                 "extra": (extra or "").strip()[:400],
                 "model": client.model,
+                "provider": provider_id,
             },
         )
         return {"job": job, "collection": title, "items": len(children),
-                "model": client.model, "role": picked}
+                "model": client.model, "provider": provider_id, "role": picked}
 
     def summary_collection_get(self, id: str = "") -> dict[str, Any]:
         """``id`` 可以是合集名，也可以是 ``col_xxx``。界面两种都有。"""
@@ -2678,7 +2750,11 @@ class WorkbenchService:
         children = self._collection_children(title)
         if len(children) < overview_core.MIN_ITEMS:
             raise WBError("CONFLICT", f"合集至少要有 {overview_core.MIN_ITEMS} 集")
-        client = self._llm_client("collection_overview")
+        client = self._llm_client_for(
+            str(payload.get("provider") or ""),
+            task="collection_overview",
+            model=str(payload.get("model") or ""),
+        )
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)
@@ -4750,7 +4826,11 @@ class WorkbenchService:
         segments = (row or {}).get("segments") or []
         if not segments:
             raise WBError("CONFLICT", "这条视频还没有字幕")
-        client = self._llm_client("summary")
+        client = self._llm_client_for(
+            str(payload.get("provider") or ""),
+            task="summary",
+            model=str(payload.get("model") or ""),
+        )
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)

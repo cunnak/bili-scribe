@@ -903,6 +903,36 @@ async function main() {
       "没标出恢复来源");
   });
 
+  await check("总结页：换模型后，生成请求带的就是那个模型", async () => {
+    WB.router.go("summary", {});
+    await tick(260);
+    const view = $("#view");
+    const pick = view.querySelector("#sum-model");
+    assert.ok(pick, "工具栏没有模型下拉");
+    assert.ok(pick.options.length >= 2, "模型下拉只有一个选项：" + pick.options.length);
+    // 第一项是「跟随设置」，其余是具体模型；选一个不等于默认的
+    const target = [...pick.options].map((o) => o.value).filter((v) => v)[0];
+    assert.ok(target, "没有可选的模型 spec");
+    pick.value = target;
+    pick.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await tick(60);
+
+    // 抓 summary.start 的参数：模型必须原样带上去
+    const seen = [];
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "summary.start") seen.push(params || {});
+      return realRpc.call(WB, method, params, opts);
+    };
+    try {
+      view.querySelector("#sum-start").click();
+      await tick(600);
+    } finally {
+      WB.rpc = realRpc;
+    }
+    assert.strictEqual(seen.length, 1, "没发出 summary.start");
+    assert.strictEqual(seen[0].model, target, "带上去的模型不对：" + JSON.stringify(seen[0]));
+  });
   await check("总结页：模型输出里的 HTML 不会被执行", async () => {
     const md = window.WB.pages.summary._internals.markdown;
     const node = md("## 标题\n正文里有 <img src=x onerror=alert(1)> 和 <script>bad()</script>");

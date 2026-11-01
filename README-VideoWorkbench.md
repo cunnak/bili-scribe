@@ -85,9 +85,15 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 （`deepseek-reasoner`，谁的 `models` 里有它就用谁）；解析只有 `config.resolve_task_model` 一个入口。
 模型 id 自带斜杠时（如 `qwen/qwen3-vl-plus`）不会被拆开——前缀不是已知服务商就整串当模型名。
 
-RPC 里跟模型相关的只有两个：`llm.test`（发一条最小对话验证这家能不能用）和
+RPC 里跟模型相关的有三个：`llm.test`（发一条最小对话验证这家能不能用）、
 `llm.models`（`GET {base_url}/models` 列这家账号能用的模型，供界面「获取可用模型」用；
-不需要 `model` 已配好，缺地址/密钥回 `LLM_NOT_CONFIGURED`，地址不支持该接口回 `LLM_BAD_RESPONSE`）。
+不需要 `model` 已配好，缺地址/密钥回 `LLM_NOT_CONFIGURED`，地址不支持该接口回 `LLM_BAD_RESPONSE`），
+以及 `summary.models`（总结页下拉的数据源：把所有服务商卡展开成 `{spec, provider, provider_name, model}`，
+外加 `default`＝`resolve_task_model(llm, "summary")` 的结果）。
+
+`summary.start` / `summary.refine` / `summary.collection.overview` 都收一个可选 `model`：
+空串＝跟随设置；`服务商id/模型名` 会走 `parse_model_spec`（斜杠分隔），指名的服务商不存在回 `VALIDATION`；
+只写模型名则换模型不换服务商。`summary.refine` 不传时**沿用这一版的模型**，不悄悄换。
 
 `llm.user_agent` 留空用**内置浏览器 UA**（`Mozilla/5.0 … Chrome/141 … Safari/537.36`）。
 之所以这么设：Cloudflare 的 1010 规则按客户端指纹判机器人。同一把 key、同一个地址实测——

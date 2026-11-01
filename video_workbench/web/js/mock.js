@@ -1506,6 +1506,21 @@
           ],
           default: "standard"
         });
+      case "summary.models": {
+        // 与真后端同构：把配置里的服务商展开成「服务商id/模型名」
+        var cards = (SETTINGS.llm.providers || []);
+        var out = [];
+        cards.forEach(function (card) {
+          (card.models || []).forEach(function (name) {
+            out.push({ spec: card.id + "/" + name, provider: card.id,
+                       provider_name: card.name || card.id, model: name });
+          });
+        });
+        var act = cards.filter(function (c) { return c.id === (SETTINGS.llm.active_provider || ""); })[0] || cards[0];
+        return ok({ items: out,
+                    default: act && (act.models || []).length ? (act.id + "/" + act.models[0]) : "",
+                    configured: out.length > 0 });
+      }
       case "summary.start":
       case "summary.refine": {
         var pid = p.project_id || "p_demo_1";
@@ -1520,11 +1535,12 @@
           // mock 少加一版，截图上就会显示成「重出没有产生新版本」——那是假象。
           var fresh = summaryRow(box.versions.length + 1, summaryContentFor(p.project_id),
                                  p.role || box.summary.role, "");
+          if (p.model) fresh.model = String(p.model).split("/").pop();
           box.summary = fresh;
           box.versions = [fresh].concat(box.versions);
         }
         SUM_JOB.result = { version: box.summary.version };
-        return ok({ job: SUM_JOB, role: box.summary.role, model: "deepseek-chat" });
+        return ok({ job: SUM_JOB, role: box.summary.role, model: box.summary.model || "deepseek-chat" });
       }
       case "summary.get": {
         // 首次进页面就给一份现成的（含两版历史），这样截图和手工验收看到的是

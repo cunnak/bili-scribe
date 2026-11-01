@@ -30,6 +30,9 @@
     projectId: "",
     roles: [],
     role: "",
+    models: [],
+    model: "",           // "" = 跟随设置（llm.tasks.summary → llm.model）
+    modelDefault: "",
     found: false,
     summary: null,
     versions: [],
@@ -164,6 +167,13 @@
   }
 
   function loadRoles() {
+    call("summary.models").then(function (data) {
+      state.models = (data && data.items) || [];
+      state.modelDefault = (data && data.default) || "";
+    }).catch(function () {
+      state.models = [];
+    });
+
     return call("summary.roles").then(function (data) {
       state.roles = (data && data.roles) || [];
       if (!state.role) {
@@ -262,7 +272,7 @@
     state.error = "";
     state.note = "正在排队…";
     paint();
-    call("summary.start", { project_id: state.projectId, role: state.role })
+    call("summary.start", { project_id: state.projectId, role: state.role, model: state.model })
       .then(function (data) {
         state.jobId = (data.job && data.job.id) || "";
         return pollJob(state.jobId);
@@ -296,7 +306,7 @@
     state.error = "";
     state.note = "正在按你的要求改…";
     paint();
-    call("summary.refine", { project_id: state.projectId, requirement: demand })
+    call("summary.refine", { project_id: state.projectId, requirement: demand, model: state.model })
       .then(function (data) {
         state.jobId = (data.job && data.job.id) || "";
         return pollJob(state.jobId);
@@ -375,7 +385,7 @@
     state.error = "";
     state.note = "正在读子项总结…";
     paint();
-    call("summary.collection.overview", { collection: state.collection, role: state.role })
+    call("summary.collection.overview", { collection: state.collection, role: state.role, model: state.model })
       .then(function (data) {
         return pollJob(data.job.id).then(function (job) {
           return { job: job, items: data.items };
@@ -471,6 +481,7 @@
     var box = currentCollection();
     var actions = ui.h("div", { class: "page__actions" }, [
       rolePick,
+      modelSelect("sum-coll-model"),
       ui.h("button", {
         class: "btn btn--primary",
         id: "sum-coll-start",
@@ -507,6 +518,41 @@
     ]);
   }
 
+  function shortSpec(spec) {
+    var text = String(spec || "");
+    var cut = text.indexOf("/");
+    return cut > 0 ? text.slice(cut + 1) : text;
+  }
+
+  function modelSelect(id) {
+    var hint = state.modelDefault
+      ? "跟随设置 · " + shortSpec(state.modelDefault)
+      : "跟随设置";
+    var options = [ui.h("option", {
+      value: "",
+      text: hint,
+      selected: state.model ? null : "selected"
+    })];
+    state.models.forEach(function (item) {
+      options.push(ui.h("option", {
+        value: item.spec,
+        text: item.provider_name + " · " + item.model,
+        selected: item.spec === state.model ? "selected" : null
+      }));
+    });
+    if (!state.models.length) {
+      options.push(ui.h("option", { value: "", text: "（还没有配置服务商）", disabled: "disabled" }));
+    }
+    return ui.h("select", {
+      class: "input input--select",
+      id: id || "sum-model",
+      title: "这一版用哪个模型写；换个模型重出一版就能对比",
+      onchange: function (event) {
+        state.model = event.target.value;
+        render();
+      }
+    }, options);
+  }
   function head() {
     if (state.mode === "collection") return collHead();
     var options = state.projects.map(function (item) {
@@ -541,6 +587,7 @@
 
     var actions = ui.h("div", { class: "page__actions" }, [
       rolePick,
+      modelSelect(),
       ui.h("button", {
         class: "btn btn--primary",
         id: "sum-start",

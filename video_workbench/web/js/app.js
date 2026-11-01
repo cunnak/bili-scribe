@@ -371,9 +371,28 @@
       });
   }
 
+  /**
+   * 对账拿回来的是磁盘上的状态，可能比界面刚收到的进度**旧**半拍。
+   * 两边都在跑时取进度大的那个，别让对账把进度条往回拽。
+   */
+  function preferFresher(list) {
+    var byId = {};
+    state.jobs.forEach(function (job) {
+      if (job && job.id) byId[job.id] = job;
+    });
+    return list.map(function (job) {
+      var old = job && job.id ? byId[job.id] : null;
+      if (!old) return job;
+      var sameRunning = old.status === "running" && job.status === "running";
+      if (!sameRunning) return job;
+      var a = Number(old.progress) || 0;
+      var b = Number(job.progress) || 0;
+      return b >= a ? job : old;
+    });
+  }
   /** 已有一份任务列表时走这里：集合没变就只刷数值，变了才重建。 */
   function applyJobs(body, rows, list, done) {
-        var jobs = list.slice(0, 30);
+        var jobs = preferFresher(list).slice(0, 30);
         state.jobs = jobs;
         refreshJobText(null);
         var sameSet =
