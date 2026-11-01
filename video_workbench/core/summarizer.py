@@ -81,6 +81,10 @@ class SummaryLLM:
         # 从项目真实时长与字幕里喂进来，否则时间线永远只写开头那十几分钟。
         self.duration_ms = 0
         self.timeline_index = ""
+        # bili-scribe 的 `_coerce_timeline()` 结尾是 `return out[:20]`——它把时间线
+        # 硬截到 20 条，且不能改它的业务代码。所以密度提升只能在这里留一份更长的，
+        # 由 run()/refine() 在拿到 Summary 之后覆盖回去（见 `_apply_dense`）。
+        self.dense_timeline: list[dict[str, str]] = []
 
     def chat(
         self,
@@ -278,6 +282,8 @@ class SummaryLLM:
         if not data:
             return fixed
         rows = data.get("timeline") or []
+        if len(rows) > 20:
+            self.dense_timeline = rows
         target = _timeline_target(messages, self.duration_ms)
         if target and len(rows) < max(6, int(target * 0.6)):
             sink(f"时间线只有 {len(rows)} 条，按 {target} 条补一轮")
@@ -286,6 +292,7 @@ class SummaryLLM:
             )
             if len(extra) > len(rows):
                 data["timeline"] = extra
+                self.dense_timeline = extra
                 self.notes.append(f"时间线偏稀（{len(rows)} 条），补到 {len(extra)} 条")
                 return json.dumps(data, ensure_ascii=False)
             self.notes.append(f"时间线补写没拿到更多条目（原 {len(rows)} 条）")
@@ -457,6 +464,18 @@ def _segment_end_ms(segments: list[dict[str, Any]]) -> int:
     return end
 
 
+def _apply_dense(summary: Any, llm: "SummaryLLM") -> Any:
+    """把适配器里那份更密的时间线覆盖回 Summary。
+
+    bili-scribe 的 `_coerce_timeline()` 结尾 `return out[:20]` 是硬上限，两小时的视频
+    因此永远只剩 20 条。它的业务代码不动，覆盖放在这一层做。
+    """
+    dense = list(getattr(llm, "dense_timeline", None) or [])
+    if len(dense) > len(getattr(summary, "timeline", None) or []):
+        summary.timeline = dense
+    return summary
+
+
 def _attach_timeline(llm: "SummaryLLM", project: dict[str, Any],
                      segments: list[dict[str, Any]]) -> None:
     """把片长与全片索引接到适配器上（时间线密度靠它称重）。"""
@@ -522,6 +541,7 @@ def run(
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
 
+    summary = _apply_dense(summary, llm)
     role_obj = get_role(key)
     return {
         "summary": summary.to_dict(),
@@ -577,6 +597,7 @@ def refine(
         raise WBError("LLM_BAD_RESPONSE", f"模型没给出可用的总结 JSON：{exc}") from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
+    summary = _apply_dense(summary, llm)
     return {
         "summary": summary.to_dict(),
         "usage": {"calls": llm.calls},

@@ -207,3 +207,27 @@ def test_duration_comes_from_segments_because_project_has_no_duration_column():
     _attach_timeline(llm, {"title": "没有时长列的项目"}, segments)
     assert llm.duration_ms == 7_200_000
     assert "01:59:50" in llm.timeline_index
+
+
+def test_dense_timeline_survives_bili_scribe_cap():
+    """bili-scribe 的 `_coerce_timeline()` 结尾 `return out[:20]`——不敢改它的代码，
+    所以在适配器这层留一份更长的，拿到 Summary 之后覆盖回去。"""
+    from dataclasses import dataclass, field
+
+    from video_workbench.core.summarizer import _apply_dense
+
+    @dataclass
+    class FakeSummary:
+        timeline: list = field(default_factory=list)
+
+    llm = SummaryLLM(ScriptClient([]), model="stub-model")
+    summary = FakeSummary(timeline=[{"t": "00:%02d" % (i % 60), "text": "x"} for i in range(20)])
+    dense = [{"t": "01:%02d" % (i % 60), "text": "x%d" % i} for i in range(58)]
+    llm.dense_timeline = dense
+
+    out = _apply_dense(summary, llm)
+    assert len(out.timeline) == 58
+
+    llm.dense_timeline = dense[:3]  # 更短就不覆盖，别把好的弄坏
+    out = _apply_dense(FakeSummary(timeline=dense[:20]), llm)
+    assert len(out.timeline) == 20
