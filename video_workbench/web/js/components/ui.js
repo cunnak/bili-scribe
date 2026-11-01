@@ -290,4 +290,9 @@
   ui.statusText = function (status) {
     return (STATUS[status] || {}).text || status || "未知";
   };
+
+  /** 徽标要就地改状态时用它取类名，省得重建整个 pill 节点。 */
+  ui.statusClass = function (status) {
+    return (STATUS[status] || {}).cls || "";
+  };
 })();

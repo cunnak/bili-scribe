@@ -263,7 +263,7 @@
             WB.rpc("job.demo.submit", { seconds: 6 }, { silent: true })
               .then(function () {
                 ui.toast("演示任务已提交，进度会出现在状态条与这里", "success");
-                paintJobs(body);
+                paintJobs(body, rows, function () {});
               })
               .catch(function (err) {
                 ui.toast((err && err.message) || "提交失败", "error");
@@ -274,84 +274,119 @@
           class: "btn",
           text: "刷新",
           onclick: function () {
-            paintJobs(body);
+            paintJobs(body, rows);
           }
         }),
         ui.h("button", { class: "btn btn--primary", text: "关闭", onclick: function () { dialog.close(); } })
       ]
     });
-    paintJobs(body);
+    var rows = {};
+    paintJobs(body, rows);
 
     // 弹窗关掉就把订阅摘掉，否则每次开窗都留一个往已卸载节点里写的回调
-    var off = WB.on("job.any", function () {
+    var off = WB.on("job.any", function (payload) {
       if (!body.isConnected) {
         off();
         return;
       }
-      paintJobs(body);
+      syncJobEvent(body, rows, payload);
     });
     return dialog;
   }
 
-  function paintJobs(body) {
-    body.textContent = "";
+  /** 把一行任务的易变部分写进 DOM（不重建节点）。 */
+  function fillJobRow(refs, job) {
+    var percent = Math.round((Number(job.progress) || 0) * 100);
+    refs.title.textContent = jobKind(job) || job.id;
+    refs.percent.textContent = percent + "%";
+    refs.bar.style.width = percent + "%";
+    refs.stage.textContent = job.stage || job.message || "";
+    refs.pill.className = ("pill " + ui.statusClass(job.status)).trim();
+    refs.pill.textContent = ui.statusText(job.status);
+    var running = job.status === "running" || job.status === "queued";
+    refs.act.textContent = running ? "取消" : "重试";
+    refs.act.setAttribute("data-act", running ? "cancel" : "retry");
+    refs.job = job;
+  }
+
+
+  function jobRow(job, repaint) {
+    var refs = {};
+    var title = ui.h("span", { class: "mono", text: jobKind(job) || job.id });
+    var pill = ui.statusPill(job.status);
+    var percent = ui.h("span", { class: "mono muted" });
+    var bar = ui.h("div", { class: "progress__bar" });
+    var stage = ui.h("span", { class: "muted truncate" });
+    var act = ui.h("button", { class: "btn btn--ghost", text: "取消" });
+    act.addEventListener("click", function () {
+      var current = refs.job || job;
+      var running = current.status === "running" || current.status === "queued";
+      var method = running ? "job.cancel" : "job.retry";
+      WB.rpc(method, { id: current.id }, { silent: true })
+        .then(function () { repaint(); })
+        .catch(function (err) {
+          ui.toast((err && err.message) || (running ? "取消失败" : "重试失败"), "error");
+        });
+    });
+    var row = ui.h("div", { class: "card", style: "background:transparent" }, [
+      ui.h("div", { class: "card__body col", style: "gap:8px" }, [
+        ui.h("div", { class: "row", style: "justify-content:space-between" }, [
+          ui.h("div", { class: "row", style: "gap:8px" }, [title, pill]),
+          percent
+        ]),
+        ui.h("div", { class: "progress" }, [bar]),
+        ui.h("div", { class: "row", style: "justify-content:space-between" }, [stage, act])
+      ])
+    ]);
+    refs.row = row;
+    refs.title = title;
+    refs.pill = pill;
+    refs.percent = percent;
+    refs.bar = bar;
+    refs.stage = stage;
+    refs.act = act;
+    fillJobRow(refs, job);
+    return refs;
+  }
+
+  /**
+   * `rows` 是「任务 id → 那几行节点的引用」，跨事件复用。
+   * `force` 为真时整块重建（任务集合变了、或用户点了刷新）。
+   */
+  function paintJobs(body, rows, done) {
     WB.rpc("job.list", {}, { silent: true, fallback: [] })
       .then(function (data) {
-        var jobs = toJobArray(data);
+        var jobs = toJobArray(data).slice(0, 30);
         state.jobs = jobs;
         refreshJobText(null);
-        body.textContent = "";
-        if (!jobs.length) {
-          body.appendChild(ui.empty("没有任务", "Phase 1 起，下载 / 转录 / 导出都会出现在这里。可以先点右下角跑一个演示任务。"));
+        var sameSet =
+          jobs.length === Object.keys(rows).length &&
+          jobs.every(function (job) { return !!rows[job.id]; });
+
+        if (sameSet) {
+          // 同一批任务：只刷数值，不碰节点结构，也就不会闪
+          jobs.forEach(function (job) { fillJobRow(rows[job.id], job); });
+          if (done) done();
           return;
         }
-        jobs.slice(0, 30).forEach(function (job) {
-          var percent = Math.round((Number(job.progress) || 0) * 100);
-          body.appendChild(
-            ui.h("div", { class: "card", style: "background:transparent" }, [
-              ui.h("div", { class: "card__body col", style: "gap:8px" }, [
-                ui.h("div", { class: "row", style: "justify-content:space-between" }, [
-                  ui.h("div", { class: "row", style: "gap:8px" }, [
-                    ui.h("span", { class: "mono", text: job.kind || job.id }),
-                    ui.statusPill(job.status)
-                  ]),
-                  ui.h("span", { class: "mono muted", text: percent + "%" })
-                ]),
-                ui.h("div", { class: "progress" }, [ui.h("div", { class: "progress__bar", style: "width:" + percent + "%" })]),
-                ui.h("div", { class: "row", style: "justify-content:space-between" }, [
-                  ui.h("span", { class: "muted truncate", text: job.stage || job.message || "" }),
-                  job.status === "running" || job.status === "queued"
-                    ? ui.h("button", {
-                        class: "btn btn--ghost",
-                        text: "取消",
-                        onclick: function () {
-                          WB.rpc("job.cancel", { id: job.id }, { silent: true })
-                            .then(function () {
-                              paintJobs(body);
-                            })
-                            .catch(function (err) {
-                              ui.toast((err && err.message) || "取消失败", "error");
-                            });
-                        }
-                      })
-                    : ui.h("button", {
-                        class: "btn btn--ghost",
-                        text: "重试",
-                        onclick: function () {
-                          WB.rpc("job.retry", { id: job.id }, { silent: true })
-                            .then(function () {
-                              paintJobs(body);
-                            })
-                            .catch(function (err) {
-                              ui.toast((err && err.message) || "重试失败", "error");
-                            });
-                        }
-                      })
-                ])
-              ])
-            ])
-          );
-        });
+
+        var frag = document.createDocumentFragment();
+        var next = {};
+        if (!jobs.length) {
+          frag.appendChild(ui.empty("没有任务", "Phase 1 起，下载 / 转录 / 导出都会出现在这里。可以先点右下角跑一个演示任务。"));
+        } else {
+          jobs.forEach(function (job) {
+            var repaint = function () { paintJobs(body, next); };
+            var refs = jobRow(job, repaint);
+            next[job.id] = refs;
+            frag.appendChild(refs.row);
+          });
+        }
+        Object.keys(rows).forEach(function (id) { delete rows[id]; });
+        Object.keys(next).forEach(function (id) { rows[id] = next[id]; });
+        body.textContent = "";
+        body.appendChild(frag);
+        if (done) done();
       })
       .catch(function (err) {
         body.textContent = "";
@@ -359,6 +394,19 @@
       });
   }
 
+  /** 事件来了只动一行：新建 / 进度 / 结束都走这里。 */
+  function syncJobEvent(body, rows, payload) {
+    var job = jobRowOf(payload);
+    if (!job || !job.id) return;
+    mergeJob(job);
+    refreshJobText(null);
+    var refs = rows[job.id];
+    if (!refs) {
+      paintJobs(body, rows); // 新任务：这时候才需要重建（一次）
+      return;
+    }
+    fillJobRow(refs, job);
+  }
   /** job.list 可能返回数组，也可能是 {items:[…]}；两处都收，省得以后再改。 */
   function toJobArray(data) {
     if (Array.isArray(data)) return data;

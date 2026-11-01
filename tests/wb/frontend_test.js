@@ -2104,6 +2104,29 @@ async function main() {
     window.__wbEvent("job.finished", JSON.stringify({ id: "job_status_ui", status: "succeeded" }));
   });
 
+  // 下载时任务中心会闪：旧实现每来一条进度就 body.textContent="" + 重发 job.list + 重建全部卡片，
+  // 每秒 4 次。这里钉住「同一个任务行节点在进度事件之后还是同一个节点」（就地更新）。
+  await check("任务中心：进度事件只改这一行，不整块重画", async () => {
+    window.document.getElementById("status-jobs").click();
+    await tick(150);
+    const body = window.document.querySelector(".modal .modal__body");
+    assert.ok(body, "任务中心没打开");
+    const rows = body.querySelectorAll(".card");
+    assert.ok(rows.length > 0, "任务中心没有渲染出任何任务行");
+    const row = rows[0];
+    const bar = row.querySelector(".progress__bar");
+    assert.ok(bar, "任务行里没有进度条");
+    const listed = await WB.rpc("job.list", {}, { silent: true, fallback: [] });
+    const jobs = Array.isArray(listed) ? listed : (listed && listed.items) || [];
+    assert.ok(jobs.length > 0, "job.list 里没有任务");
+    const id = jobs[0].id;
+    window.__wbEvent("job.updated", JSON.stringify({ id: id, status: "running", progress: 0.42 }));
+    await tick(150);
+    const after = body.querySelectorAll(".card")[0];
+    assert.strictEqual(after, row, "任务行被重建了（节点换了），这就是下载时闪的原因");
+    assert.strictEqual(after.querySelector(".progress__bar"), bar, "进度条节点也被重建了");
+    assert.strictEqual(after.querySelector(".progress__bar").style.width, "42%", "进度没写进那一行");
+  });
   dom.window.close();
   console.log("\n前端骨架验收");
   console.log(results.join("\n"));
