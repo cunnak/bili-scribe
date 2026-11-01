@@ -135,3 +135,54 @@ def test_sparse_timeline_is_topped_up():
     assert len(client.calls) == 2
     assert "至少 60 条" in client.calls[1]["messages"][-1]["content"]
     assert any("补到 55 条" in note for note in llm.notes)
+
+
+def _sparse(messages):
+    """两小时视频、但提示词里只有开头十几分钟的时间戳（真实形状）。"""
+    return list(messages) + [
+        {"role": "user", "content": "字幕 [02:49] 断更复播 [13:40] 这里就断了"}
+    ]
+
+
+def test_target_reads_real_duration_not_the_prompt():
+    """片长不能用提示词里能看到的最后一个时间戳算。
+
+    真实现场：最后那次 JSON 请求里只剩分段摘要，时间戳停在前 14 分钟，
+    按它算分母会得出「13 分钟 → 20 条就够」，两小时视频的时间线永远只有 20 条。
+    """
+    from video_workbench.core.summarizer import _timeline_target
+
+    guess = _timeline_target(_sparse([]))
+    real = _timeline_target(_sparse([]), 2 * 60 * 60 * 1000)
+    assert guess == 20  # 只看提示词：自洽但错
+    assert real == 60  # 真片长：目标 60 条
+
+
+def test_index_is_attached_and_reaches_the_timeline_prompt():
+    """全片索引要挂到适配器上，并真的进到补写那一轮的提示词里。"""
+    from video_workbench.core.summarizer import _attach_timeline, timeline_marks
+
+    segments = [
+        {"start_ms": 0, "text": "开场第一句"},
+        {"start_ms": 61_000, "text": "一分钟处"},
+        {"start_ms": 7_140_000, "text": "一小时五十九分"},
+    ]
+    marks = timeline_marks(segments)
+    assert "00:00:00" in marks and "00:01:01" in marks and "01:59:00" in marks
+
+    llm = SummaryLLM(ScriptClient([]), model="stub-model")
+    _attach_timeline(llm, {"duration_sec": 7200}, segments)
+    assert llm.duration_ms == 7_200_000
+    assert "01:59:00" in llm.timeline_index
+
+
+def test_sparse_timeline_is_topped_up_with_index_in_prompt():
+    llm = SummaryLLM(ScriptClient([json.dumps(TIMELINE)]), model="stub-model")
+    llm.duration_ms = 7_200_000
+    llm.timeline_index = "00:00:00 开场\n01:59:00 收尾"
+    fixed = json.dumps({"one_line": "一", "summary_md": "正文",
+                        "timeline": [{"t": "02:49", "text": "开场"}]})
+    llm._finalize(fixed, _sparse([]), lambda _m: None, None, 4096)
+    sent = json.dumps(llm.client.calls[0]["messages"], ensure_ascii=False)
+    assert "全片的时间轴索引" in sent and "01:59:00" in sent
+    assert "至少 60 条" in sent

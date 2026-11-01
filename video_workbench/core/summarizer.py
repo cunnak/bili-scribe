@@ -76,6 +76,11 @@ class SummaryLLM:
         self.cfg = _ModelCfg(model=self.model)
         self.notes: list[str] = []
         self.calls = 0
+        # 片长与「全片时间轴索引」：最终那次 JSON 请求里往往只剩分段摘要，
+        # 时间戳只覆盖开头一两段。片长不能从提示词里猜，得由调用方（run/refine）
+        # 从项目真实时长与字幕里喂进来，否则时间线永远只写开头那十几分钟。
+        self.duration_ms = 0
+        self.timeline_index = ""
 
     def chat(
         self,
@@ -212,7 +217,8 @@ class SummaryLLM:
             return ""
 
         timeline = self._timeline_reply(
-            messages, body, temperature, max_tokens, _timeline_target(messages), sink
+            messages, body, temperature, max_tokens,
+            _timeline_target(messages, self.duration_ms), sink
         )
         body["timeline"] = timeline
         return json.dumps(body, ensure_ascii=False)
@@ -227,18 +233,27 @@ class SummaryLLM:
         want = f"至少 {int(least)} 条" if least else "最多 60 条"
         time_messages = list(messages) + [
             {"role": "assistant", "content": digest},
-            {
+        ]
+        marks = (self.timeline_index or "").strip()
+        if marks:
+            time_messages.append({
                 "role": "user",
                 "content": (
-                    "只输出时间线，一个 JSON 对象，形如 "
-                    '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
-                    f"{want}、每条不超过 30 字，覆盖全片的关键转折与结论，"
-                    "前后两条之间不要隔太久；"
-                    "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
-                    f"（时间线批次 {_short_nonce()}）"
+                    "这是全片的时间轴索引（每 60 秒取一条，格式「时间 内容」），"
+                    "时间戳请从这些里面挑，覆盖到片尾：\n" + marks
                 ),
-            },
-        ]
+            })
+        time_messages.append({
+            "role": "user",
+            "content": (
+                "只输出时间线，一个 JSON 对象，形如 "
+                '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
+                f"{want}、每条不超过 30 字，覆盖全片的关键转折与结论，"
+                "前后两条之间不要隔太久；"
+                "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
+                f"（时间线批次 {_short_nonce()}）"
+            ),
+        })
         try:
             raw = self.client.chat(
                 time_messages,
@@ -263,7 +278,7 @@ class SummaryLLM:
         if not data:
             return fixed
         rows = data.get("timeline") or []
-        target = _timeline_target(messages)
+        target = _timeline_target(messages, self.duration_ms)
         if target and len(rows) < max(6, int(target * 0.6)):
             sink(f"时间线只有 {len(rows)} 条，按 {target} 条补一轮")
             extra = self._timeline_reply(
@@ -395,6 +410,44 @@ def build_bundle(
     )
 
 
+def _mmss(ms: int) -> str:
+    total = int(ms) // 1000
+    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+def timeline_marks(segments: list[dict[str, Any]], *, step_ms: int = 60000,
+                   limit: int = 140) -> str:
+    """把字幕压成「每 60 秒一条」的时间轴索引，给补写时间线那一步当锚点。
+
+    没有这份索引，模型只能从分段摘要里看到开头十几分钟的时间戳，写出来的时间线
+    到那里就断——两小时视频的时间线末条停在 13:40 就是这么来的。
+    """
+    rows: list[str] = []
+    next_at = 0
+    for seg in segments or []:
+        start = int(seg.get("start_ms") or 0)
+        if start < next_at:
+            continue
+        text = " ".join(str(seg.get("text") or "").split())
+        if not text:
+            continue
+        rows.append(f"{_mmss(start)} {text[:24]}")
+        next_at = start + step_ms
+        if len(rows) >= limit:
+            break
+    return "\n".join(rows)
+
+
+def _attach_timeline(llm: "SummaryLLM", project: dict[str, Any],
+                     segments: list[dict[str, Any]]) -> None:
+    """把片长与全片索引接到适配器上（时间线密度靠它称重）。"""
+    try:
+        llm.duration_ms = int(round(float(project.get("duration_sec") or 0) * 1000))
+    except (TypeError, ValueError):
+        llm.duration_ms = 0
+    llm.timeline_index = timeline_marks(segments)
+
+
 # ------------------------------------------------------------------ 主流程
 
 
@@ -430,6 +483,7 @@ def run(
     bundle = build_bundle(project, segments, danmaku=danmaku,
                           platform_summary=platform_summary)
     llm = SummaryLLM(client, model=model)
+    _attach_timeline(llm, project, segments)
     key = (role or getattr(cfg.llm, "role", "") or DEFAULT_ROLE)
     if key not in ROLE_KEYS:
         raise WBError("VALIDATION", f"没有这个角色：{key}")
@@ -476,6 +530,7 @@ def refine(
         raise WBError("CONFLICT", "还没有上一版总结，先生成一次")
     bundle = build_bundle(project, segments, danmaku=danmaku)
     llm = SummaryLLM(client, model=model)
+    _attach_timeline(llm, project, segments)
     key = role or str(previous.get("role") or DEFAULT_ROLE)
     if key not in ROLE_KEYS:
         key = DEFAULT_ROLE
@@ -687,9 +742,14 @@ def _estimate_minutes(messages) -> int:
     return longest // 60
 
 
-def _timeline_target(messages) -> int:
-    """时间线该有多少条：半小时一条上下，夹在 20–60 之间；短片返回 0（不干预）。"""
-    minutes = _estimate_minutes(messages)
+def _timeline_target(messages, duration_ms: int = 0) -> int:
+    """时间线该有多少条：半小时一条上下，夹在 20–60 之间；短片返回 0（不干预）。
+
+    片长优先用调用方喂进来的真实时长。**不能只靠 ``messages`` 里能看到的时间戳**：
+    最终那次 JSON 请求里常常只剩分段摘要，时间戳只覆盖开头十几分钟，按它算分母
+    会得出"片长 13 分钟、20 条就够"的自洽假象——两小时视频因此永远只有 20 条。
+    """
+    minutes = int(duration_ms) // 60000 if int(duration_ms or 0) > 0 else _estimate_minutes(messages)
     if minutes < 10:
         return 0
     return max(20, min(60, int(round(minutes / 2.0))))
