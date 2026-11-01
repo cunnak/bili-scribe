@@ -62,21 +62,26 @@ def test_adapter_hands_canonical_json_to_the_parser():
 
 
 def test_adapter_asks_again_once_then_succeeds():
-    client = Flaky(["这不是 JSON", json.dumps({"one_line": "救回来了"})])
+    # 阶梯：主请求 → 分批（正文/时间线）→ 重问。分批都没成，重问救回来。
+    client = Flaky(["这不是 JSON", "分批正文不行", "分批时间线也不行",
+                    json.dumps({"one_line": "救回来了"})])
     notes: list[str] = []
     llm = SummaryLLM(client)
     text = llm.chat([{"role": "user", "content": "x"}], json_mode=True,
                     note=notes.append)
     assert json.loads(text)["one_line"] == "救回来了"
-    assert llm.calls == 2
+    assert llm.calls >= 4, llm.calls
     assert any("重问" in note for note in notes)
-    # 第二次请求要把上一次的输出带回去，模型才知道要改什么
-    assert client.calls[1][-2]["role"] == "assistant"
-    assert "JSON" in client.calls[1][-1]["content"]
+    # 重问那轮要把上一次的输出带回去，模型才知道要改什么
+    echoed = [c for c in client.calls if len(c) >= 2 and c[-2]["role"] == "assistant"]
+    assert echoed, "重问请求里没有回显上一次的输出"
+    assert "JSON" in echoed[-1][-1]["content"]
+
 
 
 def test_adapter_gives_up_after_second_failure_with_truncation_hint():
-    llm = SummaryLLM(Flaky(["废话一", "废话二"]))
+    # 主请求 → 分批正文 → 分批时间线 → 重问，四次都是废话才放弃
+    llm = SummaryLLM(Flaky(["废话一", "废话二", "废话三", "废话四"]))
     from video_workbench.app.errors import WBError
 
     with pytest.raises(WBError) as exc:
@@ -84,6 +89,7 @@ def test_adapter_gives_up_after_second_failure_with_truncation_hint():
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert "两次" in exc.value.message
     assert "截断" in exc.value.message + exc.value.detail
+
 
 
 def test_non_json_mode_is_left_alone():

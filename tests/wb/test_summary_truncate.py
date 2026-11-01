@@ -71,12 +71,15 @@ def test_looks_truncated_recognises_half_object():
     assert _looks_truncated("") is False
 
 
-def test_budget_floors_at_eight_thousand():
-    assert MIN_JSON_TOKENS == 8192
-    assert _json_budget(4096) == 8192          # 配置太小 → 抬到下限
-    assert _json_budget(None) == 8192          # 没传 → 用下限
-    assert _json_budget(6000) == 12000         # 配置够大 → 两倍
+def test_budget_floors_at_twelve_thousand():
+    # 两小时视频 level2 正文一万六千字：8192 token 到头会断在半句（v7 现场），抬到 12288
+    assert MIN_JSON_TOKENS == 12288
+    assert _json_budget(4096) == 12288         # 配置太小 → 抬到下限
+    assert _json_budget(None) == 12288         # 没传 → 用下限
+    assert _json_budget(6000) == 12288         # 两倍仍在下限之下 → 抬到下限
+    assert _json_budget(9000) == 16384         # 两倍超上限 → 封顶
     assert _json_budget(20000) == 16384        # 封顶
+
 
 
 def test_truncated_output_is_continued_not_reasked():
@@ -109,7 +112,9 @@ def test_truncated_output_is_continued_not_reasked():
 
 
 def test_continuation_that_also_truncates_falls_back_to_reask():
-    client = RecClient([HALF, HALF, json.dumps(GOOD, ensure_ascii=False)])
+    # 续写失败 → 分批失败（两步都给废话）→ 才重问
+    client = RecClient([HALF, HALF, "分批正文不行", "分批时间线也不行",
+                        json.dumps(GOOD, ensure_ascii=False)])
     llm = SummaryLLM(client, model="stub-model")
 
     text = llm.chat(
@@ -117,10 +122,11 @@ def test_continuation_that_also_truncates_falls_back_to_reask():
     )
 
     assert json.loads(text)["one_line"] == "一句话结论"
-    assert len(client.calls) == 3, "续写一次仍失败 → 再重问一次"
+    assert len(client.calls) >= 5, "续写 + 分批都失败 → 再重问一次"
     assert any("重问" in n for n in llm.notes), llm.notes
     # 重问那轮同样要抬预算
-    assert client.calls[2]["max_tokens"] >= MIN_JSON_TOKENS
+    assert client.calls[4]["max_tokens"] >= MIN_JSON_TOKENS
+
 
 
 def test_repairable_output_short_circuits_without_extra_call():

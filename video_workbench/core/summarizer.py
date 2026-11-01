@@ -141,6 +141,13 @@ class SummaryLLM:
                     self.notes.append("输出被截断，接着写了一段才拿到完整 JSON")
                     return self._finalize(fixed, messages, sink, temperature, max_tokens)
                 text = merged
+        # 先试分批：截断是「装不下」，原样重问一次只会同样装不下（v7 现场两次都断在
+        # 半句「**中国REITs与美国REITs出身差异。**」）。分批能过就不必再花一次重问。
+        sink("一次装不下，改成正文与时间线分两次要，再拼起来")
+        split_first = self._split_reply(messages, temperature, max_tokens, sink)
+        if split_first:
+            self.notes.append("单次输出装不下，改成正文与时间线分两次生成后合并")
+            return self._finalize(split_first, messages, sink, temperature, max_tokens)
         sink("模型输出不是合法 JSON，已按更严格的要求重问一次")
         self.notes.append("模型输出的 JSON 无法修复，重问了一次")
         self.calls += 1
@@ -708,7 +715,7 @@ def roles_view() -> list[dict[str, Any]]:
 
 #: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，
 #: 而 llm.max_tokens 的默认值只有 4096——按配置原样重问必然再截断。
-MIN_JSON_TOKENS = 8192
+MIN_JSON_TOKENS = 12288
 
 
 def _json_budget(max_tokens: int | None, floor: int = MIN_JSON_TOKENS) -> int:

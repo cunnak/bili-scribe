@@ -195,29 +195,33 @@ def test_unknown_role_is_rejected():
 def test_non_json_reply_raises_bad_response():
     from video_workbench.app.errors import WBError
 
-    # 第一次回废话 → 重问还是废话 → 再试着分批要（正文那一步又是废话）→ 才算失败。
-    # 只回一次废话会触发重问，见下一条用例；分批是第三次尝试，见 test_summary_split。
+    # 阶梯：主请求 →（截断才续写）→ 分批（正文/时间线两步）→ 重问 → 才失败。
+    # 这里每次都给废话，所以四步都走完才抛。
     with pytest.raises(WBError) as exc:
         summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
                        client=StubClient(
-                           ["我今天不想按格式回话", "还是不按格式", "分批也还是废话"]
+                           ["我今天不想按格式回话", "分批正文也是废话", "分批时间线还是废话",
+                            "重问也还是废话"]
                        ),
                        cfg=_cfg(), ctx=FakeCtx())
     assert exc.value.code == "LLM_BAD_RESPONSE"
 
 
+
 def test_non_json_reply_is_asked_again_once():
-    """模型偶尔会把 JSON 说成人话；重问一次能救回来就别让用户白跑一轮预读。"""
+    """模型偶尔会把 JSON 说成人话；走完分批仍不行，重问一次能救回来就别让用户白跑一轮预读。"""
     from video_workbench.infra.jsonfix import repair_json
 
-    assert repair_json('{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段' + chr(10) + '第二段"}'), \
-        "字符串里的原始换行应该能修好"
+    assert repair_json('{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段' + chr(10) + '第二段"}'),         "字符串里的原始换行应该能修好"
     ctx = FakeCtx()
     result = summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                            client=StubClient(["我先说两句废话", json.dumps(GOOD)]),
+                            client=StubClient(["我先说两句废话", "分批正文不行", "分批时间线也不行",
+                                               json.dumps(GOOD)]),
                             cfg=_cfg(), ctx=ctx)
     assert result["summary"]["one_line"], "重问之后应该拿到一份总结"
     assert any("重问" in note for note in result.get("notes") or []), "没记下重问这件事"
+
+
 
 def test_progress_reports_chinese_stages():
     ctx = FakeCtx()
@@ -460,12 +464,14 @@ def test_job_failure_keeps_previous_versions(service, tmp_path, monkeypatch):
 
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
-    # 三次都不是 JSON：主请求 → 重问 → 分批的正文那一步。分批也救不回来才该失败。
-    configure(service, monkeypatch, StubClient(["不是 JSON", "还不是 JSON", "分批也不是 JSON"]))
+    # 四次都不是 JSON：主请求 → 分批正文 → 分批时间线 → 重问。分批也救不回来才该失败。
+    configure(service, monkeypatch,
+              StubClient(["不是 JSON", "分批正文不是", "分批时间线不是", "还不是 JSON"]))
     with pytest.raises(WBError) as exc:
         service._summary_job(FakeCtx(), {"project_id": project["id"], "kind": "fresh"})
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert len(service.repo.summary_list(project["id"])) == 1
+
 
 
 def test_every_llm_error_code_is_registered():

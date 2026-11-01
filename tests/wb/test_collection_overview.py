@@ -356,8 +356,9 @@ def test_overview_get_accepts_title_or_id(service, tmp_path, monkeypatch):
 
 def test_overview_failure_leaves_no_row(service, tmp_path, monkeypatch):
     make_children(service, tmp_path, count=3)
-    # 两次都是废话才会判死（第一次废话会触发一次重问，见 test_jsonfix）
-    client = StubClient(["我不按格式回话", "我还是不按格式回话"])
+    # 阶梯：主请求 → 分批正文 → 分批时间线 → 重问，全都不是 JSON 才判死
+    client = StubClient(["我不按格式回话", "分批正文也不行", "分批时间线也不行",
+                         "我还是不按格式回话"])
     service.cfg.override_llm(base_url=client.base_url, api_key="sk-test", model="stub-model")
     service.cfg.llm.model = client.model
     monkeypatch.setattr(service, "_llm_client", lambda task="summary": client)

@@ -66,7 +66,8 @@ def make_llm(replies):
 
 
 def test_split_after_truncation_and_failed_retry():
-    llm, client = make_llm([TRUNCATED, "", "还是不行", json.dumps(BODY, ensure_ascii=False),
+    # 截断 → 续写没救回来 → 直接分批（不再先花一次重问，v7 现场那样重问会同样截断）
+    llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
                             json.dumps(TIMELINE, ensure_ascii=False)])
     notes: list[str] = []
     text = llm.chat(
@@ -76,19 +77,23 @@ def test_split_after_truncation_and_failed_retry():
     assert data["one_line"] == "一句话结论"
     assert [row["t"] for row in data["timeline"]] == ["00:12", "1:34:34"]
     assert any("分两次" in note for note in llm.notes)
-    # 第 1 次主请求、第 2 次续写、第 3 次重问、第 4 次正文、第 5 次时间线
-    assert len(client.calls) == 5
-    assert "不要输出 timeline" in client.calls[3]["messages"][-1]["content"]
-    assert "只输出时间线" in client.calls[4]["messages"][-1]["content"]
+    # 第 1 次主请求、第 2 次续写、第 3 次正文、第 4 次时间线
+    assert len(client.calls) == 4
+    assert "不要输出 timeline" in client.calls[2]["messages"][-1]["content"]
+    assert "只输出时间线" in client.calls[3]["messages"][-1]["content"]
+
 
 
 def test_split_body_step_gets_bigger_budget():
-    llm, client = make_llm([TRUNCATED, "", "还是不行", json.dumps(BODY, ensure_ascii=False),
+    from video_workbench.core.summarizer import MIN_JSON_TOKENS
+
+    llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
                             json.dumps(TIMELINE, ensure_ascii=False)])
     llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True, max_tokens=4096,
              sink=lambda _text: None)
-    assert client.calls[3]["max_tokens"] >= 8192
-    assert client.calls[4]["max_tokens"] >= 4096
+    assert client.calls[2]["max_tokens"] >= MIN_JSON_TOKENS
+    assert client.calls[3]["max_tokens"] >= 4096
+
 
 
 def test_split_gives_up_when_body_step_is_garbage():
@@ -100,7 +105,7 @@ def test_split_gives_up_when_body_step_is_garbage():
 
 
 def test_split_keeps_body_when_timeline_step_fails():
-    llm, _ = make_llm([TRUNCATED, "", "还是不行", json.dumps(BODY, ensure_ascii=False),
+    llm, _ = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
                        "时间线我给不出来"])
     text = llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True,
                     sink=lambda _text: None)
@@ -108,6 +113,7 @@ def test_split_keeps_body_when_timeline_step_fails():
     assert data["summary_md"].startswith("第一段")
     # 时间线那一步没结果：键还在、值为空——正文照旧交付，不连坐。
     assert data["timeline"] == []
+
 
 
 def test_dense_timeline_is_left_alone():
