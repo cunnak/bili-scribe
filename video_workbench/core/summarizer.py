@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from typing import Any, Callable
 
 from bili_scribe.core import summarizer as bs_summarizer
@@ -156,6 +158,14 @@ class SummaryLLM:
         if fixed:
             return fixed
         tail = (again or "").strip()[-40:]
+        # 两次都装不下：把这一份大 JSON 拆成两次要（正文一次、时间线一次）再合并。
+        # 两小时视频的真实现场就是这样——不是模型不会写，是单次输出装不下：
+        # level2 正文一万六千字 + 全量时间线，一次 completion 到不了头。
+        sink("一次装不下，改成正文与时间线分两次要，再拼起来")
+        split = self._split_reply(messages, temperature, max_tokens, sink)
+        if split:
+            self.notes.append("单次输出装不下，改成正文与时间线分两次生成后合并")
+            return split
         hint = ""
         if not tail.endswith("}"):
             hint = ("（输出看起来被截断了——把「上下文与长素材」里的单次输出上限调大，"
@@ -163,6 +173,79 @@ class SummaryLLM:
         # 直接抛 WBError：SummarizeError 只在自己这一层的 run() 里被翻译成错误码，
         # 合集总览走的是 core/overview.py 的另一条路，漏出去就成了「内部错误」。
         raise WBError("LLM_BAD_RESPONSE", f"模型连续两次都没有给出可解析的 JSON{hint}：{tail}")
+
+    def _split_reply(self, messages, temperature, max_tokens, sink) -> str:
+        """正文与时间线分两次问，再把两份 JSON 拼成一个交出去。
+
+        为什么不让模型自己「写短点」：`summary_md` 的长度是内容决定的，砍它等于砍质量；
+        而 `timeline` 与正文是两种活（一个连贯叙述、一个逐条摘录），拆开问对质量
+        几乎没有损失，却把单次输出从「装不下」变成「两次都宽裕」。
+        正文那次明确不要 timeline；时间线那次带上正文摘要当上下文，只产时间线。
+        """
+        nonce = _short_nonce()
+        body_messages = list(messages) + [
+            {
+                "role": "user",
+                "content": (
+                    "这一次分两步，这是第 1 步：只输出这些字段、一个 JSON 对象——"
+                    "one_line、summary_md、key_points、caution、comment_short。"
+                    "**不要输出 timeline**（时间线下一步单独要）。"
+                    "除这几个键之外不要写别的键，不要解释文字，不要 Markdown 围栏。"
+                    f"（分批标记 {nonce}-A）"
+                ),
+            }
+        ]
+        try:
+            raw_body = self.client.chat(
+                body_messages,
+                temperature=temperature,
+                max_tokens=_json_budget(max_tokens),
+                json_mode=True,
+            )
+        except ChatError as exc:
+            sink(f"正文这一步没成：{exc.message}")
+            return ""
+        self.calls += 1
+        body = _loads_object(raw_body)
+        if not body or not (body.get("summary_md") or body.get("one_line")):
+            sink("正文这一步没给出可用的 JSON")
+            return ""
+
+        digest = _plain(str(body.get("summary_md") or body.get("one_line") or ""))[:1200]
+        time_messages = list(messages) + [
+            {"role": "assistant", "content": digest},
+            {
+                "role": "user",
+                "content": (
+                    "这是第 2 步：只输出时间线，一个 JSON 对象，形如 "
+                    '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
+                    "最多 60 条、每条不超过 30 字，覆盖全片的关键转折与结论；"
+                    "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
+                    f"（分批标记 {nonce}-B）"
+                ),
+            },
+        ]
+        try:
+            raw_time = self.client.chat(
+                time_messages,
+                temperature=temperature,
+                max_tokens=_json_budget(max_tokens, floor=4096),
+                json_mode=True,
+            )
+        except ChatError as exc:
+            sink(f"时间线这一步没成：{exc.message}")
+            # 正文已经拿到：交出去也好过整份失败，时间线留空。
+            self.notes.append("时间线那一步失败，这一版没有时间线")
+            body.setdefault("timeline", [])
+            return json.dumps(body, ensure_ascii=False)
+        self.calls += 1
+        timeline = _loads_timeline(raw_time)
+        if timeline:
+            body["timeline"] = timeline
+        else:
+            self.notes.append("时间线那一步没给出可用结果，这一版没有时间线")
+            body.setdefault("timeline", [])
+        return json.dumps(body, ensure_ascii=False)
 
     def _continue(self, text, messages, temperature, max_tokens) -> str:
         """让它从断开处接着写，把两段拼起来。
@@ -497,10 +580,57 @@ def roles_view() -> list[dict[str, Any]]:
 MIN_JSON_TOKENS = 8192
 
 
-def _json_budget(max_tokens: int | None) -> int:
-    """重问与续写用多少输出预算：取「配置的两倍」与 8192 的较大者，上限 16384。"""
+def _json_budget(max_tokens: int | None, floor: int = MIN_JSON_TOKENS) -> int:
+    """重问、续写、分批各步用多少输出预算：取「配置的两倍」与 floor 的较大者，上限 16384。"""
     base = int(max_tokens or 0)
-    return min(max(MIN_JSON_TOKENS, base * 2), 16384)
+    return min(max(int(floor), base * 2), 16384)
+
+
+def _short_nonce() -> str:
+    """分批请求的标记，只为了让日志里能分辨「同一次打磨的两次分批」。"""
+    return uuid.uuid4().hex[:6]
+
+
+def _loads_object(text: str) -> dict[str, Any]:
+    """把一段（可能是坏 JSON 的）回复读成 dict；读不出就返回空 dict。"""
+    fixed = repair_json(text)
+    if fixed:
+        try:
+            value = json.loads(fixed)
+        except (ValueError, TypeError):
+            value = None
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _loads_timeline(text: str) -> list[dict[str, str]]:
+    """时间线那一步的回复 → `[{"t": .., "text": ..}]`；只认带 t/text 的条目。"""
+    value: Any = None
+    fixed = repair_json(text)
+    if fixed:
+        try:
+            value = json.loads(fixed)
+        except (ValueError, TypeError):
+            value = None
+    if isinstance(value, dict):
+        value = value.get("timeline")
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        at = str(item.get("t") or item.get("time") or "").strip()
+        text_value = str(item.get("text") or item.get("desc") or "").strip()
+        if at and text_value:
+            rows.append({"t": at, "text": text_value})
+    return rows
+
+
+def _plain(text: str) -> str:
+    """把 Markdown 压成一段连续文字，用来当时间线那一步的上下文摘要。"""
+    return re.sub(r"\s+", " ", (text or "").replace("#", " ").replace("*", " ")).strip()
 
 
 def _looks_truncated(text: str) -> bool:

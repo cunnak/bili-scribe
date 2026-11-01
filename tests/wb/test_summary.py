@@ -195,10 +195,13 @@ def test_unknown_role_is_rejected():
 def test_non_json_reply_raises_bad_response():
     from video_workbench.app.errors import WBError
 
-    # 第一次回废话、重问还是废话 → 才算失败（只回一次废话会触发重问，见下一条用例）
+    # 第一次回废话 → 重问还是废话 → 再试着分批要（正文那一步又是废话）→ 才算失败。
+    # 只回一次废话会触发重问，见下一条用例；分批是第三次尝试，见 test_summary_split。
     with pytest.raises(WBError) as exc:
         summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                       client=StubClient(["我今天不想按格式回话", "还是不按格式"]),
+                       client=StubClient(
+                           ["我今天不想按格式回话", "还是不按格式", "分批也还是废话"]
+                       ),
                        cfg=_cfg(), ctx=FakeCtx())
     assert exc.value.code == "LLM_BAD_RESPONSE"
 
@@ -457,7 +460,8 @@ def test_job_failure_keeps_previous_versions(service, tmp_path, monkeypatch):
 
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
-    configure(service, monkeypatch, StubClient(["不是 JSON", "还不是 JSON"]))
+    # 三次都不是 JSON：主请求 → 重问 → 分批的正文那一步。分批也救不回来才该失败。
+    configure(service, monkeypatch, StubClient(["不是 JSON", "还不是 JSON", "分批也不是 JSON"]))
     with pytest.raises(WBError) as exc:
         service._summary_job(FakeCtx(), {"project_id": project["id"], "kind": "fresh"})
     assert exc.value.code == "LLM_BAD_RESPONSE"
