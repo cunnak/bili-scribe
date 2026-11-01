@@ -2213,6 +2213,37 @@ select,
 }
 
 /* 版本栏 */
+/* 用量卡：跟 bili-scribe 的面板同一套字段（这一版 / 累计），
+   数字一列右对齐、等宽，扫一眼就能比大小。 */
+.sum-cost__head {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+.sum-cost__head:first-of-type { margin-top: 0; }
+.sum-cost__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sum-cost__row:last-child { border-bottom: 0; }
+.sum-cost__label { color: var(--muted); font-size: var(--fs-sm); }
+.sum-cost__value {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.sum-cost__row.is-total .sum-cost__value { color: var(--acid-tx); font-weight: 600; }
+.sum-cost__foot {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
 .sum-side .card { background: var(--panel); border: 1px solid var(--line); padding: 14px 15px; }
 .sum-side .card__head {
   display: flex; align-items: baseline; justify-content: space-between;

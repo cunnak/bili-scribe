@@ -696,7 +696,10 @@ async def shoot_one(sock_url: str, skin: str, route: str, action: str, target: P
         )
         # 皮肤只落在 <html data-skin>（app.js 的 applySkin 就这一件事），
         # 而 `#skin=` 会和路由抢 hash，所以直接改属性。
-        await cdp.js(f"document.documentElement.setAttribute('data-skin', '{skin}')")
+        # 走应用自己的换肤函数：直接改属性会让右上角的皮肤切换器停在旧状态，
+        # 截图就会出现「浅色页面 + 高亮的深色按钮」这种自相矛盾的证据。
+        await cdp.js(f"(window.WB && WB.applySkin) ? WB.applySkin('{skin}', false)"
+                     f" : document.documentElement.setAttribute('data-skin', '{skin}')")
         if route:
             # 走 router.go 而不是只写 hash：hash 已存在时宿主可能不派发 hashchange，
             # 截图就会停在上一页（真 app 里表现为"点了没反应"）。

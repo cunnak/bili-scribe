@@ -903,6 +903,40 @@ async function main() {
       "没标出恢复来源");
   });
 
+  await check("总结页：用量卡给出这一版开销与这条视频累计", async () => {
+    WB.router.go("summary", {});
+    await tick(260);
+    const view = $("#view");
+    const card = view.querySelector("#sum-cost");
+    assert.ok(card, "没有用量卡（#sum-cost）");
+    const text = card.textContent;
+    assert.ok(/这一版开销/.test(text), "没标出这一版：" + text.slice(0, 80));
+    assert.ok(/这条视频累计/.test(text), "没有累计段：" + text.slice(0, 160));
+    assert.ok(/输入 tokens/.test(text) && /输出 tokens/.test(text), "缺输入/输出：" + text.slice(0, 160));
+    assert.ok(/总 tokens/.test(text), "缺总量行：" + text.slice(0, 160));
+    // 数字必须是人能读的分组格式，不是 241242 一坨
+    const values = [...card.querySelectorAll(".sum-cost__value")].map((n) => n.textContent.trim());
+    assert.ok(values.some((v) => /^\d{1,3}(,\d{3})+$/.test(v)), "没有分组数字：" + JSON.stringify(values));
+
+    const inst = WB.pages.summary._internals;
+    assert.strictEqual(inst.groupNum(241242), "241,242", "分组函数不对");
+    assert.strictEqual(inst.groupNum(0), "—", "0 应显示为占位而不是 0");
+    assert.strictEqual(inst.groupSeconds(1092), "18m12s", "耗时格式不对");
+    assert.strictEqual(inst.groupSeconds(84.6), "84.6s", "短耗时格式不对");
+
+    // 累计必须 ≥ 单版（求和，而不是拿最新一版顶替）
+    const nums = (label) => {
+      const row = [...card.querySelectorAll(".sum-cost__row")]
+        .find((r) => r.textContent.indexOf(label) === 0);
+      const raw = row ? row.querySelector(".sum-cost__value").textContent.replace(/,/g, "") : "";
+      return parseInt(raw, 10);
+    };
+    const single = nums("调用次数");
+    const total = nums("模型调用");
+    assert.ok(total >= single, "累计比单版还少：" + total + " < " + single);
+  });
+
+
   await check("总结页：长任务不会在 12 分钟假装失败", async () => {
     // 现场 bug：轮询到 900 次（12 分钟）就 reject「等太久了，先停在这里」，
     // 界面看着像失败，其实后台还在跑（两小时视频三轮回要 20 分钟）。

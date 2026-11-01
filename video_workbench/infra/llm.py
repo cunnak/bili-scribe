@@ -183,6 +183,13 @@ def normalize_models(payload: Any) -> list[dict[str, str]]:
 class _SupportsChat(Protocol):  # pragma: no cover - 仅用于类型说明
     def chat(self, messages: Iterable[dict[str, str]], **kwargs: Any) -> str: ...
 
+def _as_int(value: Any) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
 class ChatClient:
     """一次请求 = 一次 ``chat``。批量、分批、进度由调用方管（那是业务逻辑）。"""
 
@@ -217,6 +224,13 @@ class ChatClient:
         self._session_id = ""
         self._getter = getter or _urllib_get(self.proxy)
         self._sleep = sleep
+        # 用量计数：网关不一定回 usage，缺失时保持 0 而不是猜。
+        # 计数放客户端而不是调用方，是因为一次总结会连着调十几次，
+        # 每一处都手工累加必然漏。
+        self.calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
 
     # ------------------------------------------------------------- 列模型
 
@@ -407,6 +421,7 @@ class ChatClient:
                 last = ChatError("NETWORK", "连不上大模型服务", str(exc))
             else:
                 if 200 <= status < 300:
+                    self._account(text)
                     return self._extract(text)
                 last = self._error_for(status, text)
                 if status not in RETRY_STATUS:
@@ -416,6 +431,26 @@ class ChatClient:
         raise last or ChatError("INTERNAL", "大模型调用失败")
 
     # ------------------------------------------------------------- 内部
+
+    def _account(self, text: str) -> None:
+        """把这次响应的 ``usage`` 累加进计数器。
+
+        解析失败要静默——统计出错不该把已经成功的调用判成失败。
+        """
+        self.calls += 1
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if not isinstance(usage, dict):
+            return
+        prompt = _as_int(usage.get("prompt_tokens"))
+        completion = _as_int(usage.get("completion_tokens"))
+        total = _as_int(usage.get("total_tokens")) or (prompt + completion)
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        self.total_tokens += total
 
     def _error_for(self, status: int, text: str) -> ChatError:
         snippet = (text or "").strip()[:400]

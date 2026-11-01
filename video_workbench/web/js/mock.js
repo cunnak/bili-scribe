@@ -889,6 +889,16 @@
   }
 
 
+  // 用量样例：两版加起来刻意等于真实两小时视频的量级
+  // （21 次调用 / 输入 241,242 / 输出 34,879），跟 bili-scribe 面板同一数量级，
+  // 截图时一眼能看出这卡在说什么。
+  var SUMMARY_USAGE = {
+    1: { calls: 9, prompt_tokens: 120000, completion_tokens: 18000,
+         total_tokens: 138000, seconds: 1089, chunks: 8 },
+    2: { calls: 12, prompt_tokens: 121242, completion_tokens: 16879,
+         total_tokens: 138121, seconds: 1092, chunks: 8 }
+  };
+
   function summaryRow(version, content, role, note) {
     return {
       id: "sum_mock_" + version,
@@ -900,8 +910,24 @@
       status: "ready",
       one_line: content.one_line,
       revise_note: note || "",
+      usage: JSON.parse(JSON.stringify(SUMMARY_USAGE[version] || { calls: 1 })),
       content: content
     };
+  }
+
+  function usageTotals(rows) {
+    var out = { versions: (rows || []).length, calls: 0, prompt_tokens: 0,
+                completion_tokens: 0, total_tokens: 0, seconds: 0 };
+    (rows || []).forEach(function (row) {
+      var u = row.usage || {};
+      out.calls += u.calls || 0;
+      out.prompt_tokens += u.prompt_tokens || 0;
+      out.completion_tokens += u.completion_tokens || 0;
+      out.total_tokens += u.total_tokens || ((u.prompt_tokens || 0) + (u.completion_tokens || 0));
+      out.seconds += u.seconds || 0;
+    });
+    out.seconds = Math.round(out.seconds * 10) / 10;
+    return out;
   }
 
   function seedSummary(projectId) {
@@ -1554,16 +1580,19 @@
                       return {
                         id: row.id, version: row.version, role: row.role, model: row.model,
                         chars: row.chars, created_at: row.created_at, status: row.status,
-                        one_line: row.one_line, revise_note: row.revise_note
+                        one_line: row.one_line, revise_note: row.revise_note,
+                        usage: JSON.parse(JSON.stringify(row.usage || {}))
                       };
-                    }) });
+                    }),
+                    totals: usageTotals(got.versions) });
       }
       case "summary.versions": {
         var box2 = SUMMARIES[p.id];
         return ok({ versions: box2 ? box2.versions.map(function (row) {
           return { id: row.id, version: row.version, role: row.role, model: row.model,
                    chars: row.chars, created_at: row.created_at, status: row.status,
-                   one_line: row.one_line, revise_note: row.revise_note };
+                   one_line: row.one_line, revise_note: row.revise_note,
+                   usage: JSON.parse(JSON.stringify(row.usage || {})) };
         }) : [] });
       }
       case "summary.restore": {

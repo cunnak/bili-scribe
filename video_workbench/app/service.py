@@ -2543,6 +2543,7 @@ class WorkbenchService:
             "found": bool(latest),
             "summary": latest or {},
             "versions": [_version_row(item) for item in versions],
+            "totals": _usage_totals(versions),
         }
 
     def summary_versions(self, id: str = "") -> dict[str, Any]:
@@ -5545,6 +5546,41 @@ def _bundle_project(project: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """这条视频累计。
+
+    按库里所有版本求和，不是「最后一次的账」——小村的问题是「这条视频一共花了多少」，
+    打磨七八版之后只看最新一版会严重低估。缺字段的老版本按 0 计，不报错。
+    """
+    out = {"versions": len(rows), "calls": 0, "prompt_tokens": 0,
+           "completion_tokens": 0, "total_tokens": 0, "seconds": 0.0}
+    for row in rows:
+        usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
+        for key in ("calls", "prompt_tokens", "completion_tokens"):
+            try:
+                out[key] += int(usage.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+        # 老版本只记了 calls，没有 total_tokens；能凑就用输入+输出
+        # 兜出总量，凑不出就按 0——宁可少算，不凭空造数。
+        try:
+            given = int(usage.get("total_tokens") or 0)
+        except (TypeError, ValueError):
+            given = 0
+        if not given:
+            try:
+                given = int(usage.get("prompt_tokens") or 0) + int(
+                    usage.get("completion_tokens") or 0)
+            except (TypeError, ValueError):
+                given = 0
+        out["total_tokens"] += given
+        try:
+            out["seconds"] = round(out["seconds"] + float(usage.get("seconds") or 0), 1)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _version_row(row: dict[str, Any]) -> dict[str, Any]:
     """版本列表的一行。只挑界面要显示的，别把整篇正文塞进列表。"""
     content = dict(row.get("content") or {})
@@ -5561,4 +5597,6 @@ def _version_row(row: dict[str, Any]) -> dict[str, Any]:
         "one_line": str(content.get("one_line") or content.get("theme") or ""),
         "theme": str(content.get("theme") or ""),
         "revise_note": str(content.get("revise_note") or ""),
+        # 版本列表要能直接显示每版花了多少，不必再逐版回查。
+        "usage": dict(row.get("usage") or {}),
     }

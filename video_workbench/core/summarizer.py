@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from typing import Any, Callable
 
@@ -76,6 +77,9 @@ class SummaryLLM:
         self.cfg = _ModelCfg(model=self.model)
         self.notes: list[str] = []
         self.calls = 0
+        # 计时从建 llm 起算：总结的耗时几乎全在模型上，
+        # 而这里正是「这批请求开始」的位置。
+        self.started_at = time.monotonic()
         # 片长与「全片时间轴索引」：最终那次 JSON 请求里往往只剩分段摘要，
         # 时间戳只覆盖开头一两段。片长不能从提示词里猜，得由调用方（run/refine）
         # 从项目真实时长与字幕里喂进来，否则时间线永远只写开头那十几分钟。
@@ -519,6 +523,40 @@ def _notify(ctx: Any) -> Callable[[str, str], None]:
     return emit
 
 
+def _chunks_of(summary: Any) -> int:
+    value = getattr(summary, "chunks", 0) if summary is not None else 0
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value)
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _usage_of(llm: "SummaryLLM", summary: Any = None) -> dict[str, Any]:
+    """一次总结的开销账目。
+
+    字段名跟 bili-scribe 的用量面板对齐（输入/输出/调用/耗时/预读段数），
+    这样两边看起来是同一件事，不用记两套说法。
+    """
+    client = getattr(llm, "client", None)
+    prompt = int(getattr(client, "prompt_tokens", 0) or 0)
+    completion = int(getattr(client, "completion_tokens", 0) or 0)
+    total = int(getattr(client, "total_tokens", 0) or 0) or (prompt + completion)
+    started = float(getattr(llm, "started_at", 0.0) or 0.0)
+    seconds = round(max(0.0, time.monotonic() - started), 1) if started else 0.0
+    return {
+        "calls": int(llm.calls or 0),
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "seconds": seconds,
+        # bili-scribe 的 ``Summary.chunks`` 是段数（int），但测试里的假对象
+        # 有时给列表；两种都认，认不出就按 0。
+        "chunks": _chunks_of(summary),
+    }
+
+
 def run(
     project: dict[str, Any],
     segments: list[dict[str, Any]],
@@ -552,7 +590,7 @@ def run(
     role_obj = get_role(key)
     return {
         "summary": summary.to_dict(),
-        "usage": {"calls": llm.calls},
+        "usage": _usage_of(llm, summary),
         "model": summary.model or llm.model,
         "role": key,
         "role_name": role_obj.name,
@@ -607,7 +645,7 @@ def refine(
     summary = _apply_dense(summary, llm)
     return {
         "summary": summary.to_dict(),
-        "usage": {"calls": llm.calls},
+        "usage": _usage_of(llm, summary),
         "model": summary.model or llm.model,
         "role": key,
         "role_name": get_role(key).name,

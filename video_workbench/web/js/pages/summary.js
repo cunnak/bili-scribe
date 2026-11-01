@@ -41,6 +41,7 @@
     detached: false,     // 前端不再等（任务仍在后台跑），用来跳过"好了"的收尾
     summary: null,
     versions: [],
+    totals: null,   // 这条视频累计用量（后端按全部版本求和）
     busy: false,
     jobId: "",
     requirement: "",
@@ -232,6 +233,7 @@
       state.found = !!(data && data.found);
       state.summary = (data && data.summary) || null;
       state.versions = (data && data.versions) || [];
+      state.totals = (data && data.totals) || null;
       if (state.summary && state.summary.role) state.role = state.summary.role;
       return state.summary;
     });
@@ -748,6 +750,63 @@
     return card;
   }
 
+  // ---- 用量：这一版花了多少、这条视频一共花了多少 -------------------
+  //
+  // 数字只在有记录时显示。老版本（只有 calls 的）显示已记录的那几项，
+  // 缺的写「—」——不拿 0 冒充「没花」。
+  function groupNum(value) {
+    var n = Number(value);
+    if (!isFinite(n) || n <= 0) return "—";
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function groupSeconds(value) {
+    var n = Number(value);
+    if (!isFinite(n) || n <= 0) return "—";
+    if (n < 90) return (Math.round(n * 10) / 10).toFixed(1) + "s";
+    var total = Math.round(n);
+    var m = Math.floor(total / 60);
+    var sec = total % 60;
+    return m + "m" + (sec < 10 ? "0" : "") + sec + "s";
+  }
+
+  function costRow(label, value, extra) {
+    return ui.h("div", { class: "sum-cost__row" + (extra ? " " + extra : "") }, [
+      ui.h("span", { class: "sum-cost__label", text: label }),
+      ui.h("span", { class: "sum-cost__value", text: value })
+    ]);
+  }
+
+  function costCard() {
+    var usage = (state.summary && state.summary.usage) || {};
+    var totals = state.totals || {};
+    var hasOwn = Number(usage.calls || 0) > 0;
+    if (!hasOwn && !Number(totals.calls || 0)) return null;
+    var card = ui.h("div", { class: "card", id: "sum-cost" });
+    card.appendChild(ui.h("div", { class: "card__head" }, [
+      ui.h("span", { class: "card__title", text: "用量 · TOKENS" }),
+      ui.h("span", { text: state.summary && state.summary.model ? String(state.summary.model) : "" })
+    ]));
+    card.appendChild(ui.h("div", { class: "sum-cost__head", text: "这一版开销" }));
+    card.appendChild(costRow("输入 tokens", groupNum(usage.prompt_tokens)));
+    card.appendChild(costRow("输出 tokens", groupNum(usage.completion_tokens)));
+    card.appendChild(costRow("调用次数", hasOwn ? String(usage.calls) + " 次" : "—"));
+    card.appendChild(costRow("耗时", groupSeconds(usage.seconds)));
+    card.appendChild(costRow("素材预读", usage.chunks ? String(usage.chunks) + " 段" : "—"));
+    if (Number(totals.calls || 0) > 0) {
+      card.appendChild(ui.h("div", { class: "sum-cost__head", text: "这条视频累计" }));
+      card.appendChild(costRow("模型调用", String(totals.calls) + " 次"));
+      card.appendChild(costRow("输入合计", groupNum(totals.prompt_tokens)));
+      card.appendChild(costRow("输出合计", groupNum(totals.completion_tokens)));
+      card.appendChild(costRow("总 tokens", groupNum(totals.total_tokens), "is-total"));
+      if (totals.versions) {
+        card.appendChild(ui.h("div", { class: "sum-cost__foot", text:
+          "共 " + totals.versions + " 版" + (totals.seconds ? " · 累计 " + groupSeconds(totals.seconds) : "") }));
+      }
+    }
+    return card;
+  }
+
   function refineCard() {
     var input = ui.h("textarea", {
       class: "input textarea",
@@ -1047,7 +1106,7 @@
         warnBlock(),
         bodyCard()
       ]),
-      ui.h("div", { class: "sum-side" }, [versionsCard(), refineCard()])
+      ui.h("div", { class: "sum-side" }, [versionsCard(), costCard(), refineCard()].filter(Boolean))
     ]));
     var errorNode = document.getElementById("summary-error");
     if (errorNode) {
@@ -1083,6 +1142,7 @@
   WB.pages = WB.pages || {};
   WB.pages.summary = { render: render, state: state, reload: loadSummary, _internals: {
     markdown: markdown, start: start, refine: refine, restore: restore, chars: chars,
+    groupNum: groupNum, groupSeconds: groupSeconds,
     switchMode: switchMode, startCollection: startCollection, pickCollection: pickCollection,
     loadCollection: loadCollection
   } };
