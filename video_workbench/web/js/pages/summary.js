@@ -23,7 +23,9 @@
   var h = ui.h;
 
   var POLL_MS = 800;
-  var POLL_LIMIT = 900;     // 12 分钟：长视频的分段预读 + 三轮回会真的跑很久
+  var SLOW_MS = 3000;       // 超过 POLL_LIMIT 之后放慢，界面不再密集问一次
+  var POLL_LIMIT = 900;     // 12 分钟之后转慢速跟随
+  var HARD_LIMIT = 3600;    // 约 2 小时 40 分：到这儿才放手，并说清"还在后台跑"
 
   var state = {
     projects: [],
@@ -36,6 +38,7 @@
     found: false,
     jobProgress: 0,
     jobStage: "",
+    detached: false,     // 前端不再等（任务仍在后台跑），用来跳过"好了"的收尾
     summary: null,
     versions: [],
     busy: false,
@@ -234,6 +237,11 @@
     });
   }
 
+  // 轮询节奏与"什么时候放手"抽成纯函数：这两条曾是现场 bug（到 12 分钟就
+  // 报"等太久了，先停在这里"，用户以为失败、其实后台还在跑），要能被测住。
+  function pollDelay(attempts) { return attempts > POLL_LIMIT ? SLOW_MS : POLL_MS; }
+  function pollGaveUp(attempts) { return attempts > HARD_LIMIT; }
+
   function pollJob(jobId) {
     var attempts = 0;
     return new Promise(function (resolve, reject) {
@@ -248,17 +256,38 @@
             reject(error);
             return;
           }
-          if (attempts > POLL_LIMIT) { reject(new Error("等太久了，先停在这里")); return; }
-          state.note = (job.stage || "生成中") + " " + Math.round((job.progress || 0) * 100) + "%";
+          // 任务真的能跑很久（两小时视频的三轮回 20 分钟是常态）。以前到 12 分钟就
+          // reject 成"等太久了，先停在这里"，界面看着像失败、其实后台还在跑——现在
+          // 改成放慢节奏继续跟，只有到 HARD_LIMIT 才松手，并且**不当成失败**。
+          if (pollGaveUp(attempts)) {
+            state.detached = true;
+            state.note = "任务还在后台跑（去任务中心看进度），这里不再等";
+            paintNote();
+            resolve(null);
+            return;
+          }
+          state.note = (job.stage || "生成中") + " " + Math.round((job.progress || 0) * 100) + "%"
+            + (attempts > POLL_LIMIT ? " · 已跑 " + Math.round(attempts * SLOW_MS / 60000) + " 分钟" : "");
           state.jobProgress = job.progress || 0;
           state.jobStage = job.stage || "";
           paintNote();
           paintProgress();
-          setTimeout(tick, POLL_MS);
+          setTimeout(tick, pollDelay(attempts));
         }).catch(reject);
       }
       tick();
     });
+  }
+
+  // 给前端测试用的两个纯函数（轮询节奏 / 何时放手）
+  if (WB) {
+    WB._summaryPoll = {
+      delay: pollDelay,
+      gaveUp: pollGaveUp,
+      limit: POLL_LIMIT,
+      hard: HARD_LIMIT,
+      slow: SLOW_MS
+    };
   }
 
   // --------------------------------------------------------------- 动作
@@ -282,11 +311,12 @@
         state.jobId = (data.job && data.job.id) || "";
         return pollJob(state.jobId);
       })
-      .then(function () { return loadSummary(); })
+      .then(function () { return state.detached ? null : loadSummary(); })
       .then(function () {
         state.busy = false;
-        state.note = "";
         state.jobId = "";
+        if (state.detached) { state.detached = false; paint(); return; }
+        state.note = "";
         WB.toast("总结好了（第 " + ((state.summary && state.summary.version) || 1) + " 版）");
         paint();
       })
@@ -316,11 +346,12 @@
         state.jobId = (data.job && data.job.id) || "";
         return pollJob(state.jobId);
       })
-      .then(function () { return loadSummary(); })
+      .then(function () { return state.detached ? null : loadSummary(); })
       .then(function () {
         state.busy = false;
-        state.note = "";
         state.jobId = "";
+        if (state.detached) { state.detached = false; paint(); return; }
+        state.note = "";
         state.requirement = "";
         WB.toast("改好了");
         paint();
@@ -396,10 +427,11 @@
           return { job: job, items: data.items };
         });
       })
-      .then(function () { return loadCollections(); })
-      .then(function () { return loadCollection(); })
+      .then(function () { return state.detached ? null : loadCollections(); })
+      .then(function () { return state.detached ? null : loadCollection(); })
       .then(function () {
         state.collBusy = false;
+        if (state.detached) { state.detached = false; paint(); return; }
         state.note = "";
         paint();
         WB.ui.toast("总览已生成");

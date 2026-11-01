@@ -903,6 +903,19 @@ async function main() {
       "没标出恢复来源");
   });
 
+  await check("总结页：长任务不会在 12 分钟假装失败", async () => {
+    // 现场 bug：轮询到 900 次（12 分钟）就 reject「等太久了，先停在这里」，
+    // 界面看着像失败，其实后台还在跑（两小时视频三轮回要 20 分钟）。
+    const poll = WB._summaryPoll;
+    assert.ok(poll, "没暴露轮询策略（WB._summaryPoll）");
+    assert.ok(poll.limit > 0 && poll.hard > poll.limit, "阈值不合理");
+    assert.equal(poll.gaveUp(poll.limit + 1), false, "刚到 12 分钟就放弃了");
+    assert.equal(poll.gaveUp(poll.limit + 200), false, "还在正常区间就放弃了");
+    assert.equal(poll.gaveUp(poll.hard + 1), true, "到了硬上限也不放手");
+    assert.ok(poll.delay(1) < poll.slow, "正常阶段不该已经是慢速");
+    assert.equal(poll.delay(poll.limit + 1), poll.slow, "过了 12 分钟没有放慢节奏");
+  });
+
   await check("总结页：换模型后，生成请求带的就是那个模型", async () => {
     WB.router.go("summary", {});
     await tick(260);

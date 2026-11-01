@@ -119,6 +119,17 @@ class SummaryLLM:
         fixed = repair_json(text)
         if fixed:
             return fixed
+        # 截断：输出根本没写完（正文/时间线太长，预算在半个字符串里用完）。
+        # 这种情况「原样重问」只会再截断一次——正确的动作是让它接着写。
+        if _looks_truncated(text):
+            sink("输出被截断了，正在接着写")
+            merged = self._continue(text, messages, temperature, max_tokens)
+            if merged:
+                fixed = repair_json(merged)
+                if fixed:
+                    self.notes.append("输出被截断，接着写了一段才拿到完整 JSON")
+                    return fixed
+                text = merged
         sink("模型输出不是合法 JSON，已按更严格的要求重问一次")
         self.notes.append("模型输出的 JSON 无法修复，重问了一次")
         self.calls += 1
@@ -134,9 +145,10 @@ class SummaryLLM:
                 ),
             },
         ]
-        # 重问时把输出预算放大一倍：第一次失败常常是正文太长被截断，
-        # 原样再问一次只会再截断一次（真实现场：55 分钟视频的正文 3000+ 字）。
-        budget = None if max_tokens is None else min(int(max_tokens) * 2, 16384)
+        # 重问时把输出预算放大：第一次失败常常是正文太长被截断，
+        # 原样再问一次只会再截断一次（真实现场：55 分钟视频的正文 3000+ 字、
+        # 两小时视频的时间线一次就要 8k tokens）。
+        budget = _json_budget(max_tokens)
         again = self.client.chat(
             retry_messages, temperature=temperature, max_tokens=budget, json_mode=True
         )
@@ -151,6 +163,38 @@ class SummaryLLM:
         # 直接抛 WBError：SummarizeError 只在自己这一层的 run() 里被翻译成错误码，
         # 合集总览走的是 core/overview.py 的另一条路，漏出去就成了「内部错误」。
         raise WBError("LLM_BAD_RESPONSE", f"模型连续两次都没有给出可解析的 JSON{hint}：{tail}")
+
+    def _continue(self, text, messages, temperature, max_tokens) -> str:
+        """让它从断开处接着写，把两段拼起来。
+
+        为什么不是「重问一遍」：一段两小时视频的时间线要 8k tokens，重问还是
+        一样长、还是一样在同一个位置断。续写只补后半段，长度是原来的一半上下。
+        """
+        self.calls += 1
+        cont_messages = list(messages) + [
+            {"role": "assistant", "content": text or ""},
+            {
+                "role": "user",
+                "content": (
+                    "你上一条回复在 JSON 中途被长度限制截断了。请**从断开的位置接着写**，"
+                    "只输出剩下的部分：不要重复已经写过的内容，不要重新开头，"
+                    "不要解释，不要 Markdown 围栏。直接从被截断的那个值继续，"
+                    "直到 JSON 完整结束。"
+                ),
+            },
+        ]
+        try:
+            rest = self.client.chat(
+                cont_messages,
+                temperature=temperature,
+                max_tokens=_json_budget(max_tokens),
+                json_mode=True,
+            )
+        except ChatError:
+            return ""
+        if not rest:
+            return ""
+        return (text or "") + rest.strip()
 
 
 class _ModelCfg:
@@ -447,3 +491,27 @@ def roles_view() -> list[dict[str, Any]]:
         }
         for item in ROLES
     ]
+
+#: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，
+#: 而 llm.max_tokens 的默认值只有 4096——按配置原样重问必然再截断。
+MIN_JSON_TOKENS = 8192
+
+
+def _json_budget(max_tokens: int | None) -> int:
+    """重问与续写用多少输出预算：取「配置的两倍」与 8192 的较大者，上限 16384。"""
+    base = int(max_tokens or 0)
+    return min(max(MIN_JSON_TOKENS, base * 2), 16384)
+
+
+def _looks_truncated(text: str) -> bool:
+    """输出是不是被长度限制截断在半路上。
+
+    判据只看形状不看语义：去掉空白后不以 } 结尾，就说明这个对象没写完。
+    反例是「模型压根没写 JSON」，该重问而不是续写——那种文本不会以 { 开头。
+    """
+    body = (text or "").strip()
+    if not body:
+        return False
+    if body.endswith("}"):
+        return False
+    return "{" in body
