@@ -33,6 +33,7 @@ from bili_scribe.core.summarizer import (
 )
 
 from video_workbench.app.errors import WBError
+from video_workbench.infra.jsonfix import repair_json
 from video_workbench.infra.llm import ChatClient, ChatError
 
 #: 角色清单（顺序即下拉顺序）。``standard`` 不套方法论，其余会走三轮回。
@@ -87,7 +88,7 @@ class SummaryLLM:
         sink = note or (lambda _message: None)
         self.calls += 1
         try:
-            return self.client.chat(
+            text = self.client.chat(
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -101,9 +102,51 @@ class SummaryLLM:
                 self.notes.append("这个模型不认 JSON 模式，已退回普通请求")
                 sink("模型不支持 JSON 模式，改按普通请求重试")
                 self.calls += 1
-                return self.client.chat(
+                text = self.client.chat(
                     messages, temperature=temperature, max_tokens=max_tokens)
-            raise
+            else:
+                raise
+        if json_mode:
+            return self._json_or_retry(text, messages, sink, temperature, max_tokens)
+        return text
+
+    def _json_or_retry(self, text, messages, sink, temperature, max_tokens) -> str:
+        """模型给的 JSON 只要还能读懂就修好交出去；真读不懂再问一次。
+
+        为什么修：一份 8 段预读的总结，最后一步因为字符串里一个原始换行就整份失败，
+        用户得从头再跑三分多钟。这类输出人眼看着完全正常，是解析器太严。
+        """
+        fixed = repair_json(text)
+        if fixed:
+            return fixed
+        sink("模型输出不是合法 JSON，已按更严格的要求重问一次")
+        self.notes.append("模型输出的 JSON 无法修复，重问了一次")
+        self.calls += 1
+        retry_messages = list(messages) + [
+            {"role": "assistant", "content": (text or "")[:4000]},
+            {
+                "role": "user",
+                "content": (
+                    "上面这段不是合法 JSON。请只输出一个 JSON 对象：不要解释文字、"
+                    "不要 Markdown 围栏；字符串内部不要出现裸换行（换行写成 \n），"
+                    "引号要转义。字段与上一次保持一致。"
+                ),
+            },
+        ]
+        again = self.client.chat(
+            retry_messages, temperature=temperature, max_tokens=max_tokens, json_mode=True
+        )
+        fixed = repair_json(again)
+        if fixed:
+            return fixed
+        tail = (again or "").strip()[-40:]
+        hint = ""
+        if not tail.endswith("}"):
+            hint = ("（输出看起来被截断了——把「上下文与长素材」里的单次输出上限调大，"
+                    "或换一个更听话的模型）")
+        # 直接抛 WBError：SummarizeError 只在自己这一层的 run() 里被翻译成错误码，
+        # 合集总览走的是 core/overview.py 的另一条路，漏出去就成了「内部错误」。
+        raise WBError("LLM_BAD_RESPONSE", f"模型连续两次都没有给出可解析的 JSON{hint}：{tail}")
 
 
 class _ModelCfg:

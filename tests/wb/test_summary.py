@@ -195,12 +195,26 @@ def test_unknown_role_is_rejected():
 def test_non_json_reply_raises_bad_response():
     from video_workbench.app.errors import WBError
 
+    # 第一次回废话、重问还是废话 → 才算失败（只回一次废话会触发重问，见下一条用例）
     with pytest.raises(WBError) as exc:
         summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                       client=StubClient(["我今天不想按格式回话"]), cfg=_cfg(),
-                       ctx=FakeCtx())
+                       client=StubClient(["我今天不想按格式回话", "还是不按格式"]),
+                       cfg=_cfg(), ctx=FakeCtx())
     assert exc.value.code == "LLM_BAD_RESPONSE"
 
+
+def test_non_json_reply_is_asked_again_once():
+    """模型偶尔会把 JSON 说成人话；重问一次能救回来就别让用户白跑一轮预读。"""
+    from video_workbench.infra.jsonfix import repair_json
+
+    assert repair_json('{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段' + chr(10) + '第二段"}'), \
+        "字符串里的原始换行应该能修好"
+    ctx = FakeCtx()
+    result = summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
+                            client=StubClient(["我先说两句废话", json.dumps(GOOD)]),
+                            cfg=_cfg(), ctx=ctx)
+    assert result["summary"]["one_line"], "重问之后应该拿到一份总结"
+    assert any("重问" in note for note in result.get("notes") or []), "没记下重问这件事"
 
 def test_progress_reports_chinese_stages():
     ctx = FakeCtx()
@@ -443,7 +457,7 @@ def test_job_failure_keeps_previous_versions(service, tmp_path, monkeypatch):
 
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
-    configure(service, monkeypatch, StubClient(["不是 JSON"]))
+    configure(service, monkeypatch, StubClient(["不是 JSON", "还不是 JSON"]))
     with pytest.raises(WBError) as exc:
         service._summary_job(FakeCtx(), {"project_id": project["id"], "kind": "fresh"})
     assert exc.value.code == "LLM_BAD_RESPONSE"

@@ -86,6 +86,10 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 模型 id 自带斜杠时（如 `qwen/qwen3-vl-plus`）不会被拆开——前缀不是已知服务商就整串当模型名。
 
 RPC 里跟模型相关的有三个：`llm.test`（发一条最小对话验证这家能不能用）、
+模型输出不是严格 JSON 时（例如 `summary_md` 里带裸换行），`video_workbench/infra/jsonfix.py`
+会先 `repair_json()` 修（`strict=False` + 去尾逗号 + 剥围栏），修不了就**把上次输出回灌重问一次**；
+两次都不行才抛 `LLM_BAD_RESPONSE`，并在 detail 里提示是「截断」还是「格式」。
+这条兜底同时挂在候选解析（`core/clipper.py`）与精析解析（`core/clip_refine.py`）上。
 `llm.models`（`GET {base_url}/models` 列这家账号能用的模型，供界面「获取可用模型」用；
 不需要 `model` 已配好，缺地址/密钥回 `LLM_NOT_CONFIGURED`，地址不支持该接口回 `LLM_BAD_RESPONSE`），
 以及 `summary.models`（总结页下拉的数据源：把所有服务商卡展开成 `{spec, provider, provider_name, model}`，

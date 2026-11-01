@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from video_workbench.app.errors import WBError
+from video_workbench.infra.jsonfix import parse_json
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_candidates.md"
 
@@ -182,7 +183,11 @@ def parse_reply(raw: str) -> list[dict[str, Any]]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise WBError("LLM_BAD_RESPONSE", f"模型返回的 JSON 解析失败：{exc.msg}") from exc
+        # 模型常把字符串写成多行（原始换行），严格解析会挂；先修一次再判死
+        fixed = parse_json(text)
+        if fixed is None:
+            raise WBError("LLM_BAD_RESPONSE", f"模型返回的 JSON 解析失败：{exc.msg}") from exc
+        data = fixed
     if isinstance(data, dict):
         rows = data.get("candidates")
     else:

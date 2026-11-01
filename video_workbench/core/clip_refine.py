@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from video_workbench.app.errors import WBError
+from video_workbench.infra.jsonfix import parse_json
 
 PROMPT_PATH = (
     Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_refine.md"
@@ -315,7 +316,9 @@ def parse_reply(raw: str) -> dict[str, Any]:
     except WBError:
         raise
     except json.JSONDecodeError as exc:
-        raise WBError("LLM_BAD_RESPONSE", "精析返回的不是合法 JSON", str(exc)) from exc
+        payload = parse_json(raw)
+        if payload is None:
+            raise WBError("LLM_BAD_RESPONSE", "精析返回的不是合法 JSON", str(exc)) from exc
     if not isinstance(payload, dict):
         raise WBError("LLM_BAD_RESPONSE", "精析返回的不是对象")
     out: dict[str, Any] = {}
