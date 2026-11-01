@@ -2064,8 +2064,47 @@ async function main() {
     assert.strictEqual(headers["api-version"], "2024-02-01");
   });
 
-  dom.window.close();
+  // 状态条曾经恒为 0，两处都错：任务行的类型列叫 type（前端按 kind 读，永远是空串），
+  // 而且统计发生在合并事件之前（新任务那一刻永远是 0）。这两条钉住映射与统计本身。
+  await check("状态条：把任务行按 type 分到三格里", () => {
+    assert.strictEqual(WB._jobBucket({ type: "download.item" }), "download");
+    assert.strictEqual(WB._jobBucket({ type: "download.batch" }), "download");
+    assert.strictEqual(WB._jobBucket({ type: "transcribe.run" }), "transcribe");
+    assert.strictEqual(WB._jobBucket({ type: "subtitle.optimize" }), "transcribe");
+    assert.strictEqual(WB._jobBucket({ type: "clip.export" }), "export");
+    assert.strictEqual(WB._jobBucket({ type: "dev.demo" }), null);
+    assert.strictEqual(WB._jobBucket({ kind: "download.item" }), "download", "老字段 kind 也该认");
+    assert.strictEqual(WB._jobBucket(null), null, "空行不该炸");
+  });
 
+  await check("状态条：只数 running/queued，且不把无关任务算进三格", () => {
+    const counts = WB._countJobs([
+      { id: "a", type: "download.item", status: "running" },
+      { id: "b", type: "download.batch", status: "queued" },
+      { id: "c", type: "download.item", status: "succeeded" },
+      { id: "d", type: "transcribe.run", status: "running" },
+      { id: "e", type: "merge.run", status: "running" },
+      { id: "f", type: "clip.export", status: "failed" },
+      { id: "g", type: "dev.demo", status: "running" },
+    ]);
+    assert.strictEqual(counts.download, 2, "下载应是 2，实际 " + counts.download);
+    assert.strictEqual(counts.transcribe, 1, "转录应是 1，实际 " + counts.transcribe);
+    assert.strictEqual(counts.export, 1, "合并算导出，应是 1，实际 " + counts.export);
+  });
+
+  await check("状态条：job.created 之后状态点亮起来", async () => {
+    window.__wbEvent("job.created", JSON.stringify({
+      job: { id: "job_status_ui", type: "download.item", status: "running", progress: 0.2 },
+    }));
+    await tick(40);
+    const dot = window.document.getElementById("status-dot");
+    assert.strictEqual(dot.getAttribute("data-active"), "true", "有任务在跑，状态点却是暗的");
+    const text = window.document.getElementById("status-jobs-text").textContent;
+    assert.ok(/下载 [1-9]/.test(text), "跑着的下载没进状态条：" + text);
+    window.__wbEvent("job.finished", JSON.stringify({ id: "job_status_ui", status: "succeeded" }));
+  });
+
+  dom.window.close();
   console.log("\n前端骨架验收");
   console.log(results.join("\n"));
   if (problems.length) {

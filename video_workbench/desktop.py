@@ -311,6 +311,30 @@ def _run_ytdlp(argv: list[str]) -> int:
         return 2
     return int(ytdlp_main(argv) or 0)
 
+# Windows 上「没有控制台」的父进程去起「控制台子系统」的子进程（ffmpeg.exe 就是），
+# 系统会给子进程新开一个黑窗口。下载时那两个一闪而过的终端就是这么来的：
+# yt-dlp 合并音视频要调 ffmpeg。CREATE_NO_WINDOW 让子进程照常跑、不建窗口。
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _hide_console_children() -> None:
+    """打包态统一给子进程加 CREATE_NO_WINDOW（源码态不动，方便调试看输出）。"""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    import subprocess
+
+    if getattr(subprocess.Popen, "_wb_no_window", False):
+        return
+    original = subprocess.Popen.__init__
+
+    def patched(self, *args, **kwargs):
+        flags = int(kwargs.get("creationflags") or 0)
+        kwargs["creationflags"] = flags | _CREATE_NO_WINDOW
+        return original(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = patched  # type: ignore[method-assign]
+    subprocess.Popen._wb_no_window = True  # type: ignore[attr-defined]
+
 def _bind_stdio() -> None:
     """把 stdout/stderr 接回真正的句柄 1/2，不接日志文件。
 
@@ -331,6 +355,8 @@ def _bind_stdio() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    # 一进来就收拾子进程的窗口：GUI 主进程与 --ytdlp / --asr-worker 两个入口都要
+    _hide_console_children()
     # 必须排在 argparse 与 _ensure_streams 之前：子进程要的是管道，不是日志文件
     if raw and raw[0] == "--asr-worker":
         _bind_stdio()

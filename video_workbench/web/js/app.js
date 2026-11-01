@@ -182,34 +182,71 @@
 
   // ------------------------------------------------------------ 任务中心
 
-  function refreshJobText(payload) {
-    // 事件里带的计数直接用；没有就按内存里的任务表算一次。
-    var counts = { download: 0, transcribe: 0, export: 0 };
-    (state.jobs || []).forEach(function (job) {
-      if (job.status !== "running" && job.status !== "queued") return;
-      var kind = String(job.kind || "");
-      if (kind.indexOf("download") === 0) counts.download++;
-      else if (kind.indexOf("transcribe") === 0) counts.transcribe++;
-      else counts.export++;
+  // 任务事件有两种形状：job.created 带 {job:{...}}，job.updated 是扁平的一层
+  // （后端 jobs._report 发的就是 {id,status,stage,progress}）。两种都要能合并，
+  // 否则状态条只在「新建」那一刻记得住，之后每条进度都白丢——用户看到的一直是 0。
+  function jobRowOf(payload) {
+    if (!payload) return null;
+    if (payload.job && payload.job.id) return payload.job;
+    if (payload.id) return payload;
+    return null;
+  }
+
+  function mergeJob(incoming) {
+    if (!incoming || !incoming.id) return;
+    var found = false;
+    state.jobs = (state.jobs || []).map(function (job) {
+      if (job.id === incoming.id) {
+        found = true;
+        return Object.assign({}, job, incoming);
+      }
+      return job;
     });
+    if (!found) state.jobs.unshift(incoming);
+  }
+
+  // 任务的类型列在数据库里叫 type（wb_job.type）；早期代码按 kind 读，永远拿到空串，
+  // 于是下载中的任务一个都不计进「下载」。两个都认，但以 type 为准。
+  function jobKind(job) {
+    return String((job && (job.type || job.kind)) || "");
+  }
+
+  var EXPORT_PREFIXES = ["clip.export", "merge", "publish", "nle", "video.export"];
+
+  function jobBucket(job) {
+    var kind = jobKind(job);
+    if (kind.indexOf("download") === 0) return "download";
+    if (kind.indexOf("transcribe") === 0) return "transcribe";
+    if (kind.indexOf("subtitle") === 0) return "transcribe";
+    for (var i = 0; i < EXPORT_PREFIXES.length; i++) {
+      if (kind.indexOf(EXPORT_PREFIXES[i]) === 0) return "export";
+    }
+    return null; // 认不出来的（demo、诊断包之类）不占这三格
+  }
+
+  // 给测试留的纯函数 seams：状态条的两个坑（type/kind、先合并再统计）都在这里，
+  // 直接对着数据断言比在 jsdom 里跟 mock 的模拟任务抢时序可靠得多。
+  WB._jobBucket = jobBucket;
+  WB._countJobs = function (rows) {
+    var counts = { download: 0, transcribe: 0, export: 0 };
+    (rows || []).forEach(function (job) {
+      if (!job || (job.status !== "running" && job.status !== "queued")) return;
+      var bucket = jobBucket(job);
+      if (bucket === "download") counts.download++;
+      else if (bucket === "transcribe") counts.transcribe++;
+      else if (bucket === "export") counts.export++;
+    });
+    return counts;
+  };
+  function refreshJobText(payload) {
+    // 先合并再统计：反过来的话，新任务的那一刻永远是 0，要等下一个事件才补上
+    mergeJob(jobRowOf(payload));
+    var counts = WB._countJobs(state.jobs);
     var text = "下载 " + counts.download + " · 转录 " + counts.transcribe + " · 导出 " + counts.export;
     var node = document.getElementById("status-jobs-text");
     if (node) node.textContent = text;
     var dot = document.getElementById("status-dot");
     if (dot) dot.setAttribute("data-active", counts.download + counts.transcribe + counts.export > 0 ? "true" : "false");
-    if (payload && payload.job) {
-      // 单条任务更新就地合并，避免每次事件都全量拉一遍
-      var incoming = payload.job;
-      var found = false;
-      state.jobs = state.jobs.map(function (job) {
-        if (job.id === incoming.id) {
-          found = true;
-          return Object.assign({}, job, incoming);
-        }
-        return job;
-      });
-      if (!found) state.jobs.unshift(incoming);
-    }
   }
 
   function openJobsModal() {
