@@ -514,10 +514,16 @@ def download(
             extra_args=bbdown_args,
         )
     else:
+        prefix: list[str] = []
         binary = yt_dlp_bin or shutil.which("yt-dlp") or shutil.which("yt_dlp")
         if not binary:
             # 用模块方式跑，省得用户还要单独装 CLI
-            if _module_available("yt_dlp"):
+            if getattr(sys, "frozen", False):
+                # 打包态没有 python.exe：`sys.executable -m yt_dlp` 会把主程序
+                # 自己再拉起来一次（窗口一闪、yt-dlp 压根没跑），改走 `--ytdlp` 入口。
+                prefix = [sys.executable, "--ytdlp"]
+                binary = prefix[0]
+            elif _module_available("yt_dlp"):
                 binary = f"{sys.executable} -m yt_dlp"
             else:
                 raise WBError(
@@ -532,8 +538,13 @@ def download(
             cookie_file=cookie_file,
             ffmpeg_dir=ffmpeg_dir or ffmpeg_location(),
         )
-        # "python -m yt_dlp" 这种带空格的二进制要拆开，否则 Popen 会去找名字里有空格的 exe
-        argv = cmd[0].split() + cmd[1:] if " " in cmd[0] else cmd
+        if prefix:
+            # 打包态：[exe, "--ytdlp"] + yt-dlp 自己的参数（不能按空格拆 sys.executable，
+            # 路径里一旦带空格就会拆坏）
+            argv = list(prefix) + cmd[1:]
+        else:
+            # "python -m yt_dlp" 这种带空格的二进制要拆开，否则 Popen 会去找名字里有空格的 exe
+            argv = cmd[0].split() + cmd[1:] if " " in cmd[0] else cmd
 
     emit = on_event or (lambda _e: None)
     started = time.time()

@@ -283,3 +283,28 @@ def test_quality_actual_tolerates_odd_heights():
     assert D.DownloadResult(path=Path("x"), height=1078).quality_actual == "1080P"
     assert D.DownloadResult(path=Path("x"), height=2160).quality_actual == "4K"
     assert D.DownloadResult(path=Path("x"), height=1234).quality_actual == "1234P"
+
+
+def test_frozen_build_uses_self_ytdlp_entry(tmp_path, monkeypatch):
+    """打包态不许用 `sys.executable -m yt_dlp`。
+
+    真机教训（2026-10-31 用户报「下载任务失败了」）：exe 里 `sys.executable`
+    就是 VideoWorkbench.exe 自己，`-m yt_dlp` 会把主程序再拉起来一遍，
+    yt-dlp 压根没跑，用户只看到「yt-dlp 执行失败」。
+    """
+    monkeypatch.setattr(D.shutil, "which", lambda name: "")
+    monkeypatch.setattr(D, "_module_available", lambda name: True)
+    monkeypatch.setattr(D.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(D.sys, "executable", r"C:\Apps\Video Workbench\VideoWorkbench.exe")
+    calls = []
+    D.download(
+        url="https://www.bilibili.com/video/BV1xx411c7mD",
+        home=tmp_path / "ep",
+        runner=fake_runner([], produce="source.mp4", calls=calls),
+    )
+    cmd = calls[0]["cmd"]
+    assert cmd[0] == r"C:\Apps\Video Workbench\VideoWorkbench.exe"
+    assert cmd[1] == "--ytdlp", "打包态必须走 --ytdlp 入口"
+    # 路径里有空格也不能被拆开
+    assert "-m" not in cmd[:3]
+    assert "--newline" in cmd

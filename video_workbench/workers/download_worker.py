@@ -186,8 +186,13 @@ def make_download_handler(
                 bbdown_bin=bbdown_path,
                 bbdown_args=bbdown_args,
             )
-        except WBError:
+        except WBError as exc:
             _mark_failed(repo, project_id, "下载失败")
+            # 失败原因得能看见：detail 里是 yt-dlp 最后几十行输出，不写进日志的话
+            # 用户只看到「yt-dlp 执行失败」六个字，既不知道是登录态还是网络。
+            tail = str(getattr(exc, "detail", "") or "").strip()
+            for line in tail.splitlines()[-12:]:
+                ctx.log(f"[{exc.code}] {line}")
             raise
 
         ctx.check_cancel()

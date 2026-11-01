@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -296,13 +297,49 @@ def _run_asr_worker(argv: list[str]) -> int:
     return asr_worker.main(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    _ensure_streams()
+def _run_ytdlp(argv: list[str]) -> int:
+    """`--ytdlp <args…>`：打包态下 yt-dlp 子进程的入口。
 
+    打包后没有独立的 python.exe：`sys.executable -m yt_dlp` 会把主程序自己
+    再拉起来一遍（窗口一闪、yt-dlp 压根没跑），所以下载子进程走这里。
+    不开窗、不建服务、不读配置——跟 `--asr-worker` 一个路子。
+    """
+    try:
+        from yt_dlp import main as ytdlp_main
+    except Exception as exc:  # noqa: BLE001 - 缺依赖要当场说清楚
+        print(f"yt-dlp 不可用：{exc}", file=sys.stderr or sys.stdout)
+        return 2
+    return int(ytdlp_main(argv) or 0)
+
+def _bind_stdio() -> None:
+    """把 stdout/stderr 接回真正的句柄 1/2，不接日志文件。
+
+    子进程入口（`--ytdlp` / `--asr-worker`）的输出是给父进程读的管道。窗口程序在
+    PyInstaller 下 `sys.stdout` 可能是 None；若走 `_ensure_streams()` 会把输出重定向进
+    `video-workbench.log`，父进程的管道就永远收不到进度行（表现为「下载结束但没找到产物」）。
+    """
+    import io
+
+    for name, fd in (("stdout", 1), ("stderr", 2)):
+        try:
+            stream = io.TextIOWrapper(
+                io.FileIO(fd, "w", closefd=False), encoding="utf-8", errors="replace", line_buffering=True
+            )
+        except OSError:
+            stream = open(os.devnull, "w", encoding="utf-8")
+        setattr(sys, name, stream)
+
+def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
-    # 必须排在 argparse 之前：worker 的剩余参数是它自己的，不能被主程序的解析器吃掉
+    # 必须排在 argparse 与 _ensure_streams 之前：子进程要的是管道，不是日志文件
     if raw and raw[0] == "--asr-worker":
+        _bind_stdio()
         return _run_asr_worker(raw[1:])
+    if raw and raw[0] == "--ytdlp":
+        _bind_stdio()
+        return _run_ytdlp(raw[1:])
+
+    _ensure_streams()
 
     parser = argparse.ArgumentParser(description=f"{APP_NAME} 桌面版")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 ~/.bili-scribe/config.yaml）")
