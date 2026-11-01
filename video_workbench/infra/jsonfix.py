@@ -26,8 +26,59 @@ def _links(text: str) -> str:
     return body
 
 
+_WS = " " + chr(9) + chr(10) + chr(13)
+
+
+def _escape_inner_quotes(text: str) -> str:
+    """把字符串内部没转义的 `"` 补成 `\\"`。
+
+    真实现场（2026-11-01 14:31）：模型在正文里直接引用别人的话——
+    `"实际改动": "删掉"赋能"这种说法"`，结构在第二个引号处就断了。
+    `strict=False` 救不了它（那不是换行问题，是引号配对问题）。
+
+    判据：引号后第一个非空白字符若是「结构收尾」（逗号 / 冒号 / 闭括号 / 文本结束），
+    就当它结束了字符串；否则它只是正文里的引号，转义掉。
+    """
+    out: list[str] = []
+    inside = False
+    escaped = False
+    for i, ch in enumerate(text):
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == chr(92) and inside:
+            out.append(ch)
+            escaped = True
+            continue
+        if ch != '"':
+            out.append(ch)
+            continue
+        if not inside:
+            inside = True
+            out.append(ch)
+            continue
+        nxt = ""
+        for j in range(i + 1, min(i + 8, len(text))):
+            if text[j] not in _WS:
+                nxt = text[j]
+                break
+        if nxt in ("", ",", ":", "}", "]"):
+            inside = False
+            out.append(ch)
+        else:
+            out.append(chr(92) + '"')
+    return "".join(out)
+
+
 def _try(text: str) -> Any:
-    for candidate in (text, _TRAILING_COMMA.sub(r"\1", text)):
+    escaped = _escape_inner_quotes(text)
+    for candidate in (
+        text,
+        _TRAILING_COMMA.sub(r"\1", text),
+        escaped,
+        _TRAILING_COMMA.sub(r"\1", escaped),
+    ):
         try:
             # strict=False：允许字符串里出现原始换行/制表符——模型最常犯的就是这个
             return json.loads(candidate, strict=False)

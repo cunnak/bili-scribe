@@ -335,7 +335,11 @@
           ui.toast((err && err.message) || (running ? "取消失败" : "重试失败"), "error");
         });
     });
-    var row = ui.h("div", { class: "card", style: "background:transparent" }, [
+    var row = ui.h("div", {
+      class: "card",
+      style: "background:transparent",
+      dataset: { jobId: String(job.id || "") }
+    }, [
       ui.h("div", { class: "card__body col", style: "gap:8px" }, [
         ui.h("div", { class: "row", style: "justify-content:space-between" }, [
           ui.h("div", { class: "row", style: "gap:8px" }, [title, pill]),

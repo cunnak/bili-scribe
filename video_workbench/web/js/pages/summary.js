@@ -34,6 +34,8 @@
     model: "",           // "" = 跟随设置（llm.tasks.summary → llm.model）
     modelDefault: "",
     found: false,
+    jobProgress: 0,
+    jobStage: "",
     summary: null,
     versions: [],
     busy: false,
@@ -248,7 +250,10 @@
           }
           if (attempts > POLL_LIMIT) { reject(new Error("等太久了，先停在这里")); return; }
           state.note = (job.stage || "生成中") + " " + Math.round((job.progress || 0) * 100) + "%";
+          state.jobProgress = job.progress || 0;
+          state.jobStage = job.stage || "";
           paintNote();
+          paintProgress();
           setTimeout(tick, POLL_MS);
         }).catch(reject);
       }
@@ -553,97 +558,156 @@
       }
     }, options);
   }
+  function docHead() {
+    var item = project() || {};
+    var box = [];
+    if (item.up_name) box.push(ui.h("span", {}, [ui.h("em", { text: "UP " }), document.createTextNode(item.up_name)]));
+    if (item.stage) box.push(ui.h("span", {}, [ui.h("em", { text: "素材 " }),
+      document.createTextNode(item.has_transcript ? "字幕" : "无字幕")]));
+    if (state.versions.length) {
+      box.push(ui.h("span", {}, [ui.h("em", { text: "第 " + ((state.summary && state.summary.version) || state.versions.length) + " 版 · " }),
+        document.createTextNode("共 " + state.versions.length + " 版")]));
+    }
+    if (state.role) {
+      var picked = state.roles.filter(function (r) { return r.key === state.role; })[0];
+      box.push(ui.h("span", {}, [ui.h("em", { text: (picked ? picked.name : state.role) }),
+        document.createTextNode(picked && picked.passes >= 3 ? " · 三轮" : "")]));
+    }
+    box.push(ui.h("span", { text: whenDay(new Date().toISOString()) }));
+    return ui.h("div", { class: "sum-hd" }, [
+      ui.h("i"),
+      ui.h("div", {}, [
+        ui.h("h1", { id: "sum-title", text: item.title || "还没选素材" }),
+        ui.h("div", { class: "sum-chips", id: "sum-chips" }, box)
+      ])
+    ]);
+  }
+
+  function progressBlock() {
+    var active = state.busy || !!state.jobId;
+    if (!active) return ui.h("span", { id: "sum-prog", style: "display:none" });
+    var pct = Math.max(0, Math.min(100, Math.round((state.jobProgress || 0) * 100)));
+    var filled = Math.round(pct / 100 * 8);
+    var segs = [];
+    for (var i = 0; i < 8; i += 1) {
+      var cls = i < filled ? "on" : (i === filled ? "cur" : "");
+      segs.push(ui.h("i", { class: cls }));
+    }
+    return ui.h("div", { class: "sum-prog", id: "sum-prog" }, [
+      ui.h("div", { class: "sum-seg" }, segs),
+      ui.h("div", { class: "sum-prow" }, [
+        ui.h("span", { class: "l", id: "sum-stage", text: state.jobStage || state.note || "生成中" }),
+        ui.h("span", { class: "r", id: "sum-pct", text: pct + "%" })
+      ])
+    ]);
+  }
+
+  function warnBlock() {
+    var item = project() || {};
+    if (!item.has_transcript) return null;
+    return ui.h("div", { class: "sum-warn" }, [
+      ui.h("div", { class: "wt", text: "采集提示" }),
+      ui.h("p", {
+        text: "总结只依据这条视频的字幕文字；语音识别有同音字与断词误差，"
+          + "专有名词、数字、人名建议回看视频核对后再用。"
+      })
+    ]);
+  }
+
   function head() {
     if (state.mode === "collection") return collHead();
-    var options = state.projects.map(function (item) {
+
+    function field(id, key, title, options, onchange) {
+      var sel = ui.h("select", { id: id, onchange: function (event) { onchange(event.target.value); } },
+        options);
+      if (!options.length) sel.appendChild(ui.h("option", { value: "", text: "（空）" }));
+      return ui.h("label", { class: "sum-fld", title: title }, [
+        ui.h("span", { class: "k", text: key }),
+        sel
+      ]);
+    }
+
+    var projectOptions = state.projects.map(function (item) {
       return ui.h("option", {
         value: item.id,
         text: item.title + (item.has_transcript ? "" : "（无字幕）"),
         selected: item.id === state.projectId ? "selected" : null
       });
     });
-    var picker = ui.h("select", {
-      class: "input input--select",
-      id: "sum-project",
-      onchange: function (event) { pickProject(event.target.value); }
-    }, options);
-    if (!options.length) {
-      picker.appendChild(ui.h("option", { value: "", text: "（素材库还是空的）" }));
-    }
-
     var roleOptions = state.roles.map(function (item) {
       return ui.h("option", {
         value: item.key,
-        text: item.name + (item.passes >= 3 ? "（三轮）" : ""),
+        text: item.name + (item.passes >= 3 ? " · 三轮" : ""),
         selected: item.key === state.role ? "selected" : null
       });
     });
-    var rolePick = ui.h("select", {
-      class: "input input--select",
-      id: "sum-role",
-      title: "角色决定用哪套方法论写这份总结",
-      onchange: function (event) { state.role = event.target.value; }
-    }, roleOptions);
 
-    var actions = ui.h("div", { class: "page__actions" }, [
-      rolePick,
-      modelSelect(),
-      ui.h("button", {
-        class: "btn btn--primary",
-        id: "sum-start",
-        text: state.busy ? "生成中…" : (state.found ? "重新生成" : "生成总结"),
-        disabled: state.busy || !state.projectId ? "disabled" : null,
-        onclick: start
-      }),
-      ui.h("button", {
-        class: "btn btn--ghost",
-        text: "在文件夹中显示",
-        disabled: state.projectId ? null : "disabled",
-        onclick: reveal
-      })
-    ]);
-
-    return ui.h("div", { class: "page__head" }, [
-      ui.h("h2", { class: "page__title", text: "总结" }),
-      ui.h("p", {
-        class: "page__hint",
-        text: "用字幕生成结构化总结；不满意就换个角色重出，或直接说怎么改"
-      }),
-      ui.h("div", { class: "sum-pick" }, [picker]),
-      actions
+    return ui.h("div", { class: "page__head sum-head" }, [
+      ui.h("div", { class: "sum-fields" }, [
+        field("sum-project", "PROJECT", "选一条素材，总结只用它自己的字幕",
+          projectOptions, pickProject),
+        field("sum-role", "ROLE", "角色决定用哪套方法论写这份总结",
+          roleOptions, function (value) { state.role = value; }),
+        modelSelect(),
+        ui.h("button", {
+          class: "sum-go",
+          id: "sum-start",
+          text: state.busy ? "生成中…" : "开始总结",
+          disabled: state.busy || !state.projectId ? "disabled" : null,
+          onclick: start
+        }),
+        ui.h("button", {
+          class: "sum-ghost",
+          text: "在文件夹中显示",
+          disabled: state.projectId ? null : "disabled",
+          onclick: reveal
+        })
+      ])
     ]);
   }
 
   function versionsCard() {
-    var card = ui.h("div", { class: "card card--flat" });
+    var card = ui.h("div", { class: "card" });
+    var current = state.summary ? state.summary.id : "";
     card.appendChild(ui.h("div", { class: "card__head" }, [
-      ui.h("span", { class: "card__title", text: "版本" }),
-      ui.h("span", { class: "muted", text: state.versions.length ? state.versions.length + " 版" : "" })
+      ui.h("span", { class: "card__title", text: "版本 · VERSION" }),
+      ui.h("span", { text: state.versions.length ? "共 " + state.versions.length + " 版" : "" })
     ]));
     if (!state.versions.length) {
-      card.appendChild(ui.h("p", { class: "muted sum-ver-empty", text: "还没有版本。生成一次就有了。" }));
+      card.appendChild(ui.h("p", { class: "ver-empty", text: "还没有版本。生成一次就有了；之后每次「按这个改」都会新增一版，旧的不会被覆盖。" }));
       return card;
     }
-    var list = ui.h("div", { class: "ver-list" });
-    var current = state.summary ? state.summary.id : "";
+    var list = ui.h("div", { class: "ver-list", id: "sum-versions" });
     state.versions.forEach(function (item) {
       var active = item.id === current;
-      var meta = [whenDay(item.created_at), item.role, item.model, item.chars + " 字"]
+      var meta = [whenDay(item.created_at), item.model, (item.chars || 0) + " 字"]
         .filter(function (part) { return !!part; }).join(" · ");
       var row = ui.h("div", {
         class: "ver-row" + (active ? " is-active" : ""),
-        "data-version": String(item.version)
+        "data-version": String(item.version),
+        onclick: active ? null : function () { restore(item.id, item.version); }
       }, [
         ui.h("div", { class: "ver-row__body" }, [
-          ui.h("div", { class: "ver-row__title", text: "第 " + item.version + " 版" + (active ? "（当前）" : "") }),
+          ui.h("div", { class: "ver-row__title" }, [
+            document.createTextNode("第 " + item.version + " 版"),
+            active ? ui.h("em", { text: "当前" }) : null
+          ]),
           ui.h("div", { class: "ver-row__meta", text: meta }),
-          item.revise_note ? ui.h("div", { class: "ver-row__note", text: item.revise_note }) : null
+          item.revise_note
+            ? ui.h("div", { class: "ver-row__note" }, [
+              ui.h("b", { text: "实际改动" }),
+              document.createTextNode(String(item.revise_note))
+            ])
+            : null
         ]),
         active ? null : ui.h("button", {
           class: "btn btn--ghost btn--sm",
           text: "恢复",
           disabled: state.busy ? "disabled" : null,
-          onclick: function () { restore(item.id, item.version); }
+          onclick: function (event) {
+            if (event && event.stopPropagation) event.stopPropagation();
+            restore(item.id, item.version);
+          }
         })
       ]);
       list.appendChild(row);
@@ -681,31 +745,42 @@
 
   function bodyCard() {
     var data = (state.summary && state.summary.content) || {};
-    var card = ui.h("div", { class: "card sum-body", id: "sum-body" });
     if (!state.found) {
-      card.appendChild(ui.h("div", { class: "empty" }, [
-        ui.h("p", { class: "empty__title", text: "还没有总结" }),
-        ui.h("p", { class: "empty__text", text: "选一个项目，挑个角色，点「生成总结」。一分钟到几分钟不等，取决于视频多长。" })
+      return ui.h("div", { class: "sum-card" }, [
+        ui.h("div", { class: "idx", text: "NO DOC" }),
+        ui.h("h2", { class: "s" }, [ui.h("span", { class: "n", text: "01" }),
+          document.createTextNode("还没有总结")]),
+        ui.h("p", { class: "sum-tx", text: "选一条素材、挑个角色，点「开始总结」。长视频会先分段预读再成文，几分钟起步。" }),
+        ui.h("p", { class: "sum-ai", text: "（生成后这里会出现一句话结论、主体、要点、时间线与注意事项）" })
+      ]);
+    }
+
+    var sections = [];
+    var seq = 0;
+    function section(title, nodes) {
+      // 编号只数「小节」，不能数节点：sections 里还有正文段落，用 length 会跳号（01 → 03）。
+      seq += 1;
+      var n = ("0" + seq).slice(-2);
+      sections.push(ui.h("h2", { class: "s" }, [
+        ui.h("span", { class: "n", text: n }),
+        document.createTextNode(title)
       ]));
-      return card;
+      nodes.forEach(function (node) { sections.push(node); });
     }
-    var oneLine = String(data.one_line || "");
-    if (oneLine) {
-      card.appendChild(ui.h("p", { class: "sum-one", id: "sum-one", text: oneLine }));
-    }
-    card.appendChild(markdown(data.summary_md));
+
+    var one = String(data.one_line || "");
+    if (one) section("一句话", [ui.h("p", { class: "sum-tx", id: "sum-one", text: one })]);
+    if (data.summary_md) section("主体", [markdown(data.summary_md)]);
 
     var points = data.key_points || [];
     if (points.length) {
-      card.appendChild(ui.h("h3", { class: "sum-h", text: "要点" }));
-      var list = ui.h("ul", { class: "sum-points" });
-      points.forEach(function (item) { list.appendChild(ui.h("li", { text: String(item) })); });
-      card.appendChild(list);
+      var ul = ui.h("ul", { class: "sum-tx-ul" });
+      points.forEach(function (item) { ul.appendChild(ui.h("li", { text: String(item) })); });
+      section("关键点", [ul]);
     }
 
     var timeline = data.timeline || [];
     if (timeline.length) {
-      card.appendChild(ui.h("h3", { class: "sum-h", text: "时间线" }));
       var tl = ui.h("div", { class: "sum-time" });
       timeline.forEach(function (item) {
         tl.appendChild(ui.h("div", { class: "sum-time__row" }, [
@@ -713,18 +788,14 @@
           ui.h("span", { class: "sum-time__text", text: String(item.text || "") })
         ]));
       });
-      card.appendChild(tl);
+      section("时间线", [tl]);
     }
 
     var caution = String(data.caution || "");
-    if (caution) {
-      card.appendChild(ui.h("h3", { class: "sum-h", text: "注意" }));
-      card.appendChild(ui.h("p", { class: "callout callout--warn", text: caution }));
-    }
+    if (caution) section("注意", [ui.h("p", { class: "sum-tx", text: caution })]);
 
     var short = String(data.comment_short || "");
     if (short) {
-      card.appendChild(ui.h("h3", { class: "sum-h", text: "评论区短版" }));
       var box = ui.h("div", { class: "sum-short" });
       box.appendChild(ui.h("p", { class: "sum-short__text", text: short }));
       box.appendChild(ui.h("div", { class: "row row--end" }, [
@@ -738,19 +809,15 @@
           }
         })
       ]));
-      card.appendChild(box);
+      section("评论区短版", [box]);
     }
 
-    var meta = [];
-    if (state.summary.role) meta.push("角色：" + state.summary.role);
-    if (state.summary.model) meta.push("模型：" + state.summary.model);
-    if (state.summary.chars) meta.push(state.summary.chars + " 字");
-    if (state.summary.created_at) meta.push(whenDay(state.summary.created_at));
-    if (meta.length) {
-      card.appendChild(ui.h("div", { class: "sum-meta", text: meta.join(" · ") }));
-    }
-    card.appendChild(ui.h("p", { class: "sum-ai", text: "（本总结由 AI 依据视频字幕生成，发布前请自己过一遍）" }));
-    return card;
+    var ver = (state.summary && state.summary.version) || 1;
+    return ui.h("div", { class: "sum-card", id: "sum-body" }, [
+      ui.h("div", { class: "idx", text: "V" + ("0" + ver).slice(-2) + " / CURRENT" }),
+      ui.h("div", {}, sections),
+      ui.h("p", { class: "sum-ai", text: "（AI 依据字幕生成，发布前请自己过一遍）" })
+    ]);
   }
 
   function childrenCard() {
@@ -906,9 +973,10 @@
     var host = document.getElementById("summary-host");
     if (!host) return;
     host.textContent = "";
+    // 和单条版同序：正文在左、版本栏在右（grid 的第一列是 1fr）
     host.appendChild(ui.h("div", { class: "sum-grid" }, [
-      ui.h("div", { class: "sum-side" }, [childrenCard(), overviewVersionsCard()]),
-      ui.h("div", { class: "sum-main" }, [overviewCard()])
+      ui.h("div", { class: "sum-main" }, [overviewCard()]),
+      ui.h("div", { class: "sum-side" }, [childrenCard(), overviewVersionsCard()])
     ]));
     var errorNode = document.getElementById("summary-error");
     if (errorNode) {
@@ -917,17 +985,38 @@
     }
   }
 
+  function paintProgress() {
+    var host = document.getElementById("summary-host");
+    if (!host) return;
+    var old = document.getElementById("sum-prog");
+    if (!old) return;
+    var pct = Math.max(0, Math.min(100, Math.round((state.jobProgress || 0) * 100)));
+    var filled = Math.round(pct / 100 * 8);
+    var segs = old.querySelectorAll(".sum-seg i");
+    for (var i = 0; i < segs.length; i += 1) {
+      segs[i].className = i < filled ? "on" : (i === filled ? "cur" : "");
+    }
+    var stage = document.getElementById("sum-stage");
+    if (stage) stage.textContent = state.jobStage || state.note || "生成中";
+    var pctNode = document.getElementById("sum-pct");
+    if (pctNode) pctNode.textContent = pct + "%";
+  }
+
   function paint() {
     swapHead();
     if (state.mode === "collection") { paintCollection(); return; }
     var host = document.getElementById("summary-host");
     if (!host) return;
     host.textContent = "";
-    var grid = ui.h("div", { class: "sum-grid" }, [
-      ui.h("div", { class: "sum-side" }, [versionsCard(), refineCard()]),
-      ui.h("div", { class: "sum-main" }, [bodyCard()])
-    ]);
-    host.appendChild(grid);
+    host.appendChild(ui.h("div", { class: "sum-grid" }, [
+      ui.h("div", { class: "sum-main" }, [
+        docHead(),
+        progressBlock(),
+        warnBlock(),
+        bodyCard()
+      ]),
+      ui.h("div", { class: "sum-side" }, [versionsCard(), refineCard()])
+    ]));
     var errorNode = document.getElementById("summary-error");
     if (errorNode) {
       errorNode.textContent = state.error || "";

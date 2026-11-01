@@ -90,3 +90,17 @@ def test_non_json_mode_is_left_alone():
     llm = SummaryLLM(Flaky(["随便说点人话"]))
     assert llm.chat([{"role": "user", "content": "x"}]) == "随便说点人话"
     assert llm.calls == 1
+
+def test_repair_escapes_quotes_inside_strings():
+    """模型直接引用别人的话（正文里出现裸引号）——真实现场 2026-11-01 14:31。"""
+    broken = '{"实际改动": "删掉"赋能"这种说法，仅改诊断。", "score": 3}'
+    fixed = repair_json(broken)
+    assert fixed, "正文里的裸引号应当能修"
+    assert json.loads(fixed)["score"] == 3
+    assert '"赋能"' in json.loads(fixed)["实际改动"]
+
+
+def test_repair_keeps_real_structure_when_quotes_are_mixed():
+    broken = '{"a": "他说"好"，然后走了", "b": [1, 2,]}'
+    fixed = repair_json(broken)
+    assert json.loads(fixed) == {"a": '他说"好"，然后走了', "b": [1, 2]}

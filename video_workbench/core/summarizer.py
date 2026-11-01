@@ -129,12 +129,16 @@ class SummaryLLM:
                 "content": (
                     "上面这段不是合法 JSON。请只输出一个 JSON 对象：不要解释文字、"
                     "不要 Markdown 围栏；字符串内部不要出现裸换行（换行写成 \n），"
-                    "引号要转义。字段与上一次保持一致。"
+                    "引用别人的话不要用英文双引号，改用「」或单引号。"
+                    "字段与上一次保持一致。"
                 ),
             },
         ]
+        # 重问时把输出预算放大一倍：第一次失败常常是正文太长被截断，
+        # 原样再问一次只会再截断一次（真实现场：55 分钟视频的正文 3000+ 字）。
+        budget = None if max_tokens is None else min(int(max_tokens) * 2, 16384)
         again = self.client.chat(
-            retry_messages, temperature=temperature, max_tokens=max_tokens, json_mode=True
+            retry_messages, temperature=temperature, max_tokens=budget, json_mode=True
         )
         fixed = repair_json(again)
         if fixed:
