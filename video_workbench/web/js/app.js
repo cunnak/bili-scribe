@@ -291,6 +291,13 @@
       }
       syncJobEvent(body, rows, payload);
     });
+    var offSync = WB.on("jobs.synced", function (list) {
+      if (!body.isConnected) {
+        offSync();
+        return;
+      }
+      applyJobs(body, rows, toJobArray(list));
+    });
     return dialog;
   }
 
@@ -356,7 +363,17 @@
   function paintJobs(body, rows, done) {
     WB.rpc("job.list", {}, { silent: true, fallback: [] })
       .then(function (data) {
-        var jobs = toJobArray(data).slice(0, 30);
+        applyJobs(body, rows, toJobArray(data), done);
+      })
+      .catch(function (err) {
+        body.textContent = "";
+        body.appendChild(ui.empty("读不到任务", (err && err.message) || "任务表不可用"));
+      });
+  }
+
+  /** 已有一份任务列表时走这里：集合没变就只刷数值，变了才重建。 */
+  function applyJobs(body, rows, list, done) {
+        var jobs = list.slice(0, 30);
         state.jobs = jobs;
         refreshJobText(null);
         var sameSet =
@@ -387,11 +404,6 @@
         body.textContent = "";
         body.appendChild(frag);
         if (done) done();
-      })
-      .catch(function (err) {
-        body.textContent = "";
-        body.appendChild(ui.empty("读不到任务", (err && err.message) || "任务表不可用"));
-      });
   }
 
   /** 事件来了只动一行：新建 / 进度 / 结束都走这里。 */
@@ -413,6 +425,50 @@
     if (data && Array.isArray(data.items)) return data.items;
     return [];
   }
+
+  // ------------------------------------------------------------ 对账
+
+  /**
+   * 事件可能丢（尤其一条长任务跑完那一刻）。只要内存里还有在跑的任务，就定期拿
+   * `job.list` 覆盖一次真实状态——丢一条事件最多让界面晚 3 秒，而不是永久停在旧快照。
+   */
+  var RECONCILE_MS = 3000;
+
+  function hasActiveJobs() {
+    for (var i = 0; i < state.jobs.length; i++) {
+      var s = state.jobs[i] && state.jobs[i].status;
+      if (s === "running" || s === "queued") return true;
+    }
+    return false;
+  }
+
+  function reconcileJobs() {
+    if (state.reconciling) return;
+    if (!hasActiveJobs()) return;
+    state.reconciling = true;
+    WB.rpc("job.list", {}, { silent: true, fallback: [] })
+      .then(function (data) {
+        var jobs = toJobArray(data);
+        state.jobs = jobs;
+        refreshJobText(null);
+        emit("jobs.synced", jobs);
+      })
+      .catch(function () {})
+      .then(function () {
+        state.reconciling = false;
+      });
+  }
+
+  function startReconcile() {
+    setInterval(reconcileJobs, RECONCILE_MS);
+    window.addEventListener("focus", reconcileJobs);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) reconcileJobs();
+    });
+  }
+
+  WB._reconcileJobs = reconcileJobs;
+  WB._hasActiveJobs = hasActiveJobs;
 
   // ------------------------------------------------------------ 状态条
 
@@ -444,6 +500,7 @@
       return match ? match[1] : "";
     })();
     applySkin(skinFromHash || "ark", false);
+    startReconcile();
     applyRail(false);
 
     // 2) 左栏与交互

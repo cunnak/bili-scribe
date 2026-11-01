@@ -21,11 +21,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any, Callable
 
 Sink = Callable[[str, str], None]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class EventBus:
@@ -89,11 +92,18 @@ class EventBus:
         sink = self._sink
         if sink is None:
             return
-        try:
-            sink(name, json.dumps(payload, ensure_ascii=False))
-        except Exception:
-            # 窗口关掉之后 evaluate_js 会抛；这不影响后台任务，静默即可
-            pass
+        body = json.dumps(payload, ensure_ascii=False)
+        for attempt in (1, 2):
+            try:
+                sink(name, body)
+                return
+            except Exception as exc:  # noqa: BLE001
+                # 窗口关掉之后 evaluate_js 会抛，这不该影响后台任务；但**不能连日志都不留**：
+                # 2026-11-01 那次「任务跑完了界面还停在 97%」就是靠这条线索才查到事件丢了。
+                if attempt == 2:
+                    _LOGGER.warning("事件没有送到界面: %s (%s: %s)", name, type(exc).__name__, exc)
+                    return
+                time.sleep(0.05)
 
     def emit_now(self, name: str, payload: dict[str, Any] | None = None) -> None:
         """不节流，立即发。用于状态跃迁（创建/完成/失败）——那些一条都不能少。"""

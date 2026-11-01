@@ -148,3 +148,33 @@ def test_sink_errors_do_not_escape() -> None:
     bus.emit_now("job.finished", {"id": "job_u"})
     _wait(0.1)
     bus.close()  # 不抛就算过
+
+
+def test_failed_delivery_is_retried_then_logged(caplog):
+    """投递失败要重试一次，仍然失败就留日志——静默吞掉让我们查了一下午。"""
+    import logging
+
+    bus = EventBus()
+    seen: list[str] = []
+
+    def flaky(name: str, body: str) -> None:
+        seen.append(name)
+        raise RuntimeError("窗口正忙")
+
+    bus.set_sink(flaky)
+    with caplog.at_level(logging.WARNING, logger="video_workbench.app.events"):
+        bus.emit_now("job.finished", {"id": "job_x", "status": "succeeded"})
+    bus.close()
+
+    assert len(seen) == 2, "投递失败应该重试一次，实际尝试 %d 次" % len(seen)
+    assert "事件没有送到界面" in caplog.text
+    assert "job.finished" in caplog.text
+
+
+def test_delivery_success_does_not_retry():
+    bus = EventBus()
+    seen: list[str] = []
+    bus.set_sink(lambda name, body: seen.append(name))
+    bus.emit_now("job.finished", {"id": "job_y"})
+    bus.close()
+    assert seen == ["job.finished"]

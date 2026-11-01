@@ -2127,6 +2127,42 @@ async function main() {
     assert.strictEqual(after.querySelector(".progress__bar"), bar, "进度条节点也被重建了");
     assert.strictEqual(after.querySelector(".progress__bar").style.width, "42%", "进度没写进那一行");
   });
+  // 事件会丢（实测：长任务跑完那一刻 job.finished 没送到前端，界面永久停在 97%/写入字幕）。
+  // 所以还有在跑的任务时，前端每 3 秒拿 job.list 对一次账。这里钉住两件事：
+  // 该对账时才对账；对完账，卡住的那一行必须变成真状态，而且不换节点。
+  await check("任务中心：事件丢了也能靠对账纠正过来", async () => {
+    const realRpc = WB.rpc;
+    let jobs = [{ id: "job_stuck_ui", type: "transcribe", status: "running", progress: 0.97, stage: "写入字幕" }];
+    WB.rpc = function (method, params, opts) {
+      if (method === "job.list") return Promise.resolve(JSON.parse(JSON.stringify(jobs)));
+      return realRpc.call(WB, method, params, opts);
+    };
+    try {
+      // 关掉之前几项检查留下的弹窗，免得读到旧 body
+      Array.prototype.slice.call(window.document.querySelectorAll(".modal__x")).forEach((b) => b.click());
+      await tick(80);
+      window.document.getElementById("status-jobs").click();
+      await tick(150);
+      const body = window.document.querySelector(".modal .modal__body");
+      const row = body.querySelectorAll(".card")[0];
+      assert.ok(row, "没渲染出任务行");
+      assert.ok(WB._hasActiveJobs(), "有 running 任务，hasActiveJobs 却是 false");
+      assert.ok(/9[0-9]%/.test(row.textContent), "初始进度不对：" + row.textContent);
+
+      // 后端其实已经跑完，但那条事件丢了：只有 job.list 知道真状态
+      jobs = [{ id: "job_stuck_ui", type: "transcribe", status: "succeeded", progress: 1, stage: "完成" }];
+      await WB._reconcileJobs();
+      await tick(120);
+      const after = body.querySelectorAll(".card")[0];
+      assert.strictEqual(after, row, "对账把节点重建了");
+      assert.ok(/100%/.test(after.textContent), "对账后进度没变 100%：" + after.textContent);
+      assert.ok(/成功|已完成|succeeded/.test(after.textContent), "对账后状态没变成成功：" + after.textContent);
+      assert.notStrictEqual(WB._hasActiveJobs(), true, "任务已经结束，hasActiveJobs 还是 true");
+    } finally {
+      WB.rpc = realRpc;
+    }
+  });
+
   dom.window.close();
   console.log("\n前端骨架验收");
   console.log(results.join("\n"));
