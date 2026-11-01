@@ -186,3 +186,24 @@ def test_sparse_timeline_is_topped_up_with_index_in_prompt():
     sent = json.dumps(llm.client.calls[0]["messages"], ensure_ascii=False)
     assert "全片的时间轴索引" in sent and "01:59:00" in sent
     assert "至少 60 条" in sent
+
+
+def test_duration_comes_from_segments_because_project_has_no_duration_column():
+    """`wb_project` 没有时长列——片长必须从字幕末条推，不能读 project["duration_sec"]。
+
+    真实现场（2026-11-01 22:0x，v5）：`_attach_timeline` 读 `project["duration_sec"]`
+    恒为 0，密度守卫按「片长未知」放过 20 条，两小时视频的时间线照样停在 14:53。
+    """
+    from video_workbench.core.summarizer import _attach_timeline, _segment_end_ms
+
+    segments = [
+        {"start_ms": 0, "end_ms": 2_000, "text": "开场"},
+        {"start_ms": 7_190_000, "end_ms": 7_200_000, "text": "收尾"},
+    ]
+    assert _segment_end_ms(segments) == 7_200_000
+    assert _segment_end_ms([]) == 0
+
+    llm = SummaryLLM(ScriptClient([]), model="stub-model")
+    _attach_timeline(llm, {"title": "没有时长列的项目"}, segments)
+    assert llm.duration_ms == 7_200_000
+    assert "01:59:50" in llm.timeline_index

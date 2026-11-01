@@ -397,7 +397,9 @@ def build_bundle(
         desc=str(project.get("desc") or ""),
         up_name=str(project.get("up_name") or ""),
         up_mid=int(project.get("up_mid") or 0),
-        duration=int(round(float(project.get("duration_sec") or 0))),
+        # 项目表没有时长列，片长从字幕末条推（见 `_segment_end_ms`）。
+        duration=int(round(_segment_end_ms(segments) / 1000.0)) or int(
+            round(float(project.get("duration_sec") or 0))),
         tname=str(project.get("tname") or ""),
         tags=list(project.get("tags") or []),
         hot_replies=hot,
@@ -438,13 +440,37 @@ def timeline_marks(segments: list[dict[str, Any]], *, step_ms: int = 60000,
     return "\n".join(rows)
 
 
+def _segment_end_ms(segments: list[dict[str, Any]]) -> int:
+    """字幕里最晚的结束时间＝真实片长。
+
+    `wb_project` 表**没有时长列**（实测列：id/title/source_kind/bvid/aid/cid/page_no/
+    up_mid/up_name/collection_id/collection_title/root_dir/stage/status/error/
+    created_at/updated_at），所以 `project.get("duration_sec")` 恒为 0——片长只能
+    从字幕本身拿，否则时间线密度永远按"不知道多长"处理。
+    """
+    end = 0
+    for seg in segments or []:
+        try:
+            end = max(end, int(seg.get("end_ms") or 0))
+        except (TypeError, ValueError):
+            continue
+    return end
+
+
 def _attach_timeline(llm: "SummaryLLM", project: dict[str, Any],
                      segments: list[dict[str, Any]]) -> None:
     """把片长与全片索引接到适配器上（时间线密度靠它称重）。"""
-    try:
-        llm.duration_ms = int(round(float(project.get("duration_sec") or 0) * 1000))
-    except (TypeError, ValueError):
-        llm.duration_ms = 0
+    duration = _segment_end_ms(segments)
+    if not duration:
+        for key, scale in (("duration_ms", 1), ("duration_sec", 1000), ("duration", 1000)):
+            try:
+                value = int(float(project.get(key) or 0) * scale)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                duration = value
+                break
+    llm.duration_ms = duration
     llm.timeline_index = timeline_marks(segments)
 
 
