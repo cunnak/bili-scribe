@@ -614,6 +614,27 @@ def _llm_code(exc: Exception) -> str:
     return "LLM_ERROR"
 
 
+def _reject_dotted(values: dict[str, Any], prefix: str = "") -> None:
+    """挡掉「用点号路径提交设置」这种半对不的做法。
+
+    前端 `buildPatch()` 生成的是嵌套对象；但手搓脚本很容易写成
+    `{"llm.timeout_seconds": 900}`——那种键在任何 section 里都找不到，
+    `apply()` 会一路静默略过，接口还回 ok=true，人就会以为改成功了。
+    这里直接判参数不合法，把话说在明处。
+    """
+    for key, value in (values or {}).items():
+        name = str(key)
+        where = prefix + name
+        if "." in name:
+            raise WBError(
+                "VALIDATION",
+                f"设置项名字不对：{where}",
+                "用嵌套对象提交，例如 {\"llm\": {\"timeout_seconds\": 900}}",
+            )
+        if isinstance(value, dict):
+            _reject_dotted(value, where + ".")
+
+
 class WorkbenchService:
     def __init__(
         self,
@@ -900,6 +921,7 @@ class WorkbenchService:
         return self.cfg.settings_view()
 
     def settings_put(self, values: dict[str, Any]) -> dict[str, Any]:
+        _reject_dotted(values)
         restarted = self.cfg.apply(values)
         saved = self.cfg.save()
         # 先落盘再通知：通知里带着新皮肤，界面会立刻重绘；
