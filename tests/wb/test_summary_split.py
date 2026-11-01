@@ -106,5 +106,32 @@ def test_split_keeps_body_when_timeline_step_fails():
                     sink=lambda _text: None)
     data = json.loads(text)
     assert data["summary_md"].startswith("第一段")
+    # 时间线那一步没结果：键还在、值为空——正文照旧交付，不连坐。
     assert data["timeline"] == []
-    assert any("没有时间线" in note for note in llm.notes)
+
+
+def test_dense_timeline_is_left_alone():
+    """时间线本来就够密，就不要再花一次调用去补。"""
+    dense = {"timeline": [{"t": "%02d:%02d" % (i // 2, (i % 2) * 30), "text": "第%d段" % i}
+                          for i in range(40)]}
+    llm, client = make_llm([json.dumps({**BODY, **dense}, ensure_ascii=False)])
+    pump = [{"role": "user", "content": "字幕 [00:00] 开头 [120:00] 结尾"}]
+    text = llm.chat(pump, json_mode=True, sink=lambda _t: None)
+    assert len(json.loads(text)["timeline"]) == 40
+    assert len(client.calls) == 1
+    assert llm.notes == []
+
+
+def test_sparse_timeline_is_topped_up():
+    """两小时视频只给 20 条时间线时，单独补一轮到目标条数。"""
+    sparse = {"timeline": [{"t": "1:%02d" % i, "text": "第%d段" % i} for i in range(20)]}
+    fuller = {"timeline": [{"t": "%02d:%02d" % (i, 0), "text": "补第%d段" % i} for i in range(55)]}
+    llm, client = make_llm([json.dumps({**BODY, **sparse}, ensure_ascii=False),
+                            json.dumps(fuller, ensure_ascii=False)])
+    pump = [{"role": "user", "content": "字幕 [00:00] 开头 [119:30] 结尾"}]
+    text = llm.chat(pump, json_mode=True, sink=lambda _t: None)
+    rows = json.loads(text)["timeline"]
+    assert len(rows) == 55
+    assert len(client.calls) == 2
+    assert "至少 60 条" in client.calls[1]["messages"][-1]["content"]
+    assert any("补到 55 条" in note for note in llm.notes)

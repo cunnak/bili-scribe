@@ -120,7 +120,7 @@ class SummaryLLM:
         """
         fixed = repair_json(text)
         if fixed:
-            return fixed
+            return self._finalize(fixed, messages, sink, temperature, max_tokens)
         # 截断：输出根本没写完（正文/时间线太长，预算在半个字符串里用完）。
         # 这种情况「原样重问」只会再截断一次——正确的动作是让它接着写。
         if _looks_truncated(text):
@@ -130,7 +130,7 @@ class SummaryLLM:
                 fixed = repair_json(merged)
                 if fixed:
                     self.notes.append("输出被截断，接着写了一段才拿到完整 JSON")
-                    return fixed
+                    return self._finalize(fixed, messages, sink, temperature, max_tokens)
                 text = merged
         sink("模型输出不是合法 JSON，已按更严格的要求重问一次")
         self.notes.append("模型输出的 JSON 无法修复，重问了一次")
@@ -156,7 +156,7 @@ class SummaryLLM:
         )
         fixed = repair_json(again)
         if fixed:
-            return fixed
+            return self._finalize(fixed, messages, sink, temperature, max_tokens)
         tail = (again or "").strip()[-40:]
         # 两次都装不下：把这一份大 JSON 拆成两次要（正文一次、时间线一次）再合并。
         # 两小时视频的真实现场就是这样——不是模型不会写，是单次输出装不下：
@@ -165,7 +165,7 @@ class SummaryLLM:
         split = self._split_reply(messages, temperature, max_tokens, sink)
         if split:
             self.notes.append("单次输出装不下，改成正文与时间线分两次生成后合并")
-            return split
+            return self._finalize(split, messages, sink, temperature, max_tokens)
         hint = ""
         if not tail.endswith("}"):
             hint = ("（输出看起来被截断了——把「上下文与长素材」里的单次输出上限调大，"
@@ -211,22 +211,36 @@ class SummaryLLM:
             sink("正文这一步没给出可用的 JSON")
             return ""
 
+        timeline = self._timeline_reply(
+            messages, body, temperature, max_tokens, _timeline_target(messages), sink
+        )
+        body["timeline"] = timeline
+        return json.dumps(body, ensure_ascii=False)
+
+    def _timeline_reply(self, messages, body, temperature, max_tokens, least, sink) -> list:
+        """单独要一轮时间线：只给这一项，输出短、几乎不会撞上限。
+
+        `least` 是「至少几条」——成品里时间线的密度是按片长算的（见 `_timeline_target`），
+        不按模型的自觉。要不到就返回空列表，让调用方决定降级还是保留原值。
+        """
         digest = _plain(str(body.get("summary_md") or body.get("one_line") or ""))[:1200]
+        want = f"至少 {int(least)} 条" if least else "最多 60 条"
         time_messages = list(messages) + [
             {"role": "assistant", "content": digest},
             {
                 "role": "user",
                 "content": (
-                    "这是第 2 步：只输出时间线，一个 JSON 对象，形如 "
+                    "只输出时间线，一个 JSON 对象，形如 "
                     '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
-                    "最多 60 条、每条不超过 30 字，覆盖全片的关键转折与结论；"
+                    f"{want}、每条不超过 30 字，覆盖全片的关键转折与结论，"
+                    "前后两条之间不要隔太久；"
                     "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
-                    f"（分批标记 {nonce}-B）"
+                    f"（时间线批次 {_short_nonce()}）"
                 ),
             },
         ]
         try:
-            raw_time = self.client.chat(
+            raw = self.client.chat(
                 time_messages,
                 temperature=temperature,
                 max_tokens=_json_budget(max_tokens, floor=4096),
@@ -234,18 +248,33 @@ class SummaryLLM:
             )
         except ChatError as exc:
             sink(f"时间线这一步没成：{exc.message}")
-            # 正文已经拿到：交出去也好过整份失败，时间线留空。
-            self.notes.append("时间线那一步失败，这一版没有时间线")
-            body.setdefault("timeline", [])
-            return json.dumps(body, ensure_ascii=False)
+            return []
         self.calls += 1
-        timeline = _loads_timeline(raw_time)
-        if timeline:
-            body["timeline"] = timeline
-        else:
-            self.notes.append("时间线那一步没给出可用结果，这一版没有时间线")
-            body.setdefault("timeline", [])
-        return json.dumps(body, ensure_ascii=False)
+        return _loads_timeline(raw)
+
+    def _finalize(self, fixed: str, messages, sink, temperature, max_tokens) -> str:
+        """JSON 已经能解析了，最后再看一眼时间线的密度。
+
+        真实现场：两小时视频的 v3 只给了 20 条时间线（平均 6 分钟一条），
+        而用户要的是「完善时间线」。密度由片长决定才稳定，不能指望模型自觉，
+        所以这里称一下：偏稀就单独补一轮（只产时间线，很便宜），补不动就保留原样。
+        """
+        data = _loads_object(fixed)
+        if not data:
+            return fixed
+        rows = data.get("timeline") or []
+        target = _timeline_target(messages)
+        if target and len(rows) < max(6, int(target * 0.6)):
+            sink(f"时间线只有 {len(rows)} 条，按 {target} 条补一轮")
+            extra = self._timeline_reply(
+                messages, data, temperature, max_tokens, target, sink
+            )
+            if len(extra) > len(rows):
+                data["timeline"] = extra
+                self.notes.append(f"时间线偏稀（{len(rows)} 条），补到 {len(extra)} 条")
+                return json.dumps(data, ensure_ascii=False)
+            self.notes.append(f"时间线补写没拿到更多条目（原 {len(rows)} 条）")
+        return fixed
 
     def _continue(self, text, messages, temperature, max_tokens) -> str:
         """让它从断开处接着写，把两段拼起来。
@@ -631,6 +660,39 @@ def _loads_timeline(text: str) -> list[dict[str, str]]:
 def _plain(text: str) -> str:
     """把 Markdown 压成一段连续文字，用来当时间线那一步的上下文摘要。"""
     return re.sub(r"\s+", " ", (text or "").replace("#", " ").replace("*", " ")).strip()
+
+
+_TIME_RE = re.compile(r"(\d{1,3}):([0-5]\d)(?::([0-5]\d))?")
+
+
+def _estimate_minutes(messages) -> int:
+    """从提示词里能看到的最后一个时间戳估片长（分钟）。
+
+    bili-scribe 会把带时间戳的字幕整份塞进提示词，所以最后一条时间戳≈片尾。
+    估不出来就返回 0——宁可不算目标，也不要按错的分母硬凑条目。
+    """
+    longest = 0
+    for item in messages or []:
+        content = item.get("content") if isinstance(item, dict) else None
+        if not isinstance(content, str):
+            continue
+        for match in _TIME_RE.finditer(content):
+            first, second, third = match.group(1), match.group(2), match.group(3)
+            seconds = (
+                int(first) * 3600 + int(second) * 60 + int(third)
+                if third is not None
+                else int(first) * 60 + int(second)
+            )
+            longest = max(longest, seconds)
+    return longest // 60
+
+
+def _timeline_target(messages) -> int:
+    """时间线该有多少条：半小时一条上下，夹在 20–60 之间；短片返回 0（不干预）。"""
+    minutes = _estimate_minutes(messages)
+    if minutes < 10:
+        return 0
+    return max(20, min(60, int(round(minutes / 2.0))))
 
 
 def _looks_truncated(text: str) -> bool:
