@@ -214,6 +214,42 @@ def _fatal(message: str) -> None:
         pass
 
 
+def _emit_json(payload: dict[str, Any]) -> str:
+    """把 ``--check`` 的结果交出去，返回落盘路径（打印了就是空串）。
+
+    打包成 windowed exe 之后 **没有 stdout**：`print` 静默丢失，`--check`
+    就只剩退出码，脚本没法核「几条 RPC、依赖齐不齐」。所以没有 stdout 时
+    退回写文件（exe 旁边 ``wb-check.json``），让自检在两种形态下都可用。
+    """
+    line = json.dumps(payload, ensure_ascii=False)
+    # 打包态一律落文件：exe 会把 stdout 接到 video-workbench.log，
+    # `print` 看着成功、脚本却拿不到（日志里混着启动行，grep 不稳）。
+    # 给一个固定路径，CI 与「打不开时先自查」都只读这一个文件。
+    target = Path(sys.executable).resolve().parent / "wb-check.json"
+    wrote = ""
+    if getattr(sys, "frozen", False):
+        try:
+            # 不用 ``write_text(newline=...)``：那条路径在这个仓库里吃过 0 字节的亏。
+            target.write_text(line + "\n", encoding="utf-8")
+            wrote = str(target)
+        except OSError:
+            wrote = ""
+    out = sys.stdout
+    if out is not None:
+        try:
+            print(line)
+            return wrote
+        except (OSError, ValueError):  # 控制台被关掉/被重定向到坏句柄
+            pass
+    if wrote:
+        return wrote
+    try:
+        target.write_text(line + "\n", encoding="utf-8")
+    except OSError:
+        return ""
+    return str(target)
+
+
 def _check(config_path: str | None = None) -> int:
     """`--check`：不开窗口，只验证"服务能不能装配起来、命令表有几条"。
 
@@ -247,11 +283,11 @@ def _check(config_path: str | None = None) -> int:
         }
         service.close()
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"ok": False, "error": str(exc), "trace": traceback.format_exc()}, ensure_ascii=False))
+        _emit_json({"ok": False, "error": str(exc), "trace": traceback.format_exc()})
         return 1
     # 一行 JSON：`--check` 是给脚本和人 grep 用的，多行反而难消费。
     # README / 用户手册写的都是「打印一行 JSON」，这里跟文档对齐。
-    print(json.dumps(payload, ensure_ascii=False))
+    _emit_json(payload)
     return 0
 
 
