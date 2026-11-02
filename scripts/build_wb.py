@@ -25,9 +25,19 @@ DIST = PROJ / "dist" / "VideoWorkbench"
 EXE = DIST / "VideoWorkbench.exe"
 
 
-def _need(path: Path, what: str, problems: list[str]) -> None:
-    if not path.exists():
-        problems.append(f"缺{what}：{path}")
+def _need(path: Path, what: str, problems: list[str], *, wait_s: float = 0.0) -> None:
+    """存在性检查。
+
+    ``wait_s`` 是给构建后自检用的：PyInstaller 报"完成"那一刻，刚写好的 2000+ 个文件
+    还可能被杀软实时扫描挡在可见性后面，直接查会假报"缺包内资源"（实测同一份产物：
+    构建时 4 条 ✗，稍后 --verify-only 全过）。等满还不存在才算真缺。
+    """
+    deadline = time.time() + wait_s
+    while not path.exists():
+        if time.time() >= deadline:
+            problems.append(f"缺{what}：{path}")
+            return
+        time.sleep(0.5)
 
 
 def preflight() -> list[str]:
@@ -76,7 +86,7 @@ def verify() -> int:
                 "_internal/video_workbench/web/js/app.js",
                 "_internal/video_workbench/web/css/tokens.css",
                 "_internal/video_workbench/resources/icon.ico"):
-        _need(DIST / rel, "包内资源", problems)
+        _need(DIST / rel, "包内资源", problems, wait_s=20)
     if problems:
         for item in problems:
             print(f"[verify] ✗ {item}")
@@ -84,7 +94,13 @@ def verify() -> int:
 
     log_file = DIST / "video-workbench.log"
     if log_file.exists():
-        log_file.unlink()  # 只认这一次的输出，别拿上一轮的 ok 蒙混
+        try:
+            log_file.unlink()  # 只认这一次的输出，别拿上一轮的 ok 蒙混
+        except PermissionError:
+            # 打包版还开着一个实例时日志被独占。此时不删就无法区分新旧输出，
+            # 继续跑会把上一轮的 ok 当成本轮结果——直接报清楚该做什么，别抛栈。
+            print(f"[verify] ✗ {log_file.name} 被占用：先关掉正在运行的 VideoWorkbench 再自检")
+            return 1
 
     print("[verify] 跑 --check（不建窗口，只验证 RPC/DB/依赖探测）")
     proc = subprocess.run([str(EXE), "--check"], capture_output=True, text=True, timeout=240)
