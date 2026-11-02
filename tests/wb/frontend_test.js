@@ -47,6 +47,21 @@ function tick(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms || 30));
 }
 
+/**
+ * 等到 predicate 成立（默认最多 30 次 × 100ms）。
+ * 发布区要先等总结页两轮 rpc、再等它自己的三轮，固定 tick 在慢机器上会假红。
+ */
+async function until(predicate, label, tries) {
+  const limit = tries || 30;
+  for (let i = 0; i < limit; i += 1) {
+    if (predicate()) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await tick(100);
+  }
+  assert.ok(false, `等不到：${label || "条件"}`);
+  return false;
+}
+
 async function main() {
   assert.ok(fs.existsSync(INDEX), `找不到 ${INDEX}`);
 
@@ -106,12 +121,13 @@ async function main() {
     assert.ok(WB.isMock(), "没进 mock 模式：mock=1 的检测逻辑失效了");
   });
 
-  await check("左栏渲染出 7 个入口且顺序稳定", () => {
+  await check("左栏渲染出 6 个入口且顺序稳定", () => {
     const items = [...window.document.querySelectorAll("#rail-nav .rail__item, #rail-nav button, #rail-nav a")];
-    assert.strictEqual(items.length, 7, `左栏条目 ${items.length} 个，应为 7`);
+    assert.strictEqual(items.length, 6, `左栏条目 ${items.length} 个，应为 6`);
     // 顺序也是契约：用户靠肌肉记忆点左栏，插一个入口不该把别的挤走。
+    // 「发布」2026-11-02 并进总结页：路由还在（nav:false，兼容老链接），入口不再有。
     const labels = items.map((item) => item.textContent.trim().replace(/\s+/g, ""));
-    const order = ["新建任务", "素材库", "总结", "切片台", "合并", "发布", "设置"];
+    const order = ["新建任务", "素材库", "总结", "切片台", "合并", "设置"];
     order.forEach((name, index) => {
       assert.ok(labels[index] && labels[index].indexOf(name) >= 0,
         `第 ${index + 1} 个入口应该是「${name}」，实际是「${labels[index]}」`);
@@ -1498,11 +1514,16 @@ async function main() {
     );
   });
 
-  await check("发布页：从总结生成草稿、改标题、保存后列表出现", async () => {
-    WB.router.go("publish", {});
-    await tick(320);
+  await check("总结页发布卡：从总结生成草稿、改标题、保存后列表出现", async () => {
+    // 发布已并入总结页（bili_scribe 的卡序：正文卡 → 发布卡 → 发布记录卡）
+    // 合集用例把 state.mode 停在 collection；合集里不出发布区（发布挂单条正文下）
+    window.WB.pages.summary._internals.switchMode("video");
+    WB.router.go("summary", {});
+    await until(() => $("#view").querySelector(".pb-stack"), "总结页里的发布区");
     const view = $("#view");
-    assert.ok(view.querySelector(".pb-grid"), "发布页没有两栏布局");
+    assert.ok(view.querySelector(".pb-stack"), "总结页里没有发布区");
+    assert.ok(view.querySelector(".sum-main #publish-main"), "发布区不在正文那一列");
+    assert.ok(view.querySelector(".sum-side #publish-rail"), "草稿列表没进右栏");
     assert.strictEqual(view.querySelectorAll(".pb-row").length, 0, "一开始不该有草稿");
 
     const picker = view.querySelector("#pb-project");
@@ -1543,7 +1564,7 @@ async function main() {
     assert.ok(chars, "保存后详情卡不见了");
   });
 
-  await check("发布页：列表带 UP 与更新时间，详情亮三道门禁，重新生成只换摘要", async () => {
+  await check("总结页发布卡：列表带 UP 与更新时间，详情亮三道门禁，重新生成只换摘要", async () => {
     // 上一条用例已经存了一份草稿，这里接着用同一份
     const view = $("#view");
     const row = view.querySelector(".pb-row");
@@ -1578,10 +1599,21 @@ async function main() {
     assert.ok(oldSummary !== null || oldSummary === null);
   });
 
-  await check("发布页：没勾确认发布按钮点不动，勾了能发出去、也能撤回", async () => {
+  await check("总结页发布卡：没勾确认发布按钮点不动，勾了能发出去、也能撤回", async () => {
     // 接上一项：库里已经有一份草稿，详情卡在右栏
     const view = $("#view");
-    const checkBox = view.querySelector("#pb-confirm");
+
+    // 上一步刚重新生成过摘要 → 屏幕上是还没落库的预览，发布会用库里旧的那一版，
+    // 所以这里必须先拦住并说清原因（S1：双真相源）。
+    assert.ok(view.textContent.indexOf("先点「保存草稿」") >= 0,
+      "没提示「先保存」：" + view.textContent.slice(-90));
+    const saveBtn = [...view.querySelectorAll("button")]
+      .find((b) => b.textContent.trim() === "保存草稿");
+    assert.ok(saveBtn, "没有保存按钮");
+    saveBtn.click();
+    await tick(450);
+
+    const checkBox = $("#view").querySelector("#pb-confirm");
     assert.ok(checkBox, "没有「我已阅读并确认」勾选框");
     assert.strictEqual(checkBox.checked, false, "一开始就该是没勾的");
 
@@ -1598,6 +1630,22 @@ async function main() {
     assert.strictEqual(publishBtn().disabled, false, "勾了确认之后按钮该能点");
     assert.strictEqual($("#view").querySelector(".pb-gate").getAttribute("data-ready"), "1",
       "勾确认后门禁卡该显示三关都过");
+
+    // S3：确认只对「勾过的那一份草稿」有效。把 confirmedFor 指到别的 id，
+    // 勾不该留、按钮要回到灰的——以前 confirmed 是个全局布尔，换草稿能一路带过去。
+    const st = WB.pages.publish.state;
+    const mine = st.current.id;
+    st.confirmedFor = "draft_not_this_one";
+    WB.pages.publish._internals.paint();
+    const otherBox = $("#view").querySelector("#pb-confirm");
+    assert.strictEqual(otherBox.checked, false, "确认绑在别的草稿上时，勾不该还亮着");
+    const otherBtn = [...$("#view").querySelectorAll("button")]
+      .find((b) => b.textContent.trim().startsWith("发布笔记"));
+    assert.ok(otherBtn && otherBtn.disabled, "确认失效时发布按钮该是灰的");
+    // 还原，后面的用例还要用这一份
+    st.confirmedFor = mine;
+    WB.pages.publish._internals.paint();
+    assert.strictEqual($("#view").querySelector("#pb-confirm").checked, true, "还原后勾该回来");
 
     // 点发布 → 弹确认框 → 确认
     publishBtn().click();
@@ -1633,15 +1681,16 @@ async function main() {
       "撤回后状态该是「已撤回」：" + (pill2 && pill2.textContent));
   });
 
-  await check("发布页：记录卡留下已发与已撤回，能打开视频链接", async () => {
+  await check("总结页发布卡：记录卡留下已发与已撤回，能打开视频链接", async () => {
     // 接上一项：那条笔记已经发出去又撤回了，记录卡该有它的痕迹
-    WB.router.go("publish", {});
-    await tick(600);
+    window.WB.pages.summary._internals.switchMode("video");
+    WB.router.go("summary", {});
+    await until(() => $("#view").querySelector(".pb-record"), "发布记录行");
     const view = $("#view");
     const card = [...view.querySelectorAll(".pb-card")].find(
       (n) => n.textContent.indexOf("发布记录") >= 0
     );
-    assert.ok(card, "左栏没有「发布记录」卡");
+    assert.ok(card, "总结页没有「发布记录」卡");
     // 抬头写「已发 N · 已撤 M」：mock 里本来就种了历史记录，别硬编码成 1
     const head = card.querySelector(".pb-card__count") || card;
     const headText = head.textContent || "";
@@ -2325,7 +2374,16 @@ async function main() {
     const bar = row.querySelector(".progress__bar");
     assert.ok(bar, "任务行里没有进度条");
     window.__wbEvent("job.updated", JSON.stringify({ id: id, status: "running", progress: 0.42 }));
-    await tick(150);
+    // 等到值真的写进那一行再断言：事件是异步落到 DOM 的，固定 tick 在慢机器上会抢跑
+    await until(
+      () => {
+        const now = body.querySelector('[data-job-id="' + id + '"]');
+        const bar2 = now && now.querySelector(".progress__bar");
+        return !!bar2 && bar2.style.width === "42%";
+      },
+      `job.updated 把进度写进 ${id} 那一行`,
+      10
+    );
     const after = body.querySelector('[data-job-id="' + id + '"]');
     assert.strictEqual(after, row, "任务行被重建了（节点换了），这就是下载时闪的原因");
     assert.strictEqual(after.querySelector(".progress__bar"), bar, "进度条节点也被重建了");

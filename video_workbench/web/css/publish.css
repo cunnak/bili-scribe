@@ -6,39 +6,41 @@
  * ========================================================================= */
 
 .pb-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 0 12px;
   font-size: 12.5px;
-}
-
-.pb-bar__hint {
+  line-height: 1.65;
   color: var(--muted);
+  padding: 0 2px;
 }
 
-.pb-grid {
-  display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.pb-side,
-.pb-main {
+/* 发布卡是总结页正文卡之后的兄弟节点（bili_scribe index.html:880），
+   所以这里只有一列；草稿列表走右栏的 .pb-rail。 */
+.pb-stack {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
 }
 
+.pb-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
 .pb-card {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: var(--radius, 8px);
-  padding: 14px;
+  padding: 18px 20px;
   min-width: 0;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+/* 322px 右栏放不下 20px 的内边距：跟 .sum-side .card 同宽同距 */
+.pb-rail .pb-card {
+  padding: 14px 15px;
+  clip-path: none;
 }
 
 .pb-card--pick {
@@ -250,10 +252,6 @@
   left: -9999px;
   top: 0;
   opacity: 0;
-}
-
-.pb-bar .muted {
-  font-size: 12px;
 }
 
 .is-hidden {

@@ -431,7 +431,7 @@ SHOTS: list[tuple[str, str, str]] = [
     ),
     (
         "publish",
-        "#/publish",
+        "#/summary",
         """
         (async () => {
           // 空态先看一眼（这一张就是"还没有草稿"的样子）
@@ -441,7 +441,7 @@ SHOTS: list[tuple[str, str, str]] = [
     ),
     (
         "publish-draft",
-        "#/publish",
+        "#/summary",
         """
         (async () => {
           await new Promise(r => setTimeout(r, 600));
@@ -458,7 +458,7 @@ SHOTS: list[tuple[str, str, str]] = [
     ),
     (
         "publish-gates",
-        "#/publish",
+        "#/summary",
         """
         (async () => {
           await new Promise(r => setTimeout(r, 600));
@@ -466,7 +466,7 @@ SHOTS: list[tuple[str, str, str]] = [
             .find(b => b.textContent.trim() === '从总结生成');
           if (gen) gen.click();
           await new Promise(r => setTimeout(r, 900));
-          // 不滚动：门禁卡就在一屏里（--height 1400），滚了会把左栏草稿列表顶出画面，
+          // 不滚动：门禁卡就在一屏里（--height 1400）。滚了会把右栏草稿列表顶出画面，
           // 截出来左上角一大片空白，看着像页面坏了。
           await new Promise(r => setTimeout(r, 250));
         })()
@@ -474,7 +474,7 @@ SHOTS: list[tuple[str, str, str]] = [
     ),
     (
         "publish-records",
-        "#/publish",
+        "#/summary",
         """
         (async () => {
           // mock 里已经种了一条已发布、一条已撤回：记录卡一进页面就有内容
@@ -484,7 +484,7 @@ SHOTS: list[tuple[str, str, str]] = [
     ),
     (
         "publish-ready",
-        "#/publish",
+        "#/summary",
         """
         (async () => {
           await new Promise(r => setTimeout(r, 600));
@@ -504,6 +504,27 @@ SHOTS: list[tuple[str, str, str]] = [
             box.dispatchEvent(new Event('change', { bubbles: true }));
           }
           await new Promise(r => setTimeout(r, 700));
+        })()
+        """,
+    ),
+    (
+        "publish-card",
+        "#/summary",
+        """
+        (async () => {
+          await new Promise(r => setTimeout(r, 700));
+          const gen = [...document.querySelectorAll('button')]
+            .find(b => b.textContent.trim() === '从总结生成');
+          if (gen) gen.click();
+          await new Promise(r => setTimeout(r, 800));
+          const save = [...document.querySelectorAll('button')]
+            .find(b => b.textContent.trim() === '保存草稿');
+          if (save) save.click();
+          await new Promise(r => setTimeout(r, 800));
+          // 发布卡按 1:1 卡序排在正文卡后面，默认视口看不到，滚过去再拍
+          const host = document.getElementById('publish-main');
+          if (host) host.scrollIntoView({ block: 'start' });
+          await new Promise(r => setTimeout(r, 500));
         })()
         """,
     ),

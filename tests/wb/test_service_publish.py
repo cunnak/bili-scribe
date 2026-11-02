@@ -64,7 +64,8 @@ def test_preview_builds_body_from_latest_summary(service, tmp_path):
     assert data["summary"] == SUMMARY_CONTENT["comment_short"]
     assert "## 要点" in data["markdown"] and "时间轴" in data["markdown"]
     assert data["chars"] > 20
-    assert data["limits"] == {"title": 80, "summary": 200}
+    # 摘要上限 2026-11-02 从 200 上调到 400（config.publish.max_summary_chars 默认值）
+    assert data["limits"] == {"title": 80, "summary": 400}
     assert data["warnings"] == []
     assert data["summary_id"] == record["id"] and data["version"] == 1
     # 还没存过草稿
@@ -225,3 +226,51 @@ def test_publish_event_fires(service, tmp_path):
     with_summary(service, project)
     call(service, "publish.note", {"project_id": project["id"]})
     assert any(name == "publish.updated" for name, _ in seen)
+
+# ------------------------------------------------------------------ 并发与越界
+
+
+def test_note_cannot_overwrite_draft_of_another_project(service, tmp_path):
+    """note_pk 指向别的项目的草稿时，拒绝覆盖（D1）。
+
+    草稿是按行 id 更新的。id 若属于另一个视频，一次「保存」会把那个项目的
+    标题/摘要/正文整份改掉——用户看到的是"我明明在这个视频下点的保存"。
+    """
+    first = make_project(service, tmp_path)
+    with_summary(service, first)
+    saved = call(service, "publish.note", {"project_id": first["id"]})["data"]
+    draft_id = saved["note"]["id"]
+
+    second = make_project(service, tmp_path, title="另一个视频", bvid="BV1yy", aid=5678)
+    with_summary(service, second)
+
+    result = call(service, "publish.note", {"project_id": second["id"], "note_pk": draft_id})
+    assert result["ok"] is False
+    assert result["error"]["code"] == "CONFLICT"
+    assert "另一个视频" in result["error"]["message"]
+
+    # 原来那份草稿一个字都没被动过
+    still = call(service, "publish.get", {"id": draft_id})["data"]["note"]
+    assert still["project_id"] == first["id"]
+
+
+def test_publish_rejects_second_call_while_one_is_in_flight(service, tmp_path):
+    """发布是 check-then-act，第二个请求必须拿不到锁（D2）。
+
+    pywebview 每个 js_api 调用一个线程；两次点击会各自读到 status=draft、
+    各自 POST 一次，平台侧就是两条重复笔记。
+    """
+    project = make_project(service, tmp_path)
+    with_summary(service, project)
+    saved = call(service, "publish.note", {"project_id": project["id"]})["data"]
+    draft_id = saved["note"]["id"]
+
+    assert service._publish_lock.acquire(blocking=False) is True
+    try:
+        result = call(service, "publish.publish", {"id": draft_id, "confirmed": True})
+    finally:
+        service._publish_lock.release()
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "CONFLICT"
+    assert "还没返回" in result["error"]["message"]

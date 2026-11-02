@@ -115,7 +115,7 @@
       max_comment_chars: 900,
       disclose_ai: true,
       disclosure_text: "本条总结由 AI 依据视频字幕生成。",
-      max_summary_chars: 200,
+      max_summary_chars: 400,
       auto_comment: true
     }
   };
@@ -799,7 +799,7 @@
     var body = String(draft.content_text || "").trim();
     var items = [
       { text: "标题 " + Array.from(title).length + " / 80 字", ok: !!title && Array.from(title).length <= 80 },
-      { text: "摘要 " + Array.from(summary).length + " / 200 字", ok: Array.from(summary).length <= 200 },
+      { text: "摘要 " + Array.from(summary).length + " / 400 字", ok: Array.from(summary).length <= 400 },
       { text: "正文 " + mockChars(body) + " 字", ok: !!body },
       { text: "已阅读并确认标题/摘要/正文", ok: !!o.confirmed }
     ];
@@ -821,7 +821,7 @@
 
     return {
       ready: contentStatus === "ok" && accountStatus === "ok" && paceStatus === "ok",
-      limits: { summary: 200, interval: GATE_INTERVAL },
+      limits: { summary: 400, interval: GATE_INTERVAL },
       gates: [
         { id: "content", label: "内容确认", status: contentStatus,
           reason: contentStatus === "blocked" ? "标题或正文是空的" : (contentStatus === "todo" ? "发布前要勾一下「我已阅读并确认」" : ""),
@@ -880,7 +880,7 @@
       chars: mockChars(text),
       title_chars: Array.from(project.title).length,
       summary_chars: Array.from(content.comment_short || content.one_line || "").length,
-      limits: { title: 80, summary: 200 },
+      limits: { title: 80, summary: 400 },
       warnings: [],
       summary_id: box.summary.id || "",
       version: box.summary.version || 1,
@@ -1637,7 +1637,7 @@
         if (!title) return fail("VALIDATION", "标题不能为空");
         if (!plain.trim()) return fail("VALIDATION", "正文不能为空，先给这个项目出一版总结");
         if (Array.from(title).length > 80) return fail("VALIDATION", "标题超过 80 字");
-        if (Array.from(summaryText).length > 200) return fail("VALIDATION", "摘要超过 200 字");
+        if (Array.from(summaryText).length > 400) return fail("VALIDATION", "摘要超过 400 字");
         if (target) {
           target.title = title;
           target.summary = summaryText;
@@ -1669,17 +1669,20 @@
       }
       case "publish.list":
         // 只回 draft：发过 / 撤过的进「发布记录」，混进草稿列表会让人以为还能改
-        return ok({ notes: DRAFTS.filter(function (row) {
-          if ((row.status || "draft") !== "draft") return false;
-          return !p.project_id || row.project_id === p.project_id;
-        }).map(mockDraftView) });
+        return ok({
+          notes: DRAFTS.filter(function (row) {
+            if ((row.status || "draft") !== "draft") return false;
+            return !p.project_id || row.project_id === p.project_id;
+          }).map(mockDraftView),
+          limits: { title: 80, summary: 400 }
+        });
       case "publish.get": {
         var hit = null;
         DRAFTS.forEach(function (row) { if (row.id === p.id) hit = row; });
         if (!hit) return fail("NOT_FOUND", "草稿不存在");
         return ok({
           note: mockDraftView(hit),
-          limits: { title: 80, summary: 200 },
+          limits: { title: 80, summary: 400 },
           gates: mockGates(mockDraftView(hit), projectById(hit.project_id), hit, {
             confirmed: !!p.confirmed,
             loggedIn: MOCK_LOGGED_IN

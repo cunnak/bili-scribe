@@ -692,6 +692,13 @@
         }),
         ui.h("button", {
           class: "sum-ghost",
+          id: "sum-goto-publish",
+          title: "跳到正文下面的发布卡（草稿、三关门禁、发布与撤回）",
+          text: "去发布",
+          onclick: gotoPublish
+        }),
+        ui.h("button", {
+          class: "sum-ghost",
           text: "在文件夹中显示",
           disabled: state.projectId ? null : "disabled",
           onclick: reveal
@@ -1104,15 +1111,45 @@
         docHead(),
         progressBlock(),
         warnBlock(),
-        bodyCard()
+        bodyCard(),
+        // 发布卡：bili_scribe 里它本来就是正文卡的兄弟节点（index.html:880 的 #pub-card）。
+        // 给它独立容器，发布区只清自己的子节点，和正文/版本互不抹（C1）。
+        ui.h("div", { id: "publish-main" })
       ]),
-      ui.h("div", { class: "sum-side" }, [versionsCard(), costCard(), refineCard()].filter(Boolean))
+      ui.h("div", { class: "sum-side" }, [
+        versionsCard(),
+        // 草稿列表并进 322px 右栏，与版本栏同构（2026-11-02 决策 ③A）
+        ui.h("div", { id: "publish-rail" }),
+        costCard(),
+        refineCard()
+      ].filter(Boolean))
     ]));
+    mountPublish();
     var errorNode = document.getElementById("summary-error");
     if (errorNode) {
       errorNode.textContent = state.error || "";
       errorNode.style.display = state.error ? "" : "none";
     }
+  }
+
+  /** 发布卡排在正文之后（bili_scribe 的卡序），长正文下给一个一步跳过去的入口。 */
+  function gotoPublish() {
+    var node = document.getElementById("publish-main");
+    if (!node || typeof node.scrollIntoView !== "function") return;
+    try {
+      node.scrollIntoView({ block: "start", behavior: "smooth" });
+    } catch (err) {
+      // 老 WebView 不认 options，退回不带参数的调用
+      node.scrollIntoView();
+    }
+  }
+
+  /** 把发布卡挂进刚建好的两个容器。没装发布模块（老构建 / 测试桩）就安静跳过。 */
+  function mountPublish() {
+    var main = document.getElementById("publish-main");
+    var publish = WB.pages && WB.pages.publish;
+    if (!main || !publish || !publish.mount) return;
+    publish.mount({ main: main, rail: document.getElementById("publish-rail") });
   }
 
   function render() {

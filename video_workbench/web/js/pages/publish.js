@@ -32,7 +32,12 @@
     gates: null,
     records: [], // 发布记录（发过 / 撤过 / 发失败）
     recordCounts: { published: 0, withdrawn: 0, failed: 0 },     // 三道门禁的当前状态（publish.get / preview 里带回来）
-    confirmed: false, // 「我已阅读并确认」勾没勾
+    editTitle: "",       // 标题输入框的当前值：重绘不丢（S2）
+    editSummary: "",     // 摘要输入框的当前值
+    confirmedFor: "",    // 勾过「我已阅读并确认」的那份草稿 id；换草稿自动失效（S3）
+    limits: { title: 80, summary: 400 },  // 字数上限由后端 limits 下发，前端不另立一套
+    panel: null,         // 挂载点 {main, rail}：发布卡是总结页里的一块，不再是独立页
+    loaded: false,       // 首次数据是否已拉过（重新挂载只重画，不重拉）
     publishing: false,
     error: "",
     note: ""
@@ -73,9 +78,10 @@
     return node;
   }
 
-  function valueOf(selector) {
-    var node = document.querySelector(selector);
-    return node ? String(node.value || "") : "";
+  /** 把一份载荷的标题/摘要灌进编辑缓冲。任何「换了内容」的路径都要调它。 */
+  function syncEdit(title, summary) {
+    state.editTitle = String(title || "");
+    state.editSummary = String(summary || "");
   }
 
   // ------------------------------------------------------------------ 数据
@@ -103,6 +109,8 @@
       if (state.notes.length) return loadNote(state.notes[0].id);
       state.current = null;
       state.draft = null;
+      state.confirmedFor = "";
+      syncEdit("", "");
       return null;
     });
   }
@@ -140,11 +148,17 @@
   }
 
   function loadNote(id) {
-    return call("publish.get", { id: id, confirmed: state.confirmed }).then(function (data) {
+    // 确认只对「勾过的那一份」有效：换草稿一律不继承（S3）
+    var confirmed = state.confirmedFor === id;
+    return call("publish.get", { id: id, confirmed: confirmed }).then(function (data) {
       state.current = data.note;
       state.draft = null;
       state.gates = data.gates || null;
-      state.projectId = state.current.project_id;
+      if (!confirmed) state.confirmedFor = "";
+      syncEdit(state.current.title, state.current.summary);
+      // 不写 state.projectId：那是「新建草稿」选的目标项目，被 loadNote 改掉后
+      // 用户选的视频会静默漂移（R3）
+      if (data.limits) state.limits = data.limits;
       return state.current;
     });
   }
@@ -163,6 +177,8 @@
         state.regenerating = false;
         state.draft = data.draft;
         state.gates = data.gates || null;
+        state.confirmedFor = "";   // 内容变了，之前的确认作废
+        syncEdit(data.draft.title, data.draft.summary);
         state.note = part === "all" ? "标题与摘要已按最新总结重写" : "摘要已重写";
         paint();
       })
@@ -188,6 +204,9 @@
         state.current = data.note || null;
         state.gates = data.gates || null;
         state.busy = false;
+        state.confirmedFor = "";
+        syncEdit(data.title, data.summary);
+        if (data.limits) state.limits = data.limits;
         paint();
       })
       .catch(function (err) {
@@ -198,8 +217,9 @@
   }
 
   function save() {
-    var title = valueOf("#pb-title");
-    var summary = valueOf("#pb-summary");
+    // 读 state 而不是 document：输入时已经写回 state，重绘不会把用户改的字冲掉（S2）
+    var title = state.editTitle;
+    var summary = state.editSummary;
     if (!title.trim()) {
       state.error = "标题不能为空";
       paint();
@@ -214,7 +234,7 @@
     state.error = "";
     paint();
     return call("publish.note", {
-      project_id: state.projectId,
+      project_id: (state.current && state.current.project_id) || state.projectId,
       note_pk: state.current ? state.current.id : "",
       title: title,
       summary: summary,
@@ -224,6 +244,8 @@
         state.busy = false;
         state.current = data.note;
         state.draft = null;
+        state.confirmedFor = "";   // 存成新一版之后，之前的确认作废
+        syncEdit(data.note.title, data.note.summary);
         state.note = "草稿已保存";
         return loadNotes(data.note.id);
       })
@@ -243,6 +265,8 @@
       .then(function () {
         state.current = null;
         state.draft = null;
+        state.confirmedFor = "";
+        syncEdit("", "");
         state.note = "草稿已删除";
         return loadNotes();
       })
@@ -459,7 +483,11 @@
           disabled: state.busy
         })
       ]),
-      h("div", { class: "pb-hint", text: "标题 ≤ 80 字、摘要 ≤ 200 字；超了会被拦下，不会偷偷截断。" })
+      h("div", {
+        class: "pb-hint",
+        text: "标题 ≤ " + (state.limits.title || 80) + " 字、摘要 ≤ " +
+          (state.limits.summary || 400) + " 字；超了会被拦下，不会偷偷截断。"
+      })
     ]);
   }
 
@@ -484,13 +512,14 @@
 
   /** 勾/取消「我已阅读并确认」：门禁状态要跟着变，不用等点发布才发现少一步。 */
   function setConfirmed(checked) {
-    state.confirmed = !!checked;
+    var currentId = state.current ? state.current.id : "";
+    state.confirmedFor = checked && currentId ? currentId : "";
     if (!state.current) {
       paint();
       return Promise.resolve();
     }
-    var id = state.current.id;
-    return call("publish.get", { id: id, confirmed: state.confirmed })
+    var id = currentId;
+    return call("publish.get", { id: id, confirmed: !!state.confirmedFor })
       .then(function (data) {
         state.current = data.note;
         state.gates = data.gates || null;
@@ -503,10 +532,17 @@
   }
 
   function publishReady() {
+    // 四件事同时成立才算能发：没有未保存的预览、有落库的草稿、
+    // 勾的是**这一份**、后端三关全绿。
+    if (state.draft) return false;
+    if (!state.current) return false;
+    if (state.confirmedFor !== state.current.id) return false;
     return !!(state.gates && state.gates.ready);
   }
 
   function gateBlockedText() {
+    if (state.draft) return "屏幕上是还没保存的预览：先点「保存草稿」，发布才会用这一版";
+    if (!state.current) return "先选一份草稿";
     if (!state.gates) return "门禁状态还没拿到";
     var bad = (state.gates.gates || []).filter(function (g) { return g.status !== "ok"; });
     if (!bad.length) return "";
@@ -541,9 +577,16 @@
       ui.toast(gateBlockedText() || "门禁没过", "error");
       return Promise.resolve();
     }
+    // publishing 必须在弹窗**之前**置位：弹窗挂着的那几百毫秒里再点一次按钮，
+    // 会开出第二个确认框、发出第二次请求（D2 的前端一半；后端另有互斥）
+    state.publishing = true;
+    paint();
     return confirmPublish().then(function (yes) {
-      if (!yes) return null;
-      state.publishing = true;
+      if (!yes) {
+        state.publishing = false;
+        paint();
+        return null;
+      }
       state.error = "";
       state.note = "正在发布…";
       paint();
@@ -614,12 +657,14 @@
     var source = draft || note;
     if (!source) {
       return h("div", { class: "pb-card pb-card--empty" }, [
-        h("div", { class: "pb-empty", text: "左边选一份草稿，或者先「从总结生成」。" })
+        h("div", { class: "pb-empty", text: "右边选一份草稿，或者先「从总结生成」。" })
       ]);
     }
 
-    var title = draft ? draft.title : note.title;
-    var summary = draft ? draft.summary : note.summary;
+    // 输入框的值一律取 state.edit*：重绘（勾确认、切草稿、生成结束回填）
+    // 不会冲掉用户已经改过的字。S2 的复现路径就是「改标题 → 勾确认 → 标题被打回」。
+    var title = state.editTitle;
+    var summary = state.editSummary;
     var body = source.content_text || "";
 
     var titleInput = h("input", {
@@ -640,19 +685,26 @@
     var bodyNode = h("div", { class: "pb-body", id: "pb-body" });
     bodyNode.textContent = body;
 
-    var titleCount = h("span", { class: "pb-count", text: len(title) + " / 80" });
-    var summaryCount = h("span", { class: "pb-count", text: len(summary) + " / 200" });
+    var maxTitle = state.limits.title || 80;
+    var maxSummary = state.limits.summary || 400;
+    var titleCount = h("span", { class: "pb-count", text: len(title) + " / " + maxTitle });
+    var summaryCount = h("span", {
+      class: "pb-count" + (len(summary) > maxSummary ? " is-over" : ""),
+      text: len(summary) + " / " + maxSummary
+    });
     var bodyCount = h("span", { class: "pb-count", text: chars(body) + " 字" });
 
     titleInput.addEventListener("input", function () {
-      var n = len(titleInput.value);
-      titleCount.textContent = n + " / 80";
-      titleCount.className = "pb-count" + (n > 80 ? " is-over" : "");
+      state.editTitle = titleInput.value;   // 立即回写：下一步随时可能重绘
+      var n = len(state.editTitle);
+      titleCount.textContent = n + " / " + maxTitle;
+      titleCount.className = "pb-count" + (n > maxTitle ? " is-over" : "");
     });
     summaryInput.addEventListener("input", function () {
-      var n = len(summaryInput.value);
-      summaryCount.textContent = n + " / 200";
-      summaryCount.className = "pb-count" + (n > 200 ? " is-over" : "");
+      state.editSummary = summaryInput.value;
+      var n = len(state.editSummary);
+      summaryCount.textContent = n + " / " + maxSummary;
+      summaryCount.className = "pb-count" + (n > maxSummary ? " is-over" : "");
     });
 
     var warnings = (draft && draft.warnings) || [];
@@ -702,7 +754,8 @@
         ]);
       } else {
         var box = h("input", { type: "checkbox", id: "pb-confirm", class: "pb-publish__check" });
-        box.checked = !!state.confirmed;
+        // 只认「这一份草稿」的确认：换一份草稿，勾必须回到未勾（S3）
+        box.checked = state.confirmedFor === note.id;
         box.addEventListener("change", function () {
           setConfirmed(box.checked);
         });
@@ -761,44 +814,74 @@
     ]);
   }
 
-  function paint() {
-    var host = document.getElementById("publish-host");
-    if (!host) return;
-    host.textContent = "";
-    host.appendChild(
-      h("div", { class: "pb-grid" }, [
-        h("div", { class: "pb-side" }, [listCard(), pickCard(), recordsCard()]),
-        h("div", { class: "pb-main" }, [editor(), gateCard()])
-      ])
-    );
-    var errorNode = document.getElementById("publish-error");
-    if (errorNode) {
-      errorNode.textContent = state.error || "";
-      errorNode.style.display = state.error ? "" : "none";
-      errorNode.className = "callout callout--warn" + (state.error ? "" : " is-hidden");
+  /** 重绘前记下焦点，重绘后放回去：正在改标题时被抢走光标比丢字好一点，但没必要。 */
+  function grabFocus() {
+    var panel = state.panel;
+    var node = document.activeElement;
+    if (!panel || !node || !node.id) return null;
+    if (!panel.main.contains(node) && !(panel.rail && panel.rail.contains(node))) return null;
+    var caret = null;
+    try {
+      caret = node.selectionStart;
+    } catch (err) {
+      caret = null;
     }
-    var noteNode = document.getElementById("pb-note");
-    if (noteNode) noteNode.textContent = state.note || "";
+    return { id: node.id, caret: caret };
   }
 
-  function render() {
-    state.error = "";
-    state.note = "";
-    state.gates = null;
-    var page = ui.h("section", { class: "page" });
-    page.appendChild(
-      h("div", { class: "pb-bar" }, [
-        h("span", {
-          class: "pb-bar__hint",
+  function restoreFocus(saved) {
+    if (!saved || !saved.id) return;
+    var node = document.getElementById(saved.id);
+    if (!node || typeof node.focus !== "function") return;
+    node.focus();
+    if (saved.caret != null && typeof node.setSelectionRange === "function") {
+      try {
+        node.setSelectionRange(saved.caret, saved.caret);
+      } catch (err) {
+        // number 类型的输入框不支持 setSelectionRange，丢了就丢了
+      }
+    }
+  }
+
+  /** 画发布区。只碰自己的两个挂载点，绝不碰总结页的正文与版本卡（C1）。 */
+  function paint() {
+    var panel = state.panel;
+    if (!panel || !panel.main) return;
+
+    var focus = grabFocus();
+    panel.main.textContent = "";
+    panel.main.appendChild(
+      h("div", { class: "pb-stack" }, [
+        h("div", {
+          class: "pb-bar",
           text: "发布不可撤销：三关门禁全绿 + 勾确认之后才能点「发布笔记」。"
         }),
-        h("span", { class: "muted", id: "pb-note" })
+        state.error ? h("div", { class: "callout callout--warn", id: "publish-error", text: state.error }) : null,
+        state.note ? h("div", { class: "pb-note", id: "pb-note", text: state.note }) : null,
+        // 门禁在前：两万字的正文会把卡撑得很长，把「能不能发」压在下面等于没做（S4）
+        gateCard(),
+        editor(),
+        recordsCard()
       ])
     );
-    page.appendChild(ui.h("div", { class: "callout callout--warn is-hidden", id: "publish-error" }));
-    page.appendChild(ui.h("div", { id: "publish-host" }));
 
-    Promise.all([loadProjects(), loadNotes(), loadRecords()])
+    if (panel.rail) {
+      panel.rail.textContent = "";
+      panel.rail.appendChild(h("div", { class: "pb-rail" }, [listCard(), pickCard()]));
+    }
+    restoreFocus(focus);
+  }
+
+  /** 挂到总结页。nodes 由 summary.js 提供：{main: 正文下方的容器, rail: 右栏容器}。 */
+  function mount(nodes) {
+    state.panel = nodes || null;
+    if (!state.panel || !state.panel.main) return Promise.resolve();
+    if (state.loaded) {
+      paint();
+      return Promise.resolve();
+    }
+    state.loaded = true;
+    return Promise.all([loadProjects(), loadNotes(), loadRecords()])
       .then(function () {
         paint();
       })
@@ -806,12 +889,30 @@
         state.error = (error && error.message) || "加载失败";
         paint();
       });
+  }
+
+  function render() {
+    // 发布已经不是独立页了：UI 在总结页里。这里只留一块指路牌，
+    // 免得老书签 / 老链接落进空白页。
+    var page = ui.h("section", { class: "page" });
+    page.appendChild(
+      h("div", { class: "pb-card pb-card--empty" }, [
+        h("div", {
+          class: "pb-empty",
+          text: "发布已经并入「总结」页：选一条视频、生成总结，正文下面就是发布卡。"
+        }),
+        btn("去总结页", "打开总结页，发布卡在正文下面", function () {
+          WB.router.go("summary");
+        }, { primary: true })
+      ])
+    );
     return page;
   }
 
   WB.pages = WB.pages || {};
   WB.pages.publish = {
     render: render,
+    mount: mount,
     state: state,
     _internals: {
       state: state,
@@ -827,7 +928,10 @@
       publishNow: publishNow,
       withdrawNow: withdrawNow,
       gateCard: gateCard,
-      paint: paint
+      paint: paint,
+      mount: mount,
+      publishReady: publishReady,
+      syncEdit: syncEdit
     }
   };
 
@@ -835,7 +939,8 @@
     title: "发布",
     crumb: "草稿与字数门禁",
     icon: "send",
-    nav: true,
+    // 不出现在左栏：发布卡已并进总结页（2026-11-02）。路由保留只为兼容老链接。
+    nav: false,
     render: render
   });
 })();

@@ -118,7 +118,7 @@ clip:
 publish:
   require_confirm: true
   min_interval_seconds: 60
-  max_summary_chars: 200
+  max_summary_chars: 400
   max_comment_chars: 900
   disclose_ai: true
   disclosure_text: "（本总结由 AI 依据视频字幕／弹幕生成）"

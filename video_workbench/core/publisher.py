@@ -15,7 +15,7 @@
 字数口径（界面上要显示，所以必须写清楚）：
 - **正文字数** = Delta 里所有 insert 文本去掉空白后的字符数。B站 的限制按字符算，
   而中文正文里的换行与缩进对限制没有贡献，算进去只会让人以为超了。
-- 标题 ≤ 80、摘要 ≤ `publish.max_summary_chars`（默认 200）：这两条是
+- 标题 ≤ 80、摘要 ≤ `publish.max_summary_chars`（默认 400）：这两条是
   接口硬限制，超了发不出去，所以在**存草稿之前**就报出来。
 """
 
@@ -140,7 +140,7 @@ def default_summary(content: dict[str, Any]) -> str:
     短评是专门为"评论区卡片"写过的 120 字左右的版本，语气与长度都比一句话更合适；
     一句话经常是标题的复读，直接拿它当摘要等于把标题在卡片里再说一遍。
 
-    **同样不截断**：摘要超 200 字要被看见（warning 拦在存库前），
+    **同样不截断**：摘要超上限要被看见（warning 拦在存库前），
     偷偷切掉一半会让用户以为"平台显示的就是全部内容"。
     """
     content = content or {}
@@ -155,7 +155,7 @@ def build_draft(
     project: dict[str, Any],
     content: dict[str, Any],
     *,
-    max_summary_chars: int = 200,
+    max_summary_chars: int = 400,
     disclose: bool = True,
     title: str = "",
     summary_text: str = "",
@@ -261,7 +261,7 @@ def gate_report(
     note: dict[str, Any] | None = None,
     published_note: dict[str, Any] | None = None,
     last_publish_at: str = "",
-    summary_limit: int = 200,
+    summary_limit: int = 400,
     min_interval_seconds: int = GATE_INTERVAL_SECONDS,
     confirmed: bool = False,
     logged_in: bool | None = None,
@@ -385,13 +385,15 @@ def gate_report(
 # ------------------------------------------------------------------ 发布
 
 NOTE_TITLE_MAX = TITLE_MAX
+# 平台侧记的是 200（方案书 §756）；本机上限由 publish.max_summary_chars 决定（默认 400）。
+# 这个常量只作参考，不参与判定——真撞了 12025 就把配置调回 200。
 NOTE_SUMMARY_MAX = 200
 NOTE_ATTEMPTS = 3
 
 _NOTE_HINTS = {
     12015: "需要过验证码。这类拦截本应用不做绕过，请到网页端手动处理后再试。",
     12016: "内容被判成敏感信息，改一下措辞再发。",
-    12025: "内容超长（笔记的标题 80 字、摘要 200 字是硬上限）。",
+    12025: "内容超长。平台对笔记标题（80 字）与摘要（约 200 字）有上限，先把摘要压短再试。",
     12035: "你被这位 UP 主加入了黑名单，在这个视频下发不了笔记。",
     12051: "平台判成重复内容。同一视频重复发会被风控，先撤回旧的那条。",
     12052: "这个视频的评论区已关闭。",
