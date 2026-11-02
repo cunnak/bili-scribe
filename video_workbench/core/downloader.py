@@ -407,9 +407,13 @@ def _bbdown_output(home: Path) -> Path | None:
 
 
 def _normalize_bbdown_output(home: Path, produced: Path | None) -> Path | None:
-    """把 BBDown 的产物统一成 ``home/source.<ext>``。
+    """把 BBDown 的产物统一成 ``home/source.<ext>``——两个后端共用的**暂存名**。
 
-    布局与 sidecar 都按 ``source.*`` 找文件；改个名比让十几处调用点兼容两种命名便宜。
+    改名只在这里做一次，失败就原样返回，不因为一个文件名判下载失败。
+
+    下游真正按这个名字找文件的只有四处：``layout.SOURCE_STAGING``、本文件的 ``-o``、
+    ``_bbdown_output`` 与这里的兜底 glob。真实消费者读的是数据库里的路径，所以源文件
+    随后被 ``layout.finalize_source`` 改成视频标题不会波及它们。
     """
     if produced is None or not produced.exists():
         return produced
@@ -486,7 +490,12 @@ def download(
     bbdown_bin: str | None = None,
     bbdown_args: str = "",
 ) -> DownloadResult:
-    """下载一集到 ``home/source.mp4``。
+    """下载一集到 ``home/source.<ext>``——这是**暂存名**，不是最终文件名。
+
+    调用方（``workers/download_worker``）拿到返回路径后交给
+    ``layout.finalize_source`` 改成视频标题名。这里固定用暂存名是刻意的：
+    断点续传的 ``.part`` 文件名必须稳定，而 yt-dlp 自己的清洗规则和
+    ``sanitize_name`` 不一致，让它按标题写会留下两个名字对不上的现场。
 
     ``backend`` 两种：``ytdlp``（默认）与 ``bbdown``（兜底，P1-08）。兜底**只在调用方
     明确指定时**才走——不在这里做"失败了自动换一个"的静默切换。

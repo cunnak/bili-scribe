@@ -326,9 +326,14 @@
 
     var coverBox = ui.h("div", { class: "thumb thumb--empty", html: ui.svg("film") });
     if (res.cover) {
-      coverBox = ui.h("div", { class: "thumb" }, [
-        ui.h("img", { class: "thumb__img", alt: "", src: res.cover, referrerpolicy: "no-referrer" })
-      ]);
+      // 远程地址仍可能加载失败（断网、图床抽风、UP 换了封面后旧地址失效）。
+      // 没有这个兜底，界面就留一个破图图标——那是本次 bug 被发现的直接原因。
+      var coverImg = ui.h("img", { class: "thumb__img", alt: "", src: res.cover, referrerpolicy: "no-referrer" });
+      coverImg.addEventListener("error", function () {
+        coverBox.className = "thumb thumb--empty";
+        coverBox.innerHTML = ui.svg("film");
+      });
+      coverBox = ui.h("div", { class: "thumb" }, [coverImg]);
     }
 
     var head = ui.h("div", { class: "nt-head" }, [

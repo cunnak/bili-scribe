@@ -15,7 +15,9 @@ from video_workbench.core.layout import (
     SIDECAR_KEYS,
     allocate,
     build_sidecar,
+    finalize_source,
     read_sidecar,
+    source_stem,
     write_sidecar,
 )
 
@@ -106,12 +108,16 @@ def test_ensure_creates_standard_subdirs(tmp_path):
     layout = allocate(tmp_path, up_name="UP", title="建目录", bvid="BV10", cid=1).ensure()
     for name in ("frames", "clips", "export", "logs"):
         assert (layout.root / name).is_dir()
-    assert layout.source.parent == layout.root
+    assert layout.sidecar.parent == layout.root
+    # 源文件不再有固定名：它落在哪个目录由 finalize_source 决定，这里断言"落进项目根目录"。
+    staged = layout.root / "source.mp4"
+    staged.write_bytes(b"x" * 10)
+    assert finalize_source(layout.root, staged, stem="建目录").parent == layout.root
 
 
 def test_layout_paths_point_into_root(tmp_path):
     layout = allocate(tmp_path, up_name="UP", title="路径", bvid="BV11", cid=1)
-    for path in (layout.source, layout.sidecar, layout.audio, layout.transcript_json,
+    for path in (layout.sidecar, layout.audio, layout.transcript_json,
                  layout.transcript_srt, layout.subtitle_zh_ass, layout.summary_json):
         assert path.parent == layout.root
 

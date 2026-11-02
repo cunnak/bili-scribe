@@ -126,16 +126,28 @@
   /**
    * 本地绝对路径 → 可放进 `<img src>` 的 URL。
    *
-   * 页面本身是 `file://` 载入的（不跑本地 HTTP 服务），所以同协议读本地文件可行；
-   * 换成 `http` 模式时由 Python 侧改成 `/media?path=…`，页面这层不用动。
+   * 页面本身是 `file://` 载入的（不跑本地 HTTP 服务），所以同协议读本地文件可行。
    * 路径里有中文/空格时**必须** encodeURI，否则 WebView2 会拿不到图。
+   *
+   * 但 encodeURI 不够：它**不动** `#` `?` `&` `+` 这几个保留字符。源视频文件现在按视频
+   * 标题命名，而标题里带 `#` 是常态（`【#12】……`）——`#` 会被当成 fragment 截断、`?`
+   * 会被当成 query 起点，于是素材库里又变成一张加载不出来的破图，跟这次修的封面 bug
+   * 一模一样。所以 encodeURI 之后必须把这几个补上（`%` 不动，避免二次编码）。
    */
+  function toFileUrl(text) {
+    return encodeURI(text)
+      .replace(/#/g, "%23")
+      .replace(/\?/g, "%3F")
+      .replace(/&/g, "%26")
+      .replace(/\+/g, "%2B");
+  }
+
   WB.mediaUrl = function (path) {
     if (!path) return "";
     var text = String(path).replace(/\\/g, "/");
-    if (/^[a-zA-Z]:\//.test(text)) return "file:///" + encodeURI(text);
-    if (text.charAt(0) === "/") return "file://" + encodeURI(text);
-    return encodeURI(text);
+    if (/^[a-zA-Z]:\//.test(text)) return "file:///" + toFileUrl(text);
+    if (text.charAt(0) === "/") return "file://" + toFileUrl(text);
+    return toFileUrl(text);
   };
 
   /** 批量：并行取多个接口，全部成功才 resolve，任一失败即抛（避免半截界面）。 */

@@ -210,6 +210,12 @@ class _Repo:
         self.assets.append((project_id, kind, path))
         return {"id": "as_test"}
 
+    def asset_upsert_singleton(self, project_id, kind, path, **kwargs):
+        # "原始视频"这类单例 kind 走这里：身份键不含 path，重下只改写不插新行。
+        self.assets = [row for row in self.assets if row[1] != kind]
+        self.assets.append((project_id, kind, path))
+        return {"id": "as_test"}
+
     def asset_list(self, project_id=None, kind=None):
         return []
 

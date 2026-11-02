@@ -40,6 +40,44 @@ _SHORT = re.compile(r"^https?://b23\.tv/[0-9A-Za-z]+", re.IGNORECASE)
 _PAGE = re.compile(r"[?&]p=(\d+)", re.IGNORECASE)
 _URL_ID = re.compile(r"/(?:video|bangumi/play|bangumi/media)/([0-9A-Za-z]+)", re.IGNORECASE)
 
+# B站自己的图床。只有这些域的明文地址会被升级成 https，别的域不猜。
+COVER_HOSTS = ("hdslb.com", "biliimg.com", "bilibili.com")
+
+
+def normalize_cover(url: Any) -> str:
+    """把封面地址变成**页面真能加载**的那一种。不认识的明文地址一律丢弃（返回空串）。
+
+    为什么必须在这里做，而不是让前端直接吃 API 给的值：
+
+    1. 页面是 ``file://`` 加载的（``desktop.py`` 里 ``http_server=False``），而
+       ``web/index.html`` 的 CSP 写的是 ``img-src 'self' file: data: https:``——
+       **不含 ``http:``**。
+    2. B站 ``x/web-interface/view`` 返回的 ``pic`` 偏偏是明文
+       ``http://i2.hdslb.com/...``（实测 BV1xGxW6kEQZ 就是）。
+    两者一撞，浏览器按 CSP 直接拦掉，界面上就是一片破图占位——图床本身没拒绝任何人，
+       不带 Referer 也能 200 取到完整字节。
+
+    所以修法是把协议对齐（同一地址换 https 取到的字节数完全一致），**不是**放宽 CSP：
+    那等于给页面开一条可被中间人替换的图片来源，为了显示一张缩略图把防线拆了。
+    协议相对写法（``//i0.hdslb.com/...``）在 ``file://`` 下同样废掉，一并补成 https——
+    这也是 ``bili_scribe/infra/bili_client.py`` 早就在做的归一化口径。
+    """
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return "https:" + text
+    if text.startswith("https://"):
+        return text
+    if not text.startswith("http://"):
+        return ""
+    rest = text[len("http://"):]
+    host = rest.split("/", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0].lower()
+    if any(host == domain or host.endswith("." + domain) for domain in COVER_HOSTS):
+        return "https://" + rest
+    # 非白名单的明文图地址：CSP 注定拦它，留着只会在界面上留一个破图。丢掉，走占位。
+    return ""
+
 
 @dataclass
 class Item:
@@ -73,7 +111,8 @@ class Item:
             "part_title": self.part_title,
             "page_count": self.page_count,
             "duration_ms": self.duration_ms,
-            "cover": self.cover,
+            # 出口统一归一：CSP 只放行 https，API 给的 pic 常常是明文 http。
+            "cover": normalize_cover(self.cover),
         }
 
 
@@ -100,7 +139,7 @@ class Resolution:
             "title": self.title,
             "up_name": self.up_name,
             "up_mid": self.up_mid,
-            "cover": self.cover,
+            "cover": normalize_cover(self.cover),
             "collection_title": self.collection_title,
             "season_id": self.season_id,
             "note": self.note,

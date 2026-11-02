@@ -8,6 +8,18 @@
    `` (2)``，但**同一个 bvid+cid 再来一次要复用原目录**，否则续传会变成"每次都新下载"。
 3. **侧车即真相**：``source.wb.json`` 记下 bvid/cid/画质/来源，重启后没有它就只能靠
    目录名猜项目身份。
+
+**三个命名域是故意的不对称，别去"统一"它：**
+
+- **媒体文件名 = 内容**：跟着视频原标题走（``source_stem`` → ``finalize_source``）。
+  用户在资源管理器里看到的就该是他认得出的东西，不该是一堆 ``source.mp4``。
+- **侧车文件名 = 格式锚点**：固定 ``source.wb.json``。``allocate`` 要在**还不知道媒体
+  文件名**的时候判断"这个目录是不是同一集"，靠的就是这个可预测的名字。改它会让旧目录的
+  复用判定失效，重下同集反而新建一个重复项目目录——数据分裂比名字不一致严重得多。
+- **下载暂存名 = 机器名**：固定 ``source``（见 ``core/downloader.py`` 的 ``-o``）。
+  断点续传的 ``.part`` 名必须稳定，否则 UP 改一次标题续传就写到另一个文件上；而且标题
+  一旦进 yt-dlp 的输出模板，就是拿外部可控字符串当模板片段用（``%(id)s`` 会被展开）。
+  下载结束后由 ``finalize_source`` 一次性改成媒体文件名——**改名只有这一个归属**。
 """
 
 from __future__ import annotations
@@ -20,6 +32,12 @@ from typing import Any
 from ..infra.files import is_within, sanitize_name, unique_path
 
 SIDECAR = "source.wb.json"
+
+# 下载器写盘用的暂存主干（``-o "source.%(ext)s"``）。**不是**最终文件名，别拿它拼路径。
+SOURCE_STAGING = "source"
+
+# 认作"这一集的视频文件"的扩展名。读侧兜底只按这份名单挑，不猜别的。
+SOURCE_EXTS = (".mp4", ".mkv", ".flv", ".webm", ".ts", ".m4v")
 
 # 一个项目目录里固定会出现的子目录（方案书 5.3.3 的目录树）。
 SUBDIRS = ("frames", "clips", "export", "logs")
@@ -36,10 +54,6 @@ class Layout:
     """一个项目的目录与关键文件。全部是绝对路径，不会再被 cwd 影响。"""
 
     root: Path
-
-    @property
-    def source(self) -> Path:
-        return self.root / "source.mp4"
 
     @property
     def sidecar(self) -> Path:
@@ -108,9 +122,9 @@ class Layout:
         return Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
 
     def as_dict(self) -> dict[str, str]:
+        # 故意不含 source：媒体文件名跟着标题走，只有 find_source/DB 知道它在哪。
         return {
             "root": str(self.root),
-            "source": str(self.source),
             "sidecar": str(self.sidecar),
             "audio": str(self.audio),
             "transcript_json": str(self.transcript_json),
@@ -120,6 +134,94 @@ class Layout:
             "export": str(self.export),
             "logs": str(self.logs),
         }
+
+
+def source_stem(title: str, part_title: str = "") -> str:
+    """这一集的视频文件名主干（不含扩展名）。**命名规则只有这一处**。
+
+    多 P 用 ``主标题 - 分P名``，和 :meth:`core.resolver.Item.display_title`（界面列表
+    显示的那串）保持同一条规则——用户在界面上看到什么，资源管理器里就该是什么。
+    清洗交给 :func:`video_workbench.infra.files.sanitize_name`：非法字符、首尾点、
+    Win32 保留字、超长都在这里收口，空标题退化成 ``untitled`` 而不是抛异常。
+    """
+    text = str(title or "").strip()
+    part = str(part_title or "").strip()
+    if part and text and part != text:
+        text = f"{text} - {part}"
+    elif part and not text:
+        # 没有主标题时只留分P名，不要留一个开头孤零零的 " - "。
+        text = part
+    return sanitize_name(text)
+
+
+def finalize_source(root: str | Path, produced: str | Path, *, stem: str) -> Path:
+    """把下载产物改成正式文件名 ``<stem><原扩展名>``，返回最终路径。
+
+    两个后端（yt-dlp / BBDown）都在这一个函数汇合，保证命名一致。产物不在本目录时
+    只如实返回原路径——**绝不跨目录动别人的文件**，路径由调用方写进 DB 与侧车。
+
+    目标名已存在时覆盖它是安全的：能进到同一个项目目录，说明 :func:`allocate` 已经用
+    侧车里的 bvid+cid 认定过"这就是这一集"，那个同名文件是上一次尝试留下的残留。
+    清洗后的标题为空会退化成 ``untitled``，不会出现空文件名。
+    """
+    home = Path(str(root))
+    src = Path(str(produced))
+    if not src.is_file() or src.parent != home:
+        return src
+    target = home / f"{stem}{src.suffix.lower()}"
+    if target == src:
+        return target
+    try:
+        if target.exists():
+            target.unlink()
+        src.replace(target)
+    except OSError:
+        # 改名失败不判下载失败：文件确实在盘上，DB 记真实路径就行（读侧走 DB 优先）。
+        return src
+    return target
+
+
+def find_source(
+    root: str | Path,
+    *,
+    prefer: str | Path = "",
+    stem: str = "",
+) -> Path | None:
+    """读侧唯一入口：这一集的视频文件在哪。**兜底 glob 只允许写在这里**。
+
+    顺序：调用方给的权威路径（DB / 侧车）→ 标题名 → 历史遗留的 ``source.*`` →
+    目录里**唯一**那一个视频文件。找不到、或者同一种命名下有多个候选，一律返回
+    ``None`` 让上层重下——"挑最大的那个"或"挑最新的那个"这类猜法在文件名跟标题走之后
+    会从兜底变成主路径，有把 B 视频记到 A 项目名下且不报错的风险。
+
+    最后那条"唯一候选"不算猜：目录里只有一个视频文件时没有歧义，它覆盖的是"DB 路径失效
+    但文件还在"的现场（用户手动挪动过、或标题改过之后重算的 stem 对不上）。
+
+    旧目录（只有 ``source.mp4``）在这里天然兼容：不改名、不迁移，读得到就是读到。
+    """
+    given = str(prefer or "")
+    if given:
+        path = Path(given)
+        if path.is_file():
+            return path
+    home = Path(str(root))
+    if not home.is_dir():
+        return None
+    hits = [
+        item
+        for item in sorted(home.iterdir())
+        if item.is_file()
+        and item.suffix.lower() in SOURCE_EXTS
+        and not item.name.startswith(".")
+    ]
+    if stem:
+        exact = [item for item in hits if item.stem == stem]
+        if len(exact) == 1:
+            return exact[0]
+    legacy = [item for item in hits if item.stem == SOURCE_STAGING]
+    if len(legacy) == 1:
+        return legacy[0]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _segments(

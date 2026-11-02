@@ -280,10 +280,11 @@ class Repo:
     )
 
     def asset_upsert(self, project_id: str, kind: str, path: str, **fields: Any) -> dict[str, Any]:
-        """一个项目里同类资产按路径唯一。
+        """一个项目里同类资产按路径唯一。**只用于多值 kind**（``subtitle`` / ``export``）。
 
-        用 upsert 而不是纯 insert：重下同一集会再写一次 ``source.mp4``，
-        每次都插一条的话详情页会出现五条一模一样的"原始视频"。
+        写 ``source`` 这类"一个项目只该有一份"的资产请改用
+        :meth:`asset_upsert_singleton`——本方法的去重键含 path，而源视频文件名跟着视频
+        标题走，改名会插出第二行并被 :meth:`asset_list` 的升序读取遮蔽成"权威行"。
         """
         row = self._one(
             "SELECT * FROM wb_asset WHERE project_id=? AND kind=? AND path=?",
@@ -299,6 +300,50 @@ class Repo:
                 )
                 row = self._one("SELECT * FROM wb_asset WHERE id=?", (row["id"],)) or row
             return row
+
+        asset_id = new_id("as")
+        data = {
+            "id": asset_id,
+            "project_id": project_id,
+            "kind": kind,
+            "path": path,
+            "status": values.pop("status", "ready"),
+            "created_at": now_iso(),
+            **values,
+        }
+        columns = ",".join(data)
+        marks = ",".join("?" for _ in data)
+        self._exec(f"INSERT INTO wb_asset ({columns}) VALUES ({marks})", list(data.values()))
+        return self._one("SELECT * FROM wb_asset WHERE id=?", (asset_id,)) or {}
+
+    def asset_upsert_singleton(
+        self, project_id: str, kind: str, path: str, **fields: Any
+    ) -> dict[str, Any]:
+        """**单例 kind** 专用（``source`` 这类"一个项目只该有一份"的资产）。
+
+        身份键是 ``(project_id, kind)``，**不含 path**。为什么不能沿用 :meth:`asset_upsert`：
+        它的去重条件带 path，而媒体文件名现在跟着视频标题走——UP 改标题、换下载后端、
+        换扩展名都会插出第二行 ``kind=source``。而 :meth:`asset_list` 按 ``created_at``
+        **升序**返回，读取侧（``service._decorate`` 的 ``setdefault``、各处 ``next(...)``）
+        取的是**最早**那行 → 指向死文件的旧行会遮蔽真实文件：素材库标红 missing，
+        转录/剪辑/导出拿到不存在的路径，且不报任何错。
+
+        这里把同 kind 的所有行统一改写到新路径（不删行：``wb_transcript.asset_id``
+        外键指向资产行，删行会把转录记录的来源抹成 ``NULL``）。多值 kind
+        （``subtitle`` / ``export``）不该用这个方法——它们的身份确实含 path。
+        """
+        values = {k: v for k, v in fields.items() if k in self.ASSET_FIELDS}
+        rows = self._all(
+            "SELECT * FROM wb_asset WHERE project_id=? AND kind=? ORDER BY created_at DESC, id DESC",
+            (project_id, kind),
+        )
+        if rows:
+            sets = ", ".join(["path=?", *(f"{k}=?" for k in values)])
+            self._exec(
+                f"UPDATE wb_asset SET {sets} WHERE project_id=? AND kind=?",
+                [path, *values.values(), project_id, kind],
+            )
+            return self._one("SELECT * FROM wb_asset WHERE id=?", (rows[0]["id"],)) or rows[0]
 
         asset_id = new_id("as")
         data = {
@@ -704,6 +749,10 @@ class Repo:
         只有发布成功才会有。两者刻意分开：把平台 id 当本地主键，撤回时就找不到行了。
         """
         existing = self.publish_get(note_pk) if note_pk else self.publish_for_project(project_id)
+        # 兜底：note_pk 指向别的项目的行时不当成「要改的那份」，免得 UPDATE 把
+        # 另一个项目的草稿覆盖掉（服务层已有同类校验，这里防直接调 repo 的路径）。
+        if existing and str(existing.get("project_id") or "") != str(project_id):
+            existing = None
         # 只改"还没发出去的"那一份。项目里最新一条已经是 published / withdrawn 时，
         # 再走 update 会把**发出去的那份记录**改掉——那既是改历史，又让后面的
         # "同视频不能重复发"判断失效（它按 status=published 找，找到的是被改脏的同一行）。
