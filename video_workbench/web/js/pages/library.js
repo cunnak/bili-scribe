@@ -318,10 +318,21 @@
         text: "复制路径",
         onclick: function () { copy(row.root_dir); }
       }),
-      row.stage === "new" || row.stage === "downloaded"
+      row.stage === "new" || row.stage === "downloaded" || row.stage === "analyzed"
         ? ui.h("button", {
             class: "btn btn--primary",
             text: "开始转录",
+            onclick: function () { transcribe(row); }
+          })
+        : null,
+      // 已经转过的项目必须留重转入口：选错语言是这套流程里最常出的错，
+      // 没有这个按钮，用户唯一的自救办法是删库重导——那条路既不会命中缓存，
+      // 还会多留一份 audio.wav（retention 只有配置没有实现，永远不回收）。
+      row.stage === "transcribed" || row.stage === "subtitle" || row.stage === "summarized"
+        || row.stage === "clipped" || row.stage === "merged" || row.stage === "published"
+        ? ui.h("button", {
+            class: "btn",
+            text: "重新转录",
             onclick: function () { transcribe(row); }
           })
         : null,
@@ -428,13 +439,55 @@
     ui.toast(value, "info", 6000);
   }
 
-  /** 起一次转录。进度不在这里轮询——job 事件会推过来，素材库收到就刷新。 */
+  // 源语言清单只取一次。100 个码不在前端手抄——后端 infra/languages.py 是唯一真源，
+  // 前端抄一份就会和 faster-whisper 的版本漂移，而漂移的后果是任务白跑一次。
+  var langCache = null;
+
+  function languageChoices() {
+    if (langCache) return Promise.resolve(langCache);
+    return call("transcribe.languages").then(function (data) {
+      langCache = data || { common: [], all: [] };
+      return langCache;
+    });
+  }
+
+  /**
+   * 起一次转录。进度不在这里轮询——job 事件会推过来，素材库收到就刷新。
+   *
+   * 弹窗给的是"必答"而不是"带默认值的确认"：默认选中「自动检测」的话，
+   * 用户连点两下就等于什么都没改，而自动探测只看开头一段，正是最容易出错的
+   * 那部分。要让这个功能真的解决问题，就得让他至少做一次选择。
+   */
   function transcribe(row) {
-    return call("transcribe.start", { project_ids: [row.id] })
+    var retry = row.stage !== "new" && row.stage !== "downloaded" && row.stage !== "analyzed";
+    return languageChoices()
+      .catch(function () {
+        // 拿不到清单不该把功能卡死：退化成只有「自动检测」，至少能用。
+        return { common: [{ code: "", label: "自动检测" }], all: [] };
+      })
       .then(function (data) {
-        var jobs = (data && data.jobs) || [];
-        ui.toast(jobs.length ? "已开始转录，可在任务里看进度" : "没有可转录的项目", "success");
-        load();
+        return ui.pick({
+          title: retry ? "重新转录 · 选择源语言" : "选择源语言",
+          hint: "源语言决定识别准确度。自动检测只分析开头一小段，中英混排或开头没说话的素材容易判错。",
+          options: data.common,
+          more: data.all,
+          moreLabel: "其余 " + (data.all || []).length + " 种语言",
+          confirmText: retry ? "重新转录" : "开始转录"
+        });
+      })
+      .then(function (language) {
+        // null = 用户关掉了弹窗（取消 / ESC / 点遮罩）。一个 RPC 都不发，
+        // 队列里也就不会多出一条 canceled 记录。
+        if (language === null) return null;
+        return call("transcribe.start", {
+          project_ids: [row.id],
+          language: language || ""
+        }).then(function (result) {
+          var jobs = (result && result.jobs) || [];
+          ui.toast(jobs.length ? "已开始转录，可在任务里看进度" : "没有可转录的项目", "success");
+          load();
+          return result;
+        });
       })
       .catch(function (err) {
         ui.toast("启动转录失败：" + ((err && err.message) || err), "error");

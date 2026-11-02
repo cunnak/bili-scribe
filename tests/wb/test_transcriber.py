@@ -394,3 +394,97 @@ def test_runner_kills_child_without_waiting_for_next_line(monkeypatch, tmp_path)
     assert code == -2, "取消要回 -2，调用方才好标 canceled"
     assert killed == [424242], f"没杀子进程：{killed}"
     assert seen and seen[0]["event"] == "progress", "第一行事件仍要派发"
+
+
+# ----------------------------------------------------------------- 源语言
+
+
+def _cfg(**over):
+    base = {"model": "tiny", "language": "auto", "vad": True, "word_timestamps": True,
+            "device": "cpu", "compute_type": "int8"}
+    base.update(over)
+    return type("C", (), base)()
+
+
+def test_payload_language_reaches_spec_after_normalizing(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    project = make_project(repo, tmp_path)
+    models = tmp_path / "models"
+    make_model(models)
+    seen: list[dict] = []
+
+    def runner(spec, on_event, cancel):
+        seen.append(dict(spec))
+        return writing_runner()(spec, on_event, cancel)
+
+    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
+                                        runner=runner)
+    handler(FakeCtx(), {"project_id": project["id"], "language": " ZH "})
+
+    assert seen and seen[0]["language"] == "zh", "用户选的码要原样进 spec，worker 直接读它"
+    assert t.read_cache(Path(project["root_dir"]))["cache_key"]
+
+
+def test_handler_rejects_bad_language_before_touching_audio(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    project = make_project(repo, tmp_path)
+    models = tmp_path / "models"
+    make_model(models)
+    ff = FakeFF()
+    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=ff,
+                                        runner=writing_runner())
+
+    with pytest.raises(WBError) as info:
+        handler(FakeCtx(), {"project_id": project["id"], "language": "zh-CN"})
+
+    assert info.value.code == "VALIDATION"
+    assert ff.calls == 0, "非法码要在抽音频之前就拦住，别让用户白等一次解码"
+
+
+def test_failed_rerun_keeps_the_previous_transcript(tmp_path: Path):
+    """重转失败不能把用户手上唯一一份字幕清掉。
+
+    以前失败分支无条件 _wipe_outputs(root)，重选语言选错一次，旧字幕就没了；
+    而 importer 查重按 root_dir，删库重导也不会重跑，等于把结果永久弄丢。
+    """
+    repo = make_repo(tmp_path)
+    project = make_project(repo, tmp_path)
+    models = tmp_path / "models"
+    make_model(models, "tiny")
+    make_model(models, "small")
+
+    ok = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
+                                   runner=writing_runner())
+    ok(FakeCtx(), {"project_id": project["id"]})
+    root = Path(project["root_dir"])
+    good = (root / "transcript.json").read_text(encoding="utf-8")
+    assert good
+
+    bad = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=_cfg(model="small"), ff=FakeFF(),
+        runner=writing_runner(code=1, error={"code": "PROCESS_FAILED", "message": "boom"}),
+    )
+    with pytest.raises(WBError):
+        bad(FakeCtx(), {"project_id": project["id"]})
+
+    assert (root / "transcript.json").read_text(encoding="utf-8") == good, "旧结果要留着"
+    assert (root / "transcript.srt").is_file(), "旧字幕同理"
+    assert not (root / "transcript.json.tmp").exists(), "半成品要清掉，不能留在目录里"
+    assert not (root / "transcript.srt.tmp").exists()
+    assert repo.project_get(project["id"])["stage"] == "transcribed"
+
+
+def test_finish_does_not_roll_back_downstream_stage(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    project = make_project(repo, tmp_path)
+    repo.project_update(project["id"], stage="clipped")
+    models = tmp_path / "models"
+    make_model(models)
+
+    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
+                                        runner=writing_runner())
+    handler(FakeCtx(), {"project_id": project["id"]})
+
+    assert repo.project_get(project["id"])["stage"] == "clipped", (
+        "已经切过片/发布过的项目，重转一次不该被打回 transcribed——下游产物还在"
+    )

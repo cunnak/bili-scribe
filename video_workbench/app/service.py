@@ -21,11 +21,12 @@ import csv
 import io
 import json
 import tempfile
+import threading
 import time
 from importlib.util import find_spec
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from video_workbench import APP_NAME, __version__
 from video_workbench.app.errors import ERROR_CODES, WBError
@@ -61,6 +62,7 @@ from video_workbench.core.transcriber import format_srt
 from video_workbench.core.bili import default_gateway
 from video_workbench.core import clip_refine
 from video_workbench.core.importer import import_videos
+from video_workbench.infra import languages
 from video_workbench.core.probe import make_thumbnail, probe_file
 from video_workbench.core.transcriber import make_transcribe_handler
 from video_workbench.infra import models as models_mod
@@ -182,6 +184,14 @@ class TranscribeStartParams(BaseModel):
     compute_type: str = ""
     vad: bool | None = None
     word_timestamps: bool | None = None
+
+    @field_validator("language")
+    @classmethod
+    def _check_language(cls, value: str) -> str:
+        # 在这里挡，而不是在 transcribe_start 里：非法语言码一旦进了 jobs 队列，
+        # 用户会看到一条 PROCESS_FAILED 的"假失败"。而真正的报错要等到 worker
+        # 建 tokenizer 时才出现——那时 VAD 和模型加载的钱已经付掉了。
+        return languages.normalize(value)
 
 
 class ModelParams(BaseModel):
@@ -662,6 +672,10 @@ class WorkbenchService:
         self.conn = open_and_migrate(self.cfg.db_path)
         self.repo = Repo(self.conn)
         self.events = EventBus()
+        # 发布是全应用唯一不可撤销的动作，而且 pywebview 每个 js_api 调用一个线程：
+        # 两次并发点「发布」会各自读到 status=draft、各自 POST 一次。这里用非阻塞锁
+        # 把 check-then-act 串起来，第二个请求直接拿到 CONFLICT（D2）。
+        self._publish_lock = threading.Lock()
 
         limits = {
             # 下载可并行：网络 IO，互不争用。上限取配置值。
@@ -797,6 +811,7 @@ class WorkbenchService:
         r.add("transcribe.start", self.transcribe_start, TranscribeStartParams)
         r.add("transcribe.cancel", self.transcribe_cancel, IdParams)
         r.add("transcribe.models", self.transcribe_models)
+        r.add("transcribe.languages", self.transcribe_languages)
         r.add("transcribe.model.download", self.transcribe_model_download, ModelParams)
         r.add("transcribe.model.remove", self.transcribe_model_remove, ModelParams)
         r.add("audio.peaks", self.audio_peaks, PeaksParams)
@@ -1473,6 +1488,22 @@ class WorkbenchService:
             "current": current if any(i["name"] == current for i in items) else models_mod.DEFAULT_MODEL,
             "models_root": self.cfg.models_root,
             "engine": str(self.cfg.transcribe.engine or "faster-whisper"),
+        }
+
+    def transcribe_languages(self) -> dict[str, Any]:
+        """源语言选项。弹窗与设置页共用这一份，别在前端手抄 100 个码。"""
+        try:
+            current = languages.normalize(self.cfg.transcribe.language)
+        except WBError:
+            # 老版本可能把 "zh-CN" 之类的坏值写进了配置。列个清单不该因此报错，
+            # 静默降级成"自动检测"，真正的拦截在 transcribe.start 那侧。
+            current = ""
+        data = languages.catalog()
+        return {
+            "common": data["common"],
+            "all": data["all"],
+            "current": current,
+            "count": len(languages.CODES),
         }
 
     def transcribe_model_download(self, name: str = "") -> dict[str, Any]:
@@ -2857,7 +2888,7 @@ class WorkbenchService:
     # 这里**一个网络请求都没有**。方案书原则 7：AI 产出一律是草稿，
     # 发布入口在 Phase 5 —— 到那时才有"发出去撤不回"的代价需要门禁来兜。
     # 现在能保证的是：草稿的正文形态与字数限制和真实接口一致，
-    # 用户在这里看到「80/200 字」就是发出去时平台会卡的那两个数。
+    # 用户在这里看到「80/400 字」是本机上限；平台侧可能更紧（见 12025 文案）。
 
     def _publish_content(self, project_id: str, summary_id: str = "") -> dict[str, Any]:
         """取一版总结的 content。没有总结就没得写草稿，直接说清楚。"""
@@ -2902,6 +2933,12 @@ class WorkbenchService:
         project = self.repo.project_get(project_id)
         if not project:
             raise WBError("NOT_FOUND", "项目不存在")
+        if note_pk:
+            # 草稿行是按 id 更新的。id 若属于另一个项目，这次「保存」会把那个项目的
+            # 草稿标题/摘要/正文整份覆盖掉（D1：跨项目覆盖）。
+            target = self.repo.publish_get(note_pk)
+            if target and str(target.get("project_id") or "") != str(project_id):
+                raise WBError("CONFLICT", "这份草稿属于另一个视频，不能在这里覆盖")
         record = self._publish_content(project_id, summary_id)
         draft = publisher_core.build_draft(
             project,
@@ -2960,7 +2997,10 @@ class WorkbenchService:
             for row in self.repo.publish_list(project_id)
             if str(row.get("status") or "draft") == "draft"
         ]
-        return {"notes": [publisher_core.row_view(row) for row in rows]}
+        return {
+            "notes": [publisher_core.row_view(row) for row in rows],
+            "limits": self._publish_limits(),
+        }
 
     def publish_get(self, id: str = "", confirmed: bool = False) -> dict[str, Any]:
         row = self.repo.publish_get(id)
@@ -2984,7 +3024,19 @@ class WorkbenchService:
         return {"removed": removed}
 
     def publish_publish(self, id: str, confirmed: bool = False) -> dict[str, Any]:
-        """把草稿发成笔记。这是全应用唯一不可撤销的动作。"""
+        """把草稿发成笔记。这是全应用唯一不可撤销的动作。
+
+        并发保护：拿到锁才算数。非阻塞——第二个请求立刻拿到 CONFLICT，
+        而不是排队等着把同一份草稿再发一遍。
+        """
+        if not self._publish_lock.acquire(blocking=False):
+            raise WBError("CONFLICT", "上一次发布还没返回，等它结束再试")
+        try:
+            return self._publish_publish_locked(id, confirmed)
+        finally:
+            self._publish_lock.release()
+
+    def _publish_publish_locked(self, id: str, confirmed: bool = False) -> dict[str, Any]:
         row = self.repo.publish_get(id)
         if not row:
             raise WBError("NOT_FOUND", "草稿不存在")

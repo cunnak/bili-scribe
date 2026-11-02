@@ -146,7 +146,10 @@
         { path: "transcribe.device", label: "推理设备", type: "select", options: [["auto", "自动"], ["cuda", "CUDA"], ["cpu", "CPU"]] },
         { path: "transcribe.compute_type", label: "计算精度", type: "select", options: [["auto", "自动"], ["float16", "float16"], ["int8_float16", "int8_float16"], ["int8", "int8"]] },
         { path: "transcribe.vad", label: "静音过滤（VAD）", type: "switch" },
-        { path: "transcribe.language", label: "源语言", type: "text", placeholder: "auto", help: "auto 会先做语言探测；已知语种时写死可省几秒。" }
+        // 这里给的是「默认源语言」，只影响 CLI 与无前端确认的路径——素材库点
+        // 「开始转录」时一定会再问一次，那里能选全部 100 种，所以下拉只放常用项。
+        // 以前是自由文本框，随手写个 zh-CN 就会在 tokenizer 里炸（它只认 ISO 639-1）。
+        { path: "transcribe.language", label: "源语言", type: "select", options: [["auto", "自动检测"], ["zh", "中文"], ["en", "英语"], ["ja", "日语"], ["yue", "粤语"], ["ko", "韩语"], ["ru", "俄语"], ["de", "德语"]], help: "auto 会先做语言探测，只看开头一小段，容易判错；已知语种时选死更稳。" }
       ]
     },
     {

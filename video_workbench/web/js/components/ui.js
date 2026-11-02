@@ -112,20 +112,28 @@
 
   // ---------------------------------------------------------------- 弹窗
 
-  /** 打开一个弹窗，返回 { close }。ESC 与点遮罩都能关。 */
+  /**
+   * 打开一个弹窗，返回 { close, body }。ESC 与点遮罩都能关。
+   * ``onClose`` 在任何一种关闭方式下都会跑一次——需要"关闭即结束"的调用方
+   * （比如 ui.pick）靠它兜底，否则 ES​C 一按 Promise 就永远悬着。
+   */
   ui.modal = function (options) {
     var opts = options || {};
     var root = document.getElementById("modal-root");
-    if (!root) return { close: function () {} };
+    if (!root) return { close: function () {}, body: null };
     var body = h("div", { class: "modal__body" }, opts.body || null);
     var foot = opts.footer || null;
+    var closed = false;
 
     var close = function () {
       // panel 的父节点是 overlay，不是 #modal-root —— 之前写 root.removeChild(panel)
       // 会抛 NotFoundError（node to be removed is not a child of this node），
       // 弹窗关不掉、后面的 resolve(true) 也永远走不到，用户看到的是「点了发布没反应」。
+      if (closed) return;
+      closed = true;
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       document.removeEventListener("keydown", onKey, true);
+      if (typeof opts.onClose === "function") opts.onClose();
     };
     var onKey = function (event) {
       if (event.key === "Escape") {
@@ -189,7 +197,105 @@
               dialog.close();
             }
           })
-        ]
+        ],
+        // 以前 ESC 关掉时两个按钮都没被点，Promise 永远悬着。onClose 兜底成交。
+        onClose: function () {
+          if (!settled) {
+            settled = true;
+            resolve(false);
+          }
+        }
+      });
+    });
+  };
+
+  /**
+   * 选一个值，**一定**给结果。返回 Promise：选中 resolve(值)，任何方式关闭 resolve(null)。
+   *
+   * 为什么不拿 ui.modal 自己拼：它有关闭四条路径（× / ESC / 点遮罩 / 代码 close），
+   * 只有把"结束"挂进 close 本身，Promise 才不会挂死。没有结果就关掉的语义是
+   * 「用户放弃了」，调用方必须能区分它和「选了自动检测」——后者是空字符串。
+   *
+   * opts = { title, hint, options: [{code,label}], more: [...], moreLabel, confirmText }
+   */
+  var pickSeq = 0;
+
+  ui.pick = function (opts) {
+    var o = opts || {};
+    var settled = false;
+    var chosen = null;
+    var hasChoice = false;
+    var dialog = null;
+    var confirmBtn = null;
+    var resolvePromise = null;
+    var radioName = "wb-pick-" + ++pickSeq;
+
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      if (resolvePromise) resolvePromise(value);
+    }
+
+    function rows(items) {
+      var list = h("div", { class: "langpick__list" });
+      (items || []).forEach(function (item) {
+        var input = h("input", { type: "radio", name: radioName, value: item.code });
+        input.addEventListener("change", function () {
+          chosen = item.code;
+          hasChoice = true;
+          if (confirmBtn) confirmBtn.disabled = false;
+        });
+        list.appendChild(
+          h("label", { class: "langpick__item" }, [
+            input,
+            h("span", { class: "langpick__name", text: item.label || item.code || "自动检测" }),
+            item.code ? h("span", { class: "langpick__code", text: item.code }) : null
+          ])
+        );
+      });
+      return list;
+    }
+
+    var body = h("div", { class: "langpick" }, [
+      o.hint ? h("p", { class: "langpick__hint", text: o.hint }) : null,
+      rows(o.options),
+      o.more && o.more.length
+        ? h("details", { class: "langpick__more" }, [
+            h("summary", { text: o.moreLabel || "更多语言" }),
+            rows(o.more)
+          ])
+        : null
+    ]);
+
+    return new Promise(function (resolve) {
+      resolvePromise = resolve;
+      confirmBtn = h("button", {
+        class: "btn btn--primary",
+        text: o.confirmText || "确定",
+        disabled: true,
+        onclick: function () {
+          if (!hasChoice) return;
+          finish(chosen);
+          if (dialog) dialog.close();
+        }
+      });
+      dialog = ui.modal({
+        title: o.title || "",
+        body: body,
+        footer: [
+          h("button", {
+            class: "btn",
+            text: "取消",
+            onclick: function () {
+              finish(null);
+              if (dialog) dialog.close();
+            }
+          }),
+          confirmBtn
+        ],
+        onClose: function () {
+          finish(null);
+        }
       });
     });
   };

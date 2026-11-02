@@ -139,6 +139,131 @@ async function main() {
     assert.ok(rows.length >= 1, "列表一条都没渲染出来");
   });
 
+  // ---------------------------------------------------------------- 源语言
+
+  // 以前点转录按钮直接发 RPC，源语言只能靠自动探测——探测只看开头一段，
+  // 中英混排或开头没说话的素材经常判错，用户既改不了也看不出来。
+
+  // Promise 挂死时 await 会一直等下去，整个测试变成"卡住"而不是"失败"，
+  // 所以所有等待都套一层超时——超时就是可读的失败信息。
+  function within(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(label + " 超过 " + ms + "ms 没结果：Promise 悬着")), ms);
+      })
+    ]);
+  }
+
+  function langModal() {
+    return window.document.querySelector(".langpick");
+  }
+
+  function langBtn(label) {
+    return [...window.document.querySelectorAll(".modal__foot button")]
+      .find((b) => b.textContent.trim() === label);
+  }
+
+  async function openLangPick() {
+    // 转录/字幕/移除这些按钮在详情卡里，列表行上只有标题和状态，
+    // 所以要先把项目选中（路由参数 project）才看得到。
+    WB.router.go("library", { project: "p_demo_1" });
+    await tick(500);
+    // mock 里的项目都转过，所以这里是「重新转录」；两条按钮走同一段逻辑，
+    // 文案只差在标题和确认键上。
+    const all = [...window.document.querySelectorAll("#view button")].map((b) => b.textContent.trim());
+    const btn = [...window.document.querySelectorAll("#view button")]
+      .find((b) => ["开始转录", "重新转录"].indexOf(b.textContent.trim()) >= 0);
+    assert.ok(btn, "素材库里没有任何转录入口：" + all.join(" | "));
+    btn.click();
+    await tick(150);
+    assert.ok(langModal(), "点了转录按钮没弹源语言选择");
+    return btn;
+  }
+
+  await check("ui.pick：选中、取消、ESC 三条路都一定给结果", async () => {
+    const one = [{ code: "", label: "自动检测" }];
+
+    const escP = WB.ui.pick({ title: "选语言", options: one });
+    await tick(40);
+    assert.ok(langModal(), "弹窗没开");
+    window.document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+    assert.strictEqual(await within(escP, 1200, "ESC 关闭"), null,
+      "ESC 关掉时调用方拿不到结果，用户看到的就是「点了没反应」");
+
+    const cancelP = WB.ui.pick({ title: "选语言", options: one });
+    await tick(40);
+    langBtn("取消").click();
+    assert.strictEqual(await within(cancelP, 1200, "取消关闭"), null);
+
+    const pickP = WB.ui.pick({ title: "选语言", options: [{ code: "zh", label: "中文" }] });
+    await tick(40);
+    langModal().querySelector(".langpick__item input").click();
+    await tick(20);
+    langBtn("确定").click();
+    assert.strictEqual(await within(pickP, 1200, "选中后确认"), "zh", "选中的值要原样交回");
+  });
+
+  await check("转录前先弹源语言选择：不预选、确认灰着、取消不发请求", async () => {
+    const before = (await WB.rpc("job.list", {}, { silent: true })).length;
+    await openLangPick();
+
+    const items = [...langModal().querySelectorAll(".langpick__item")];
+    assert.ok(items.length >= 8, "常用语言没渲染全：" + items.length);
+    assert.ok(items[0].textContent.indexOf("自动检测") >= 0, "自动检测要保留，排在第一位");
+    assert.strictEqual(items[0].querySelector("input").checked, false, "不该预选任何一项");
+
+    const confirm = langBtn("重新转录") || langBtn("开始转录");
+    assert.ok(confirm, "弹窗上没有确认键");
+    assert.strictEqual(confirm.disabled, true, "没选就点得动，等于让用户空手提交");
+
+    langBtn("取消").click();
+    await tick(120);
+    assert.ok(!langModal(), "取消没关掉弹窗");
+    const after = (await WB.rpc("job.list", {}, { silent: true })).length;
+    assert.strictEqual(after, before, "取消之后还是把任务发出去了");
+  });
+
+  await check("选了中文再确认：language=zh 真的传到 transcribe.start", async () => {
+    const before = (await WB.rpc("job.list", {}, { silent: true })).length;
+    await openLangPick();
+
+    const zh = [...langModal().querySelectorAll(".langpick__item")]
+      .find((el) => el.textContent.indexOf("中文") >= 0);
+    assert.ok(zh, "常用组里没有中文");
+    zh.querySelector("input").click();
+    await tick(30);
+
+    const confirm = langBtn("重新转录") || langBtn("开始转录");
+    assert.strictEqual(confirm.disabled, false, "选了之后确认键还是灰的");
+    confirm.click();
+    await tick(250);
+
+    const jobs = await WB.rpc("job.list", {}, { silent: true });
+    assert.strictEqual(jobs.length, before + 1, "没提交转录任务");
+    assert.strictEqual(jobs[0].project_id, "p_demo_1", "任务挂错了项目");
+    assert.strictEqual(jobs[0].language, "zh", "用户选的语言没传下去");
+
+    // 这条 queued 任务留着会污染后面「状态条只数 running/queued」的断言。
+    await WB.rpc("job.cancel", { id: jobs[0].id }, { silent: true });
+  });
+
+  await check("按 ESC 关掉弹窗 = 放弃，不发请求（以前 Promise 会一直悬着）", async () => {
+    const before = (await WB.rpc("job.list", {}, { silent: true })).length;
+    await openLangPick();
+
+    window.document.body.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+    await tick(150);
+
+    assert.ok(!langModal(), "ESC 没关掉弹窗");
+    const after = (await WB.rpc("job.list", {}, { silent: true })).length;
+    assert.strictEqual(after, before, "ESC 取消之后还是把任务发出去了");
+  });
+
   for (const [route, title] of ROUTES) {
     // eslint-disable-next-line no-await-in-loop
     await check(`切到 ${route} 能渲染且标题正确`, async () => {

@@ -402,9 +402,15 @@ class Cli:
             self.say("跳过转录（--skip-transcribe）")
         else:
             self.args.project_ids = [project_id]
+            # produce 以前漏传 language，整条流水线的转录永远走自动探测——
+            # 单跑 transcribe 能指定，串起来反而不能，这是最容易踩的一个不一致。
             data = self.rpc(
                 "transcribe.start",
-                {"project_ids": [project_id], "model": str(getattr(self.args, "model", "") or "")},
+                {
+                    "project_ids": [project_id],
+                    "model": str(getattr(self.args, "model", "") or ""),
+                    "language": str(getattr(self.args, "language", "") or ""),
+                },
             )
             for job in data.get("jobs") or []:
                 final = self.wait(str(job.get("id")), label="转录")
@@ -525,6 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project-id", dest="project_id", default="")
     p.add_argument("--quality", default="1080P")
     p.add_argument("--model", default="")
+    p.add_argument("--language", default="", help="源语言（zh/en/ja…）；留空 = 自动探测")
     p.add_argument("--role", default="")
     p.add_argument("--clips", type=int, default=0)
     p.add_argument("--export", type=int, default=0)

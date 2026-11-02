@@ -123,7 +123,7 @@ def transcribe(spec: dict[str, Any]) -> dict[str, Any]:
 
     audio = str(spec["audio"])
     model_path = str(spec["model_path"])
-    language = str(spec.get("language") or "auto")
+    language = str(spec.get("language") or "auto").strip()
     language = "" if language.lower() in ("auto", "") else language
     device, compute = _pick_device(str(spec.get("device") or "auto"), str(spec.get("compute_type") or "auto"))
     vad = bool(spec.get("vad", True))
@@ -206,6 +206,12 @@ def transcribe(spec: dict[str, Any]) -> dict[str, Any]:
     try:
         segments, info, total_ms = consume(vad)
     except Exception as exc:  # noqa: BLE001 —— GPU 的坑在 encode 阶段才暴露
+        # 参数错（语言码非法、模型路径不对）在任何设备上都该原样抛出，
+        # 不能被当成"GPU 跑不动"。否则一次手误（比如传了 zh-CN）就会把
+        # models_root/.asr_device.json 写成失败标记，之后**每一次**转录都被
+        # 强制降到 CPU——性能损失是永久的，而用户根本不知道是自己拼错了。
+        if isinstance(exc, (ValueError, TypeError, KeyError, LookupError)):
+            raise
         if state["device"] != "cuda":
             raise
         emit({"event": "log", "message": f"GPU 运行失败（{type(exc).__name__}: {exc}），改用 CPU"})

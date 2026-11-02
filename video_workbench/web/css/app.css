@@ -2279,3 +2279,90 @@ select,
   color: var(--dim); font-weight: 400; margin-right: 4px;
 }
 .ver-empty { font-size: 11.5px; color: var(--dim); line-height: 1.8; margin: 0; }
+
+/* ---------------------------------------------------------------- 源语言选择 */
+
+/* 弹窗里的一列单选。列表本身用 gap:1px + 底色当分割线，比逐项画 border 少一半规则；
+   常用组和折叠组共用同一套 .langpick__list，所以抽出来不复用第二份样式。 */
+.langpick__hint {
+  margin: 0 0 var(--gap-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.langpick__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--line-s);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--line-s);
+}
+
+.langpick__item {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  padding: 8px var(--gap-3);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.langpick__item:hover {
+  background: var(--panel-2);
+}
+
+/* 选中项要一眼看出来：光靠小圆点，在 8 行等价列表里几乎分不出选的是哪一行，
+   而 --panel 与 --panel-2 在暗色皮肤下只差一档，所以再加一条左侧酸绿竖线做锚点。 */
+.langpick__item:has(input:checked) {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--acid);
+}
+
+.langpick__item:has(input:checked) .langpick__name {
+  font-weight: 600;
+}
+
+.langpick__item input {
+  margin: 0;
+  accent-color: var(--acid);
+}
+
+.langpick__name {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+}
+
+.langpick__code {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  color: var(--dim);
+}
+
+.langpick__more {
+  margin-top: var(--gap-3);
+}
+
+.langpick__more > summary {
+  padding: 4px 0;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .14em;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.langpick__more > summary:hover {
+  color: var(--text);
+}
+
+/* 92 项要能滚。这里覆盖父级的 overflow:hidden，否则展开后整页跟着变长。 */
+.langpick__more .langpick__list {
+  margin-top: var(--gap-2);
+  max-height: 240px;
+  overflow: auto;
+}

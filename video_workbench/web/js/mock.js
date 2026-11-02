@@ -2523,6 +2523,51 @@
           }
         }
         return fail("NOT_FOUND", "任务不存在");
+      // 码表只抄常用 8 项 + 3 个长尾：前端从不依赖全集（真源是 infra/languages.py），
+      // 这里只负责让 mock 模式能真的把选择弹窗打开、选出值。
+      case "transcribe.languages": {
+        var langCommon = [
+          { code: "", label: "自动检测" },
+          { code: "zh", label: "中文" },
+          { code: "en", label: "英语" },
+          { code: "ja", label: "日语" },
+          { code: "yue", label: "粤语" },
+          { code: "ko", label: "韩语" },
+          { code: "ru", label: "俄语" },
+          { code: "de", label: "德语" }
+        ];
+        var langAll = [
+          { code: "fr", label: "法语" },
+          { code: "es", label: "西班牙语" },
+          { code: "pt", label: "葡萄牙语" }
+        ];
+        return ok({ common: langCommon, all: langAll, current: "", count: 100 });
+      }
+      case "transcribe.start": {
+        // 真后端会把 language 归一化后写进 job.payload；mock 里也挂在 job 上，
+        // 前端测试才能断言"用户选的确实是这个码"，而不是只看弹窗关没关。
+        var picked = String((p && p.language) || "");
+        var madeJobs = [];
+        ((p && p.project_ids) || []).forEach(function (pid) {
+          var trJob = {
+            id: "j_mock_tr_" + (JOBS.length + 1),
+            kind: "transcribe",
+            type: "transcribe",
+            status: "queued",
+            progress: 0,
+            stage: picked ? "排队中 · " + picked : "排队中 · 自动检测",
+            language: picked,
+            project_id: pid,
+            created_at: "2026-11-02 21:00:00",
+            updated_at: "2026-11-02 21:00:00",
+            attempts: 0,
+            error: null
+          };
+          JOBS.unshift(trJob);
+          madeJobs.push(trJob);
+        });
+        return ok({ jobs: madeJobs, count: madeJobs.length, skipped: [] });
+      }
       case "job.demo.submit":
         return ok({ id: "j_mock_demo", kind: "dev.demo", status: "queued", progress: 0, stage: "排队中" });
       case "fs.reveal":

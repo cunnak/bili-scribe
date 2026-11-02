@@ -36,15 +36,20 @@ from .. import __version__
 from ..app.errors import WBError
 from ..app.jobs import JobContext
 from ..core.downloader import kill_tree
+from ..infra import languages
 from ..infra import models as models_mod
 from ..infra.ffmpeg import FFmpeg
 from ..infra.db import now_iso
+from .layout import find_source
 
 TRANSCRIPT_JSON = "transcript.json"
 TRANSCRIPT_SRT = "transcript.srt"
 AUDIO_NAME = "audio.wav"
 TASK_NAME = "transcript.task.json"
 CACHE_NAME = "transcript.wb.json"
+
+#: 已经走过转录之后的阶段。重转录只更新字幕，不把这些阶段往回退。
+_DOWNSTREAM_STAGES = frozenset({"clipped", "merged", "published", "summarized"})
 
 CHUNK = 1 << 20
 
@@ -131,13 +136,21 @@ def _source_video(project: dict[str, Any], repo: Any) -> Path:
     root = Path(str(project.get("root_dir") or ""))
     if not str(root):
         raise WBError("NOT_FOUND", "这个项目没有目录记录")
-    direct = root / "source.mp4"
-    if direct.is_file():
-        return direct
+    # DB 优先，兜底规则只在 layout.find_source 一处。
+    # 早先是反过来写的（先猜 root/"source.mp4" 再查库）：源文件名跟着视频标题走之后，
+    # 那个硬编码猜测对任何新下载都不成立，还会把"猜中了旧文件"当成正确结果。
+    prefer = ""
     for asset in repo.asset_list(project["id"]):
-        if asset.get("kind") == "source" and asset.get("path") and Path(asset["path"]).is_file():
-            return Path(asset["path"])
-    raise WBError("NOT_FOUND", "找不到原始视频文件", str(direct))
+        if str(asset.get("kind") or "") != "source":
+            continue
+        path = str(asset.get("path") or "")
+        if path and Path(path).is_file():
+            prefer = path
+            break
+    found = find_source(root, prefer=prefer)
+    if found is not None:
+        return found
+    raise WBError("NOT_FOUND", "找不到原始视频文件", str(root))
 
 
 def _worker_command(spec_path: Path, python: str | None = None) -> list[str]:
@@ -267,7 +280,11 @@ def make_transcribe_handler(
             raise WBError("NOT_FOUND", "项目目录不存在", str(root))
 
         model_name = str(payload.get("model") or getattr(cfg, "model", models_mod.DEFAULT_MODEL))
-        language = str(payload.get("language") or getattr(cfg, "language", "auto"))
+        # 这里再做一次归一化：jobs.retry() 会把库里的旧 payload 原样重新提交，
+        # 那些记录写于加校验之前。纵深防御，不指望上游一定干净。
+        language = languages.normalize(
+            payload.get("language") or getattr(cfg, "language", "auto")
+        )
         vad = bool(payload.get("vad", getattr(cfg, "vad", True)))
         want_words = bool(payload.get("word_timestamps", getattr(cfg, "word_timestamps", True)))
         device = str(payload.get("device") or getattr(cfg, "device", "auto"))
@@ -306,6 +323,11 @@ def make_transcribe_handler(
 
         resolved = models_mod.resolve_for_use(models_root, model_name)
         ctx.progress(0.08, stage="加载模型")
+        # worker 先写这两个临时名，父进程确认成功后才 os.replace 到正式名。
+        # 直接让 worker 覆盖正式文件的话，中途失败会把上一版还能用的字幕一起
+        # 带走——而"选错语言 → 重转 → 失败"恰恰是这个功能最容易出现的路径。
+        tmp_json = root / (TRANSCRIPT_JSON + ".tmp")
+        tmp_srt = root / (TRANSCRIPT_SRT + ".tmp")
         spec = {
             "audio": str(audio),
             "model_path": resolved["path"],
@@ -317,8 +339,8 @@ def make_transcribe_handler(
             "vad": vad,
             "word_timestamps": want_words,
             "duration_ms": int(project.get("duration_ms") or 0),
-            "out_json": str(root / TRANSCRIPT_JSON),
-            "out_srt": str(root / TRANSCRIPT_SRT),
+            "out_json": str(tmp_json),
+            "out_srt": str(tmp_srt),
             "_spec_path": str(root / TASK_NAME),
             "_cwd": str(Path(__file__).resolve().parents[2]),
         }
@@ -348,26 +370,35 @@ def make_transcribe_handler(
             pass
 
         if code == -2 or ctx.should_cancel():
-            # 半截结果必须清掉：留着它，下次进来就会"命中缓存"拿到残缺字幕。
-            _wipe_outputs(root)
+            # 只清临时文件。上一次的正式字幕是用户唯一的退路，取消不该把它带走。
+            _wipe_outputs(root, tmp_only=True)
             raise WBError("CANCELED", "已取消转录")
         if code != 0 or errors:
-            _wipe_outputs(root)
+            _wipe_outputs(root, tmp_only=True)
             first = errors[0] if errors else {}
             raise WBError(
                 "PROCESS_FAILED",
                 str(first.get("message") or f"转录进程退出码 {code}"),
                 str(first.get("detail") or "")[:2000],
             )
-        if not json_path.is_file():
-            raise WBError("PROCESS_FAILED", "转录进程结束但没有产出 transcript.json", str(json_path))
+        if not tmp_json.is_file():
+            raise WBError(
+                "PROCESS_FAILED", "转录进程结束但没有产出 transcript.json", str(tmp_json)
+            )
 
         ctx.progress(0.97, stage="写入字幕")
+        # 到这一步才动正式文件。os.replace 在同分区上是原子的：不存在
+        # "transcript.json 写了一半"这种中间态，也不会留下下次会被误判成
+        # 缓存命中的半截结果。
+        os.replace(tmp_json, json_path)
         data = _load_json(json_path)
         segments = data.get("segments") or []
         detected = str(data.get("language") or language or "")
         srt_path = root / TRANSCRIPT_SRT
-        srt_path.write_text(format_srt(segments), encoding="utf-8")
+        if tmp_srt.is_file():
+            os.replace(tmp_srt, srt_path)
+        else:  # pragma: no cover - worker 总会写 srt，这里只是不让流程断
+            srt_path.write_text(format_srt(segments), encoding="utf-8")
         write_cache(root, {"cache_key": key, "model": model_name, "language": detected,
                            "vad": bool(vad), "word_timestamps": bool(want_words),
                            "created_at": now_iso(), "tool_version": tool_version,
@@ -380,8 +411,17 @@ def make_transcribe_handler(
     return handler
 
 
-def _wipe_outputs(root: Path) -> None:
-    for name in (TRANSCRIPT_JSON, TRANSCRIPT_SRT):
+def _wipe_outputs(root: Path, *, tmp_only: bool = False) -> None:
+    """清转录产物。
+
+    ``tmp_only=True`` 是默认工作路径：worker 写的是 ``*.tmp``，失败或取消时
+    只把半截的临时文件删掉，正式字幕原封不动。用户选错语言重转一次失败，
+    不该连上一版能用的字幕一起没了。
+    """
+    names = [TRANSCRIPT_JSON + ".tmp", TRANSCRIPT_SRT + ".tmp"]
+    if not tmp_only:
+        names += [TRANSCRIPT_JSON, TRANSCRIPT_SRT]
+    for name in names:
         try:
             (root / name).unlink(missing_ok=True)
         except OSError:
@@ -412,10 +452,16 @@ def _finish(repo: Any, project_id: str, *, segments: list[dict[str, Any]], langu
         asset_id=asset.get("id") if asset else None,
         status="ready" if segments else "empty",
     )
+    # 重转录不该把已经切片/合并/发布/总结过的项目打回 transcribed：下游产物
+    # 仍然有效，阶段一倒退，界面就会提示"还没切片"，用户得手动再走一遍流水线。
+    # 与总结任务的处理保持一致（service.py 的摘要任务有同类保护）。
+    current = str((repo.project_get(project_id) or {}).get("stage") or "")
+    keep = current in _DOWNSTREAM_STAGES
     if segments:
-        repo.project_update(project_id, stage=stage, status="ready", error=None)
+        repo.project_update(project_id, stage=current if keep else stage,
+                            status="ready", error=None)
     else:
         # 没识别到语音是"结果为空"，不是失败：方案书 §7 的约定，不自动总结。
-        repo.project_update(project_id, stage="downloaded", status="ready",
-                            error="未识别到语音")
+        repo.project_update(project_id, stage=current if keep else "downloaded",
+                            status="ready", error="未识别到语音")
     _ = audio

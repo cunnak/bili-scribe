@@ -134,3 +134,36 @@ def test_app_info_reports_faster_whisper(service):
     data = service.dispatch("app.info", {})["data"]
     assert "faster_whisper" in data["deps"]
     assert models_mod.DEFAULT_MODEL == "large-v3-turbo"
+
+
+# ----------------------------------------------------------------- 源语言
+
+
+def test_transcribe_start_rejects_unknown_language(service, spied, tmp_path):
+    project = make_project(service, tmp_path)
+    code = err_code(service, "transcribe.start",
+                    {"project_ids": [project["id"]], "language": "zh-CN"})
+    assert code == "VALIDATION"
+    assert spied == [], "校验必须发生在提交任务之前，否则队列里会多一条注定失败的 job"
+
+
+def test_transcribe_start_normalizes_language_into_payload(service, spied, tmp_path):
+    project = make_project(service, tmp_path)
+    service.dispatch("transcribe.start", {"project_ids": [project["id"]], "language": " ZH "})
+    assert spied[0][2]["language"] == "zh", "大小写和空格要在入口吃掉，下游只认裸码"
+
+
+def test_transcribe_start_keeps_auto_empty(service, spied, tmp_path):
+    project = make_project(service, tmp_path)
+    service.dispatch("transcribe.start", {"project_ids": [project["id"]], "language": "auto"})
+    assert spied[0][2]["language"] == "", "auto 归一成空串，worker 靠它切换成 None 去探测"
+
+
+def test_transcribe_languages_lists_common_and_all(service):
+    from video_workbench.infra import languages
+
+    data = service.dispatch("transcribe.languages", {})["data"]
+    assert data["common"][0]["code"] == ""
+    assert len(data["common"]) == len(languages.COMMON)
+    assert data["count"] == len(languages.CODES)
+    assert len(data["all"]) > 50, "长尾要给全，用户在弹窗里可能就要那一个"
