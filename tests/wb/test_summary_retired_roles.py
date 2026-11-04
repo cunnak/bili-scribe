@@ -475,3 +475,171 @@ def test_the_real_database_row_for_standard_is_still_readable():
         f"真库里没有 standard 的历史行，这条的对照意义没了：{counts}")
     after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     assert after == before, "只读连接改了真库指纹——立刻停手查是谁写的"
+
+
+# ============================================================== 真库导出（缺口 1）
+# 取材分两栏，**不许混成「已验」**：
+#   上面 `test_export_*` 那组是 **Temp 夹具造行** —— 能造 xueshu/shipin，因为真库里没有那种行；
+#   这两条是 **真实库只读** —— 真数据里只有 1 条 `standard`，它是「用户盘上真存在过的退役行」
+#   的唯一证据，补的是「真库的导出路径今天没被任何用例走过」这个洞（此前只被 GROUP BY 数过）。
+# 现读事实：`summary_version` 列 = id/task_id/version_no/source/requirement/role/summary_json/
+# preview_md/comment_text/metrics/created_at；`summary_json` 里**也存了 role**，两者一致才说明
+# 没有迁移只改了一半。
+
+
+def test_the_real_retired_row_still_exports_by_its_stored_key():
+    """真库那行 `standard` 喂 `to_markdown`：按**存库的 key** 对回那一行 + 停用标注。
+
+    实测读数（探针 2026-11-04 22:32）：导出那行是
+    `角色：standard（已停用）　模型：qwen3.8-omni-flash　分段：3　本次改动：…`
+    —— 三件事一起钉：key 在、标注在、**没被人话名替换**。
+    """
+    if not REAL_DB.is_file():
+        pytest.skip(f"本机没有真库 {REAL_DB}，这条没跑（不是通过）")
+    before = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
+    conn = sqlite3.connect(f"file:{REAL_DB.as_posix()}?mode=ro", uri=True)
+    try:
+        cols = [r[1] for r in conn.execute("pragma table_info(summary_version)")]
+        row = conn.execute(
+            "select * from summary_version where role = 'standard' limit 1").fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        pytest.fail("真库里 standard 行没了 —— 这条的证据基础消失，改用夹具并在交付里写明")
+    data = dict(zip(cols, row))
+    body = json.loads(str(data["summary_json"]))
+    assert body.get("role") == data["role"] == "standard", (
+        f"列与 JSON 的角色不一致，「按 key 对回那一行」成了看运气："
+        f"列={data['role']!r} JSON={body.get('role')!r}")
+
+    text = ad.to_markdown(body)
+    line = next((ln for ln in text.splitlines() if ln.startswith("角色：")), "")
+    assert "standard" in line, f"导出里找不到存库 key：{line!r}"
+    assert "已停用" in line, f"真库退役行导出没标注停用：{line!r}"
+    assert "未知角色" not in line, f"真库退役行被并报成未知：{line!r}"
+    # 导出是**出处**，人话归界面：这里出现 role_label() 的输出就是把两栏合成一栏了。
+    assert "标准（已停用）" not in text, (
+        "导出开始念人话名了 —— 按存库 key 对回那一行是导出的定义，不是显示偏好")
+
+    after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
+    assert after == before, "只读连接改了真库指纹 —— 立刻停手查是谁写的"
+    print(f"sha unchanged: {after == before}")
+
+
+def test_the_real_database_only_holds_standard_among_retired_keys():
+    """钉住「真库退役 key 只有 standard」这个事实 —— 它就是上一条只能用 standard 的原因。
+
+    常驻而不是写进注释的理由：将来真库里多出 xueshu/shipin（或有人迁移造行）时，这条会红着
+    提醒「取材基础变了，两栏分工要重排」，而不是让人以为夹具那组已经等价于真库验证。
+    """
+    if not REAL_DB.is_file():
+        pytest.skip(f"本机没有真库 {REAL_DB}，这条没跑（不是通过）")
+    before = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
+    conn = sqlite3.connect(f"file:{REAL_DB.as_posix()}?mode=ro", uri=True)
+    try:
+        counts = dict(conn.execute(
+            "select role, count(*) from summary_version group by role").fetchall())
+    finally:
+        conn.close()
+    retired_in_db = sorted(set(counts) & EXPECTED_RETIRED)
+    assert retired_in_db == ["standard"], (
+        f"真库的退役 key 不再只有 standard：{counts} —— 上一条的取材范围要跟着扩")
+    after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
+    assert after == before, "只读连接改了真库指纹 —— 立刻停手查是谁写的"
+
+
+# ================================================== RPC 层的兜底支（缺口 2）
+# vendor 在 task-36 自报：他只在 `cli.py` 做了「缺 display 退回裸 key」，RPC 这条路
+# （`app/service.py:691` 经**模块属性** `summarizer.retired_row_labels()` 取数）没夹具。
+# 我现读 + 探针复核过他那句「缺 display 会 UnknownRole 抛错」——**报得太宽，两种坏法要分开**：
+#   · `role_label()`（`core/summary/__init__.py:233`）docstring 明写「任何输入都不抛」，
+#     正常路径根本产不出「缺 display」；所以缺 display 只能是载荷层被改坏。
+#   · 探针 Q2a：把 `retired_row_labels` 换成 key-only，RPC **照旧 ok=True**、`retired` 与
+#     `roles` 都还在 ⇒ 分类靠裸 key 那把，display 只是念法，念法没了分类不能没。
+#   · 探针 Q2b：真抛出去时，`app/rpc.py:78-91` 兜住 Exception 回 INTERNAL 信封，
+#     **不会把桥挂死**（他担心的「页面卡死」不成立），成立的是另一件事：整页角色名单
+#     跟着一起没，而且 message 里认不出是哪个键。⇒ 下面第二条是**变更探测器**，
+#     钉的是现状，不是我认为的对。
+
+
+def _rpc_roles_envelope(tmp_path) -> dict:
+    """进程内真 service 取 `summary.roles` 的信封（接缝照 :121 那条，不新造入口）。
+
+    teardown 必 `close()`：`WorkbenchService.__init__` 会建库建 logs，泄漏会污染 Temp。
+    """
+    from video_workbench.app.service import WorkbenchService
+
+    from test_summary_real_backend_ui import _temp_config
+
+    service = WorkbenchService(config_path=str(_temp_config(tmp_path)))
+    try:
+        return service.dispatch("summary.roles", {}, "t39")
+    finally:
+        service.close()
+
+
+def test_the_roles_rpc_still_serves_retired_keys_when_a_row_has_no_display(tmp_path):
+    """把 `retired_labels` 的 display 整列拿掉：RPC 必须照旧 ok，`retired` 一把不能少。
+
+    拦的是「把退役判定搬到 display 上」这类退化。控制腿在同一条里先跑，
+    防「patch 没生效也算绿」。
+    """
+    keys = sorted(EXPECTED_RETIRED)
+    normal = _rpc_roles_envelope(tmp_path)
+    assert normal["ok"] is True, f"控制腿：正常 RPC 就失败了 {normal.get('error')}"
+    assert [r["key"] for r in normal["data"]["retired_labels"]] == \
+        normal["data"]["retired"] == keys, (
+        "控制腿不成立：正常载荷两栏就不同源同序，下面那条对照没有意义")
+
+    original = ad.retired_row_labels          # `ad` 就是 core.summarizer（文件 :69 现读别名）
+    ad.retired_row_labels = lambda: [{"key": k} for k in keys]
+    try:
+        envelope = _rpc_roles_envelope(tmp_path)
+    finally:
+        ad.retired_row_labels = original
+    assert envelope["ok"] is True, (
+        f"少一列 display 就把整条 summary.roles 打死了：{envelope.get('error')}")
+    data = envelope["data"]
+    assert data["retired"] == keys, f"没了 display 连退役判定也丢了：{data['retired']}"
+    assert [r.get("display") for r in data["retired_labels"]] == [None] * len(keys), (
+        "兜底腿自己把 display 补出来了 —— 这一条只测「缺字段不许打死接口」，"
+        "补谁的名字是另一个决定，不许顺手猜")
+    assert data["roles"], "角色清单空了：前端连活角色都选不了"
+
+
+def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tmp_path):
+    """变更探测器（**钉现状，不是钉我认为的对**）：某个退役键的显示名算不出来时，
+    今天整条 `summary.roles` 一起失败（ok=False / INTERNAL），而不是只少那一行。
+
+    这是 task-39 现读时发现的单点故障，**归 lead 判要不要修，我不改产品码**：
+    `roles_payload()`（`app/service.py:691`）里 `retired_row_labels()` 一抛，整个载荷构造
+    就没了 ⇒ 用户看到的是「设置页连活角色都列不出来」，代价与「一个退役键念不出来」不成比例。
+    第二条证据更难受：错误信封的 `message` 只有异常原文、**不含键名**（键只出现在 detail 的
+    traceback 里），现场连「哪个键坏了」都要翻栈。
+
+    修好之后本条会**变红**：那时请改成期望 ok=True 并保留「其他键照常念得出」的断言，
+    同时把上面这段说明删掉——别只把断言放宽成两种都行。
+    """
+    import video_workbench.core.summary as authority
+
+    original = authority.role_label
+
+    def boom(key):
+        if str(key) == "xueshu":
+            raise authority.UnknownRole("夹具：这一个键念不出来")
+        return original(key)
+
+    authority.role_label = boom
+    try:
+        envelope = _rpc_roles_envelope(tmp_path)
+    finally:
+        authority.role_label = original
+
+    assert envelope["ok"] is False, (
+        "单点故障已被修掉：坏一个键不再打死整张名单 —— 现在就把这条改成期望 ok=True，"
+        "并加一条「其余键的 display 仍要正常」的断言")
+    error = envelope.get("error") or {}
+    assert error.get("code") == "INTERNAL", f"错误码不是现状登记的 INTERNAL：{error}"
+    assert "xueshu" not in str(error.get("message", "")), (
+        "错误信封里已经带上键名了（现状是不带，只带异常原文）——"
+        "这条探测器的另一半随修随删")
