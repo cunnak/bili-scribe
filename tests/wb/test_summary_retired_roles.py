@@ -794,11 +794,11 @@ def test_the_error_envelope_currently_names_no_broken_role_key(tmp_path):
 _SHAPE_PROBE = (
     None, "", "   ", "\t\n", 123, 0, -1, 3.5, True, False, b"x",
     [], ["x"], {}, {"key": "x"}, (1,), frozenset({"x"}), set(),
-    object(), Ellipsis, range(2), (lambda: None), Exception("boom"),
+    object(), Ellipsis, NotImplemented, range(2), (lambda: None), Exception("boom"),
 )
-# `NotImplemented` 刻意**不在**这一组里：实测它会把 `if not key` 引爆成 TypeError，
-# 是契约的一个真实破口。不许从集合里悄悄摘掉当没看见——单独用探测器钉住，见
-# `test_notimplemented_input_currently_breaks_the_never_raises_contract`。
+# `NotImplemented` 与 `Ellipsis` 现在都在这一组里：task-43 把判空从真值判断改成
+# `"" if key is None else str(key).strip()` 之后，builtin 哨兵和 `123`、`b'x'`、
+# `object()` 走同一条未知键路径，不再单开分支。
 
 # 真·未知字符串。注意 **不能**写 " standard"／"standard "：现读证明 `role_label`
 # 会先去空白再查表，那两个会正常解析成退役标签（是宽容，不是 bug）。# 也**不能**写 "wengao"：那是现役键，会被正常解析成角色名，
@@ -911,17 +911,184 @@ def test_unknown_inputs_never_claim_a_retired_role_or_say_nothing():
     assert not silent, "这些未知键的标签没带回原键名：\n  " + "\n  ".join(silent)
 
 
-def test_notimplemented_input_currently_breaks_the_never_raises_contract():
-    """变更探测器：`NotImplemented` 现在会让 `if not key` 抛 TypeError——契约的真实破口。
 
-    我只钉现状、不改产品码（边界：本轮只动 `tests/wb/**`）。修法归 vendor：显式判空
-    （例如 `if key is None or key == ""`）而不是靠真值判断。
-    修好那天这条必须红——那时请把 `NotImplemented` 加回 `_SHAPE_PROBE`、删掉本条。
-    复现命令原文：
-      `.venv/Scripts/python.exe -c "import video_workbench.core.summary as a; a.role_label(NotImplemented)"`
+class _HostileBool:
+    """`__bool__` 自己抛错的对象：与 `NotImplemented` 同一成因（真值判断）。"""
+
+    def __bool__(self):
+        raise RuntimeError("夹具：真值判断故意炸")
+
+    def __repr__(self):
+        return "<HostileBool>"
+
+
+class _HostileRepr:
+    """`__repr__` 自己抛错的对象：另一成因——标签把输入格式化进字符串。"""
+
+    def __repr__(self):
+        raise RuntimeError("夹具：repr 故意炸")
+
+
+# 三支现读出来的形状，都不在主组里，各自钉一条「现在会抛」的探测器。
+_TRUTHINESS_HAZARDS = (
+    ("NotImplemented", NotImplemented),
+    ("__bool__ 抛错的对象", _HostileBool()),
+)
+_REPR_HAZARD = ("__repr__ 抛错的对象", _HostileRepr())
+# falsy 的非字符串：今天全部回 ''，靠的正是 `if not key`。
+_FALSY_NON_STRINGS = (0, False, range(0), 0.0, -0.0, 0j, b"", (), frozenset(),
+                      {}.keys())
+
+
+def _live_role_labels() -> set:
+    """全部真角色的现读标签（公开 + 退役），用来判「解析成功了」。不写中文名。"""
+    return {role_label(key) for key in ROLE_KEYS} | {
+        role_label(key) for key in sorted(RETIRED_ROLES)}
+
+
+class _StrShadow:
+    """`__str__` 正好返回某个真键的对象：非字符串里唯一可能被查表命中的形状。
+
+    只改 `__str__`、`__repr__` 保持默认——这样它能把「按 str() 查表」这个洞和
+    「按 repr 格式化」那个洞分开钉（后者见 `test_a_non_string_is_currently_looked_up_by_its_str_form`
+    与 repr 探测器那条）。
     """
-    with pytest.raises(TypeError) as exc:
-        role_label(NotImplemented)
-    text = str(exc.value)
-    assert "boolean context" in text, (
-        f"抛是抛了，但不是原来那个形状（{text!r}）——破口换了位置，请重读并改写这条")
+
+    def __init__(self, key: str):
+        self._key = key
+
+    def __str__(self):
+        return self._key
+
+    def __repr__(self):
+        return f"<StrShadow {self._key}>"
+
+
+
+def test_builtin_sentinels_take_the_unknown_key_path_like_anything_else():
+    """正向常驻断言：builtin 哨兵不特殊，和 `123`、`b'x'` 走同一条未知键路径。
+
+    这条原来是探测器（`NotImplemented` 会抛 TypeError）。task-43 落地后产品满足了
+    契约，探测器必须翻成正向断言——留着它就是一条永远绿的假测试。
+    期望值全部现读，不写中文：
+      · 标签必须非空（哨兵不是「空值」，不许被吞成 ''）；
+      · 标签必须把 `str(输入)` 带回给用户；
+      · 标签不许等于任何一把真角色的标签（现役或退役都不行）；
+      · 六把不同形状的输入，剥掉各自的 `str(value)` 之后剩下的外壳必须**逐字相同**
+        ——这一条才真正拦住「给某个哨兵单开分支」。
+    """
+    live = _live_role_labels()
+    assert live, "现读标签集合为空，这条没有对照物"
+    shells = set()
+    for value in (NotImplemented, Ellipsis, 123, b"x", ["x"], float("nan")):
+        label = role_label(value)
+        rendered = str(value)
+        assert label, f"{type(value).__name__} 的标签不许是空串"
+        assert label != rendered, f"标签只剩裸值，界面看不出这是未知键：{label!r}"
+        assert rendered in label, f"标签没把原值带回给用户：{label!r}"
+        assert label not in live, f"哨兵 {rendered!r} 被解析成真角色：{label!r}"
+        shells.add(label.replace(rendered, "\x00", 1))
+    assert len(shells) == 1, (
+        f"这些非字符串的标签外壳分裂成多份（特例被加回来了）：{sorted(shells)}")
+
+
+def test_truthiness_sensitive_inputs_land_on_the_unknown_key_path():
+    """正向常驻断言：靠真值分流的那一类输入整类闭合（替代原探测器）。
+
+    `NotImplemented` 与任何 `__bool__` 抛错的对象，过去都被 `if not key` 引爆。
+    task-43 把判空改成 `key is None` + `str()` 之后，这一类**整类**安全落地——
+    不是只治了 builtin 那一个实例，所以这里喂的还是那组 `_TRUTHINESS_HAZARDS`，
+    只是判据从「必须抛」翻成「必须不抛且走未知键路径」。
+    """
+    live = _live_role_labels()
+    offenders = []
+    for tag, value in _TRUTHINESS_HAZARDS:
+        try:
+            out = role_label(value)
+        except Exception as exc:                            # noqa: BLE001
+            offenders.append(f"{tag} → 抛 {type(exc).__name__}: {exc}")
+            continue
+        if not isinstance(out, str) or not out:
+            offenders.append(f"{tag} → {out!r}（非空字符串才算走通未知键路径）")
+        elif out in live:
+            offenders.append(f"{tag} → {out!r}（被解析成真角色）")
+    assert not offenders, (
+        "真值敏感输入又开始抛、或又被当成空值/真角色了。"
+        "判空大概退回真值判断：\n  " + "\n  ".join(offenders))
+
+
+def test_only_none_and_blank_input_collapse_to_an_empty_label():
+    """正向常驻断言：只有 `None` 与纯空白算空；falsy 的非字符串必须带原值。
+
+    这条原来钉的是「`0`/`False`/`range(0)` 今天也回 ''」——那正是真值判断顺带造成的
+    行为，也是 `NotImplemented` 破口的同一个表达式。task-43 之后这一支**按合同翻面**：
+    `''` → `未知角色（0）`。从界面角度这反而更有信息量（用户看得见配置里存了个怪值），
+    所以断言写成「空值支只许有 `None` 与空白串」：
+      · falsy 非字符串：标签非空、且带 `str(value)`；
+      · 真空值（`None`/空白串）必须回 `''` —— 那一半由
+        `test_blank_inputs_get_an_empty_label_not_an_invented_name` 钉，本条不动它。
+    """
+    offenders = []
+    for value in _FALSY_NON_STRINGS:
+        label = role_label(value)
+        rendered = str(value).strip()
+        if not rendered:
+            continue                     # 自身就是空形态的（b''/()）交给空值支判
+        if label == "" or rendered not in label:
+            offenders.append(f"{type(value).__name__}({value!r}) → {label!r}")
+    assert len(_FALSY_NON_STRINGS) >= 8, (
+        f"falsy 形状集合只剩 {len(_FALSY_NON_STRINGS)} 项，钉不住整类")
+    assert not offenders, (
+        "这些 falsy 输入被当成空值吞掉了（界面留白，看不出配置里存了个怪东西）：\n  "
+        + "\n  ".join(offenders))
+
+
+def test_a_non_string_is_currently_looked_up_by_its_str_form():
+    """现状登记（**不是我认为的对**）：查表吃的是 `str(输入)`，不是输入本身。
+
+    现读 `core/summary/__init__.py`：`role_label` 与 `get_role` 都先 `str(key).strip()`
+    再拿那个字符串比对键表。后果是一个 `__str__` 正好返回键名的对象会被当成合法键：
+      `role_label(<str()=='wengao'>)` → 文稿编辑（现读）
+      `get_role(<str()=='fenxi'>)`     → 返回那个 Role（现读）
+    契约只声明「非字符串按 `str()` 呈现」，**没有**声明「非字符串不许当键用」，
+    所以我不能把它写成规格、也不能擅自要求 vendor 加 `isinstance` 分支（那叫加特例）。
+    这条钉当前语义，**已报 lead 判**：他若定「查表只认真 `str`」，这条会红，那时翻成
+    「非字符串一律走未知键路径 / `get_role` 必须抛 `UnknownRole`」。
+
+    今天没有真实入口踩得到：RPC 与配置里的 role 都是 `str`，所以这是语义洞、不是用户
+    可见缺陷——但 `get_role` 是硬拒入口，值域被 `str()` 放宽这件事必须留痕。
+    """
+    live = _live_role_labels()
+    assert live, "现读标签集合为空，这条没有对照物"
+
+    retired = sorted(RETIRED_ROLES)[0]        # 现读一把退役键，不写死名字
+    shadow = _StrShadow(retired)
+    assert str(shadow) == retired, "夹具造错：__str__ 没返回键名"
+    assert role_label(shadow) == role_label(retired), (
+        "标签这一支已经不按 str() 查表了——请把这条翻成"
+        "「非字符串必须走未知键路径」的正向断言")
+
+    public = sorted(ROLE_KEYS)[0]
+    got = get_role(_StrShadow(public))
+    assert got.key == public, (
+        "get_role 开始拒绝非字符串了——这条该翻成「必须抛 UnknownRole」")
+    assert role_label(b"wengao") not in live, (
+        "bytes 的 str() 形态不等于键名，不该解析成角色（对照腿：防整类被吞成空值）")
+
+
+def test_an_input_with_a_broken_repr_currently_raises():
+    """变更探测器（第二成因）：标签会把输入格式化进字符串，`__repr__` 抛错就整体抛。
+
+    与真值那条是**两个不同的成因**，task-43 的修法（`str()` 判空）治不到这一支：
+    对象没定义 `__str__` 时 `str(obj)` 会回落到 `__repr__`，所以照样抛。要治得给转换
+    包一层，或改用 `type(value).__name__` 兜底。我不替产品决定该不该管——这种对象只有
+    测试夹具造得出来，真实 RPC 载荷进不来；先钉现状，将来谁改谁看见。
+    （已随探测器一起报 lead：契约那句「任何输入都不抛」在这一支**仍未闭合**。）
+    """
+    tag, value = _REPR_HAZARD
+    with pytest.raises(RuntimeError) as exc:
+        role_label(value)
+    assert "repr" in str(exc.value), (
+        f"{tag} 抛了，但不是 repr 那条路径（{exc.value}）——成因变了，请重读")
+
+
