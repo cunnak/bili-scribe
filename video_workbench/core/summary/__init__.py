@@ -231,14 +231,21 @@ def get_role(key: str | None) -> Any:
 
 
 def role_label(key: Any) -> str:
-    """角色名，只给展示用，**任何输入都不抛**。
+    """角色名，只给展示用：**任何输入都不抛**；非字符串输入按 ``str()`` 呈现，
+    空/纯空白返回 ``""``（只有 ``None`` 与空白串算空，见下面那条判空）。
 
     历史行里存着退役角色是常态（版本列表、总览、导出都要显示），那些路径不能因为
     退役就报错或留白：退役显示「〈现读名字〉（已停用）」，未知显示「未知角色（key）」，
     空值显示空串。**已停用**和**不认识**是两件事——前者要换角色，后者要改配置，
     界面不能混着说，所以这里也不能把退役一律报成未知。
+
+    判空为什么写成 ``"" if key is None else str(key).strip()`` 而不是 ``str(key or "")``：
+    后者对入参做真值判断，而 ``NotImplemented`` 对 ``bool()`` 敏感（``bool(NotImplemented)``
+    直接抛 ``TypeError``），于是「任何输入都不抛」这句契约就破了。转换一律用 ``str()``，
+    它对任何对象都不抛，所以 ``NotImplemented``/``Ellipsis`` 这些 builtin 哨兵和 ``123``、
+    ``b'x'``、``object()`` 走同一条未知键路径 —— **不给哨兵单开分支**，特例没人维护。
     """
-    text = str(key or "").strip()
+    text = "" if key is None else str(key).strip()
     if not text:
         return ""
     if text in RETIRED_ROLES:
