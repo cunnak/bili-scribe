@@ -20,6 +20,7 @@ import yaml
 from video_workbench.config import (
     LlmProviderConfig,
     WorkbenchConfig,
+    ext_path,
     find_provider,
     parse_model_spec,
     provider_id,
@@ -308,8 +309,9 @@ def test_validate_allows_empty_cards_on_a_fresh_install(tmp_path):
     assert cfg.llm.model == "keepme"
 
 
-def test_render_yaml_roundtrip_keeps_cards(tmp_path):
-    cfg = write_cfg(tmp_path, {
+def _two_cards(tmp_path):
+    """两张服务商卡的真实起点（走 `write_cfg` 那条真 load 链路，不手搓对象）。"""
+    return write_cfg(tmp_path, {
         "active_provider": "kimi",
         "model": "moonshot-v1-8k",
         "providers": [
@@ -319,14 +321,93 @@ def test_render_yaml_roundtrip_keeps_cards(tmp_path):
              "api_key": "sk-kimi", "models": ["moonshot-v1-8k"]},
         ],
     })
-    text = render_yaml(cfg)
-    path = tmp_path / "again.yaml"
-    path.write_text(text, encoding="utf-8")
-    back = WorkbenchConfig.load(path)
+
+
+def test_save_roundtrip_keeps_cards(tmp_path):
+    """`save()` 往返必须带得住两张卡——这才是用户真正走的那条路（两个文件一起落）。
+
+    以前这条测的是「`render_yaml` 单独往返也能保住两张卡」，而它绿是靠 `load()` 的自愈写盘：
+    load 顺手把 sidecar 补了出来，第二张卡才从那里读回来。`5cc6abf` 撤掉自愈写以后就露了底
+    （实得 ['moonshot']，那是用扁平 base_url 推的一张，id 来自域名）。翻成正方向：
+    `save()` 会同时写 yaml 与 `workbench.json`（先 `sync_providers()` 再写），所以卡不丢。
+    """
+    cfg = _two_cards(tmp_path)
+    saved_dir = tmp_path / "saved"
+    saved_dir.mkdir()
+    target = saved_dir / "config.yaml"
+
+    cfg.save(target)
+
+    assert ext_path(target).exists(), "save() 必须一起落 sidecar，服务商就住在那儿"
+    back = WorkbenchConfig.load(target)
     assert [p.id for p in back.llm.providers] == ["deepseek", "kimi"]
     assert back.llm.active_provider == "kimi"
     assert back.llm.providers[1].api_key == "sk-kimi"
     assert back.llm.model == "moonshot-v1-8k"
+
+
+def test_render_yaml_alone_drops_the_cards(tmp_path):
+    """说明性一条：`render_yaml` 只渲染 bili-scribe 认识的键，服务商不在 yaml 里。
+
+    这不是缺陷，是形状：`providers` / `active_provider` 属 WB 扩展段，住在 `workbench.json`。
+    所以「把 `render_yaml` 的文本单独写成一份 yaml、旁边不放 sidecar 就去 load」**必然**只剩
+    一张由扁平字段合成的卡。这条把它钉住，是为了拦下另一种走法：有人为了让旧断言重新绿，
+    把 providers 塞进 `render_yaml`（那会让 bili-scribe 读到不认识的键，直接 ValueError）。
+    期望值用现读：扁平 base_url 是 active 那张（kimi → moonshot 域名），推出来的 id 由
+    `provider_id()` 决定，所以这里断「只剩一张 + 那张的 base_url 是 active 的地址」，
+    不把 id 的字面量钉死。
+
+    旧假绿的机制（实测，不是推测）：`foreign_keys()` 把 `llm.providers` / `llm.active_provider`
+    算成 bili-scribe 不认识的扩展键，而 `5cc6abf` 之前 `load()` 见到扩展键就 `cfg.save(target)`
+    ——于是 `write_cfg` 那次 load 把 sidecar 落在了 **config.yaml 所在的同一目录**；sidecar 是
+    按目录共用的（见 `test_the_sidecar_is_scoped_per_directory`），所以同目录那份 `again.yaml`
+    读得回两张卡。今天的夹具必须把「单独 yaml」放进**另一个目录**才测得到真实形状。
+    """
+    cfg = _two_cards(tmp_path)
+    text = render_yaml(cfg)
+
+    assert "providers" not in text, "render_yaml 不该渲染 WB 扩展键，bili 读到会报错"
+    assert "active_provider" not in text
+
+    solo_dir = tmp_path / "solo"
+    solo_dir.mkdir()
+    solo = solo_dir / "config.yaml"
+    solo.write_text(text, encoding="utf-8")
+
+    assert ext_path(solo).exists() is False, "这份夹具旁边不该有 sidecar（否则就测不到单 yaml 的形状）"
+    back = WorkbenchConfig.load(solo)
+    assert len(back.llm.providers) == 1, f"单 yaml 往返只剩扁平推出的那一张：{[p.id for p in back.llm.providers]}"
+    assert back.llm.providers[0].base_url == "https://api.moonshot.cn/v1", "扁平字段是 active 那张的地址"
+    assert back.llm.model == "moonshot-v1-8k", "model 是共享键，单 yaml 往返带得住"
+
+
+def test_the_sidecar_is_scoped_per_directory(tmp_path):
+    """`workbench.json` 按**目录**共用，不按文件名——本轮夹具各占一个目录就是这个原因。
+
+    这条钉形状，不钉功能：同一个目录里放两份不同名的 config，`ext_path()` 给的是同一个
+    sidecar；换目录才换 sidecar。它解释了上面那条旧用例为什么能假绿（`5cc6abf` 之前
+    `load()` 见到 `llm.providers` / `llm.active_provider` 这类扩展键就 `cfg.save(target)`，
+    把两张卡写进**同目录**的 `workbench.json`，随后同目录那份 `again.yaml` 再 load 就
+    「什么都保住了」），也是 `test_save_roundtrip_keeps_cards` 与
+    `test_render_yaml_alone_drops_the_cards` 各自 `mkdir()` 一个子目录的理由。
+    哪天 sidecar 改成按文件名走，这条会红：那不是回归，是提醒这一族用例的独立性靠的是目录。
+    """
+    same_dir = tmp_path / "same"
+    other_dir = tmp_path / "other"
+    same_dir.mkdir()
+    other_dir.mkdir()
+
+    first = same_dir / "config.yaml"
+    second_in_same_dir = same_dir / "another.yaml"
+    third = other_dir / "config.yaml"
+    for p in (first, second_in_same_dir, third):
+        p.write_text(render_yaml(write_cfg(same_dir, {
+            "base_url": "https://api.deepseek.com/v1", "api_key": "sk-one", "model": "deepseek-chat",
+        })), encoding="utf-8")
+
+    assert ext_path(first).name == "workbench.json"
+    assert ext_path(first) == ext_path(second_in_same_dir), "同目录两份 config 现在共用一份 sidecar"
+    assert ext_path(first) != ext_path(third), "换了目录就该换 sidecar"
 
 
 def test_public_view_hides_keys_settings_view_keeps(tmp_path):

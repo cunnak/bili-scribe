@@ -57,6 +57,7 @@ from __future__ import annotations
 import ast
 import io
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -77,6 +78,14 @@ PY_LOCK_FLOOR = (
     "video_workbench/infra/notecache.py",
     "video_workbench/core/prompt_source.py",
 )
+
+
+#: 牙齿与「措辞不是证据」那两条共用的占位文案：不含任何中文，改它不影响判据。
+PLACEHOLDER_RULE = "PLACEHOLDER-RULE-TEXT"
+
+
+#: 第七节表格里点名的 .py 路径（允许带目录）。只比路径，不比中文文案。
+_PY_PATH_RE = re.compile(r"[A-Za-z0-9_./\-]+\.py")
 
 
 def _repo_root() -> Path:
@@ -418,14 +427,171 @@ def test_the_agents_md_rule_table_names_this_gate_and_a_real_file():
     """AGENTS.md 第七节那行的拦截手段必须是真实存在的测试名，不许再写「人工，暂无自动闸」。
 
     文档指一个不存在的文件，比没文档更糟：下一个人会以为已经有闸，于是连三比都不跑。
+
+    本轮（task-47）改的是**定位方式**：旧写法用 `"不许被 git 规范化" in ln` 找那一行，
+    那是拿**措辞**当证据 —— 任何人改写规则文案，这条就红，而红与字节锁无关。
+    现在按表格结构定位本闸自己那一行（`_section_seven_rows` + 文件名比对），
+    要求一条没少：那一行必须点名本闸、必须不许写「暂无自动闸」。
     """
-    text = (ROOT / "AGENTS.md").read_bytes().decode("utf-8")
-    rows = [ln for ln in text.splitlines() if "不许被 git 规范化" in ln]
-    assert rows, "AGENTS.md 里找不到那条字节锁规则（第七节规则表被改了？）"
-    row = rows[0]
-    assert "暂无自动闸" not in row, f"文档还写着没有自动闸，而本文件就是那道闸：{row}"
-    assert Path(__file__).name in row, f"那一行没点名本闸的文件名：{row}"
+    rows = _section_seven_rows(_agents_md_text())
+    mine = [cells for cells in rows if _names_gate(cells)]
+    assert mine, (
+        "AGENTS.md 第七节没有一行在「由什么拦住」列点名本闸"
+        f"（{Path(__file__).name}）——按结构找的行，与文案无关")
+    row = mine[0]
+    blocking = row[-1]
+    assert "暂无自动闸" not in blocking, f"文档还写着没有自动闸，而本文件就是那道闸：{blocking}"
     assert (ROOT / "tests" / "wb" / Path(__file__).name).is_file(), "文档点名的文件不在盘上"
+
+
+def _agents_md_text() -> str:
+    """AGENTS.md 的读取入口：**只换文件、不换判据**（AGENTS.md 第六节的扫描域口径）。
+
+    牙齿要验「文档里那一行被删掉」，必须能读 `%TEMP%` 副本；禁止为了验红去改工作区。
+    开关语义本身由 `test_the_agents_source_override_switches_the_file_not_the_verdict` 钉。
+    """
+    raw = os.environ.get("WB_AGENTS_MD_OVERRIDE", "").strip()
+    path = Path(raw) if raw else ROOT / "AGENTS.md"
+    if not path.is_file():
+        pytest.fail(f"AGENTS.md 扫描域不存在：{path}"
+                    "（默认读仓库根；牙齿用 WB_AGENTS_MD_OVERRIDE 指 Temp 副本）")
+    return path.read_bytes().decode("utf-8")
+
+
+def _section_seven_rows(md: str) -> list[list[str]]:
+    """按**结构**取第七节规则表的数据行；一个中文字面量都不比对。
+
+    定位只用三件事：① 节标题是 `## ` 开头且紧跟「七」；到下一个 `## ` 为止。
+    ② 表体里以 `|` 开头的行；第一行是表头，第二行必须是分隔行（单元格只由
+    `-`/`:`/空格组成），其余是数据行。③ 每条数据行的列数必须等于表头列数。
+    为什么坚持结构定位：把「文档必须包含某个中文词」当判据，等于让改文案的人红一条
+    与字节锁无关的锁 —— 那是拿措辞当证据（lead 2026-11-05 定的反向腿）。
+    """
+    lines = md.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.startswith("## ") and ln[3:].lstrip().startswith("七")), None)
+    if start is None:
+        pytest.fail("AGENTS.md 里找不到「## 七、」这节标题；节序变了要同步改本闸")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    rows = [[c.strip() for c in ln.strip().strip("|").split("|")]
+            for ln in lines[start:end] if ln.strip().startswith("|")]
+    if len(rows) < 3:
+        pytest.fail(f"第七节表格至少要 表头+分隔+1 条数据，实得 {len(rows)} 行")
+    header, sep, data = rows[0], rows[1], rows[2:]
+    if not all(set(cell or "-") <= set("-: ") for cell in sep):
+        pytest.fail(f"第七节第二行不是 markdown 分隔行，结构变了要改本闸：{sep}")
+    if any(len(cells) != len(header) for cells in data):
+        pytest.fail("第七节有数据行的列数与表头不一致："
+                    f"表头 {len(header)} 列，数据 {[len(c) for c in data]}")
+    return data
+
+
+def _names_gate(cells: list[str]) -> bool:
+    """这一行的「由什么拦住」列（按位置=最后一列）是否点名本闸文件。
+
+    那一列写的是**散文**（路径带反引号、后面跟全角括号说明），所以不能要求整格等于
+    文件名；把格子里所有 `.py` 路径 token 抽出来比**基名**。仍然是结构判据：
+    一个中文字面量都不比对。
+    """
+    gate = Path(__file__).name
+    blocking = cells[-1] if cells else ""
+    return any(Path(tok).name == gate for tok in _PY_PATH_RE.findall(blocking))
+
+
+def test_section_seven_names_only_files_that_exist_on_disk():
+    """第七节每一行点名的 `*.py` 都必须真在盘上 —— 文档不许指空气。
+
+    路径按**文档原样**解析：写全路径（`tests/wb/x.py`、`scripts/build_wb.py`）就直接比；
+    只写裸文件名（表格里有这种写法）再回落到 `tests/wb/` 找。这个回落是本仓库表格的
+    既有书写习惯，不是放宽 —— 两种写法都要求文件真实存在。
+    """
+    rows = _section_seven_rows(_agents_md_text())
+    resolved, missing = [], []
+    for cells in rows:
+        for token in _PY_PATH_RE.findall(cells[-1]):
+            as_written = ROOT / token
+            fallback = ROOT / "tests" / "wb" / Path(token).name
+            if as_written.is_file():
+                resolved.append(str(token))
+            elif "/" not in token and fallback.is_file():
+                resolved.append(f"{token}（按裸名回落到 tests/wb/）")
+            else:
+                missing.append((token, str(as_written)))
+    assert resolved, "第七节的「由什么拦住」列一个 .py 都没点名（闸清单被清空了）"
+    assert not missing, f"AGENTS.md 点名了盘上不存在的文件：{missing}"
+
+
+def test_the_gate_row_is_found_even_when_the_wording_is_rewritten():
+    """反向腿的常驻化：把**规则列**整列换成占位文案，本闸那一行必须照样找得到。
+
+    这条拦的是「将来有人把判据改回关键词搜索」：那样一来改文案＝红，而红与字节锁无关。
+    重写只在内存里做（不落盘、不碰工作区 AGENTS.md），拼回表格再喂同一个解析器。
+    """
+    md = _agents_md_text()
+    rows = _section_seven_rows(md)
+    assert any(_names_gate(c) for c in rows), "前提不成立：原表就没点名本闸"
+    rebuilt = md
+    for cells in rows:
+        original = "| " + " | ".join(cells) + " |"
+        rewritten = "| " + PLACEHOLDER_RULE + " | " + cells[-1] + " |"
+        if original in rebuilt:
+            rebuilt = rebuilt.replace(original, rewritten, 1)
+    assert rebuilt != md, "没换到任何一行，这条会变成空对照（先检查表格拼装格式）"
+    after = _section_seven_rows(rebuilt)
+    assert len(after) == len(rows), f"换文案之后行数变了：{len(rows)} → {len(after)}"
+    named_before = sorted(c[-1] for c in rows if _names_gate(c))
+    named_after = sorted(c[-1] for c in after if _names_gate(c))
+    assert named_after == named_before, (
+        "把规则列换成占位文案后，点名本闸的那一列内容变了 —— "
+        "说明定位里混进了措辞依赖")
+
+
+def test_the_agents_source_override_switches_the_file_not_the_verdict(tmp_path):
+    """开关只换**读哪份文件**，不换判据 —— 用一份「规则列整体改写」的临时副本证明。
+
+    先前这版写法是拿 override 指回真实 AGENTS.md 与默认比：同一份文件读两遍必然相等，
+    接近「自己考自己」；而且它会在任何合法改文档时连带红（牙齿 reword 变体实测就是这条红），
+    那等于给文档编辑埋了一条与字节锁无关的锁。
+
+    现在比的是**判据真正依赖的那一半**：换掉全部中文文案、原样保留「由什么拦住」列，
+    ⇒ 行数不变、规则列必须真的变了（不然对照是空的）、点名本闸的结果一字不差。
+    临时副本写在 pytest 的 `tmp_path` 下，工作区 `AGENTS.md` 一个字节都不动。
+    """
+    default_rows = _section_seven_rows(_agents_md_text())
+    assert default_rows, "默认扫描域读出 0 行（这条会变成空对照）"
+
+    md = _agents_md_text()
+    out = md
+    for cells in default_rows:
+        original = "| " + " | ".join(cells) + " |"
+        rewritten = "| " + PLACEHOLDER_RULE + " | " + cells[-1] + " |"
+        if original in out:
+            out = out.replace(original, rewritten, 1)
+    assert out != md, "没换到任何一行，这份对照是空的"
+    copy = tmp_path / "AGENTS.md"
+    copy.write_text(out, encoding="utf-8")
+
+    prev = os.environ.get("WB_AGENTS_MD_OVERRIDE", "")
+    os.environ["WB_AGENTS_MD_OVERRIDE"] = str(copy)
+    try:
+        via_rows = _section_seven_rows(_agents_md_text())
+    finally:
+        if prev:
+            os.environ["WB_AGENTS_MD_OVERRIDE"] = prev
+        else:
+            os.environ.pop("WB_AGENTS_MD_OVERRIDE", None)
+
+    assert len(via_rows) == len(default_rows), \
+        f"换文件之后行数变了：{len(default_rows)} → {len(via_rows)}"
+    assert [c[0] for c in via_rows] == [PLACEHOLDER_RULE] * len(via_rows), \
+        "规则列没有被整体改写，这份对照等于没做"
+    assert [c[-1] for c in via_rows] == [c[-1] for c in default_rows], \
+        "「由什么拦住」列变了 —— 判据依赖的不该只有结构"
+    named_default = [c[-1] for c in default_rows if _names_gate(c)]
+    named_via = [c[-1] for c in via_rows if _names_gate(c)]
+    assert named_via == named_default and named_default, \
+        f"换文件之后点名本闸的结果变了：{named_default} → {named_via}"
 
 
 def test_this_gate_file_is_tracked_by_git():
