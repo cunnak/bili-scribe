@@ -45,6 +45,13 @@ from video_workbench.core.summary import (
     role_label,
 )
 from video_workbench.core.summary import summarizer as bs_summarizer
+# 显示名一律**经这个模块属性现取**（下面 `role_label(...)` 的三个调用点都是），不用 import
+# 时绑进来的那个别名：别名在导入时就固定了函数对象，谁改了权威层的 `role_label`（或测试
+# monkeypatch 它）都传不到这里，于是「改 owner 的输出，下游必须跟着变」这条行为锁会假绿。
+# 别名本身留在上面的 from-import 清单里不动，那是 `summarizer.role_label` 这种取法的入口
+# （`tests/wb/test_summary.py:558` 就在这么取）。副作用要说清：改成走模块属性之后，
+# **patch 这个别名不再影响下面那几个调用点**，要换输出请 patch 权威层 `summary.role_label`。
+from video_workbench.core import summary as summary_pkg
 from video_workbench.core import prompt_source
 
 from video_workbench.app.errors import WBError
@@ -134,7 +141,8 @@ def resolve_role(explicit: "str | None",
         role_obj = get_role(wanted)
     except UnknownRole as exc:
         if from_fallback and wanted in RETIRED_ROLES:
-            return DEFAULT_ROLE, f"{exc}；本次按默认角色「{role_label(DEFAULT_ROLE)}」"
+            return DEFAULT_ROLE, (f"{exc}；本次按默认角色"
+                                  f"「{summary_pkg.role_label(DEFAULT_ROLE)}」")
         raise WBError("VALIDATION", str(exc)) from exc
     return role_obj.key, ""
 
@@ -158,7 +166,7 @@ def configured_role_issue(role_value: "str | None") -> tuple[str, str]:
                        f"请改成下面列表里的一个")
     if notice:
         return value, (f"配置里的默认角色「{value}」已停用，"
-                       f"生成时会自动按「{role_label(DEFAULT_ROLE)}」走")
+                       f"生成时会自动按「{summary_pkg.role_label(DEFAULT_ROLE)}」走")
     return "", ""
 
 
@@ -1132,7 +1140,7 @@ def retired_row_labels() -> list[dict[str, str]]:
     `retired_labels`（key+中文名，给"怎么念出来"用）分两个字段放，两个都从同一批
     `RETIRED_ROLES` 现读派生，不存在第二处真源。
     """
-    return [{"key": key, "display": role_label(key)} for key in sorted(RETIRED_ROLES)]
+    return [{"key": key, "display": summary_pkg.role_label(key)} for key in sorted(RETIRED_ROLES)]
 
 
 #: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，

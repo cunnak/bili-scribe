@@ -240,10 +240,11 @@ class Cli:
         if not self.json:
             rows = list(data.get("roles") or [])
             # 退役段念的是**后端给的中文名**，不是裸 key。以前这里是 `str(r) for r in retired`，
-            # 于是 CLI 打「shipin、standard、xueshu」三个英文 key，界面同一件事打的是带状态
-            # 后缀的中文名——一个事实两个 owner，而 key 对用户没有信息量（那三个词从来没在
-            # 界面上出现过）。显示名的唯一 owner 是权威层 `role_label()`，
-            # 经载荷的 `retired_labels` 送进来（`core/summarizer.retired_row_labels`）。
+            # 于是 CLI 打「shipin、standard、xueshu」三个英文 key，界面同一件事打的是整句
+            # （「学术分析（已停用）」「视频总结（已停用）」「标准（已停用）」）——一个事实两个
+            # owner，而 key 对用户没有信息量（那三个词从来没在界面上出现过）。显示名的唯一
+            # owner 是权威层 `role_label()`，经载荷的 `retired_labels` 送进来
+            # （`core/summarizer.retired_row_labels`）。
             # **这里不许出现 key→中文 的表**（也别在这里拼停用后缀）：那样下次退役就得改
             # 两个地方，而 task-31 之后退役是三个键，改漏一个就是现在这个 bug。
             # 缺 `display`（老后端/字段没带上）时退回裸 key：兼容支宁可信息少一点，
