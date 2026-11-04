@@ -108,10 +108,34 @@ def _bound_get_role(key: str | None) -> Any:
     先查 ``_WB_ONLY_BY_KEY`` 这一条留着：当前它是空的（task-31 之后 WB 不自造角色），
     但它拦的是"将来再有只存在于 WB 的 key 时，被原函数静默回落到 ``standard``"——
     那种回落会把方法论整个换掉，而查表看不出来。
+
+    **这行只断掉「真值判断」这一类成因，没有、也不打算断掉「未知键静默回落 standard」。**
+    两件事必须分开写清楚，否则下一个读代码的人会以为两个都管住了：
+
+    * 判空以前是「先对入参做真值判断、再转字符串」那个形状（``key or ""`` 再 ``str()``）——
+      ``NotImplemented`` 对 ``bool()`` 敏感，于是 ``_bound_get_role(NotImplemented)`` 当场
+      ``TypeError``。现在与本文件 ``role_label``（:274 那条）同一条规则：
+      ``"" if key is None else str(key).strip()``；判空只看转换后的 ``text``，不再碰原对象。
+    * 改完之后 ``NotImplemented`` 与 ``Ellipsis`` 同形：都拿到非空串、落进 ``_raw_get_role``，
+      而**副本的查表语义就是「未知键回落 standard」**（``bili_scribe/core/roles.py:612-613``，
+      上面第 106 行也写了「查表行为与原函数逐字一致」）。WB 侧把它改成抛 ``UnknownRole`` 等于
+      **主动偏离 bili-scribe**，而这个项目的整个前提就是与 bs 输出一致 —— 那种偏离要用户拍板，
+      不由实现层决定。所以这里**有意保留**回落。2026-11-04 现读的对照：
+      ``_bound_get_role(Ellipsis).key == 'standard'``，而权威层 ``get_role(Ellipsis)`` 正确抛
+      ``UnknownRole``。两条路不同形是**已知差异**，不是这行没修干净。
+
+    **已知边界（同样不兜底）**：``__str__`` 自己抛异常的对象，在 ``str(key)`` 这一步照样抛。
+    现读：喂一个 ``__str__`` 抛 ``ValueError`` 的对象 ⇒ ``role_label``/``_bound_get_role``/
+    ``get_role`` 三个入口都抛 ``ValueError: __str__ 故意抛``。那是输入对象本身坏了，不是判空
+    写法的问题；给它加 try/except 等于替坏掉的调用方编一个角色名，比抛出来更难查。
     """
-    text = str(key or "").strip()
+    text = "" if key is None else str(key).strip()
     role = _WB_ONLY_BY_KEY.get(text)
     if role is None:
+        # 这里**仍然把原始 `key` 交给副本**，不交 `text`：上面第 106 行承诺的是「查表行为
+        # （含未知回落 standard）与原函数逐字一致」，而 `text` 是**去过空白**的字符串 ——
+        # 喂 `" wengao "` 进去，用 `text` 会查中 wengao、用 `key` 则按原函数那样落回 standard。
+        # 那是查表语义的偏离，不属于本单要断的「真值判断」成因。（实测差异见交付读数。）
         role = _raw_get_role(key)
     return prompt_source.view_for(role)
 
@@ -239,11 +263,13 @@ def role_label(key: Any) -> str:
     空值显示空串。**已停用**和**不认识**是两件事——前者要换角色，后者要改配置，
     界面不能混着说，所以这里也不能把退役一律报成未知。
 
-    判空为什么写成 ``"" if key is None else str(key).strip()`` 而不是 ``str(key or "")``：
-    后者对入参做真值判断，而 ``NotImplemented`` 对 ``bool()`` 敏感（``bool(NotImplemented)``
-    直接抛 ``TypeError``），于是「任何输入都不抛」这句契约就破了。转换一律用 ``str()``，
-    它对任何对象都不抛，所以 ``NotImplemented``/``Ellipsis`` 这些 builtin 哨兵和 ``123``、
-    ``b'x'``、``object()`` 走同一条未知键路径 —— **不给哨兵单开分支**，特例没人维护。
+    判空为什么写成 ``"" if key is None else str(key).strip()`` 而不是「先 ``key or ""``
+    再 ``str()``」：后者对入参做真值判断，而 ``NotImplemented`` 对 ``bool()`` 敏感
+    （``bool(NotImplemented)`` 直接抛 ``TypeError``），于是「任何输入都不抛」这句契约就破了。
+    转换一律用 ``str()``，它对任何对象都不抛，所以 ``NotImplemented``/``Ellipsis`` 这些
+    builtin 哨兵和 ``123``、``b'x'``、``object()`` 走同一条未知键路径 —— **不给哨兵单开分支**，
+    特例没人维护。同一形状的第二处（``_bound_get_role``，:132）按同一条规则修掉，回落语义
+    仍然照副本，见那段的 docstring。
     """
     text = "" if key is None else str(key).strip()
     if not text:
