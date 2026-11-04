@@ -12,8 +12,9 @@
 ## 二、两套包，别当一回事
 
 - `bili_scribe/`（bs）= 原程序，`video_workbench/`（WB）= 复刻方。根 `config.yaml` 是两边共用的实配。
-- WB 的总结核心是**逐字节锁定的 vendored 副本**：`video_workbench/core/summary/{__init__,roles,summarizer}.py` + `video_workbench/infra/notecache.py`。除 import 段外必须与 bs 原件逐字节一致，`tests/wb/test_summary_drift.py` 14 条守着。
-- **`core/summary/__init__.py` 是唯一合法的差异点**（WB 自有的权威层：`RETIRED_ROLES`、`ALL_ROLES` 过滤、`_WB_ONLY` 自造角色都在这里）。要删/藏/加角色，只改这里；不要去动 `roles.py`。
+- WB 的总结核心是**逐字节锁定的 vendored 副本**：`video_workbench/core/summary/roles.py`、`video_workbench/core/summary/summarizer.py` + `video_workbench/infra/notecache.py`。除 import 段外必须与 bs 原件逐字节一致，`tests/wb/test_summary_drift.py` 14 条守着（现读该文件：`:234` 比 `core/summary/roles.py` 对 `bili_scribe/core/roles.py`、`:284` 比 `core/summary/summarizer.py` —— **`__init__.py` 不在这两条比对里，也不在字节锁清单里**）。
+- **`core/summary/__init__.py` 不是副本，是 WB 自有的权威层**（`RETIRED_ROLES`、`ALL_ROLES` 过滤、`_WB_ONLY` 自造角色、`role_label` 都在这里），改它合法、不需要 drift 翻正。要删/藏/加角色，只改这里；不要去动 `roles.py`。（本条 2026-11-04 更正：我原先在这行把 `__init__.py` 也写成"逐字节锁定的副本"，那是错的口径，会让人以为改权威层要过 drift 门。）
+- **角色名单对账只在权威层首次 import 时跑一次；import 之后再改坏 `NO_SOURCE`/`_NEVER_BIND` 是静默的**（parity 实测：干净 import 后改坏不抛，显式重跑 `_reconcile_role_lists()` 才抛）。⇒ 这类锁的牙齿必须**赶在 collection 之前** patch 权威层模块属性；而且判"红没红"时 `rc ∉ (0, 1)`（例如 collection 失败 `rc=2`、内部错 `rc=3`）必须显式打出来，不能读成"没红"。同一族形状：套件级牙齿可能整文件收集失败（`Interrupted: 1 error during collection`），这时"只红它该红的那条"根本不成立。
 - `tests/smoke_test.py` 里的 `xueshu` 全部是测 **bili-scribe** 的（bs summarizer、bs 的 set_role、bs `passes==3`）。删 WB 的角色不影响它，别顺手"修"它。
 - **比提示词长度前，先确认你量的是哪个对象**（本仓库为此反复吵过三轮）。`role.system` 存的是 **txt 原文**；真正进请求的是副本 `core/summary/summarizer.py:518` 拼出来的 `system.strip() + "\n" + OUTPUT_CONTRACT`。实测：txt stripped **511** + 换行 1 + `OUTPUT_CONTRACT` **450** = 进请求 **962**。⇒ 断言 `len(role.system)==txt` 与断言请求内容，是两件不同的事，报数时必须写明是哪个；同一条读数换个字段就变了。
 
