@@ -615,6 +615,13 @@ class WorkbenchConfig:
     # 类级默认 ``None`` 保证「不是通过 load() 造出来的配置对象」也能安全读这个属性。
     migrated_from: ClassVar[str | None] = None
 
+    # 只报告、不修：本次 load 读到「bili-scribe 不认识的键」时，把这些**键名**记在这里，
+    # 平时是空列表。和 ``migrated_from`` 同一个道理写成 ``ClassVar``：它不是字段，
+    # ``asdict`` / ``workbench.json`` / ``==`` / 设置页视图都不带它，**只放键名不放值**
+    # （那些键里就有 ``llm.api_key`` 这种，界面上打出来等于把密钥写进日志）。
+    # 以前这条会顺手重写用户的配置文件，现在不了 —— 见 ``load()`` 里那段注释。
+    foreign_keys: ClassVar[list[str]] = []
+
     # ------------------------------------------------------- 服务商归一
 
     def override_llm(self, *, base_url: str = "", api_key: str = "", model: str = "") -> None:
@@ -861,19 +868,22 @@ class WorkbenchConfig:
             except OSError:
                 pass  # 新家暂时写不进去不影响本次启动，下次保存会补
         elif foreign and target != LEGACY_CONFIG_PATH:
-            # 文件里还留着 bili-scribe 不认识的键（老版本写进去过）就立刻按新形状重写：
-            # 留着不管，用户每次打开 bili-scribe 都是一句 ValueError。
-            # ``target != LEGACY_CONFIG_PATH`` 这一半是补「旧家只读」的最后一个洞：
-            # 谁要显式 ``--config ~/.bili-scribe/config.yaml``（老习惯、老脚本），读是允许
-            # 的（指到哪读到哪），但这次重写会连带把对方的 sidecar 一起写出来 —— 那是
-            # bili-scribe 的地盘，脏键留不留归它自己判，WB 不替它改。
-            # 放在 sync_providers 之后：save 会把服务商列表写进 sidecar，
-            # 反过来的话这次重写会把刚归一出来的那张卡写成空列表，用户的服务商就没了。
-            # 走 ``target``（新家的路径，或用户显式指的路径），旧家永远不在这个分支上。
-            try:
-                cfg.save(target)
-            except OSError:
-                pass  # 写不进去不影响本次启动，下次保存会重写
+            # 文件里还留着 bili-scribe 不认识的键（老版本写进去过）。
+            # **这里以前会 `cfg.save(target)` 原地重写用户的配置文件**，2026-11-04 撤掉，
+            # 理由不是风格问题，是两条实测：
+            #   1. 一次纯读的角色查询（`-m video_workbench.cli roles --config …`）在用户
+            #      没点任何保存的情况下，把 395 B 的 config.yaml 重写成 4519 B、留下
+            #      `config.yaml.bak` 与 `workbench.json`。只读路由写用户的盘，出事时用户
+            #      手里连"我原本那份"都没有。
+            #   2. 这个重写**修不了它想修的那个病**：脏键来自上一版本 WB 自己的写入，
+            #      bili-scribe 读的是 `~/.bili-scribe/`，不是这里；重写只是把脏键从
+            #      WB 的文件里抹掉，用户真正会撞到的那一句 ValueError 在旧家。
+            # 现在的规则：**除「搬家落新家」与「显式保存」以外，`load()` 不写盘。**
+            # 这里只把事实记下来交给真正有日志的地方（`WorkbenchService` 启动时打一行、
+            # `app.info` 里能看见），由人决定要不要在设置页里点保存。
+            # ``target != LEGACY_CONFIG_PATH`` 这半仍然要留着：旧家是 bili-scribe 的文件，
+            # 读可以、写不行，报告也一样不能替对方改盘 —— 只是这次连新家的写都省了。
+            cfg.foreign_keys = sorted(str(key) for key in foreign)
         # 密钥允许被环境变量覆盖：这样容器/脚本里起服务不用把密钥落盘。
         # 生效服务商也要一起改，否则界面显示的还是文件里那把。
         if os.environ.get(ENV_API_KEY):

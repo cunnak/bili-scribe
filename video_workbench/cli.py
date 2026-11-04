@@ -37,7 +37,8 @@ from typing import Any
 
 from video_workbench import APP_NAME, __version__
 from video_workbench.app.errors import WBError, RETRYABLE_CODES
-from video_workbench.app.service import WorkbenchService
+from video_workbench.app.service import WorkbenchService, roles_payload
+from video_workbench.config import WorkbenchConfig
 
 EXIT_OK = 0
 EXIT_JOB_FAILED = 1
@@ -127,6 +128,11 @@ class Cli:
         print(text, file=sys.stderr, flush=True)
 
     def rpc(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        # 装配是**懒的**：以前 `main()` 在建 handler 之后就无条件 `cli.open()`，于是连
+        # `roles` 这种纯读查询也要先建库、建 logs/、写 sidecar（2026-11-04 实测一次
+        # `roles --config` 造成 6 项盘上变化）。谁真要干活谁才装配。
+        if self.service is None:
+            self.open()
         assert self.service is not None
         result = self.service.router.dispatch(method, params or {}, request_id="cli")
         if result.get("ok"):
@@ -140,6 +146,8 @@ class Cli:
 
     def wait(self, job_id: str, *, label: str = "") -> dict[str, Any]:
         """轮询任务到结束。失败时抛出带退出码的 CliError（消息里带错误码）。"""
+        if self.service is None:
+            self.open()
         assert self.service is not None
         started = time.time()
         last = ""
@@ -213,18 +221,40 @@ class Cli:
         return EXIT_OK
 
     def cmd_roles(self) -> int:
-        """角色名单与各自真源：只读 `summary.roles`，不联网、不写配置、不调 `save()`。
+        """角色名单与各自真源：只读 `summary.roles` 的载荷，不联网、不写配置、不调 `save()`。
 
-        走 RPC 而不是在这里 `import roles_view()` —— 同一个 owner、同一份载荷，
-        设置页读的就是这个。这条命令是给**打好的 exe** 用的离线自证：
-        不开界面、不配密钥、不发任何请求，也能证明包里那 6 篇 txt 真的被读到、
-        绑在哪些角色上（`prompt_sha8` 就是包内那一份的哈希）。
+        走 `roles_payload` 而不是 `self.rpc("summary.roles")` —— 载荷本身仍然只有一个 owner
+        （`WorkbenchService.summary_roles()` 就是对它的一层委托，设置页读的是同一份），
+        但这条命令为了取一份只读名单**不该把整个服务装配起来**：装配会建库
+        （`service.py` 的 `open_and_migrate`）、建 `logs/`（`setup_logging`）、连带写 sidecar。
+        2026-11-04 实测：一次 `roles --config` 造成 6 项盘上变化，用户什么都没点。
+        体检类命令（`info` / 打包的 `--check`）照旧必须装配 —— 它们的工作正是验
+        "配置写得进去、数据目录可写"，摘掉装配就成了 no-op。
+
+        这条命令是给**打好的 exe** 用的离线自证：不开界面、不配密钥、不发任何请求，
+        也能证明包里那几篇 txt 真的被读到、绑在哪些角色上（`prompt_sha8` 就是包内那一份的哈希）。
         """
-        data = self.rpc("summary.roles")
+        cfg = WorkbenchConfig.load(getattr(self.args, "config", "") or None)
+        data = roles_payload(cfg)
         self.emit("roles", data)
         if not self.json:
             rows = list(data.get("roles") or [])
-            retired = "、".join(str(r) for r in (data.get("retired") or [])) or "无"
+            # 退役段念的是**后端给的中文名**，不是裸 key。以前这里是 `str(r) for r in retired`，
+            # 于是 CLI 打「shipin、standard、xueshu」三个英文 key，界面同一件事打的是带状态
+            # 后缀的中文名——一个事实两个 owner，而 key 对用户没有信息量（那三个词从来没在
+            # 界面上出现过）。显示名的唯一 owner 是权威层 `role_label()`，
+            # 经载荷的 `retired_labels` 送进来（`core/summarizer.retired_row_labels`）。
+            # **这里不许出现 key→中文 的表**（也别在这里拼停用后缀）：那样下次退役就得改
+            # 两个地方，而 task-31 之后退役是三个键，改漏一个就是现在这个 bug。
+            # 缺 `display`（老后端/字段没带上）时退回裸 key：兼容支宁可信息少一点，
+            # 也不能因为一个字段缺失就让整条命令抛 KeyError。
+            labels = {
+                str(row.get("key")): str(row.get("display") or "")
+                for row in (data.get("retired_labels") or [])
+                if isinstance(row, dict)
+            }
+            shown = [labels.get(str(key)) or str(key) for key in (data.get("retired") or [])]
+            retired = "、".join(shown) or "无"
             print(f"角色 {len(rows)} 个（默认：{data.get('default')}；已退役：{retired}）")
             for row in rows:
                 src = row.get("prompt_source") or "内置压缩版（无 txt 真源）"
@@ -674,7 +704,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BAD_INPUT
 
     try:
-        cli.open()
+        # 这里**不再无条件 `cli.open()`**：装配服务会建库、建 logs/、连带写 sidecar，
+        # 而 `roles` 这类纯读出口不该在用户没点任何保存的时候动他的盘。
+        # 真要服务的命令由 `rpc()` / `wait()` 懒装配，行为对它们完全不变。
         return handler()
     except CliError as exc:
         return cli.fail(args.cmd, exc)

@@ -14,8 +14,12 @@
 * **C2 载荷与设置页同源**：`--json` 出来的东西必须逐字段等于 `svc.dispatch("summary.roles")`
   的 `data`。两边读的是同一个 owner，不许 CLI 自己拼一份「看起来一样」的名单。
 * **C3 不泄密**：Temp 配置里故意写一把哨兵 key，输出里必须一个字符都见不到。
-* **C4 不写家目录**：跑之前跑之后，真实 `~/.video-workbench` 与 `~/.bili-scribe`
-  的每个文件 `(sha256, mtime_ns, size)` 必须一致（lead 的 V6 判据）；配置本身也不许被写。
+* **C4 不写家目录、也不写配置**：跑之前跑之后，真实 `~/.video-workbench` 与 `~/.bili-scribe`
+  的每个文件 `(sha256, mtime_ns, size)` 必须一致（lead 的 V6 判据）；Temp 那份配置本身
+  也不许被写 —— task-34 之后这条从「幂等」抬回「一次都不写」。
+* **C5 连副作用都没有**：`roles` / `--roles` / `--roles --json` 三种写法都不许建库、
+  不许建 `logs/`、不许落 sidecar。**范围只到这两个入口**：`info` 与 `--check` 的语义就是
+  体检「写得进去」，仍会建库建 logs，那是 `AGENTS.md` 第四节记在案的有意边界，不是缺陷。
 
 冲突那条（`info --roles`）钉的是**报错方式**：必须明确说「--roles 就是 roles 子命令」，
 不许静默丢掉用户要的那份输出。
@@ -122,8 +126,13 @@ def test_the_three_spellings_all_reach_the_same_role_list(temp_cfg):
 def test_the_roles_header_names_the_default_and_the_retired_ones(temp_cfg):
     """表头那行必须把「默认是谁、退役了谁」说出来。
 
-    打包验收时这是唯一一处能一眼看出装的是哪一版角色的地方 —— 光有 8 行名单，
+    打包验收时这是唯一一处能一眼看出装的是哪一版角色的地方 —— 光有 6 行名单，
     看不出默认角色被换过没有。期望值从权威层现读，不写死。
+
+    **退役那三个用的是人话名，不是裸 key**（2026-11-04 vendor 把表头改成人读；
+    我第一版按裸 key 断，红在这里）。改断 `role_label()` 的产物并不等于放宽：这条要守的
+    行为是「退役集合被完整念出来」，键序、数量、缺一个都照样红；而「载荷里到底该带 key
+    还是带 display」是 RPC/CLI 载荷的判据，归 task-36/task-38，不在表头这行上混着钉。
     """
     from video_workbench.core import summary as wb_summary
 
@@ -134,7 +143,11 @@ def test_the_roles_header_names_the_default_and_the_retired_ones(temp_cfg):
     assert str(len(wb_summary.ROLE_KEYS)) in header[0], header[0]
     assert wb_summary.DEFAULT_ROLE in header[0], header[0]
     for retired in sorted(wb_summary.RETIRED_ROLES):
-        assert retired in header[0], f"退役角色 {retired} 没在表头里说出来：{header[0]}"
+        label = wb_summary.role_label(retired)
+        assert label != retired, (
+            f"{retired} 的停用名回落到裸 key 了：{label}（表头就再也读不出「谁退役了」）")
+        assert label in header[0], (
+            f"退役角色 {retired} 没在表头里被念出来（现读它的停用名是「{label}」）：{header[0]}")
 
 
 def test_the_json_output_is_the_same_payload_the_page_reads(temp_cfg):
@@ -215,13 +228,16 @@ def test_the_key_never_leaves_the_config_file(temp_cfg):
     assert "api_key" not in proc.stdout, "stdout 里出现了 api_key 字样（哪怕没带值）"
 
 
-def test_the_command_writes_neither_the_real_homes_nor_a_second_time(
+def test_the_command_writes_neither_the_real_homes_nor_the_config(
         temp_cfg):
-    """C4：跑一次 `--roles` 之后，真实两家必须原封不动；而且**不许每跑一次写一次**。
+    """C4：`--roles` 跑完之后，真实两家原封不动，Temp 配置**一个字节都没被写**。
 
-    这是 lead 的 V6 判据的常驻形态。家目录那一半直接钉死；配置这一半钉的是**幂等**
-    （第二次运行的字节必须等于第一次之后的字节），不是「一次都不写」——
-    后者今天不成立，单独记在下一条严格 xfail 里，不偷偷混进来当已通过。
+    这是 lead 的 V6 判据的常驻形态。家目录那一半直接钉死；配置这一半以前钉的是
+    「幂等」（第二次运行等于第一次之后的状态），因为首次运行就会把最小配置补成 91 行
+    整份模板 —— 那是当时的既有缺陷，我用严格 xfail 单独记着、没有混进通过项。task-34
+    把只读路由改成不装配服务之后（`app/service.py:650 roles_payload`），这里改回合同
+    本意：**一次都不写**。幂等仍然顺带验（第二次也不许漂）。副作用面（不建库、不建
+    logs、不落 sidecar）由下一条单独钉，别把两件事挤进一条断言里。
     """
     before = _home_tree()
     proc = _cli("--roles", "--config", str(temp_cfg))
@@ -232,40 +248,70 @@ def test_the_command_writes_neither_the_real_homes_nor_a_second_time(
     assert not changed, f"真实家目录被写了：{changed}"
     assert not extra, f"真实家目录多出文件：{extra}"
 
-    once = temp_cfg.read_bytes()
-    sidecar_once = (temp_cfg.parent / "workbench.json").read_bytes() \
-        if (temp_cfg.parent / "workbench.json").exists() else b""
+    original = temp_cfg.read_bytes()
+    assert temp_cfg.read_bytes() == original, (
+        "只读诊断口重写了用户配置（首次运行就落盘）")
     proc2 = _cli("--roles", "--config", str(temp_cfg))
     assert proc2.returncode == 0, proc2.stderr[-300:]
-    assert temp_cfg.read_bytes() == once, (
+    assert temp_cfg.read_bytes() == original, (
         "同一个配置被第二次运行又改了一遍 —— 诊断口变成了改环境的操作")
-    sidecar_again = (temp_cfg.parent / "workbench.json").read_bytes() \
-        if (temp_cfg.parent / "workbench.json").exists() else b""
-    assert sidecar_again == sidecar_once, "sidecar 每次运行都在漂"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="产品问题，等 vendor 定：只读诊断口第一次跑就会把用户配置整份重写。"
-           "实测 `roles` 与 `info` **都一样**（88 行模板 + sidecar），"
-           "写发生在服务装配那一步（`video_workbench/app/service.py` 里的 `self.cfg.save()`），"
-           "不在我加的 `cmd_roles` 里 —— 我的写范围只有 `cli.py`，改不到那一层。"
-           "vendor 修好这条会 XPASS 变红，那时把它删掉、把上面的幂等腿改回「一次都不写」。")
-def test_a_read_only_route_should_not_rewrite_a_users_config_the_first_time(
-        temp_cfg):
-    """合同写的是「不写任何配置」，盘上现在做不到：首次运行就把最小配置补成整份模板。
+def test_a_read_only_route_leaves_no_database_logs_or_sidecar(temp_cfg):
+    """合同「不写任何配置」的完整版：**只针对 `roles` / `--roles` 这两个入口**。
 
-    为什么单独立一条而不是并进上一条：这条**今天就是红的**，而红的是既有行为，
-    不是我这轮加的路由。把它塞进通过的用例里，就等于用一句注释把违约说成合规。
-    现读到的形状：跑前 8 行（只有 llm/storage 两段），跑后 91 行整份模板 + 落
-    `workbench.json`；`grep -n "\\.save()" video_workbench/app/service.py` 六处命中，
-    服务装配那条路径上就有。
+    判据不是「配置字节不变」这一条 —— 一次「只是看看角色表」的运行如果在用户目录里
+    留下 `cli.db`、`logs/`、`workbench.json`，用户看到的仍是「跑一下诊断口，环境被改了」。
+    所以这里钉四件事：配置不变、不落 sidecar、不建库、不建 logs 目录。三种写法都验
+    （`--roles`、`roles`、`--roles --json`），因为打包验收会用哪一种不该决定副作用。
+
+    **`info` 与 `--check` 不在本条范围内**：它们的语义就是体检「写得进去」，现在仍会
+    建库建 logs —— lead 已把这条边界写进 `AGENTS.md` 第四节与 release notes 的已知边界，
+    别在这里顺手把它们钉成不建库（那是另一笔产品改动）。
     """
     original = temp_cfg.read_bytes()
-    proc = _cli("--roles", "--config", str(temp_cfg))
-    assert proc.returncode == 0, proc.stderr[-300:]
-    assert temp_cfg.read_bytes() == original, (
-        "只读的诊断口重写了用户配置（见上面的 reason，等 vendor）")
+    cfg_dir = temp_cfg.parent
+    tmp_root = cfg_dir.parent
+    for argv in (("--roles",), ("roles",), ("--roles", "--json")):
+        proc = _cli(*argv, "--config", str(temp_cfg))
+        assert proc.returncode == 0, f"{argv}：{proc.stderr[-300:]}"
+    assert temp_cfg.read_bytes() == original, "配置被写过（见上一条的口径）"
+    sidecar = cfg_dir / "workbench.json"
+    assert not sidecar.exists(), (
+        f"sidecar 落盘了：{sidecar}（配置里只有一个 yaml 应当是唯一事实文件）")
+    db = cfg_dir / "cli.db"
+    assert not db.exists(), f"只读路由建了库：{db}"
+    logs = tmp_root / "logs"
+    assert not logs.exists(), (
+        f"只读路由建了日志目录：{logs}（cache_root 同级的 logs 是装配副作用）")
+
+
+def test_a_writing_route_actually_lands_on_the_paths_c5_checks(temp_cfg):
+    """上面那条 C5 的**正向对照**：`info` 确实会在 `cli.db` / `logs` 落东西。
+
+    为什么必须有这条：C5 断的全是 `not exists`。路径一旦写错（比如日志其实落在别处），
+    那四条就永远为真 —— 这正是本仓库反复在清的「自己考自己」。所以用一条**会写**的路由
+    把同样的路径钉活：它建出来的东西必须落在 C5 检查的那几个位置上，C5 的绿才说明问题。
+
+    这条不是要求 `info` 永远建库：`--check` 是 `desktop.py` 的旗标（CLI 里没有），而
+    `info` 建库是 `AGENTS.md` 第四节记在案的有意边界 —— 体检语义本身就包含「写得进去」。
+    万一将来它不写了，本条会红着说「对照失效」，提醒 C5 要重新设计，
+    而不是安静地变成永真。
+    """
+    cfg_dir = temp_cfg.parent
+    tmp_root = cfg_dir.parent
+    proc = _cli("info", "--config", str(temp_cfg))
+    assert proc.returncode == 0, proc.stderr[-400:]
+    built = sorted(str(p.relative_to(tmp_root).as_posix()) for p in tmp_root.rglob("*")
+                   if p.is_file())
+    db = cfg_dir / "cli.db"
+    assert db.is_file(), (
+        f"C5 检查的库路径 {db.as_posix()} 连 info 都不建 ⇒ 路径写错了、C5 的 "
+        f"not-exists 是空的。本次实际建出：{built}")
+    logs = tmp_root / "logs"
+    assert logs.is_dir(), (
+        f"C5 检查的日志目录 {logs.as_posix()} 连 info 都不建 ⇒ 同上。"
+        f"本次实际建出：{built}")
 
 
 def test_conflicting_spelling_errors_instead_of_silently_losing_output(temp_cfg):

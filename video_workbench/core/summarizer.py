@@ -1094,6 +1094,12 @@ def _json(data: Any) -> str:
 def roles_view() -> list[dict[str, Any]]:
     # 真源三兄弟（prompt_source / prompt_bytes / prompt_sha8）直接透传权威层的判断，
     # 前端只渲染。这里不重算、不写文件名映射——映射的唯一出处是 prompt_source.MAP。
+    #
+    # 盘上事实（别误读成"display 随载荷走"）：**这一份只放公开角色**，字段是 `key`+`name`，
+    # 没有 `display`，也永远不会有退役角色进来。退役行的中文名在
+    # ``retired_row_labels()``（下面）单独产，两处不共用一个循环：
+    # 公开角色的 `name` 是给下拉框当标签用的（选中要用 key），退役行的 `display` 是给
+    # 「这个角色现在叫什么状态」用的（「学术分析（已停用）」这种整句），语义不同。
     return [
         {
             "key": item["key"],
@@ -1106,6 +1112,28 @@ def roles_view() -> list[dict[str, Any]]:
         }
         for item in ROLES
     ]
+
+
+def retired_row_labels() -> list[dict[str, str]]:
+    """退役角色的载荷行 `{"key","display"}` —— 显示名的**唯一 owner 是权威层** ``role_label()``。
+
+    为什么要单独一个函数：`summary.roles` 的 `retired` 一直是裸 key 列表（`standard`、
+    `xueshu`、`shipin`），命令行直接把它打了出来，于是用户在 CLI 看到的是三个英文 key，
+    而界面上同一条事实写作「学术分析（已停用）」。同一个事实两个 owner，就一定会漂移：
+    `shipin` 是 task-31 才进退役集合的，`role_label()` 那边已经跟着现读改名，CLI 这边没人管。
+
+    这里**不查任何表、不写任何中文**，只把权威层的输出搬进载荷；
+    `display` 里带不带「（已停用）」由权威层决定（退役→「〈名字〉（已停用）」）。
+
+    为什么 `retired` 那个裸 key 字段还留着、不改形状：前端 ``summary.js:234`` 把它接给
+    ``roleText()``，那里用的是 ``state.roleRetired.indexOf(wanted)``——**只认字符串数组**。
+    把 `retired` 换成对象数组会让它恒等 -1，历史行于是显示成「未知角色」，正是本单要修的
+    那个症状的镜像版本。所以 `retired`（key，给"是不是退役"这个判定用）与
+    `retired_labels`（key+中文名，给"怎么念出来"用）分两个字段放，两个都从同一批
+    `RETIRED_ROLES` 现读派生，不存在第二处真源。
+    """
+    return [{"key": key, "display": role_label(key)} for key in sorted(RETIRED_ROLES)]
+
 
 #: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，
 #: 而 llm.max_tokens 的默认值只有 4096——按配置原样重问必然再截断。

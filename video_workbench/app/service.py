@@ -647,6 +647,54 @@ def _reject_dotted(values: dict[str, Any], prefix: str = "") -> None:
             _reject_dotted(value, where + ".")
 
 
+def roles_payload(cfg: WorkbenchConfig) -> dict[str, Any]:
+    """角色名单载荷 —— `summary.roles` 的唯一计算处，只需要配置，不需要数据库。
+
+    为什么提成模块级函数而不是留在方法里：`video_workbench/cli.py` 的 `roles` 与
+    打包版的 `--roles` 都是**纯读出口**，而 `WorkbenchService.__init__` 会
+    `setup_logging`（建 `logs/`）、`open_and_migrate`（建库并落 `workbench.db.bak-*`）、
+    连带写出 `workbench.json`。一条"看看有哪些角色"的命令在用户盘上留下四个文件，
+    这个代价和它做的事不成比例 —— 2026-11-04 实测（`Temp/wb_t34/repro.py`）：一次
+    `roles --config` 造成 6 项变化。所以把计算收在这里，装配留给真正要干活的入口
+    （`--check` / `info` 这类体检本来就必须验"配置写得进去、目录可写"，它们照旧装配，
+    别跟着改，否则体检就成了 no-op）。
+
+    **这不是第二份真源**：`WorkbenchService.summary_roles()` 只是 `return roles_payload(self.cfg)`
+    一层委托，设置页、RPC、CLI、打包自检走的都是同一条链；判定规则本身仍然只在
+    `core/summarizer.resolve_role` / `configured_role_issue`，这里一个都不自己算。
+
+    默认值也走角色取值的唯一去处（`resolve_role`）：配置文件里写着退役角色时，前端不能
+    默认选中一个「一提交就被拒」的项——用户没做错任何事，界面先骗他一次。这里连「配置把
+    角色名拼错了」也不能报错：这一页的作用正是让用户改配置，报了错他就没有改的地方了。
+    """
+    try:
+        picked_default, _ = summarizer.resolve_role("", cfg.llm.role)
+    except WBError:
+        picked_default = summarizer.DEFAULT_ROLE
+    # 配置里那个值到底能不能直接用，也问同一个 owner（不建第二条判定链）：
+    # 能用时两个字段都是空，界面就不显示任何东西。
+    dirty, hint = summarizer.configured_role_issue(cfg.llm.role)
+    return {
+        "roles": summarizer.roles_view(),
+        "default": picked_default,
+        "configured_unrecognized": dirty,
+        "configured_hint": hint,
+        # 退役名单：前端靠它把「这个角色被撤了」和「这个 key 我压根不认识」
+        # 分成两句话（换角色 vs 改配置）。名单只有一个出处——权威层的
+        # RETIRED_ROLES，界面不许自己写死 "standard"，否则下次退役就得改前端。
+        "retired": sorted(summarizer.RETIRED_ROLES),
+        # 同一批 key 的**中文显示名**（`{"key","display"}`），owner 是权威层 `role_label()`：
+        # 命令行以前直接打裸 key，界面打「学术分析（已停用）」，同一个事实两个说法。
+        # 为什么不改上面那个 `retired` 的形状：前端 `roleText()` 用 `indexOf(key)` 判退役，
+        # 换成对象数组会恒判"不认识"，把历史行显示成「未知角色」。两个字段同源于
+        # RETIRED_ROLES，不是第二份真源（细节见 core/summarizer.retired_row_labels 的注释）。
+        "retired_labels": summarizer.retired_row_labels(),
+        # 附加提示词开关的当前值。前端不自己数、不自己猜默认：这一栏和「默认角色」
+        # 一样，唯一出处是后端配置（cfg.llm.extra_prompt，默认关）。
+        "extra_prompt": bool(getattr(cfg.llm, "extra_prompt", False)),
+    }
+
+
 class WorkbenchService:
     def __init__(
         self,
@@ -692,6 +740,18 @@ class WorkbenchService:
                     len(notice.get("keys") or []),
                     ", ".join(str(k) for k in (notice.get("keys") or [])),
                 )
+        # 配置文件里有 bili-scribe 不认识的键：只报，不修（`config.load()` 里那段注释写了
+        # 为什么不修——一次纯读查询就重写用户的配置文件，用户手里连原本那份都没了）。
+        # 这里是有日志的现场，所以把那句话从"读盘时静默改文件"换成"启动时打一行"。
+        # 仍然**只报键名、不报值**：那些键里可能有 api_key。
+        if getattr(self.cfg, "foreign_keys", None):
+            self.logger.warning(
+                "生效配置 %s 里有 %d 个 bili-scribe 不认识的键：%s —— WB 不替你删、"
+                "也不会自己重写这份配置；要清掉请在设置页保存一次（保存是显式动作）",
+                self.cfg.source_path,
+                len(self.cfg.foreign_keys),
+                ", ".join(str(k) for k in self.cfg.foreign_keys),
+            )
         log_mod.prune(self.logs["dir"], keep_days=30)
         self.conn = open_and_migrate(self.cfg.db_path)
         self.repo = Repo(self.conn)
@@ -955,6 +1015,11 @@ class WorkbenchService:
             "uptime": round(time.time() - self.started_at, 1),
             # 上次退出留下的东西收拾了多少：界面据此决定要不要提醒"有 N 个任务被中断"
             "recovery": getattr(self, "recovery", {}),
+            # 生效配置里「bili-scribe 不认识的键」的**键名**（值一律不给，里面可能有密钥）。
+            # `load()` 以前会把这些键顺手重写掉，现在只报（见 config.py 那段注释），所以
+            # 这里必须给一个能看见的地方：`info` / `--check` 的 json 里能看到，
+            # 启动日志里同一条是 warning。空列表 = 干净，界面无需为此多画一栏。
+            "foreign_keys": list(getattr(self.cfg, "foreign_keys", [])),
             "deps": {
                 "ffmpeg": bool(shutil.which("ffmpeg") or self._ffmpeg_in_config_dir()),
                 "yt_dlp": find_spec("yt_dlp") is not None,
@@ -2530,30 +2595,10 @@ class WorkbenchService:
     # 因为总结是给人改的草稿，用户会想回去看上一版怎么写。
 
     def summary_roles(self) -> dict[str, Any]:
-        # 默认值也走角色取值的唯一去处（core/summarizer.resolve_role）：配置文件里写着
-        # 退役角色时，前端不能默认选中一个「一提交就被拒」的项——用户没做错任何事，
-        # 界面先骗他一次。这里连「配置把角色名拼错了」也不能报错：这一页的作用正是
-        # 让用户改配置，报了错他就没有改的地方了。判定规则本身仍然只在 resolve_role。
-        try:
-            picked_default, _ = summarizer.resolve_role("", self.cfg.llm.role)
-        except WBError:
-            picked_default = summarizer.DEFAULT_ROLE
-        # 配置里那个值到底能不能直接用，也问同一个 owner（不建第二条判定链）：
-        # 能用时两个字段都是空，界面就不显示任何东西。
-        dirty, hint = summarizer.configured_role_issue(self.cfg.llm.role)
-        return {
-            "roles": summarizer.roles_view(),
-            "default": picked_default,
-            "configured_unrecognized": dirty,
-            "configured_hint": hint,
-            # 退役名单：前端靠它把「这个角色被撤了」和「这个 key 我压根不认识」
-            # 分成两句话（换角色 vs 改配置）。名单只有一个出处——权威层的
-            # RETIRED_ROLES，界面不许自己写死 "standard"，否则下次退役就得改前端。
-            "retired": sorted(summarizer.RETIRED_ROLES),
-            # 附加提示词开关的当前值。前端不自己数、不自己猜默认：这一栏和「默认角色」
-            # 一样，唯一出处是后端配置（cfg.llm.extra_prompt，默认关）。
-            "extra_prompt": bool(getattr(self.cfg.llm, "extra_prompt", False)),
-        }
+        # 载荷本身在模块级 `roles_payload`：CLI 的 `roles` 与打包版的 `--roles` 都要读它，
+        # 而它们不该为了取一份只读名单去装配数据库和日志。这里保留一层委托，
+        # **owner 仍然只有一个**，设置页读的也是这一份。
+        return roles_payload(self.cfg)
 
     def summary_notes_stats(self) -> dict[str, Any]:
         """预读缓存的现状（↔ bs ``app/service.py:1512 notes_stats``）。

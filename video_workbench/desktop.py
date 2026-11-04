@@ -45,7 +45,8 @@ from bili_scribe.desktop import (
 )
 
 from video_workbench import APP_NAME, __version__
-from video_workbench.app.service import WorkbenchService
+from video_workbench.app.service import WorkbenchService, roles_payload
+from video_workbench.config import WorkbenchConfig
 
 WINDOW_TITLE = APP_NAME
 WINDOW_SIZE = (1360, 860)
@@ -303,13 +304,13 @@ def _roles(config_path: str | None = None) -> int:
 
     ``prompt_sha8`` 就是包内那一份的哈希：与仓库侧的 sha 对得上，才说明
     "冻结包跑的提示词 == 仓库里的那一版"。
+
+    这里**不装配 ``WorkbenchService``**（`--check` 才需要装配，它的工作就是验"服务起得来、
+    目录可写"）：装配会建库、建 `logs/`、连带写 sidecar，而这条命令只想读一份角色名单。
+    载荷走 `roles_payload` —— 和设置页 `summary.roles` 同一个 owner，不是第二份真源。
     """
     try:
-        service = WorkbenchService(config_path=config_path)
-        try:
-            data = service.summary_roles()
-        finally:
-            service.close()
+        data = roles_payload(WorkbenchConfig.load(config_path))
     except Exception as exc:  # noqa: BLE001 - 自检失败也要给出可 grep 的形状
         _emit_json({"ok": False, "what": "roles", "error": str(exc)}, name="wb-roles.json")
         return 1
