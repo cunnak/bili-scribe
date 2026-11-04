@@ -1,0 +1,82 @@
+# AGENTS.md — video_workbench / bili_scribe 仓库作业规则
+
+> 本文件沉淀**这个仓库特有的坑**。都是踩出来的，不是设计偏好。改代码前先读第三、四节。
+
+## 一、环境（错一次就白跑一轮）
+
+- Python 一律用 **`.venv/Scripts/python.exe`**。裸 `python` 是 WindowsApps 占位 alias，跑了等于没跑。
+- 中文探针/输出先 `export PYTHONIOENCODING=utf-8`，否则 GBK 控制台会乱码或抛 `UnicodeEncodeError`。
+- 计数类命令**不要接 `head`/`tail`**：管道会让中途退出的 `[exit code]` 变成 0，把失败洗成成功。
+- 全量回归：`.venv/Scripts/python.exe -m pytest tests/wb -q`（离线，约 85–95s）。
+
+## 二、两套包，别当一回事
+
+- `bili_scribe/`（bs）= 原程序，`video_workbench/`（WB）= 复刻方。根 `config.yaml` 是两边共用的实配。
+- WB 的总结核心是**逐字节锁定的 vendored 副本**：`video_workbench/core/summary/{__init__,roles,summarizer}.py` + `video_workbench/infra/notecache.py`。除 import 段外必须与 bs 原件逐字节一致，`tests/wb/test_summary_drift.py` 14 条守着。
+- **`core/summary/__init__.py` 是唯一合法的差异点**（WB 自有的权威层：`RETIRED_ROLES`、`ALL_ROLES` 过滤、`_WB_ONLY` 自造角色都在这里）。要删/藏/加角色，只改这里；不要去动 `roles.py`。
+- `tests/smoke_test.py` 里的 `xueshu` 全部是测 **bili-scribe** 的（bs summarizer、bs 的 set_role、bs `passes==3`）。删 WB 的角色不影响它，别顺手"修"它。
+- **比提示词长度前，先确认你量的是哪个对象**（本仓库为此反复吵过三轮）。`role.system` 存的是 **txt 原文**；真正进请求的是副本 `core/summary/summarizer.py:518` 拼出来的 `system.strip() + "\n" + OUTPUT_CONTRACT`。实测：txt stripped **511** + 换行 1 + `OUTPUT_CONTRACT` **450** = 进请求 **962**。⇒ 断言 `len(role.system)==txt` 与断言请求内容，是两件不同的事，报数时必须写明是哪个；同一条读数换个字段就变了。
+
+## 三、字节锁 × git 规范化（这条最容易静默炸别人机器）
+
+`.gitattributes:5` 是 `* text=auto eol=lf`。它会**静默改写被 sha/字节锁住的文件**：工作区 CRLF 的文件入库变 LF，字节数就变了。
+
+已发生的：`文稿编辑.txt` 工作区 8479B、入库 blob 一度只有 **8273B**（少 206 个 CR）。别人 `git clone` 拿到的是 LF 版，于是「真源 sha 登记表」和打包期字节比对在**别人机器上**红成"真源被人改过"。
+
+修法与核查法（三比，缺一个都可能漏）：
+
+```bash
+wc -c < 工作区文件                          # ① 桌面真源
+git cat-file -s ":路径"                    # ② 入库 blob
+git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
+```
+
+任何被 sha/字节锁住的路径（**6 个 `resources/prompts/*.txt`**，以及将来新增的二进制/字节敏感件）必须在 `.gitattributes` 里显式 `-text`。改完用 `git add --renormalize` 重灌，再用 ③ 证明 clone==桌面。
+
+**判据**：新增任何 sha/字节锁时，同一笔改动里就要跑一遍 ①②③ 并贴出三行读数。
+
+## 四、起真 GUI / 真后端的三条硬知识
+
+1. **隔离夹具只准重定向 `HOME` + `USERPROFILE`，必须保留真实 `APPDATA`/`LOCALAPPDATA`。**
+   连 `APPDATA` 一起指到 Temp，pythonnet 的 netfx 宿主会起不来：
+   `RuntimeError: Failed to resolve Python.Runtime.Loader.Initialize … pythonnet\runtime\Python.Runtime.dll`；
+   试 `PYTHONNET_RUNTIME=coreclr` 更糟：`FileNotFoundException: Could not load assembly 'System.Windows.Forms'`。
+   这个报错长得像产品坏了，其实是夹具过界。路径差异靠改写配置副本里的绝对路径解决。
+2. **浏览器探针别用 fetch/XHR。** `video_workbench/web/index.html:13` 的 CSP 含 `connect-src 'none'`（`:9` 注释：页面不做任何网络动作，所有网络都在 Python 侧）。桌面 RPC 走 pywebview 桥（`desktop.py:142`），所以正确做法是 Playwright `page.expose_binding` 把进程内 `WorkbenchService().dispatch` 挂成 `window.pywebview.api.rpc`。现成范例：`tests/wb/test_summary_real_backend_ui.py:225`。**不要为了让探针方便而放宽产品 CSP。**
+3. **真 GUI 验收前后各记一次三个真实配置文件的 sha256 并逐字比对**（`~/.bili-scribe/config.yaml`、`~/.bili-scribe/workbench.json`、`~/.video-workbench/*`）。窗口可能在你看不见的时候写盘。
+
+WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrowser 启动器，不是 WB 的。WB 入口只有 `video_workbench/desktop.py:main(argv)`（`--config/--debug/--check`）。
+
+## 五、打包版（`dist/VideoWorkbench`）
+
+- 构建：`.venv/Scripts/python.exe scripts/build_wb.py`（`SPEC` 指向**仓库根**的 `video_workbench.spec`，不在 `scripts/` 下）。
+- `verify()` 会逐个比 `resources/prompts/*.txt` 的**字节数**（`PROMPT_TXT_NAMES`）。文件名里有全角冒号、末尾句号、`.txt` 前一个空格（`大概率管用 .txt`）——**逐字抄，别手敲**。
+- 冻结态 **没有 stdout**（`console=False`，exe `Subsystem=2`）。CLI 自检结果只能落成 exe 旁边的 json：`--check` → `wb-check.json`，`--roles` → `wb-roles.json`。
+- **exe 的入口是 `desktop.py` 的 `main()`：只往 `cli.py` 加路由，冻结态收不到**（当年实测报 `VideoWorkbench.exe: error: unrecognized arguments: --roles`）。这类开关必须挂在 `desktop.py` 的 `main()` 上，且派发要在 `create_window` **之前**，否则会先弹窗、什么都不返回。
+  现状（2026-11-04 更正本条口径）：**两个入口都存在，但只有一个数据 owner**。`desktop.py:294 _roles()` 是打包验收路径（落 `wb-roles.json`）；`cli.py:215 cmd_roles()` 是**开发态额外入口**（`python -m video_workbench.cli --roles`，内部走 `self.rpc("summary.roles")` ⇒ 同一份载荷，不是第二份真源）。别因为"cli 里已经有了"就以为冻结态能跑。
+  **判据的实际写法**（parity 现读纠正，我复核过：`grep -rln "inspect.getsource" tests/wb/` → **零命中**，所以拦它的不是读源码文本）：`tests/wb/test_packaging_roles_cli.py:76 test_main_dispatches_roles_before_opening_a_window` —— 用 monkeypatch 把 `desktop._roles` 换成记账函数、把 `desktop.create_window` 换成 `raise AssertionError("--roles 不该建窗…")`，再断 `desktop.main(["--roles","--config",…]) == 0`。**建窗即炸**才是那条机械证据；掉进建窗分支的现场是"弹窗起来了"，人工验收极易误判成通过。同文件 `:46` 钉 `wb-roles.json` 载荷形状、`:68` 钉 `--check` 的文件名没被 `name` 参数带跑。
+
+## 六、协作与交付纪律（本仓库踩过事故）
+
+- **牙齿（故意改坏验红）只准在 `%TEMP%` 下自己带哨兵名的副本里做。禁止对仓库工作区文件按快照覆盖回写。** 已发生两次：用"开工前原字节"还原，把同一文件上别人已落地的改动一起抹了（settings.js 的角色下拉注入、已 accepted 的删控件都被抹过）。
+- **新建 `tests/wb/*.py` 要先把路径登记进 sha256 快照清单。** 否则还原逻辑会把"开工前不存在"的文件当垃圾删掉。
+- **交付里每个数字后面必须附产生它的那条命令原文。** 编不出命令原文，就等于没跑过。
+- 别人报告里的函数名/行号/文件名，**引用前自己现读一遍**。盘面在被并发修改时，任何单点读数都不能用来定罪。
+- **判别人「报了没跑过的东西」之前，先隔 3–5 分钟重读同一批文件。** 单点读数可能落在失真窗口里。本轮我（lead）就用一次失真窗口的读数判过 vendor 造假，随后被他的只读命令原文推翻——规矩对我也生效。
+- **任何对仓库文件的快照恢复必须先打印 sha256（恢复前/恢复后），禁止静默 `shutil.copy2` / `cp -p` 回盖。** 保留 mtime 的覆盖会让「文件没变」的假象与内容漂移同时成立：本轮 `prompt_source.py` 的 mtime 停在 19:06，内容却在 20:01 读到 HEAD 版、20:04 读到落地版，排查成本极高。
+- **`git diff` 对未跟踪文件恒返回空且不报错。** 判断"有没有人动过"必须 `git status --porcelain` + `git ls-files`（或 `git cat-file -s :path`）。只看 `git diff` 会把"没被跟踪"读成"没被改动"——`tests/wb/test_git_no_normalization_on_locked_paths.py` 那 20 条字节锁闸就是这样被静默删掉、一夜从全量里消失的。
+- **新建 `tests/wb/*.py` 落地后必须马上 `git add`（只 add，不 commit）。** 未跟踪的文件在任何一次误删/换机/快照还原里都会永久消失，已经消失过一次。
+- **跨工具比 sha 必须比原始字节，禁止用 `read_text()` 归一化后的内容算 sha。** `video_workbench/web/js/pages/settings.js` 是 **CRLF**，而 `prompt_source.py`/`mock.js` 是 LF：`sha256sum` 打磁盘字节得 `18a9fc3a…`，Python `Path.read_text()` 把 `\r\n` 折成 `\n` 再 encode 得 `4339f77f…`。本轮「同一文件两次 sha 不同」被当成并发写/静默还原来排查，实际全是读法差异。⇒ 快照登记、字节锁闸、牙齿的"恢复后一致"核对，三处都必须 `open(p,'rb').read()` 或 `sha256sum` / `git cat-file -s :path`。
+- **判"落地了没有"只读工作区路径本身，并且必须在同一条命令里同时打印 工作区 / 索引 / HEAD 三份 sha256 + grep 命中，写明引用的是哪一份。** 我（lead）用 `git show :path` 读到旧版，判成"工作区被打回旧版"，给两位成员各开了一张重建单——这种单子会让人真去重写本来好好的代码，比误删文件更贵。`M` 只代表工作区≠索引；落地未 commit 时索引=HEAD=旧版是**正常状态**，不是回退。
+- 逐字节锁定的副本不许"顺手修"：那是刻意保留的上游行为，改一处就等于放弃了"一比一"的整个价值。要偏离，走 `core/summary/__init__.py`。
+
+## 七、规则表
+
+| 规则 | 由什么拦住 |
+|---|---|
+| 副本与 bs 逐字节一致（除 import 段与 `__init__.py` 权威层） | `pytest tests/wb/test_summary_drift.py`（14 条） |
+| 6 个 txt 真源不许被改一个字节 | `tests/wb/test_summary_prompt_source.py` P1 的 sha256 登记表 + 打包期字节比对 |
+| 被字节锁住的路径不许被 git 规范化 | `.gitattributes` 的 `-text` 行 + 上面 ①②③ 三比（人工，暂无自动闸） |
+| 界面字段必须真的可达可点 | `tests/wb/test_settings_role_warning_ui.py` N1/N2/N3（同快照三条件：内容盒高>0、行在盒内、`elementFromPoint` 命中） |
+| 配置搬家不改任何值 | `tests/wb/test_*_migration*` 反向常驻用例（旧家 `max_tokens:4096` → 新家仍 4096） |
+| 全量测试通过才谈交差 | `.venv/Scripts/python.exe -m pytest tests/wb -q` + `node tests/frontend_test.js` + `tests/smoke_test.py` |
