@@ -776,3 +776,152 @@ def test_the_error_envelope_currently_names_no_broken_role_key(tmp_path):
         f"『message 必须含坏掉的键名』，并删掉上面那段现状说明。实得 message={message!r}")
     assert "这一个键念不出来" in message, (
         f"错误信封连异常原文都不回了，界面将完全没有线索：{message!r}")
+# ---------------------------------------------------------------------------
+# task-41 判据 1：把 docstring 那句「任何输入都不抛」从注释变成机械证据
+#
+# 分工（判据 2，刻意不合并成一条）：
+#   · 下面这一组钉的是**函数本身对任何输入都不抛**——契约面。
+#   · `test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down`
+#     钉的是**万一它抛了会牵连整张名单**——现状面（变更探测器）。
+#   并成一条的话，「不抛」就会被「抛了也有错误信封」掩盖：将来 role_label 真的开始抛，
+#   那一组照样绿。一条说「不许坏」，一条说「坏了会长什么样」，缺一不可。
+#
+# 期望值全部现读，**一个中文显示名都不写死**：写死就等于将来有人把「已停用」改成
+# 「停用」，测试红得毫无信息量（还会诱导下一个人去改测试而不是改产品）。
+# ---------------------------------------------------------------------------
+
+# 契约的措辞是「任何输入」，所以用例集合要是它的像：类型形状 × 键空间两条轴都铺到。
+_SHAPE_PROBE = (
+    None, "", "   ", "\t\n", 123, 0, -1, 3.5, True, False, b"x",
+    [], ["x"], {}, {"key": "x"}, (1,), frozenset({"x"}), set(),
+    object(), Ellipsis, range(2), (lambda: None), Exception("boom"),
+)
+# `NotImplemented` 刻意**不在**这一组里：实测它会把 `if not key` 引爆成 TypeError，
+# 是契约的一个真实破口。不许从集合里悄悄摘掉当没看见——单独用探测器钉住，见
+# `test_notimplemented_input_currently_breaks_the_never_raises_contract`。
+
+# 真·未知字符串。注意 **不能**写 " standard"／"standard "：现读证明 `role_label`
+# 会先去空白再查表，那两个会正常解析成退役标签（是宽容，不是 bug）。# 也**不能**写 "wengao"：那是现役键，会被正常解析成角色名，
+# 拿它当未知键就会得到一条假红（第一版我就踩在这里）。
+_UNKNOWN_STRINGS = (
+    "zzz-not-a-role", "Standard", "STANDARD", "standard2",
+    "标准", "已停用", "（已停用）",
+)
+
+
+def _authority_layer():
+    import video_workbench.core.summary as authority
+
+    return authority
+
+
+def _live_base_name(key: str) -> str:
+    """退役键的「基名」现读：vendored 副本表里有定义就用它，没有就用权威层补登的名。
+
+    两个来源都是产品自己的表，不是我抄的第二份真源——我要量的只是
+    「label 在基名之外还多加了什么」，基名本身由权威层决定。
+    """
+    import video_workbench.core.summary.roles as copy_roles
+
+    for role in copy_roles.ALL_ROLES:
+        if role.key == key:
+            return role.name
+    extra = getattr(_authority_layer(), "_RETIRED_EXTRA_NAMES", {})
+    assert key in extra, (
+        f"{key!r} 是退役键，但副本表里没有它、权威层也没补登名字——"
+        "那它的显示名是从哪来的？请把这条改成读新的真源位置")
+    return extra[key]
+
+
+def _live_retired_suffix() -> str:
+    """退役标签共用的那个后缀，从现读 label 减现读基名得到（不写中文字面量）。"""
+    suffixes = set()
+    for key in sorted(RETIRED_ROLES):
+        label = role_label(key)
+        base = _live_base_name(key)
+        assert label != key, f"退役键 {key!r} 的标签退化成裸 key，界面等于没说话"
+        assert label.startswith(base), (
+            f"退役标签 {label!r} 不是以现读基名 {base!r} 开头——格式变了，"
+            "这条判据的减法前提不成立，请改成新格式再判")
+        suffixes.add(label[len(base):])
+    assert len(suffixes) == 1, f"三把退役键的后缀不一致：{sorted(suffixes)}"
+    suffix = suffixes.pop()
+    assert suffix, "退役标签没有任何后缀，那「已停用」这件事在界面上就消失了"
+    return suffix
+
+
+def test_role_label_never_raises_and_always_returns_a_string():
+    """判据 1 主面：把 `_SHAPE_PROBE` 里每个形状都喂进去，一个都不许抛、都必须回 str。"""
+    offenders = []
+    for value in _SHAPE_PROBE:
+        tag = f"{type(value).__name__}({value!r})"[:60]
+        try:
+            out = role_label(value)
+        except Exception as exc:                       # noqa: BLE001 - 契约面就是要抓任何异常
+            offenders.append(f"{tag} → 抛 {type(exc).__name__}: {exc}")
+            continue
+        if not isinstance(out, str):
+            offenders.append(f"{tag} → 返回 {type(out).__name__}，不是 str")
+    assert len(_SHAPE_PROBE) >= 20, (
+        f"形状集合只剩 {len(_SHAPE_PROBE)} 项了；契约写的是「任何输入」，"
+        "用例集合缩到个位数就等于没测")
+    assert not offenders, "「任何输入都不抛」被这些形状破了：\n  " + "\n  ".join(offenders)
+
+
+def test_blank_inputs_get_an_empty_label_not_an_invented_name():
+    """空值输入必须回空串。
+
+    为什么单独立一条：回 `''` 和回「未知角色（None）」是两种完全不同的产品行为——
+    后者会把 None 打印到用户的下拉框里。这条钉的是「不许编名字」，
+    而上面那条只保证「不抛」，两条不重复。
+    """
+    for value in (None, "", "   ", "\t\n"):
+        assert role_label(value) == "", (
+            f"输入 {value!r} 拿到了 {role_label(value)!r}：空值不该有名字")
+
+
+def test_retired_labels_share_one_suffix_built_on_the_live_base_name():
+    """退役标签＝现读基名 + 一个三把共用的非空后缀；现役键不许带它（控制腿）。"""
+    suffix = _live_retired_suffix()
+    for key in ROLE_KEYS:
+        label = role_label(key)
+        assert not label.endswith(suffix), (
+            f"现役角色 {key!r} 被打上退役后缀了：{label!r}")
+        assert label == _live_base_name(key), (
+            f"现役角色 {key!r} 的标签 {label!r} 不等于现读基名 "
+            f"{_live_base_name(key)!r}——展示层开始加戏了")
+
+
+def test_unknown_inputs_never_claim_a_retired_role_or_say_nothing():
+    """未知键与非字符串输入：不许带退役后缀；字符串型未知键还必须把原键带回给用户。"""
+    # 「冒充退役角色」的准确含义：标签正好等于某一把真退役键的标签。
+    # 不用 endswith(后缀) 判——输入本身就是「已停用」这种字符串时，
+    # `未知角色（已停用）` 会以该后缀结尾，那是正确行为，不是冒充（第一版红在这里）。
+    retired_labels = {role_label(key) for key in sorted(RETIRED_ROLES)}
+    silent, mislabeled = [], []
+    for value in list(_UNKNOWN_STRINGS) + [123, 3.5, b"x", ["x"], {"key": "x"},
+                                           frozenset({"x"}), object(), Ellipsis]:
+        label = role_label(value)
+        if label in retired_labels:
+            mislabeled.append(f"{value!r} → {label!r}（正好撞上真退役键的标签）")
+        if isinstance(value, str) and value.strip() and value not in label:
+            silent.append(f"{value!r} → {label!r}（用户看不出是哪个键坏了）")
+    assert retired_labels, "退役标签集合为空，这条就没有对照物了"
+    assert not mislabeled, "这些输入被冒充成退役角色了：\n  " + "\n  ".join(mislabeled)
+    assert not silent, "这些未知键的标签没带回原键名：\n  " + "\n  ".join(silent)
+
+
+def test_notimplemented_input_currently_breaks_the_never_raises_contract():
+    """变更探测器：`NotImplemented` 现在会让 `if not key` 抛 TypeError——契约的真实破口。
+
+    我只钉现状、不改产品码（边界：本轮只动 `tests/wb/**`）。修法归 vendor：显式判空
+    （例如 `if key is None or key == ""`）而不是靠真值判断。
+    修好那天这条必须红——那时请把 `NotImplemented` 加回 `_SHAPE_PROBE`、删掉本条。
+    复现命令原文：
+      `.venv/Scripts/python.exe -c "import video_workbench.core.summary as a; a.role_label(NotImplemented)"`
+    """
+    with pytest.raises(TypeError) as exc:
+        role_label(NotImplemented)
+    text = str(exc.value)
+    assert "boolean context" in text, (
+        f"抛是抛了，但不是原来那个形状（{text!r}）——破口换了位置，请重读并改写这条")
