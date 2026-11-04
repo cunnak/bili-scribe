@@ -23,6 +23,7 @@ SUMMARY_CONTENT = {
     "caution": "数字建议回视频核对",
     "comment_short": "一句话：把注意力拆成能照做的三步。",
     "model": "deepseek-chat",
+    # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
     "role": "standard",
 }
 
@@ -37,6 +38,7 @@ def make_project(service, tmp_path: Path, *, title="标题", bvid="BV1xx", aid=1
 
 def with_summary(service, project, content=None):
     return service.repo.summary_insert(
+        # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
         project["id"], content=content or SUMMARY_CONTENT, content_md="# 总结", role="standard"
     )
 

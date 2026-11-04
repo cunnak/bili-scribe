@@ -172,6 +172,7 @@ def _seed_summary(service, project_id):
             "comment_short": "短评",
         },
         content_md="# 标题\n\n正文第一段。",
+        # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
         role="standard",
         model="stub",
     )

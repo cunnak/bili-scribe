@@ -1,14 +1,37 @@
-"""config.yaml 共用边界：Workbench 的扩展配置不能出现在共享文件里（方案书 6.6 / 偏差记录）。
+"""config.yaml + workbench.json 这一对的**形状契约**（方案书 6.6 / 偏差记录）。
 
-这条边界是硬的：bili-scribe 的 ``AppConfig.load`` 遇到不认识的键**直接报错**，
-所以 VideoWorkbench 一旦把 ``ui.onboarded``、``llm.providers`` 之类写进
-``~/.bili-scribe/config.yaml``，用户打开 bili-scribe 就是一句
-``ValueError: LlmConfig 存在未知配置项：tasks``。
+## task-23 搬家之后：这份文件还钉什么，为什么还钉
 
-三个契约：
-1. 写出去：yaml 只含 bili-scribe 认识的 6 段，其余全在 ``workbench.json``。
-2. 读进来：两个文件合并，共享键以 yaml 为准（用户会手改），扩展键只有 sidecar 有。
-3. 老文件：yaml 里残留扩展键时，load 就地迁移成新形状，并保证 bili-scribe 能读。
+原来这条边界是「共享边界」：``config.yaml`` 两边共用，bili-scribe 的 ``AppConfig.load``
+遇到不认识的键**直接报错**，所以 WB 把 ``ui.onboarded``、``llm.tasks`` 写进去就等于
+让用户打开 bili-scribe 时看到 ``ValueError: LlmConfig 存在未知配置项：tasks``。
+
+搬家（``DEFAULT_HOME`` 从 ``~/.bili-scribe`` 换成 ``~/.video-workbench``）之后，
+**「共用同一个文件」这个前提没了**：默认情况下各读各的，WB 写脏也不会打到对方。
+但形状契约**一条都不删**，因为 vendor 选的是「只搬家、不改存储格式」
+（``video_workbench/config.py`` 搬家后的注释给了两条还站得住的理由）：
+
+1. yaml 的形状继续由 bili-scribe 自己的 ``render_config_yaml`` 生成——省得两份模板各说一套；
+2. 这份文件仍然**被 bili-scribe 读得动**（实测），搬家后不依赖它，但也没必要主动
+   把它变成一个读不了的形状。
+
+于是本文件与 ``tests/wb/test_config_home_split.py`` 的分工是：
+
+- 本文件：一份**指定路径**的 yaml + sidecar 的形状（写出保守、读入合并、老形状就地重写）；
+- ``test_config_home_split.py``：**默认家在哪、迁移读谁写谁、旧家零写入、库仍共用**。
+
+三条契约的前后口径（逐条，写给下一个读的人）：
+
+- 契约 1 ``test_save_keeps_yaml_bili_only``：原来钉「不能出现 bili 不认识的键，因为
+  bili 会读这份文件并报错」；现在钉的是同样的形状，理由换成「形状由它说了算 +
+  搬家换来的自由是目录自由、不是随便写」。断言一个字没放宽。
+- 契约 2 ``test_yaml_wins_for_shared_keys`` / ``test_save_puts_extensions_in_sidecar``：
+  原来「共享键以 yaml 为准」的前提是两边都会改同一份文件；搬家后只剩 WB 自己改，
+  但**用户仍会手改 yaml**，所以「手改的共享键必须生效」这条照旧成立，保留。
+- 契约 3 ``test_load_migrates_legacy_yaml``：这里的「迁移」是**同一份文件内的形状迁移**
+  （老版本把扩展键写进 yaml，load 一次重写成新形状），跟「搬家」是两件事。
+  搬家那条要求旧家零写入，见 ``test_config_home_split.py``；本条用的是显式路径，
+  写回自己那份文件是合法的，不许被当成搬家语义放宽。
 """
 
 from __future__ import annotations

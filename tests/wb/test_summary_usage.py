@@ -121,6 +121,7 @@ def test_usage_totals_falls_back_to_sum_of_parts_and_tolerates_junk():
 
 def test_version_row_exposes_usage():
     row = {
+        # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
         "id": "sum_x", "version": 3, "role": "standard", "model": "m",
         "chars": 10, "created_at": "2026-11-01T00:00:00Z", "status": "ready",
         "content": {"one_line": "一句话"},
@@ -153,6 +154,7 @@ def test_summary_get_returns_totals_for_whole_video(service):
             project["id"],
             content={"one_line": "一句话"},
             content_md="## 摘要\n正文",
+            # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
             role="standard",
             model="m",
             usage={"calls": calls, "prompt_tokens": prompt,

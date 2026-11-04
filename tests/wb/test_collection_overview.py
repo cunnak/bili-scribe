@@ -116,6 +116,7 @@ def make_children(service, tmp_path: Path, count=3, *, collection="研究方法"
                 project["id"],
                 content={"one_line": f"第{index + 1}集讲了什么", "key_points": ["要点"]},
                 content_md="# 标题\n正文",
+                # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
                 role="standard",
                 model="stub",
                 status="ready",
@@ -231,7 +232,7 @@ def test_run_sends_one_request_and_returns_structure():
     client = StubClient([json.dumps(GOOD, ensure_ascii=False)])
     ctx = FakeCtx()
     result = ov.run("合集", [child({"title": "第一集：反例"}), child({"title": "第二集：变量"})],
-                    client=client, ctx=ctx, role="standard")
+                    client=client, ctx=ctx, role="wengao")
     assert result["calls"] == 1
     assert result["content"]["theme"] == GOOD["theme"]
     assert result["content"]["item_count"] == 2
@@ -314,7 +315,7 @@ def test_overview_job_writes_row_files_and_keeps_children(service, tmp_path, mon
     service.cfg.llm.model = client.model
     monkeypatch.setattr(service, "_llm_client", lambda task="summary": client)
 
-    result = service._collection_job(FakeCtx(), {"collection": "研究方法", "role": "standard"})
+    result = service._collection_job(FakeCtx(), {"collection": "研究方法", "role": "wengao"})
     assert result["version"] == 1
     assert result["items"] == 3
 

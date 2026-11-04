@@ -1,9 +1,9 @@
-"""总结适配器（P2-07）：把我们的项目数据包装成 bili-scribe 的素材，交给它的总结器。
+"""总结适配器（P2-07）：把我们的项目数据包装成 ``Bundle``，交给自带的总结方法论。
 
-**为什么是"适配"而不是"重写"。** bili-scribe 的 summarizer 里有三件很难重做的事：
-提示词里那几条反幻觉硬约束、长素材的分段预读（map/reduce，带磁盘缓存）、
-以及角色的三轮回（自我批判 → 按批判修订）。这些是被真实使用打磨出来的，
-重写等于把踩过的坑再踩一遍。所以这里只做三件事：
+**为什么是"适配"而不是"重写"。** 提示词里那几条反幻觉硬约束、长素材的分段预读
+（map/reduce，带磁盘缓存）、以及角色的三轮回（自我批判 → 按批判修订），都是被真实
+使用打磨出来的，重写等于把踩过的坑再踩一遍。所以方法本体是
+``video_workbench/core/summary/`` 里那份与上游逐字节一致的副本，这里只做三件事：
 
 1. **把我们的字幕喂成它认识的 ``Bundle``**——素材类型标成 ``subtitle_ai``，
    带时间戳，这样它才允许写 ``timeline``。
@@ -18,31 +18,149 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import re
+import threading
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from bili_scribe.core import summarizer as bs_summarizer
 from bili_scribe.core.collector import Bundle
-from bili_scribe.core.roles import describe_roles as _describe_roles
-from bili_scribe.core.roles import get_role
-from bili_scribe.core.summarizer import (
+
+# 方法论本体在 video_workbench/core/summary/：那份副本与 bili_scribe 逐字节一致
+# （只换了 import 段），角色字典/默认角色/退役角色由它的 __init__ 权威层给出。
+from video_workbench.core.summary import (
+    DEFAULT_ROLE,
+    RETIRED_ROLES,
     PreparedMaterial,
     Refinement,
     SummarizeError,
     Summary,
+    UnknownRole,
+    describe_roles,
+    get_role,
+    role_label,
 )
+from video_workbench.core.summary import summarizer as bs_summarizer
+from video_workbench.core import prompt_source
 
 from video_workbench.app.errors import WBError
 from video_workbench.infra.jsonfix import repair_json
 from video_workbench.infra.llm import ChatClient, ChatError
 
-#: 角色清单（顺序即下拉顺序）。``standard`` 不套方法论，其余会走三轮回。
-ROLES = _describe_roles()
+#: 角色清单（顺序即下拉顺序）。全部是方法论角色；``standard`` 已退役，不在清单里。
+ROLES = describe_roles()
 ROLE_KEYS = tuple(item["key"] for item in ROLES)
-DEFAULT_ROLE = "standard"
+
+#: 对账开关：**默认开**。开着时适配层不做三件事——不抬输出预算（不 12288、不翻倍、
+#: 不封 16384）、不抢救坏 JSON（修复→续写→分两次要→严格重问那套阶梯整条不走）、
+#: 一次调用只发一次请求，让 ``video_workbench.core.summary`` 那份副本按上游语义跑，
+#: 两边可以逐请求、逐字段比对。
+#: 设 ``WB_SUMMARY_PARITY_STRICT=0``（或 false/off）才恢复 WB 的加固。这不是可有可无的
+#: 保险：实测一天的日志里「已按更严格的要求重问一次」命中 7 次、「输出被截断了，正在
+#: 接着写」5 次，说明坏 JSON 是真会发生——默认严格就默认失败，所以失败时要把开关念出来
+#: （见 `_strict_hint`）。
+#: 唯一不受这个开关影响的是「① 时间线补密」：有密时间线就覆盖 bs 的 20 条上限，
+#: 没有就原样返回，一次额外请求都不发（见 `_apply_dense`）。
+PARITY_ENV = "WB_SUMMARY_PARITY_STRICT"
+
+#: 显式关掉对账模式的写法；除此以外的任何值（包括没设）都算严格档。
+PARITY_OFF_VALUES = frozenset({"0", "false", "off"})
+
+
+def _parity_strict() -> bool:
+    """默认严格；只有显式写 0/false/off 才宽松。
+
+    每次调用都现读环境变量，不在 import 时缓存（测试要在同一进程里来回切）。
+    """
+    return str(os.environ.get(PARITY_ENV, "")).strip().lower() not in PARITY_OFF_VALUES
+
+
+def extra_prompt_on(cfg: Any, explicit: "bool | None" = None) -> bool:
+    """附加提示词该不该接进去：显式入参优先，其次配置 ``llm.extra_prompt``（默认关）。
+
+    这里只**取值**，不判断内容——拼不拼、拼在哪一段，全在 ``prompt_source`` 一处。
+    默认关的理由写在那份模块的 docstring 里：`大概率管用 .txt` 是对抗性双角色提示词，
+    和总结要的 JSON 契约正面冲突，开着会拖垮产出，所以开关交给人。
+    """
+    if explicit is not None:
+        return bool(explicit)
+    return bool(getattr(getattr(cfg, "llm", None), "extra_prompt", False))
+
+
+def _strict_hint(message: str) -> str:
+    """严格档（默认）里坏 JSON 直接失败，得告诉用户是谁关掉了抢救。
+
+    前半句是既有用例钉着的文案，一个字不动，只在末尾追加可操作提示。宽松档里这条
+    失败是整套阶梯都用尽之后的结果，再提开关就是误导，所以不追加。
+    """
+    if not _parity_strict():
+        return message
+    return (f"{message} 对账模式（默认）不抢救坏 JSON；"
+            f"需要抢救请设 {PARITY_ENV}=0 后重试。")
+
+
+def resolve_role(explicit: "str | None",
+                 fallback: "str | None" = None) -> tuple[str, str]:
+    """取总结角色的**唯一**去处。返回 ``(role_key, notice)``。
+
+    优先级是「调用方这次显式传的 > 配置或历史存的 > 默认角色」，但两类来源的
+    待遇不一样——这是整段逻辑里唯一需要判断的地方：
+
+    - 两个都空                    → ``(DEFAULT_ROLE, "")``
+    - 选中的 key 可用              → ``(key, "")``
+    - 选中的 key **只来自 fallback 且已退役** → ``(DEFAULT_ROLE, 中文说明)``。
+      配置文件里或历史行里躺着退役值是**脏数据**，不是用户此刻的意图；用它把
+      人挡在门外，等于拿历史惩罚现在的人。换默认角色，但必须把 notice 写进日志。
+    - 用户**显式提交**的退役值，或任何**未知值** → ``WBError("VALIDATION", 权威层原话)``。
+      显式提交＝意图，悄悄改写就是替用户改了主意；配置里拼错的角色名也不能静默
+      修正成默认角色，否则用户永远不知道自己配的那一行没生效。
+
+    什么算 explicit（别自查，规则在这）：**只有用户这次刚提交的值**。RPC 入参
+    ``payload.role`` 是 explicit；``cfg.llm.role``、历史版本存的 ``role``、job 重放
+    时从已落库 payload 里读出来的 role，全都是 fallback。
+    """
+    wanted = str(explicit or "").strip()
+    from_fallback = False
+    if not wanted:
+        wanted = str(fallback or "").strip()
+        from_fallback = True
+    if not wanted:
+        return DEFAULT_ROLE, ""
+    try:
+        role_obj = get_role(wanted)
+    except UnknownRole as exc:
+        if from_fallback and wanted in RETIRED_ROLES:
+            return DEFAULT_ROLE, f"{exc}；本次按默认角色「{role_label(DEFAULT_ROLE)}」"
+        raise WBError("VALIDATION", str(exc)) from exc
+    return role_obj.key, ""
+
+
+def configured_role_issue(role_value: "str | None") -> tuple[str, str]:
+    """把配置里存着的默认角色翻成「能不能直接用」，给设置页显示。返回 ``(脏值, 说明)``。
+
+    值能直接用时返回 ``("", "")``。**这里不建第二条判定链**——判断仍然只在
+    ``resolve_role``：它给出 notice 就是退役值，它抛 VALIDATION 就是未知值，其余算干净。
+    为什么不直接把 ``resolve_role`` 的结果丢给界面：配置页的作用正是让用户把这一行改对，
+    未知值在那里会报错——一报错用户就没有改的地方了，所以这一页只取它的**结论**、
+    不取它的**异常**。措辞按两种情况分开（退役 ≠ 拼错，用户要做的事不一样）。
+    """
+    value = str(role_value or "").strip()
+    if not value:
+        return "", ""
+    try:
+        _key, notice = resolve_role("", value)
+    except WBError as exc:
+        return value, (f"配置里的默认角色「{value}」不是可用角色：{exc.message}，"
+                       f"请改成下面列表里的一个")
+    if notice:
+        return value, (f"配置里的默认角色「{value}」已停用，"
+                       f"生成时会自动按「{role_label(DEFAULT_ROLE)}」走")
+    return "", ""
+
 
 #: 进度映射。bili-scribe 的 stage 只有四个，界面上要说得清"现在在干什么"。
 #: 数值是**保守估计**：预读占大头的实测比例见 summarizer 的注释（约 38% 输入）。
@@ -71,10 +189,13 @@ class SummaryLLM:
       靠 ``note`` 把重试、降级这类"发生过但没失败"的事情送到界面。
     """
 
-    def __init__(self, client: ChatClient, *, model: str = "") -> None:
+    def __init__(self, client: ChatClient, *, model: str = "", cfg: Any = None) -> None:
         self.client = client
         self.model = model or client.model
         self.cfg = _ModelCfg(model=self.model)
+        # 配置对象只为对账模式服务（要把请求上限还原成 cfg.llm.max_tokens）；
+        # 普通路径不看它，行为与改动前一致。
+        self.app_cfg = cfg
         self.notes: list[str] = []
         self.calls = 0
         # 计时从建 llm 起算：总结的耗时几乎全在模型上，
@@ -102,6 +223,21 @@ class SummaryLLM:
     ) -> str:
         sink = note or (lambda _message: None)
         self.calls += 1
+        if _parity_strict():
+            # 对账模式：一次调用只发一次请求——不修 JSON、不续写、不拆分、不重问，
+            # 也不做「端点不认 response_format 就退回普通请求」那层兜底。
+            # 正文原样交出去，能不能解析由方法论那一层（``_extract_json``）判失败。
+            reply = self.client.chat(
+                messages,
+                temperature=temperature,
+                max_tokens=self._parity_max_tokens(max_tokens),
+                json_mode=json_mode,
+            )
+            if json_mode:
+                # 只读地数一遍这次回复里到底有几条时间线，然后原样交出正文。
+                # 多发一个请求都没有，逐请求一致一个字都没破。
+                self._capture_dense(reply)
+            return reply
         try:
             text = self.client.chat(
                 messages,
@@ -124,6 +260,48 @@ class SummaryLLM:
         if json_mode:
             return self._json_or_retry(text, messages, sink, temperature, max_tokens)
         return text
+
+    def _parity_max_tokens(self, max_tokens: int | None) -> int | None:
+        """对账模式下这次请求该给多少输出上限：按配置原样，不抬不封。
+
+        上游 ``summarize()`` 调 ``llm.chat`` 时根本不写 ``max_tokens``，它指望端点
+        按 ``cfg.llm.max_tokens`` 走；我们的 ``ChatClient`` 在 None 时干脆不发这个字段，
+        那两边就不是同一个请求了。所以这里把配置值补上——仍然不抬到 12288、不翻倍。
+        配置读不到（0）就不发这个字段，与上游一致。
+        """
+        if max_tokens is not None:
+            return _json_budget(max_tokens)
+        llm_cfg = getattr(self.app_cfg, "llm", None)
+        configured = int(getattr(llm_cfg, "max_tokens", 0) or 0)
+        return configured or None
+
+    def _capture_dense(self, text: str) -> None:
+        """严格档里 ① 的唯一数据来源：把这次回复真实的时间线条数记下来。
+
+        为什么这一步不要多问一轮：模型给了几条，字节已经在手上了。丢掉它们的是
+        副本 ``_coerce_timeline()`` 结尾那句 ``return out[:20]``，它只作用在交给
+        方法论那一层的解析结果上，管不到适配器自己看的这份原文。所以「保留 ①」
+        只需要在这里数一遍，``_apply_dense`` 覆盖时就有东西可用。
+
+        三条边界，都是刻意的：
+        1. 读不出就当没事发生——``_loads_object`` 返回空 dict 即返回。不许抛、不许改
+           正文、不许因此再发一次请求；成败判据仍然归副本的 ``_extract_json()``。
+        2. 只有真的多于 20 条才记，等于或少于都保持空：不截断的语义不能被「记一下」改坏。
+        3. **存原文，不清洗**——清洗只在 ``_apply_dense()`` 里做一次（那里用副本的
+           ``_coerce_text`` 洗成 ``t``/``text`` 同构条目，洗完再比条数）。一处存、一处洗：
+           这儿也洗一遍、覆盖前再洗一遍，等于同一份数据两套时序，将来两边规则一漂移
+           就说不清哪份是真的。为什么不干脆在这儿洗完存下来：这道门只负责「原文里到底
+           有 20 条还是 25 条」，宽松档 ``:403`` 记的也是原文，两边存同一种东西才谈得上
+           「语义一致」；在这儿洗会逼着宽松档也跟着洗，而那条路今天已经有自己的时序。
+
+        宽松档不走这里：它照旧由 ``_finalize()``（``:403``/``:412``）记同一件事。
+        """
+        data = _loads_object(text)
+        if not data:
+            return
+        rows = data.get("timeline") or []
+        if isinstance(rows, list) and len(rows) > 20:
+            self.dense_timeline = rows
 
     def _json_or_retry(self, text, messages, sink, temperature, max_tokens) -> str:
         """模型给的 JSON 只要还能读懂就修好交出去；真读不懂再问一次。
@@ -422,6 +600,8 @@ def build_bundle(
         tags=list(project.get("tags") or []),
         hot_replies=hot,
         platform_summary=platform_summary,
+        # WB 目前唯一字幕来源是本机 ASR；一旦支持导入外部 srt/人工整稿，这里必须改成按来源判定，
+        # 否则提示词里的可信度说明失真。
         source_kind="subtitle_ai",
         source_label="AI 转录字幕",
         source_trust="中（机器转录，可能有错字，时间戳可信）",
@@ -475,13 +655,55 @@ def _segment_end_ms(segments: list[dict[str, Any]]) -> int:
     return end
 
 
+def _clean_dense(rows: list[Any]) -> list[dict[str, str]]:
+    """把原文时间线洗成与副本同构的条目。
+
+    规则**逐条对齐**副本 `_coerce_timeline()`（`core/summary/summarizer.py:168-183`），
+    只去掉最后那句 `[:20]`：清洗只做清洗，上限是 ① 要突破的东西。不排序、不去重、
+    不补时间戳——补时间戳要读全片索引，那是 `_timeline_reply` 那条路的事，混进来会让
+    「① 只保住条数」这条命令变成「① 重新编一遍时间线」。
+
+    为什么不在这儿另写一份 strip：文本取值全部走副本的 `_coerce_text()`。副本将来改
+    语义，这里跟着变；自己抄一份就是第二套真相，而这轮一直在收的就是这种重复。
+    """
+    out: list[dict[str, str]] = []
+    for item in rows or []:
+        if isinstance(item, str):
+            text = bs_summarizer._coerce_text(item)
+            if text:
+                out.append({"t": "", "text": text})
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = bs_summarizer._coerce_text(item.get("text") or item.get("content"))
+        if not text:
+            continue
+        out.append({"t": bs_summarizer._coerce_text(item.get("t") or item.get("time")),
+                    "text": text})
+    return out
+
+
 def _apply_dense(summary: Any, llm: "SummaryLLM") -> Any:
-    """把适配器里那份更密的时间线覆盖回 Summary。
+    """把适配器里那份更密的时间线覆盖回 Summary。**不受对账模式开关影响**。
 
     bili-scribe 的 `_coerce_timeline()` 结尾 `return out[:20]` 是硬上限，两小时的视频
     因此永远只剩 20 条。它的业务代码不动，覆盖放在这一层做。
+
+    密时间线有两个来源，两边记的是同一件事：
+    - 严格档（默认）：`chat()` 拿到回复后 `_capture_dense()` 只读捕获原文里真实的
+      条数（`len(rows) > 20` 才记），一次额外请求都不发。
+    - 宽松档：`_finalize()` 在模型自报 >20 条时顺手记下（`:403`），或补写那一轮的
+      结果（`:412`）。
+    两个来源存的都可能是**原文条目**（模型爱用 `content`/`time` 而不是 `text`/`t`），
+    所以覆盖前先 `_clean_dense()` 洗成副本同构——`to_markdown()` 与前端只读 `t`/`text`
+    （渲染段 `:866-867`），未清洗的条目落进去，用户看到的时间线整段读不出内容。
+    清洗会丢掉空 text 的条目，所以**洗完再比条数**：洗完不比已有的多就原样返回，
+    不许为了「保条数」把洗不动的垃圾塞进去。
+    两边都没有更密的条目时这里不成立，summary 原样返回。拍板的是「对账设默认，但
+    保留 ①」，所以这道门不能加回 `if not _parity_strict()`：那等于把用户点名要保留
+    的东西塞回开关里。
     """
-    dense = list(getattr(llm, "dense_timeline", None) or [])
+    dense = _clean_dense(list(getattr(llm, "dense_timeline", None) or []))
     if len(dense) > len(getattr(summary, "timeline", None) or []):
         summary.timeline = dense
     return summary
@@ -557,6 +779,59 @@ def _usage_of(llm: "SummaryLLM", summary: Any = None) -> dict[str, Any]:
     }
 
 
+# -------------------------------------------------------------------- 预读复用
+#
+# 镜像 bili_scribe/app/service.py:252 的 `RefineContext` 与 :301/:347/:356 那套内存字典。
+# 磁盘那层缓存在 `video_workbench/infra/notecache.py`（按内容寻址、跨任务跨进程），
+# 这里这层仍然要留：同一版反复打磨时素材一个字没变，命中内存比命中磁盘更快、也不碰盘。
+# 两层堵的是同一笔钱——bs `core/summarizer.py:392-394` 实测：4 小时视频 7 段预读占一次
+# 总结 **38%** 的输入（32,663 tokens）；同一个 bvid 被重开成第二个任务时，第二遍那 13 万
+# prompt tokens 本可以一分不花。
+
+
+@dataclass
+class RefineContext:
+    """一次迭代打磨所需的上下文（对应 bs 的同名 dataclass）。
+
+    ``bundle.body`` **已经被换成分段笔记**，不是素材原文——留在内存里的始终是模型写出来
+    的摘要，第三方原文既不落库也不留着。元数据（标题、UP 主、时长、标签、来源）照常带着：
+    归约提示词要用它们，而且都是很小、不敏感的字段。
+    """
+
+    bundle: Bundle
+    material: PreparedMaterial
+
+
+#: 内存里最多留几条预读结果。取 bs 的 200，理由照它 :266-282 那段实测：一条 ≈39 KB
+#: （最坏 94 KB），200 条 ≈7.7–18 MB；原来写的是 20，**估错了约三个数量级**——20 条省下
+#: 不到 1 MB 内存，代价是早先那条视频想再改一次就得整条重跑（4 小时视频 = 86,428 tokens，
+#: 是真花钱）。内存几乎免费、重跑很贵，这个不对称就是取 200 的理由。
+MAX_PREPARED = 200
+
+_prepared: dict[str, RefineContext] = {}
+_prepared_lock = threading.Lock()
+
+
+def remember_prepared(key: str, context: RefineContext) -> None:
+    """存下这次任务的预读结果，供后续「再改一版」复用。超出上限就淘汰最早的一条。"""
+    if not key:
+        return
+    with _prepared_lock:
+        _prepared.pop(key, None)  # 先删再插，让它排到队尾
+        _prepared[key] = context
+        while len(_prepared) > MAX_PREPARED:
+            _prepared.pop(next(iter(_prepared)))
+
+
+def get_prepared(key: str) -> RefineContext | None:
+    """读预读结果。叫 get 不叫 take：**它不删除**——打磨是反复的，同一份笔记要支撑很多轮
+    修订，每轮都取走的话第二次就没了。"""
+    if not key:
+        return None
+    with _prepared_lock:
+        return _prepared.get(key)
+
+
 def run(
     project: dict[str, Any],
     segments: list[dict[str, Any]],
@@ -568,31 +843,64 @@ def run(
     danmaku: list[str] | None = None,
     platform_summary: str = "",
     model: str = "",
+    cache: Any = None,
+    task_key: str = "",
+    extra_prompt: "bool | None" = None,
 ) -> dict[str, Any]:
-    """跑一次总结。返回 ``{summary, usage, model, role, calls, notes, chars}``。"""
+    """跑一次总结。返回 ``{summary, usage, model, role, calls, notes, chars}``。
+
+    ``cache`` 是磁盘预读缓存（``infra/notecache.NoteCache``），``task_key`` 是内存复用那层
+    的钥匙——WB 里就是 ``project_id``，对应 bs 的 ``task_id``。两个都不传就是老行为：每次都
+    重新预读；传了以后长素材第二次跑这段一个请求都不发。
+
+    ``extra_prompt`` 覆盖配置里的 ``llm.extra_prompt``（默认关）。它按**请求**生效：
+    只有归约那一段被包在开关里，预读不吃它（预读用的是 MAP_SYSTEM，与角色无关）。
+    """
     bundle = build_bundle(project, segments, danmaku=danmaku,
                           platform_summary=platform_summary)
-    llm = SummaryLLM(client, model=model)
+    llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
-    key = (role or getattr(cfg.llm, "role", "") or DEFAULT_ROLE)
-    if key not in ROLE_KEYS:
-        raise WBError("VALIDATION", f"没有这个角色：{key}")
+    key, notice = resolve_role(role, getattr(cfg.llm, "role", ""))
+    if notice:
+        # 退役值来自配置（用户从没选过它），换默认角色并把原因写进日志。
+        # 判定规则不在这里，见 resolve_role。
+        ctx.log(notice)
+    role_obj = get_role(key)
     ctx.progress(0.02, "准备素材")
+    notify = _notify(ctx)
     try:
-        summary = bs_summarizer.summarize(
-            bundle, llm, cfg, progress=_notify(ctx), role_key=key)
+        # 预读单独跑一次，结果连同一份「笔记版 bundle」留在内存里，后续「再改一版」直接
+        # 复用（见 refine()）。缓存的是**笔记版**：body 已被换成分段笔记，素材原文不进来。
+        # 传 cache 是为了跨任务复用——同一个视频重开成第二个项目时，这一整段预读直接命中
+        # 磁盘、一次模型调用都不发。
+        material = bs_summarizer.prepare_material(
+            bundle, llm, cfg, progress=notify, cache=cache)
+        note_bundle = copy.copy(bundle)
+        note_bundle.body = material.body
+        remember_prepared(task_key, RefineContext(bundle=note_bundle, material=material))
+        # 附加提示词按请求生效（contextvar，不是模块级布尔）：batch_worker 并发跑两个
+        # job、一个开一个关时，两边的 system 各自正确。with 只包住归约那一段——
+        # 上面的预读用的是 MAP_SYSTEM，与角色无关，不该被这个开关影响。
+        with prompt_source.use_extra_prompt(extra_prompt_on(cfg, extra_prompt)):
+            summary = bs_summarizer.summarize(
+                bundle, llm, cfg, progress=notify, role_key=role_obj.key,
+                prepared=material)
     except SummarizeError as exc:
-        raise WBError("LLM_BAD_RESPONSE", f"模型没给出可用的总结 JSON：{exc}") from exc
+        raise WBError("LLM_BAD_RESPONSE",
+                      _strict_hint(f"模型没给出可用的总结 JSON：{exc}")) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
 
+    # ① 时间线补密：无条件生效，不受对账模式开关影响（拍板的是「设成默认，但保留①」）。
+    # 密条目有两个来源，两边记的是同一件事：严格档由 `chat()` 的 `_capture_dense()`
+    # 只读捕获原文条数（零额外请求），宽松档由 `_finalize()` 记下。都没有更密的
+    # 条目时这里空转一次：不发额外请求，也不改 summary。
     summary = _apply_dense(summary, llm)
-    role_obj = get_role(key)
     return {
         "summary": summary.to_dict(),
         "usage": _usage_of(llm, summary),
         "model": summary.model or llm.model,
-        "role": key,
+        "role": role_obj.key,
         "role_name": role_obj.name,
         "calls": llm.calls,
         "notes": list(llm.notes),
@@ -612,43 +920,77 @@ def refine(
     role: str = "",
     danmaku: list[str] | None = None,
     model: str = "",
+    cache: Any = None,
+    task_key: str = "",
+    extra_prompt: "bool | None" = None,
 ) -> dict[str, Any]:
-    """按用户的话改一版。素材**仍然带着**——只给上一版会像传话游戏一样越改越远。"""
+    """按用户的话改一版。素材**仍然带着**——只给上一版会像传话游戏一样越改越远。
+
+    命中 ``task_key`` 的内存预读结果时**不重跑预读**（对应 bs 的 `run_refine`：
+    「不重新采集、不重新预读——素材笔记直接从 ctx 拿」）。这就是迭代打磨的全部意义：
+    同一份素材改很多版，只付一次预读的钱（4 小时视频省下 32,663 tokens，占一次总结
+    输入的 38%）。没命中就看磁盘缓存 ``cache``，还没有才真的重跑一次预读。
+    """
     demand = (requirement or "").strip()
     if len(demand) < 4:
         raise WBError("VALIDATION", "说一下你想怎么改（至少几个字）")
     if not previous:
         raise WBError("CONFLICT", "还没有上一版总结，先生成一次")
     bundle = build_bundle(project, segments, danmaku=danmaku)
-    llm = SummaryLLM(client, model=model)
+    llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
-    key = role or str(previous.get("role") or DEFAULT_ROLE)
-    if key not in ROLE_KEYS:
-        key = DEFAULT_ROLE
+    key, notice = resolve_role(role,
+                               str(previous.get("role") or "")
+                               or getattr(cfg.llm, "role", ""))
+    if notice:
+        # 上一版很可能就是退役角色生成的（历史行里存着 standard）。这里不静默换：
+        # 按默认角色重做，同时把「为什么换了角色」写进日志，用户看得见。
+        # 判定规则不在这里，见 resolve_role。
+        ctx.log(f"{notice}重做")
+    role_obj = get_role(key)
     ctx.progress(0.05, "准备素材")
+    notify = _notify(ctx)
     try:
-        summary = bs_summarizer.summarize(
-            bundle,
-            llm,
-            cfg,
-            progress=_notify(ctx),
-            role_key=key,
-            refinement=Refinement(
-                requirement=demand,
-                previous=_json(previous),
-            ),
-        )
+        context = get_prepared(task_key)
+        if context is not None:
+            # 内存里已经有这版素材的笔记：直接拿，一个预读请求都不发。
+            # 传进归约的是**笔记版 bundle**（body 已被换成分段笔记，素材原文不进来），
+            # 与 bs `run_refine` 传的 `ctx.bundle` 同一个东西。
+            material = context.material
+            work_bundle = context.bundle
+        else:
+            material = bs_summarizer.prepare_material(
+                bundle, llm, cfg, progress=notify, cache=cache)
+            work_bundle = copy.copy(bundle)
+            work_bundle.body = material.body
+            remember_prepared(task_key, RefineContext(bundle=work_bundle, material=material))
+        # 与 run() 同一个开关、同一个理由：打磨也要吃到当前该不该接附加提示词。
+        with prompt_source.use_extra_prompt(extra_prompt_on(cfg, extra_prompt)):
+            summary = bs_summarizer.summarize(
+                work_bundle,
+                llm,
+                cfg,
+                progress=notify,
+                role_key=role_obj.key,
+                prepared=material,
+                refinement=Refinement(
+                    requirement=demand,
+                    previous=_json(previous),
+                ),
+            )
     except SummarizeError as exc:
-        raise WBError("LLM_BAD_RESPONSE", f"模型没给出可用的总结 JSON：{exc}") from exc
+        raise WBError("LLM_BAD_RESPONSE",
+                      _strict_hint(f"模型没给出可用的总结 JSON：{exc}")) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
+    # ① 同 run()：补密不受对账模式影响，dense 为空时逐字节原样返回。
     summary = _apply_dense(summary, llm)
     return {
         "summary": summary.to_dict(),
         "usage": _usage_of(llm, summary),
         "model": summary.model or llm.model,
-        "role": key,
-        "role_name": get_role(key).name,
+        "role": role_obj.key,
+        "role_name": role_obj.name,
         "calls": llm.calls,
         "notes": list(llm.notes),
         "chars": len(bundle.body),
@@ -667,7 +1009,7 @@ def prepare(
 ) -> PreparedMaterial:
     """只跑预读（长素材才真的发请求），给"先看看素材有多长"这类场景用。"""
     bundle = build_bundle(project, segments)
-    llm = SummaryLLM(client)
+    llm = SummaryLLM(client, cfg=cfg)
     return bs_summarizer.prepare_material(bundle, llm, cfg, _notify(ctx), cache=cache)
 
 
@@ -719,7 +1061,16 @@ def to_markdown(summary: dict[str, Any]) -> str:
         lines.append("")
     meta = []
     if data.get("role"):
-        meta.append(f"角色：{data['role']}")
+        # 现役角色沿用 key：导出正文里的这一行要和库里存的记录对得上。
+        # 历史行里的退役/未知 key 不能只甩一个界面上已经找不到的字符串——
+        # 既不报错也不留白，而是标出来它是什么。
+        # 这里**故意不用** summary.role_label()（那个给界面用，返回「标准（已停用）」）：
+        # 导出是出处，必须按存进库的 key 对回那一行；界面是展示，要说人话。
+        # 两种口径同时存在是有意的——别为消掉一个「（已停用）」字面量把出处改掉。
+        shown = str(data["role"])
+        if shown not in ROLE_KEYS:
+            shown += "（已停用）" if shown in RETIRED_ROLES else "（未知角色）"
+        meta.append(f"角色：{shown}")
     if data.get("model"):
         meta.append(f"模型：{data['model']}")
     if data.get("chunks"):
@@ -741,12 +1092,17 @@ def _json(data: Any) -> str:
 
 #: 给服务层与前端用的角色清单（带 passes，界面要标"三轮回"）。
 def roles_view() -> list[dict[str, Any]]:
+    # 真源三兄弟（prompt_source / prompt_bytes / prompt_sha8）直接透传权威层的判断，
+    # 前端只渲染。这里不重算、不写文件名映射——映射的唯一出处是 prompt_source.MAP。
     return [
         {
             "key": item["key"],
             "name": item["name"],
             "tagline": item.get("tagline", ""),
             "passes": item.get("passes", 1),
+            "prompt_source": item.get("prompt_source"),
+            "prompt_bytes": item.get("prompt_bytes", 0),
+            "prompt_sha8": item.get("prompt_sha8", ""),
         }
         for item in ROLES
     ]
@@ -757,7 +1113,15 @@ MIN_JSON_TOKENS = 12288
 
 
 def _json_budget(max_tokens: int | None, floor: int = MIN_JSON_TOKENS) -> int:
-    """重问、续写、分批各步用多少输出预算：取「配置的两倍」与 floor 的较大者，上限 16384。"""
+    """重问、续写、分批各步用多少输出预算：取「配置的两倍」与 floor 的较大者，上限 16384。
+
+    默认（对账档，``WB_SUMMARY_PARITY_STRICT`` 没设就算）不抬到 12288、不翻倍、也不封
+    16384：上游用的就是 ``cfg.llm.max_tokens``，多给一个 token 都算 WB 在改变输出预算。
+    只有显式设成 0/false/off 才走上面那套抬升——那也是这套阶梯唯一还会被执行的时候
+    （严格档下 `chat()` 直通，根本进不到重问/续写/分批）。
+    """
+    if _parity_strict():
+        return int(max_tokens or 0)
     base = int(max_tokens or 0)
     return min(max(int(floor), base * 2), 16384)
 

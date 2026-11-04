@@ -103,7 +103,11 @@ def test_config_rejects_header_with_newline() -> None:
     from video_workbench.app.errors import WBError
     from video_workbench.config import WorkbenchConfig
 
-    cfg = WorkbenchConfig.load()
+    # 刻意用 `WorkbenchConfig()` 而不是 `load()`：load() 会去读**真实家目录**那份配置，
+    # 而搬家之后「新家还没有文件、旧家有」正是它顺手写一次新家的触发点
+    # （见 tests/wb/test_config_home_split.py 的隔离段）。这条用例只要一个能过 validate
+    # 的对象，不需要任何盘上现场，就不该顺手把用户机器迁移一次。
+    cfg = WorkbenchConfig()
     cfg.llm.extra_headers = {"X-Bad": "a" + chr(13) + "b"}
     try:
         validate(cfg)

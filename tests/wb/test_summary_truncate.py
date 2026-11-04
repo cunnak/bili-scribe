@@ -23,6 +23,7 @@ from video_workbench.core.summarizer import (  # noqa: E402
     _json_budget,
     _looks_truncated,
 )
+from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 GOOD = {
     "one_line": "一句话结论",
@@ -71,7 +72,8 @@ def test_looks_truncated_recognises_half_object():
     assert _looks_truncated("") is False
 
 
-def test_budget_floors_at_twelve_thousand():
+# 档位=宽松：②输出预算抬升只在宽松档生效（默认档实测还原 cfg 的 4096，正是这次红的原因）。
+def test_budget_floors_at_twelve_thousand(loose_env):
     # 两小时视频 level2 正文一万六千字：8192 token 到头会断在半句（v7 现场），抬到 12288
     assert MIN_JSON_TOKENS == 12288
     assert _json_budget(4096) == 12288         # 配置太小 → 抬到下限
@@ -82,7 +84,8 @@ def test_budget_floors_at_twelve_thousand():
 
 
 
-def test_truncated_output_is_continued_not_reasked():
+# 档位=宽松：续写是③阶梯的一步。
+def test_truncated_output_is_continued_not_reasked(loose_env):
     client = RecClient([HALF, REST])
     llm = SummaryLLM(client, model="stub-model")
     notes: list[str] = []
@@ -111,7 +114,8 @@ def test_truncated_output_is_continued_not_reasked():
     assert "接着写" in last and "不要重复" in last
 
 
-def test_continuation_that_also_truncates_falls_back_to_reask():
+# 档位=宽松：续写→拆分→重问的降级顺序，属③。
+def test_continuation_that_also_truncates_falls_back_to_reask(loose_env):
     # 续写失败 → 分批失败（两步都给废话）→ 才重问
     client = RecClient([HALF, HALF, "分批正文不行", "分批时间线也不行",
                         json.dumps(GOOD, ensure_ascii=False)])
@@ -129,7 +133,8 @@ def test_continuation_that_also_truncates_falls_back_to_reask():
 
 
 
-def test_repairable_output_short_circuits_without_extra_call():
+# 档位=宽松：repair_json 短路是③的第一步；严格档不修 JSON。
+def test_repairable_output_short_circuits_without_extra_call(loose_env):
     raw = '{"one_line":"一行",' + chr(10) + '"summary_md":"第一段' + chr(10) + '第二段"}'
     client = RecClient([raw])
     llm = SummaryLLM(client, model="stub-model")

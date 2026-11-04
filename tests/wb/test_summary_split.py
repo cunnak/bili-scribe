@@ -22,6 +22,7 @@ import pytest  # noqa: E402
 
 from video_workbench.app.errors import WBError  # noqa: E402
 from video_workbench.core.summarizer import SummaryLLM  # noqa: E402
+from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 BODY = {
     "one_line": "一句话结论",
@@ -65,7 +66,8 @@ def make_llm(replies):
     return llm, client
 
 
-def test_split_after_truncation_and_failed_retry():
+# 档位=宽松(`WB_SUMMARY_PARITY_STRICT=0`)：③修复→续写→拆分→重问整条阶梯只在宽松档走；默认严格档一次即失败（parity I 组另钉那边）。
+def test_split_after_truncation_and_failed_retry(loose_env):
     # 截断 → 续写没救回来 → 直接分批（不再先花一次重问，v7 现场那样重问会同样截断）
     llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
                             json.dumps(TIMELINE, ensure_ascii=False)])
@@ -84,7 +86,8 @@ def test_split_after_truncation_and_failed_retry():
 
 
 
-def test_split_body_step_gets_bigger_budget():
+# 档位=宽松：拆分是③的一环，②预算抬升也只在宽松档生效。
+def test_split_body_step_gets_bigger_budget(loose_env):
     from video_workbench.core.summarizer import MIN_JSON_TOKENS
 
     llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
@@ -96,7 +99,8 @@ def test_split_body_step_gets_bigger_budget():
 
 
 
-def test_split_gives_up_when_body_step_is_garbage():
+# 档位=宽松：钉「拆分失败后如何收尾」，严格档根本进不到拆分。
+def test_split_gives_up_when_body_step_is_garbage(loose_env):
     llm, _ = make_llm([TRUNCATED, "", "还是不行", "我也不知道", "也不知道"])
     with pytest.raises(WBError) as err:
         llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True,
@@ -104,7 +108,8 @@ def test_split_gives_up_when_body_step_is_garbage():
     assert err.value.code == "LLM_BAD_RESPONSE"
 
 
-def test_split_keeps_body_when_timeline_step_fails():
+# 档位=宽松：部分成功保留正文，属③阶梯内部行为。
+def test_split_keeps_body_when_timeline_step_fails(loose_env):
     llm, _ = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
                        "时间线我给不出来"])
     text = llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True,
@@ -116,7 +121,8 @@ def test_split_keeps_body_when_timeline_step_fails():
 
 
 
-def test_dense_timeline_is_left_alone():
+# 档位=宽松：这条走 chat()，严格档下 chat 直接短路、什么都不做，它会在「什么都没发生」上白白变绿——钉到加固真的会跑的档位才有牙。
+def test_dense_timeline_is_left_alone(loose_env):
     """时间线本来就够密，就不要再花一次调用去补。"""
     dense = {"timeline": [{"t": "%02d:%02d" % (i // 2, (i % 2) * 30), "text": "第%d段" % i}
                           for i in range(40)]}
@@ -128,7 +134,8 @@ def test_dense_timeline_is_left_alone():
     assert llm.notes == []
 
 
-def test_sparse_timeline_is_topped_up():
+# 档位=宽松：补密发生在③的 _finalize 里，严格档不走③。
+def test_sparse_timeline_is_topped_up(loose_env):
     """两小时视频只给 20 条时间线时，单独补一轮到目标条数。"""
     sparse = {"timeline": [{"t": "1:%02d" % i, "text": "第%d段" % i} for i in range(20)]}
     fuller = {"timeline": [{"t": "%02d:%02d" % (i, 0), "text": "补第%d段" % i} for i in range(55)]}

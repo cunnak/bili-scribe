@@ -12,6 +12,7 @@ import pytest
 from video_workbench.core import summarizer
 from video_workbench.core.summarizer import SummaryLLM
 from video_workbench.infra.jsonfix import repair_json
+from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 
 class Flaky:
@@ -53,7 +54,8 @@ def test_repair_returns_empty_when_hopeless():
     assert repair_json("我今天不想按格式回话") == ""
 
 
-def test_adapter_hands_canonical_json_to_the_parser():
+# 档位=宽松：交出去「严格可解析」靠 repair 这一步，严格档原样透传。
+def test_adapter_hands_canonical_json_to_the_parser(loose_env):
     """适配器交出去的必须是**严格可解析**的文本，否则 bili-scribe 那边照样炸。"""
     llm = SummaryLLM(Flaky(['{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段'
                             + chr(10) + '第二段"}']))
@@ -61,7 +63,8 @@ def test_adapter_hands_canonical_json_to_the_parser():
     assert json.loads(text)["one_line"] == "一行"
 
 
-def test_adapter_asks_again_once_then_succeeds():
+# 档位=宽松：重问救场是③的最后一档。
+def test_adapter_asks_again_once_then_succeeds(loose_env):
     # 阶梯：主请求 → 分批（正文/时间线）→ 重问。分批都没成，重问救回来。
     client = Flaky(["这不是 JSON", "分批正文不行", "分批时间线也不行",
                     json.dumps({"one_line": "救回来了"})])
@@ -79,7 +82,8 @@ def test_adapter_asks_again_once_then_succeeds():
 
 
 
-def test_adapter_gives_up_after_second_failure_with_truncation_hint():
+# 档位=宽松：钉「阶梯用尽之后的报错」；默认档那句 `设 WB_SUMMARY_PARITY_STRICT=0 后重试` 是另一种失败，两者不许混用。
+def test_adapter_gives_up_after_second_failure_with_truncation_hint(loose_env):
     # 主请求 → 分批正文 → 分批时间线 → 重问，四次都是废话才放弃
     llm = SummaryLLM(Flaky(["废话一", "废话二", "废话三", "废话四"]))
     from video_workbench.app.errors import WBError

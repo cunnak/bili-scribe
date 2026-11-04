@@ -6,6 +6,25 @@
 2. **角色换得动**：选 ``xueshu`` 真的换了提示词，不是换了个下拉框；
 3. **版本存得住**：每次生成/打磨各存一版，恢复不删历史；
 4. **失败说得清**：模型不吐 JSON 时报 LLM_BAD_RESPONSE，而不是把空总结入库。
+
+## ``standard`` 退役之后，本目录里 ``role="standard"`` 的分类标准
+
+（task-5。别凭字面量判断漏没漏改——按它走没走生成路径判断。）
+
+1. **走生成路径 → 改成 ``"wengao"``。** 判据：这个字符串最终会流到
+   ``summarizer.run/refine`` 的 ``role`` 参数、或 ``_summary_job`` /
+   ``_collection_job`` / ``ov.run`` / ``summary.start`` 的 payload 里。退役角色在这条路上
+   必须被拒（``WBError(VALIDATION)``），留着它只会让用例红在错误的原因上。
+2. **直接写库、或手搭的历史行/内容 dict → 保留 ``"standard"`` 字面量。** 判据：它进的是
+   ``repo.summary_insert(...)`` 的 ``role=`` / ``content={...}``，或测试自己造的 version dict。
+   这些正是「退役前存的东西今天还读得出来」的证据；把它们一起改掉，就等于把这条保证删了。
+   正证集中在 ``test_legacy_standard_rows_stay_readable_after_retirement`` 一处。
+3. **角色清单本身 → 按退役更新断言。** 见 ``test_roles_endpoint_lists_every_role``。
+
+与派单行表不一致的地方（按第 1/2 类判据核过代码才改判，已在交付里点名）：
+``test_collection_overview.py:119``、``test_publish_gates.py:175``、
+``test_summary_usage.py:156`` 实际是 ``repo.summary_insert`` 直接写库 → 保留；
+``test_summary.py:366/374/386/391/444`` 实际走 ``run_job`` 生成 → 改成 ``wengao``。
 """
 
 from __future__ import annotations
@@ -16,7 +35,9 @@ from pathlib import Path
 import pytest
 
 from video_workbench.core import summarizer
+
 from video_workbench.core.subtitles import normalize
+from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 
 GOOD = {
@@ -163,19 +184,22 @@ def test_run_produces_summary_with_role_and_model():
         client=client,
         cfg=_cfg(),
         ctx=ctx,
-        role="standard",
+        role="wengao",
     )
     assert result["summary"]["one_line"] == "这期讲三件事"
-    assert result["role"] == "standard"
+    assert result["role"] == "wengao"
     assert result["model"] == "stub-summary"
-    assert result["calls"] == 1
+    # 同步断言（分类标准第 1 类）：原来 standard 是 passes=1，一次调用就出结果；
+    # 换成本目录的默认方法论角色 wengao 之后走三轮回（生成 → 自我批判 → 修订），
+    # 所以是 3 次。**这不是回归**，正是这次复刻要买的东西。
+    assert result["calls"] == 3
 
 
 def test_role_changes_the_system_prompt():
     """角色不是装饰：选学术角色时必须换掉 system 提示词。"""
     one = StubClient([json.dumps(GOOD)])
     summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=one, cfg=_cfg(), ctx=FakeCtx(), role="standard")
+                   client=one, cfg=_cfg(), ctx=FakeCtx(), role="wengao")
     two = StubClient([json.dumps(GOOD)])
     summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
                    client=two, cfg=_cfg(), ctx=FakeCtx(), role="xueshu")
@@ -208,7 +232,8 @@ def test_non_json_reply_raises_bad_response():
 
 
 
-def test_non_json_reply_is_asked_again_once():
+# 档位=宽松：重问一次是③；默认严格档一次即抛（parity I 组钉那边）。
+def test_non_json_reply_is_asked_again_once(loose_env):
     """模型偶尔会把 JSON 说成人话；走完分批仍不行，重问一次能救回来就别让用户白跑一轮预读。"""
     from video_workbench.infra.jsonfix import repair_json
 
@@ -233,7 +258,8 @@ def test_progress_reports_chinese_stages():
     assert all(stage and stage.isascii() is False for stage in stages if stage)
 
 
-def test_json_mode_rejected_falls_back_once():
+# 档位=宽松：`response_format` 不被接受时退回普通请求，这段兜底在严格档 chat() 里被整段跳过。
+def test_json_mode_rejected_falls_back_once(loose_env):
     """端点不认 response_format 时要能退回来，不能让用户永远出不了总结。"""
 
     class Picky(StubClient):
@@ -252,7 +278,11 @@ def test_json_mode_rejected_falls_back_once():
     client = Picky()
     result = summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
                             client=client, cfg=_cfg(), ctx=FakeCtx())
-    assert client.modes == [True, False]
+    # 同步断言（分类标准第 1 类）：_cfg() 的默认角色换成 wengao 之后是三轮回，
+    # 退回形状因此是 5 项——两个 JSON 请求（生成、修订）各配一次退回，
+    # 中间那次「自我批判」本来就不开 json_mode。
+    # 「每个 json_mode 请求都恰好有一次 False 紧跟其后」才是这条要守的东西。
+    assert client.modes == [True, False, False, True, False]
     assert result["summary"]["one_line"]
     assert any("JSON 模式" in note for note in result["notes"])
 
@@ -274,7 +304,14 @@ def test_long_material_is_chunked_by_policy():
 def test_refine_requires_previous_and_keeps_material():
     from video_workbench.app.errors import WBError
 
-    client = StubClient([json.dumps({**GOOD, "revise_note": "收紧了措辞"})])
+    # 同步断言（分类标准第 1 类）：默认角色改成 wengao 之后是三轮回
+    # （生成 → 批判 → 修订），最终那一版的字段来自**第三次**调用，
+    # 所以 revise_note 要挂在脚本的第三项上；第一项只是草稿。
+    client = StubClient([
+        json.dumps(GOOD),
+        "诊断：正文偏长，要点没有排序。",
+        json.dumps({**GOOD, "revise_note": "收紧了措辞"}),
+    ])
     with pytest.raises(WBError) as exc:
         summarizer.refine({"title": "t"}, [{"start_ms": 0, "text": "x"}], {},
                           "再短一点", client=client, cfg=_cfg(), ctx=FakeCtx())
@@ -302,9 +339,9 @@ def test_refine_rejects_too_short_requirement():
 
 
 def test_markdown_carries_every_section():
-    md = summarizer.to_markdown({**GOOD, "role": "standard", "model": "m", "chunks": 2})
+    md = summarizer.to_markdown({**GOOD, "role": "wengao", "model": "m", "chunks": 2})
     for piece in ("这期讲三件事", "## 要点", "第一件", "## 时间线", "`00:01`",
-                  "## 评论用短版", "角色：standard", "模型：m", "分段：2"):
+                  "## 评论用短版", "角色：wengao", "模型：m", "分段：2"):
         assert piece in md
 
 
@@ -363,7 +400,7 @@ def test_summary_start_rejects_unknown_role(service, tmp_path, monkeypatch):
 def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     result, ctx = run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-                          {"kind": "fresh", "role": "standard"}, project)
+                          {"kind": "fresh", "role": "wengao"}, project)
     root = Path(service.repo.project_get(project["id"])["root_dir"])
     assert (root / "summary.md").is_file()
     assert (root / "summary.json").is_file()
@@ -371,7 +408,7 @@ def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
     assert result["chars"] > 0
     saved = service.repo.summary_latest(project["id"])
     assert saved["content"]["one_line"] == "这期讲三件事"
-    assert saved["role"] == "standard"
+    assert saved["role"] == "wengao"
     assert service.repo.project_get(project["id"])["stage"] == "summarized"
     assert any(
         item["kind"] == "summary" and item["path"] == str(root / "summary.md")
@@ -383,12 +420,12 @@ def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
 def test_two_versions_both_kept_and_numbered(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-            {"kind": "fresh", "role": "standard"}, project)
+            {"kind": "fresh", "role": "wengao"}, project)
     run_job(service, monkeypatch, StubClient([json.dumps({**GOOD, "one_line": "第二版"})]),
             {"kind": "fresh", "role": "xueshu"}, project)
     rows = service.repo.summary_list(project["id"])
     assert [row["version"] for row in rows] == [2, 1]
-    assert {row["role"] for row in rows} == {"standard", "xueshu"}
+    assert {row["role"] for row in rows} == {"wengao", "xueshu"}
 
 
 def test_refine_creates_new_version_with_note(service, tmp_path, monkeypatch):
@@ -398,7 +435,11 @@ def test_refine_creates_new_version_with_note(service, tmp_path, monkeypatch):
     base = service.repo.summary_latest(project["id"])
     result, _ctx = run_job(
         service, monkeypatch,
-        StubClient([json.dumps({**GOOD, "revise_note": "把要点压到两条"})]),
+        # 同步脚本长度（分类标准第 1 类）：默认角色改成 wengao 之后走三轮回，
+        # 入库的是**修订那一次**的产出，所以 revise_note 挂在第三项。
+        StubClient([json.dumps(GOOD),
+                    "诊断：要点没有排序。",
+                    json.dumps({**GOOD, "revise_note": "把要点压到两条"})]),
         {"kind": "refine", "requirement": "要点压到两条", "previous_id": base["id"]},
         project)
     assert result["version"] == 2
@@ -441,14 +482,73 @@ def test_get_returns_latest_and_versions(service, tmp_path, monkeypatch):
     assert data["found"] is True
     assert data["summary"]["content"]["one_line"] == "这期讲三件事"
     assert data["versions"][0]["chars"] > 0
-    assert data["versions"][0]["role"] == "standard"
+    assert data["versions"][0]["role"] == "wengao"
 
 
 def test_roles_endpoint_lists_every_role(service):
+    """角色清单：standard 已退役不再出现；清单 = 「两侧共有的那段」+「WB 自造的尾巴」。
+
+    分类标准第 3 类（角色清单 → 按退役更新）：这条以前断言的是「八个角色都在」，
+    其中 standard 还是默认位。退役之后它**不该再出现**——用户选到一个不能生成总结的角色，
+    比少一个角色糟得多。顺序也钉住，因为那就是界面下拉的顺序。
+
+    task-24 加了 `shipin` 之后，逐字等于那 7 个不再成立。这里刻意**不写死总数**
+    （`shipin` 与 `renhua` 方法论同源，用户可能拍板合并），改成两段式：
+    前段必须逐字等于 bs 存活角色（共有段，漂了就说明副本被单方面动过），
+    后段只许是 bs 没有的角色（WB 权威层自造的，且必须排在后面——插到中间会改下拉顺序，
+    历史版本对比会错位）。退役那半判据一个字没松。
+    """
+    from bili_scribe.core import roles as bs_roles
+
     data = rpc(service, "summary.roles")
     keys = [item["key"] for item in data["roles"]]
-    assert "standard" in keys and "xueshu" in keys and "jinglian" in keys
+    bs_keys = [role.key for role in bs_roles.ALL_ROLES]
+    survivors = [key for key in bs_keys if key != "standard"]
+    assert keys[:len(survivors)] == survivors, (
+        f"共有角色那一段漂了：期望 {survivors} 开头，实得 {keys}")
+    extras = keys[len(survivors):]
+    assert extras, f"公开面只剩 bs 那 {len(survivors)} 个：WB 自造的角色没进清单"
+    assert all(key not in bs_keys for key in extras), (
+        f"后段 {extras} 里出现了 bs 已有的角色：前段被删短了，不是新角色进来了")
+    assert "standard" not in keys, "退役角色还在清单里，用户选了就会拿到 VALIDATION"
     assert data["default"] in keys
+    assert data["default"] == "wengao"
+
+
+def test_legacy_standard_rows_stay_readable_after_retirement(service, tmp_path, monkeypatch):
+    """退役只关**生成入口**，不关历史数据——分类标准第 2 类的正证。
+
+    这条是专门补的：库里有退役前留下的版本行（role 写死 "standard"，直接经 repo 入库、
+    不经过生成），它们必须仍然列得出来、取不出来会丢、也重新渲染得了。
+    把「测试里还留着 standard 字面量」这件事写成一条有针对性的用例，而不是散落在各处的
+    残留：散落会让人误以为漏改了，而这条让「历史可读」变成一个有人守的承诺。
+    """
+    from video_workbench.core import summarizer
+
+    project = make_project(service, tmp_path)
+    row = service.repo.summary_insert(
+        project["id"],
+        content={**GOOD, "role": "standard"},
+        content_md=summarizer.to_markdown({**GOOD, "role": "standard"}),
+        role="standard", model="stub-legacy")
+
+    assert [item["role"] for item in service.repo.summary_list(project["id"])] == ["standard"]
+    assert service.repo.summary_latest(project["id"])["id"] == row["id"]
+    assert service.repo.summary_get(row["id"])["content"]["one_line"] == GOOD["one_line"]
+
+    data = rpc(service, "summary.get", {"id": project["id"]})
+    assert data["found"] is True
+    assert data["versions"][0]["role"] == "standard"
+    # 界面上要能解释这个名字，不能抛——role_label 是退役角色的唯一出口。
+    assert "已停用" in summarizer.role_label("standard")
+    # 而生成入口必须拒绝它。summary_start 先查「模型配好了没」再查角色
+    # （service.py:2542-2550），所以要先把假客户端装上，否则拿到的是
+    # LLM_NOT_CONFIGURED，测不到角色这一层。
+    configure(service, monkeypatch, StubClient([json.dumps(GOOD)]))
+    error = err(service, "summary.start",
+                {"project_id": project["id"], "role": "standard"})
+    assert error["code"] == "VALIDATION"
+    assert "standard" in error["message"], f"错误要说清是哪个角色不行：{error['message']}"
 
 
 def test_job_does_not_downgrade_late_stage(service, tmp_path, monkeypatch):
@@ -503,5 +603,5 @@ def _cfg(**llm):
         setattr(cfg.llm, key, value)
     cfg.llm.max_tokens = 4096
     cfg.llm.temperature = 0.3
-    cfg.llm.role = "standard"
+    cfg.llm.role = "wengao"
     return cfg

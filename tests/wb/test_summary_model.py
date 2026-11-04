@@ -61,7 +61,7 @@ def test_summary_start_forwards_bare_model(service, tmp_path, monkeypatch):
     monkeypatch.setattr(service.jobs, "submit",
                         lambda job_type, project_id=None, payload=None: seen.update(payload or {}) or {"id": "job_s"})
     data = rpc(service, "summary.start",
-               {"project_id": project["id"], "role": "standard", "model": "deepseek-reasoner"})
+               {"project_id": project["id"], "role": "wengao", "model": "deepseek-reasoner"})
     assert seen["model"] == "deepseek-reasoner"
     assert data["model"] == "deepseek-reasoner"
 
@@ -74,7 +74,7 @@ def test_summary_start_forwards_provider_qualified_model(service, tmp_path, monk
     monkeypatch.setattr(service.jobs, "submit",
                         lambda job_type, project_id=None, payload=None: seen.update(payload or {}) or {"id": "job_s"})
     data = rpc(service, "summary.start",
-               {"project_id": project["id"], "role": "standard", "model": "mo/moonshot-v1-8k"})
+               {"project_id": project["id"], "role": "wengao", "model": "mo/moonshot-v1-8k"})
     assert seen["provider"] == "mo"
     assert seen["model"] == "moonshot-v1-8k"
 
@@ -84,7 +84,7 @@ def test_summary_start_rejects_unknown_provider_in_model(service, tmp_path, monk
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
     error = err(service, "summary.start",
-                {"project_id": project["id"], "role": "standard", "model": "nope/x"})
+                {"project_id": project["id"], "role": "wengao", "model": "nope/x"})
     assert error["code"] == "VALIDATION"
     assert "nope" in error["message"]
 
@@ -93,6 +93,7 @@ def test_refine_without_model_keeps_previous_version_model(service, tmp_path, mo
     _two_cards(service)
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
+    # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
     service.repo.summary_insert(project_id=project["id"], role="standard",
                                 model="deepseek-reasoner", content_md="旧的一版",
                                 content={"one_line": "旧的一版"})
@@ -113,7 +114,7 @@ def test_summary_job_uses_model_from_payload(service, tmp_path, monkeypatch):
     from test_summary import FakeCtx
 
     result = service._summary_job(FakeCtx(), {
-        "project_id": project["id"], "kind": "fresh", "role": "standard",
+        "project_id": project["id"], "kind": "fresh", "role": "wengao",
         "model": "deepseek-reasoner", "provider": "",
     })
     assert stub.model == "deepseek-reasoner", "客户端没换成选中的模型"
