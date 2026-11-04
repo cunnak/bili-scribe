@@ -55,6 +55,15 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 - **已知残留（有意保留，不是缺陷）**：`info` 与 `--check` **仍会建库、建 `logs/`、落 DB 备份**——它们的语义就是体检「配置写得进去、数据目录可写」。**别为了"统一"把它们也改成不装配**，那会让 `--check` 变成 no-op；要改得先让 `app.onboard` 不摸网关，那是另一笔改动。
 - 复现这条要用**含 foreign 键的夹具**（`storage.cache_root` 一个就够）。真实两家现在 `foreign_keys()` 都是 `[]`，**拿真实配置当夹具复现不出来 —— 那不等于缺陷不存在**（本轮 lead 就在这上面错过一次，并据此否掉过一张真单）。
 
+### 长素材的输出预算边界，以及 bs 那条自愈腿为什么救不了（2026-11-05 定，task-50）
+
+- 走分段预读的长素材（`pj_0c24bce5cf5c` 4126 段 / 39938 字），**输入最大的不是 generate、也不是 critique，而是第三轮 revise**：副本 `core/summary/summarizer.py:597`，user 内容 = 素材正文 + 待评稿 + 批判意见，实测 **55013 字符**（critique 50674、generate 49504）。报「哪一轮最大」之前必须三轮都读过。
+- 三轮调用**都不写 `max_tokens`**；严格档（默认）下适配器 `_parity_max_tokens(None)` 只是**把配置值原样补上**，不抬不封 ⇒ **每一轮的输出预算恒等于 `cfg.llm.max_tokens`**。`_json_budget` / `MIN_JSON_TOKENS=12288` 那套阶梯只在 `max_tokens` 显式传入时生效，严格档实测 11 次调用 `max_tokens_arg` 全 None ⇒ **一次都没参与**。别拿它当"预算兜底"。
+- 因此 `max_tokens=16384` + 推理型模型（`workbuddy/deepseek-v4.1-flash` 等）在长素材上**必然**死在 revise：detail 逐字 `finish_reason=length，思考用了 16384 tokens`。实测两条对症解法（都不改产品码）：**抬到 32768**（同模型同素材 11/11 全过，总 541s）；或**换非推理模型**（`workbuddy/glm-5.3-flash` + 16384 也 11/11 全过，总 809s，预读方差大）。
+- **`bili_scribe` 那条"空正文自动关思考重问"的自愈腿在这台机器上是空转**，别照搬进 WB 当修复：`_payload` 在 `thinking=="auto"` 时根本不发 `enable_thinking`（bs 配置默认就是 auto），所以它的第一次请求与 WB 严格档逐字同形；它多做的只有"带 `enable_thinking:false` 重问一次"。实测该端点**不遵守这个参数**——同一小题三发 `reasoning_tokens` = auto 110 / off(**false**) **140** / on 106，全都照样思考。⇒ 同 payload 下 bs 也会走到 `bili_scribe/infra/llm.py:452 raise LlmError`，只是换一句文案。**这不是"WB 与 bs 输出不一致"的破口，是端点能力**；判"两边行为不同"之前先用这种几秒的小请求把布尔问题答掉，别喂 10 分钟原 payload。
+- 端到端探针的零改动量法（副本是字节锁的，**别去加 print**）：进程内包一层 `video_workbench.core.summarizer.SummaryLLM.chat`，打印 `sum(len(str(m["content"])))`、`kw["max_tokens"]`、`_parity_strict()`，挂在 `ad.run(...)` 之前。现成脚本 `Temp/wb_t50_probe.py`，三份读数 `Temp/wb_t50_probe{,_mt32768,_flash}.json`。
+- **旧探针 `Temp/wb_real_e2e.py` 没有 try/except**，异常直接冒到 stderr ⇒ 从不落 JSON 产物，事后只能靠已被消费的 job 输出。**端到端脚本必须自己捕异常并把 `ChatError.detail` 写进产物**，否则失败证据活不过一轮。
+
 ## 五、打包版（`dist/VideoWorkbench`）
 
 - 构建：`.venv/Scripts/python.exe scripts/build_wb.py`（`SPEC` 指向**仓库根**的 `video_workbench.spec`，不在 `scripts/` 下）。
