@@ -212,6 +212,27 @@ class Cli:
             self.say("体检：" + "；".join(f"{s.get('title')}={s.get('status')}" for s in steps))
         return EXIT_OK
 
+    def cmd_roles(self) -> int:
+        """角色名单与各自真源：只读 `summary.roles`，不联网、不写配置、不调 `save()`。
+
+        走 RPC 而不是在这里 `import roles_view()` —— 同一个 owner、同一份载荷，
+        设置页读的就是这个。这条命令是给**打好的 exe** 用的离线自证：
+        不开界面、不配密钥、不发任何请求，也能证明包里那 6 篇 txt 真的被读到、
+        绑在哪些角色上（`prompt_sha8` 就是包内那一份的哈希）。
+        """
+        data = self.rpc("summary.roles")
+        self.emit("roles", data)
+        if not self.json:
+            rows = list(data.get("roles") or [])
+            retired = "、".join(str(r) for r in (data.get("retired") or [])) or "无"
+            print(f"角色 {len(rows)} 个（默认：{data.get('default')}；已退役：{retired}）")
+            for row in rows:
+                src = row.get("prompt_source") or "内置压缩版（无 txt 真源）"
+                sha8 = str(row.get("prompt_sha8") or "")
+                tail = f" · {row.get('prompt_bytes')} B · {sha8}" if sha8 else ""
+                print(f"  {row.get('key')}｜{row.get('name')}｜{row.get('passes')} 轮｜{src}{tail}")
+        return EXIT_OK
+
     def cmd_jobs(self) -> int:
         jobs = self.rpc("job.list")
         self.emit("jobs", jobs)
@@ -485,15 +506,18 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", default="", help="配置文件路径（默认 ~/.bili-scribe/config.yaml）")
+    parser.add_argument("--config", default="", help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只读）")
     parser.add_argument("--json", action="store_true", help="输出一行 JSON，日志走 stderr")
     parser.add_argument("--quiet", action="store_true", help="不打印过程信息")
     parser.add_argument("--timeout", type=float, default=0, help="等待任务的超时秒数（0 = 不限）")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
+    parser.add_argument("--roles", action="store_true",
+                        help="等价于 `roles` 子命令：离线打印角色名单与各自真源（打包验收用）")
     subs = parser.add_subparsers(dest="cmd", required=True)
 
     subs.add_parser("info", help="环境与依赖状态")
     subs.add_parser("jobs", help="最近的任务")
+    subs.add_parser("roles", help="角色名单与各自真源（离线：不联网、不写配置）")
 
     p = subs.add_parser("download", help="解析并下载")
     p.add_argument("--url", required=True)
@@ -543,8 +567,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_GLOBAL_FLAGS = ("--json", "--quiet", "--version")
+_GLOBAL_FLAGS = ("--json", "--quiet", "--version", "--roles")
 _GLOBAL_VALUES = ("--config", "--timeout")
+
+
+def _has_subcommand(tokens: list[str]) -> bool:
+    """这串参数里**到底写没写子命令**。
+
+    不能按「是不是横杠开头」猜：`--config` 的路径值也不带横杠，那样
+    `--roles --config X`（打包验收最自然的写法）会被误判成「已经写了命令」，
+    旗标就静默失效了。所以旗标值成对跳过，剩下的裸 token 才是子命令。
+    """
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        name = token.split("=", 1)[0]
+        if name in _GLOBAL_VALUES and "=" not in token:
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            continue
+        return True
+    return False
 
 
 def hoist_globals(argv: list[str]) -> list[str]:
@@ -597,11 +643,22 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     parser = build_parser()
-    args = parser.parse_args(hoist_globals(list(sys.argv[1:] if argv is None else argv)))
+    tokens = hoist_globals(list(sys.argv[1:] if argv is None else argv))
+    # `--roles` 是打包验收用的旗标（`VideoWorkbench.exe --roles`），但 argparse 要求必须给
+    # 子命令，所以这里把它翻译成 `roles`。**只在确实没写子命令时翻译** —— 判据要跟
+    # 真实命令名比，不能拿「是不是横杠开头」猜：`--config <路径>` 的值也不带横杠，
+    # 把它当命令名就会让 `--roles --config X` 这条最自然的写法报错。
+    # `info --roles` 这种两个都写的自相矛盾用法下面直接报错，不静默丢掉用户要的那一份。
+    if "--roles" in tokens and not _has_subcommand(tokens):
+        tokens = ["roles", *[t for t in tokens if t != "--roles"]]
+    args = parser.parse_args(tokens)
+    if args.roles and args.cmd != "roles":
+        parser.error(f"--roles 就是 roles 子命令，别再和 {args.cmd} 一起写")
     cli = Cli(args)
     handler = {
         "info": cli.cmd_info,
         "jobs": cli.cmd_jobs,
+        "roles": cli.cmd_roles,
         "download": cli.cmd_download,
         "transcribe": cli.cmd_transcribe,
         "summarize": cli.cmd_summarize,

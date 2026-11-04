@@ -516,6 +516,72 @@
 
   // ------------------------------------------------------------ 启动
 
+  // ------------------------------------------------------------ 搬家一次性提示
+
+  /**
+   * 首启一次弹窗：告诉用户「配置搬到新家了 / 旧家那份我没动 / 旧家里这几个键会让
+   * bili-scribe 起不来，得你自己去清」。
+   *
+   * 为什么值得弹一次：搬家之前 ``load()`` 会顺手把共享的 ``~/.bili-scribe/config.yaml``
+   * 里 bili 不认识的脏键重写干净，老用户其实靠这个才打得开 bili-scribe。搬家之后
+   * 重写只作用于新家（「不许写对方文件」的合同要求），旧家那份就再没人清了 ——
+   * 用户的 bili-scribe 照样起不来，而且完全猜不到原因。代价落在他身上，至少让他
+   * 看得见代价落在哪几个键上。
+   *
+   * 三条纪律写在这里而不是靠后端保证：
+   * 1) **演示态绝不弹**：mock 里没有真实搬家发生过，弹它等于凭空造一条假事实；
+   * 2) **键名只当文本**：那份清单来自用户配置文件 = 外部数据，一律 textContent
+   *    （``h()`` 的 ``text``），不许走 ``html``；含尖括号也只当字面显示；
+   * 3) **不写「已清理/已同步」**：WB 没替任何人删过东西，措辞只能说他要做的事。
+   * 关闭的四条路径（知道了 / ESC / 点遮罩 / ×）都由 ``onClose`` 收敛成一次 dismiss。
+   */
+  function maybeMigrationNotice() {
+    if (WB.isMock()) return Promise.resolve(false);   // 演示态：没有真搬家这回事
+    return WB.rpc("app.migration_notice", null, { silent: true })
+      .then(function (res) {
+        var notice = res && res.notice;
+        if (!notice) return false;                     // 没搬过家 / 旧家干净 / 已确认
+        var keys = Array.isArray(notice.keys) ? notice.keys : [];
+        if (!keys.length) return false;
+        var body = [
+          ui.h("p", {
+            text: "Workbench 的设置已经搬到新家：" + (notice.to || "（后端没给路径）") + "。"
+          }),
+          ui.h("p", {
+            text: "旧家那份文件（" + (notice.from || "（后端没给路径）") + "）我没有改动 —— 一个字节都没动，"
+              + "它归 bili-scribe。"
+          }),
+          ui.h("p", { text: "但它里面有 " + keys.length + " 个键是 bili-scribe 不认识的：" }),
+          ui.h("ul", { style: "margin:6px 0 6px 18px" }, keys.map(function (k) {
+            // 只列键名。值里可能有 api_key，印到屏幕上就是泄露。
+            return ui.h("li", { class: "mono", text: String(k) });
+          })),
+          ui.h("p", {
+            text: "这些键会让 bili-scribe 报「未知配置项」而起不来。要清得你自己在 bili-scribe 那边删掉它们："
+              + "WB 不会替你删，也不会去改对方的文件。"
+          }),
+          ui.h("p", { class: "muted", text: "（这里只列键名，不列它们的值。看过点「知道了」，以后不再提示。）" })
+        ];
+        var dialog = null;
+        dialog = ui.modal({
+          title: "配置搬家了，旧家还留着会让 bili-scribe 起不来的键",
+          body: body,
+          footer: ui.h("button", {
+            class: "btn btn--primary",
+            type: "button",
+            text: "知道了",
+            onclick: function () { if (dialog) dialog.close(); }
+          }),
+          onClose: function () {
+            // 四种关法都走到这里一次：确认只需记一次，失败也不打扰用户。
+            WB.rpc("app.migration_notice.dismiss", null, { silent: true }).catch(function () {});
+          }
+        });
+        return true;
+      })
+      .catch(function () { return false; });   // 读不到就当没提示：不能挡住首屏
+  }
+
   function boot() {
     // 1) 皮肤：URL 参数（`#skin=ark`）优先，其次后端配置，最后默认。
     var skinFromHash = (function () {
@@ -638,6 +704,11 @@
     // 放在 finishBoot 之后：先让用户看见界面，再叠一层说明，而不是先白屏再出东西。
     if (WB.onboard && data && data.info) {
       WB.onboard.maybeShow(data.info).catch(function () { /* 体检失败不挡启动 */ });
+    }
+    // 搬家提示排在体检之后：两者都只在"没看过"时出现，而且体检是浮卡、这条是模态，
+    // 叠着也不挡路。真后端才打这个接口（maybeMigrationNotice 内部还有一道 isMock 闸）。
+    if (data && !WB.isMock()) {
+      maybeMigrationNotice().catch(function () { /* 读不到不挡启动 */ });
     }
   }
 

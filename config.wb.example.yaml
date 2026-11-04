@@ -1,5 +1,11 @@
 # VideoWorkbench 配置
 #
+# 默认位置：~/.video-workbench/config.yaml（Workbench 自己的家）。
+# 这份**不是** bili-scribe 的配置：两边互不影响，改这里不会动到 bili-scribe，
+# 反过来它也不会改到你的模型/角色设置。第一次启动时若旧家
+# (~/.bili-scribe/config.yaml + workbench.json) 还在，会被**只读**搬运一次到新家
+# —— 搬运逐字段忠实（不改任何值），旧家之后只读，连 .bak 都不再产生。
+#
 # 本文件由设置页面生成。手动修改同样生效；下次在页面上保存时整体覆盖，
 # 覆盖前会备份为 config.yaml.bak。
 #
@@ -34,8 +40,34 @@ llm:
   timeout_seconds: 300
   # 调用模型时走的代理。留空 = 直连，且不读 HTTP_PROXY/HTTPS_PROXY。
   proxy: ""
-  # 总结角色：standard / xueshu / wengao / xiezuo / fenxi / jinglian。
-  role: "standard"
+  # 总结角色：xueshu / renhua / shensi / wengao / xiezuo / fenxi / jinglian / shipin。
+  # 前 7 个走三轮改写（生成→自我批判→修订），耗时约为单轮的 3 倍；shipin（视频总结）
+  # 是唯一的单轮角色——它的 txt 真源里本来就没有批判/修订环节，所以不套那两轮。
+  # 原 standard（不套方法论的裸总结）在 Workbench 里已停用；这份模板以前写的是
+  # standard，照抄的人会第一次点生成就被拒，所以这里改成 wengao。
+  role: "wengao"
+  # 附加提示词：把 resources/prompts/大概率管用 .txt 的**全文**接在当前角色的 txt 真源之后、
+  # 输出契约之前（顺序固定：txt → extra → 契约；契约必须在最后，它专门压住 txt 里
+  # 「必须打印阶段 1/2/3」「输出 ReAct 执行日志」那类指令，否则 JSON 解析当场坏掉）。
+  # 默认关。那篇是对抗性双角色提示词（要求 [lbk]Guardian[rbk] / [lbk]Maverick[rbk] 两段必出），
+  # 和总结要的 JSON 契约正面冲突，默认开着会拖垮产出——要不要吃它交给人。
+  # 按请求生效（contextvar）：并发跑的两个任务一个开一个关时各自的提示词都正确，不用重启。
+  # 拼接规则与缺文件的回落只有一个出处：core/prompt_source.py。
+  # 存盘位置：这个键 bili-scribe 不认识，所以它只落在同目录的 workbench.json 里，
+  # 共用的 config.yaml 不会被写进 WB 专有键（实测 render_yaml 不输出它）。
+  extra_prompt: false
+  # 总结的对账模式：**默认开**，不是配置项，是环境变量，所以这里只写说明。
+  # 开着时每次模型调用只发一次请求、坏 JSON 不抢救（不修复、不续写、不分两次要、
+  # 不严格重问）、输出预算不抬升（照 max_tokens 原样给），也就是与 bili_scribe 那份
+  # 方法论逐请求一致——两边的输出可以逐字段比对，副本也受逐字节锁保护。
+  # 代价是实测过的：同一份日志里「已按更严格的要求重问一次」命中 7 次、「输出被截断了，
+  # 正在接着写」5 次，长素材的坏 JSON 是真会发生。这些场景在默认档下直接失败，
+  # 报错末尾会把开关念出来。
+  # 需要抢救阶梯与预算抬升（12288 起、翻倍、封 16384）时设 WB_SUMMARY_PARITY_STRICT=0
+  # （false/off 同义），改完重启生效。
+  # 保留项：时间线补密不受这个开关影响——有密时间线就覆盖 bs 的「最多 20 条」上限。
+  # 实测你手上 86 个历史版本的落库 timeline 条数是 p50=8 / p90=12 / 最多 19，
+  # 也就是说这条上限目前咬不到，保留它是保住能力，不是保住现在的差异。
   max_input_chars: 24000
   chunk_size: 6000
   chunk_overlap: 400
@@ -51,6 +83,12 @@ llm:
 
 storage:
   db_path: "C:\\Users\\b1596\\.bili-scribe\\bili-scribe.db"
+  # 分段预读笔记的磁盘缓存（长素材第一次总结时逐段提炼，之后同一份素材直接复用，
+  # 不再重跑那轮最贵的预读）。位置由 db_path 同级的 notes-cache/ 推导，不用单独配：
+  # 写这一段只是告诉你它在存东西——以前这目录根本没人用。
+  # 缓存坏了不影响正确性：读不出就按未命中重跑，写失败只记日志；随时可以整个删掉，
+  # 下一次总结自己会把预读再跑一遍，产物一分不差（界面上走 summary.notes.clear，
+  # 返回 {"removed": 条数}；现状走 summary.notes.stats）。
   # 凭据加密密钥，与 bili-scribe 共用。
   key_path: "C:\\Users\\b1596\\.bili-scribe\\key.bin"
   media_root: "%APPDATA%/VideoWorkbench/media"

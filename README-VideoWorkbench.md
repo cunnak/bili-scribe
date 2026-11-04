@@ -13,7 +13,7 @@
 | 代码位置 | `bili_scribe/` | `video_workbench/` |
 | 数据库 | `~/.bili-scribe/bili-scribe.db` | **同一个库**，只写 `wb_*` 表；读它的 task/publish/summary_version 表 |
 | B 站登录 | `~/.bili-scribe/key.bin` | **复用**，不需要再登一次 |
-| 配置 | `~/.bili-scribe/config.yaml` + `workbench.json` | `config.yaml` 只写 bili-scribe 认识的六段（它的加载器遇到未知键会报错）；扩展设置全在同目录 `workbench.json` |
+| 配置 | `~/.bili-scribe/config.yaml`（**只读**，WB 不再写它） | 自己的家 `~/.video-workbench/`：`config.yaml` 只写 bili-scribe 认识的六段、扩展设置全在同目录 `workbench.json`；首次启动若旧家还在，会被**逐字段原样**搬运一次到新家 |
 
 原则：**不改 `bili_scribe/` 的任何业务代码**。需要的能力（下载、摘要、B 站客户端）按函数
 导入复用；新功能一律写在 `video_workbench/`。
@@ -56,16 +56,40 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 体检可以「先这样，进去试试」跳过，之后再从设置页「关于 → 运行环境体检」打开。
 跳过这件事记在 `ui.onboarded`，下次不再弹。
 
-## 配置（`~/.bili-scribe/config.yaml` + `workbench.json`，或 `config.wb.example.yaml` 作模板）
+## 配置（`~/.video-workbench/config.yaml` + `workbench.json`，或 `config.wb.example.yaml` 作模板）
+
+> 2026-11-04 起 WB 的配置**从 bili-scribe 的家里搬出去了**：以前两边共用 `~/.bili-scribe/config.yaml`，WB 往里面写 `role` / `max_tokens` 会连带改掉 bili-scribe 的行为。现在 WB 只读那一份（首次启动搬运一次），写只写自己的 `~/.video-workbench/`。**数据文件没搬**：库与 B 站凭据仍在 `~/.bili-scribe/`，那是刻意复用（已有项目与总结历史都在里面）。
 
 两个文件分工明确：
 
 - `config.yaml`：只放 bili-scribe 也认的六段（`server` / `llm` / `collect` / `publish` / `storage` / `ui`），
-  形状由 bili-scribe 自己的模板渲染。**往里加键会让 bili-scribe 起不来。**
+  形状由 bili-scribe 自己的模板渲染。搬新家之后往这里加键**不再会打挂对方**（它不读这份了），但仍然守这条：一份配置只留一个地方负责，而且这份文件保持可被 bili-scribe 读。
 - `workbench.json`：Workbench 的 11 段全量配置（服务商列表、任务模型、目录、切片参数、保留策略……）。
 
 读取顺序：`config.yaml` 与 `workbench.json` 合并 → 共享键以 yaml 为准 → 环境变量 → 默认值。
+新家不存在而旧家 (`~/.bili-scribe/config.yaml` / `workbench.json`) 还在 → 首次 `load()` **只读**搬一次过去：逐字段忠实（旧家那份就算写着已停用的 `standard`、4096 也照搬，修值是另一件事），`source_path` 指向新家并立刻落盘；旧家此后一个字节都不再被写（连 `.bak` 都不产生），本次迁移记在 `cfg.migrated_from` 上（一次性，第二次 load 为空）。
 老版本把扩展键写在 yaml 里的，首次 `load()` 会自动迁移（值搬到 sidecar，yaml 重写成合法形状）。
+
+### 搬家之后 bili-scribe 打不开？那是旧家留下的键
+
+搬家只把配置**复制**到新家，旧家 `~/.bili-scribe/config.yaml` 一个字节都不改（那是 bili-scribe 的文件，
+WB 没有权限制去动它）。但老版本的 WB 曾经往那份文件里写过 bili-scribe 不认识的东西——
+`llm.tasks`、`ui.onboarded`、整段 `download:` 等等。bili-scribe 的加载器对未知键是**报错**而不是忽略，
+所以这些键会让它直接起不来。搬家之前 WB 会顺手把它们重写干净，搬家之后不会了：**代价留给了旧家**。
+
+首次搬运时如果现读到这些键，WB 会：
+
+1. 把事实记进 sidecar 的 `ui.migration_notice`（新家 `config.yaml` 里查不到这个字段——它是扩展键）：
+   只有**键名**清单与两个路径，**绝不带值**（值里可能有 `api_key`）；
+2. 日志里同一件事留一行（同样只报键名）；
+3. 第一次打开界面弹一次窗，说清三件事：配置搬到新家了、旧家那份我没动、旧家里这几个键会让
+   bili-scribe 报「未知配置项」而起不来——**要清得你自己在 bili-scribe 那边删，WB 不会替你删**。
+   点「知道了」/ 按 ESC / 点遮罩都算看过一次，之后不再提示（标记存在 `ui.migration_notice.dismissed`，
+   熬得过后续任何一次保存）。
+
+自家机器如果早于这个功能搬完（新家已经有文件），那条提示不会凭空出现——下次读到旧家仍有未知键时
+才会记下来。想直接确认，看 `~/.video-workbench/workbench.json` 里的 `ui.migration_notice.keys`，
+照着那份名单删 `~/.bili-scribe/config.yaml` 里对应的行即可。
 
 | 段 | 关键项 |
 |---|---|

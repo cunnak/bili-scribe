@@ -43,6 +43,7 @@ from video_workbench.config import (
     render_yaml,
 )
 from video_workbench.core import resolver as resolver_mod
+from video_workbench.core import prompt_source
 from video_workbench.core import subtitles, summarizer, waveform
 from video_workbench.core import overview as overview_core
 from video_workbench.core import recovery as recovery_core
@@ -71,6 +72,7 @@ from video_workbench.infra.db import open_and_migrate, schema_version
 from video_workbench.infra.ffmpeg import FFmpeg, filter_path, subtitle_filter
 from video_workbench.infra.files import is_within, unique_path
 from video_workbench.infra.llm import ChatClient, ChatError
+from video_workbench.infra.notecache import NoteCache
 from video_workbench.infra.db import now_iso as db_now_iso
 from video_workbench.infra.files import atomic_write_text, ensure_free_space, sanitize_name
 from video_workbench.infra.repo import Repo, new_id
@@ -668,9 +670,40 @@ class WorkbenchService:
         )
         self.logger = log_mod.get_logger("service")
         self.logger.info("配置 %s / 数据库 %s", self.cfg.source_path or "(默认)", self.cfg.db_path)
+        # 搬家发生过就要在日志里留一句：用户第一次启动会发现「生效的配置不是我打开过
+        # 的那份文件」，没有这行日志就只能靠猜。只报路径与「没改值」这件事，不打印任何
+        # 配置内容 —— 这一份里可能有密钥。
+        if getattr(self.cfg, "migrated_from", None):
+            self.logger.info(
+                "首次启动：配置已从旧家 %s 搬到新家 %s（逐字段原样搬运，没有改任何值）；"
+                "旧家是 bili-scribe 的文件，此后只读、不再被写入",
+                self.cfg.migrated_from,
+                self.cfg.source_path,
+            )
+            # 搬家时旧家留下的「挡住 bili-scribe 的键」：界面上有一次性弹窗
+            # （app.migration_notice），日志这边留同一件事的事后追溯。
+            # **只报键名，一个值都不打** —— 那些键的值里可能有密钥。
+            notice = getattr(self.cfg.ui, "migration_notice", None)
+            if isinstance(notice, dict) and notice.get("keys") and not notice.get("dismissed"):
+                self.logger.info(
+                    "旧家 %s 里有 %d 个 bili-scribe 不认识的键：%s —— WB 不替你删，"
+                    "但 bili-scribe 会因为它们报「未知配置项」而起不来，需要你在 bili-scribe 那边自己清",
+                    notice.get("from", ""),
+                    len(notice.get("keys") or []),
+                    ", ".join(str(k) for k in (notice.get("keys") or [])),
+                )
         log_mod.prune(self.logs["dir"], keep_days=30)
         self.conn = open_and_migrate(self.cfg.db_path)
         self.repo = Repo(self.conn)
+        # 预读笔记的磁盘缓存（按素材内容寻址，跨任务、跨进程复用）。
+        # 目录是 `cfg.notes_dir`——以前只是算得出来、没有任何代码往里写，现在接上了：
+        # 一次长素材预读占一次总结输入的 38%（bs 实测 4 小时视频 32,663 tokens），
+        # 同一条视频重开一个任务或反复「再改一版」时，这一整段应该一分不花。
+        # 缓存坏了不影响正确性：读不出就按未命中重跑，写失败只记日志（见 infra/notecache.py）。
+        self.notes = NoteCache(
+            self.cfg.notes_dir,
+            logger=lambda message: self.logger.info("预读缓存 %s", message),
+        )
         self.events = EventBus()
         # 发布是全应用唯一不可撤销的动作，而且 pywebview 每个 js_api 调用一个线程：
         # 两次并发点「发布」会各自读到 status=draft、各自 POST 一次。这里用非阻塞锁
@@ -836,6 +869,15 @@ class WorkbenchService:
         r.add("summary.refine", self.summary_refine, SummaryRefineParams)
         r.add("summary.restore", self.summary_restore, SummaryRestoreParams)
         r.add("summary.roles", self.summary_roles)
+        # 预读缓存的两个入口（↔ bs 的 notes_stats / clear_notes）。名字跟着 WB 的点号
+        # 命名域走（summary. 域下已有 9 个），返回体形状照 bs：stats() 的键名与
+        # {"removed": n} 都不改，将来两侧对照不用动结构。
+        r.add("summary.notes.stats", self.summary_notes_stats)
+        r.add("summary.notes.clear", self.summary_notes_clear)
+        # 角色提示词真源清单（哪个角色吃哪个 txt、多少字节、sha 前 8 位）。
+        # 设置页那个「默认角色」下拉要能说出选中项现在用的是用户写的原文还是压缩版，
+        # 判定只有一个出处：core/prompt_source.py，前端不复制映射表。
+        r.add("summary.prompt.list", self.summary_prompt_list)
         r.add("collection.list", self.collection_list)
         r.add("summary.collection.overview", self.summary_collection_overview,
               CollectionOverviewParams)
@@ -879,6 +921,10 @@ class WorkbenchService:
         r.add("app.diagnostics", self.app_diagnostics, DiagnosticsParams)
         r.add("app.onboard", self.app_onboard)
         r.add("app.onboard.done", self.app_onboard_done, OnboardDoneParams)
+        # 搬家一次性提示（task-29）：读 = 有没有该说的，dismiss = 说过了。
+        # 注册写在这里，不动 app/rpc.py（那是 bili 的注册表）。
+        r.add("app.migration_notice", self.app_migration_notice)
+        r.add("app.migration_notice.dismiss", self.app_migration_notice_dismiss)
         r.add("app.log_tail", self.app_log_tail, LogTailParams)
         r.add("fs.pick", self.fs_pick, _PickParams)
         r.add("fs.media", self.fs_media)
@@ -2484,10 +2530,54 @@ class WorkbenchService:
     # 因为总结是给人改的草稿，用户会想回去看上一版怎么写。
 
     def summary_roles(self) -> dict[str, Any]:
+        # 默认值也走角色取值的唯一去处（core/summarizer.resolve_role）：配置文件里写着
+        # 退役角色时，前端不能默认选中一个「一提交就被拒」的项——用户没做错任何事，
+        # 界面先骗他一次。这里连「配置把角色名拼错了」也不能报错：这一页的作用正是
+        # 让用户改配置，报了错他就没有改的地方了。判定规则本身仍然只在 resolve_role。
+        try:
+            picked_default, _ = summarizer.resolve_role("", self.cfg.llm.role)
+        except WBError:
+            picked_default = summarizer.DEFAULT_ROLE
+        # 配置里那个值到底能不能直接用，也问同一个 owner（不建第二条判定链）：
+        # 能用时两个字段都是空，界面就不显示任何东西。
+        dirty, hint = summarizer.configured_role_issue(self.cfg.llm.role)
         return {
             "roles": summarizer.roles_view(),
-            "default": (self.cfg.llm.role or summarizer.DEFAULT_ROLE),
+            "default": picked_default,
+            "configured_unrecognized": dirty,
+            "configured_hint": hint,
+            # 退役名单：前端靠它把「这个角色被撤了」和「这个 key 我压根不认识」
+            # 分成两句话（换角色 vs 改配置）。名单只有一个出处——权威层的
+            # RETIRED_ROLES，界面不许自己写死 "standard"，否则下次退役就得改前端。
+            "retired": sorted(summarizer.RETIRED_ROLES),
+            # 附加提示词开关的当前值。前端不自己数、不自己猜默认：这一栏和「默认角色」
+            # 一样，唯一出处是后端配置（cfg.llm.extra_prompt，默认关）。
+            "extra_prompt": bool(getattr(self.cfg.llm, "extra_prompt", False)),
         }
+
+    def summary_notes_stats(self) -> dict[str, Any]:
+        """预读缓存的现状（↔ bs ``app/service.py:1512 notes_stats``）。
+
+        让「省了多少」看得见：条目数、占用字节、目录，以及本次进程的命中/未命中。
+        """
+        return self.notes.stats()
+
+    def summary_notes_clear(self) -> dict[str, Any]:
+        """清空预读缓存（↔ bs ``app/service.py:1517 clear_notes``）。
+
+        只删磁盘那一层：缓存是可以整个删掉的东西，下一次总结自己会重跑预读，产物不差
+        分毫。内存里那份预读结果不动——它属于「正在打磨的那一版」，删了反而让下一轮
+        多付一次预读的钱。
+        """
+        return {"removed": self.notes.clear()}
+
+    def summary_prompt_list(self) -> dict[str, Any]:
+        """包内提示词 txt 的清单：谁被绑成角色、谁只是躺在目录里等拍去向。
+
+        设置页要的是"用户写的那一份到底生效了没有"，所以这里连 sha256 与字节数一起给
+        （值由 prompt_source 现算，不在配置或前端里存副本）。
+        """
+        return {"prompts": prompt_source.manifest()}
 
     def _pick_model(self, spec: str, task: str) -> tuple[str, str]:
         """把界面上选的模型翻成 (服务商 id, 模型名)。空串＝跟随设置。"""
@@ -2545,9 +2635,11 @@ class WorkbenchService:
                 "还没有配置大模型",
                 "在 设置 → 模型 里填好地址与密钥再来",
             )
-        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()
-        if picked not in summarizer.ROLE_KEYS:
-            raise WBError("VALIDATION", f"没有这个角色：{picked}")
+        # 角色取值收敛到唯一去处：显式提交的退役值/未知值在这里就抛，文案用权威层原话；
+        # 配置里的退役值回落默认角色，回落原因随 payload 交给任务日志（RPC 这层没有日志）。
+        # 原来这里跟着一段 `picked not in ROLE_KEYS → 没有这个角色：X` 的预校验，它排在
+        # 适配层兜底前面，把「配置写着 standard」的用户直接挡在门外——那是死路，删掉。
+        picked, role_notice = summarizer.resolve_role(role, self.cfg.llm.role)
         job = self.jobs.submit(
             "summary.run",
             project_id,
@@ -2555,6 +2647,7 @@ class WorkbenchService:
                 "project_id": project_id,
                 "kind": "fresh",
                 "role": picked,
+                "role_notice": role_notice,
                 "danmaku": [str(item) for item in (danmaku or [])][:400],
                 "model": client.model,
                 "provider": provider_id,
@@ -2609,8 +2702,9 @@ class WorkbenchService:
         client = self._llm_client_for(provider_id, task="summary", model=model_name)
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
-        picked = (role or base.get("role") or self.cfg.llm.role
-                  or summarizer.DEFAULT_ROLE)
+        # 上一版存的 role 属于 fallback（那次不是用户此刻的选择）：退役就回落并留痕。
+        picked, role_notice = summarizer.resolve_role(
+            role, str(base.get("role") or "") or self.cfg.llm.role)
         job = self.jobs.submit(
             "summary.run",
             project_id,
@@ -2618,6 +2712,7 @@ class WorkbenchService:
                 "project_id": project_id,
                 "kind": "refine",
                 "role": str(picked),
+                "role_notice": role_notice,
                 "requirement": demand,
                 "previous_id": str(base.get("id") or ""),
                 "model": client.model,
@@ -2754,7 +2849,7 @@ class WorkbenchService:
         )
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
-        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()
+        picked, role_notice = summarizer.resolve_role(role, self.cfg.llm.role)
         # ``wb_job.project_id`` 有外键指向 ``wb_project``。合集的 ``col_xxx`` 不是项目，
         # 当 project_id 传进去会直接 FOREIGN KEY constraint failed —— 任务表就挂在这一步。
         # 合集信息全在 payload 里，任务行不挂项目（也就不会被"删项目"顺带删掉）。
@@ -2764,6 +2859,7 @@ class WorkbenchService:
             {
                 "collection": title,
                 "role": picked,
+                "role_notice": role_notice,
                 "extra": (extra or "").strip()[:400],
                 "model": client.model,
                 "provider": provider_id,
@@ -2811,7 +2907,13 @@ class WorkbenchService:
         )
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
-        role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)
+        # job 重放读到的 role 是**已落库**的历史值，不是这次的选择 → 按合同算 fallback：
+        # 退役就回落默认角色，并把原因写进任务日志（入口算出的说明随 payload 带过来）。
+        role, notice = summarizer.resolve_role(
+            "", str(payload.get("role") or "") or self.cfg.llm.role)
+        notice = str(payload.get("role_notice") or "") or notice
+        if notice:
+            ctx.log(notice)
         ctx.log(f"用 {client.model} 出合集总览：{title}（{len(children)} 集）")
         result = overview_core.run(
             title,
@@ -4908,7 +5010,13 @@ class WorkbenchService:
         )
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
-        role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)
+        # job 重放读到的 role 是**已落库**的历史值，不是这次的选择 → 按合同算 fallback：
+        # 退役就回落默认角色，并把原因写进任务日志（入口算出的说明随 payload 带过来）。
+        role, notice = summarizer.resolve_role(
+            "", str(payload.get("role") or "") or self.cfg.llm.role)
+        notice = str(payload.get("role_notice") or "") or notice
+        if notice:
+            ctx.log(notice)
         ctx.log(f"用 {client.model} 生成总结（角色：{role}）")
 
         if str(payload.get("kind")) == "refine":
@@ -4927,6 +5035,8 @@ class WorkbenchService:
                 ctx=ctx,
                 role=role,
                 model=client.model,
+                cache=self.notes,
+                task_key=project_id,
             )
         else:
             result = summarizer.run(
@@ -4938,6 +5048,8 @@ class WorkbenchService:
                 role=role,
                 danmaku=payload.get("danmaku") or None,
                 model=client.model,
+                cache=self.notes,
+                task_key=project_id,
             )
         ctx.check_cancel()
         content = dict(result["summary"])
@@ -5456,6 +5568,34 @@ class WorkbenchService:
         self.cfg.apply({"ui": {"onboarded": True}})
         self.cfg.save()
         return {"onboarded": True, "skipped": bool(skipped)}
+
+    def app_migration_notice(self) -> dict[str, Any]:
+        """搬家一次性提示。没搬过家 / 旧家干净 / 已经确认过 → ``notice`` 为 None。
+
+        这份数据只有路径与**键名**，没有任何值：值里可能有 ``api_key``，弹到屏幕上
+        就是泄露。已确认后刻意返回 None 而不是「带 dismissed=True 的原件」——前端只需
+        要一个判断，把决定留在后端（口径只有一个出处）。
+        """
+        notice = getattr(self.cfg.ui, "migration_notice", None)
+        if not isinstance(notice, dict):
+            return {"notice": None, "dismissed": False}
+        if notice.get("dismissed") or not notice.get("keys"):
+            return {"notice": None, "dismissed": bool(notice.get("dismissed"))}
+        return {"notice": dict(notice), "dismissed": False}
+
+    def app_migration_notice_dismiss(self) -> dict[str, Any]:
+        """记下「这条我看过了」。弹窗的四条关闭路径（知道了 / ESC / 点遮罩 / ×）都走这一次。
+
+        只改标记、不删事实：旧家那批键还在，事实不该跟着消失，只是不再打扰。
+        ``save()`` 会整体重写 sidecar，所以这个标记必须熬得过之后任何一次无关保存
+        （V5 验的就是这条链路）。
+        """
+        notice = getattr(self.cfg.ui, "migration_notice", None)
+        if not isinstance(notice, dict):
+            return {"dismissed": False, "reason": "没有需要确认的搬家提示"}
+        notice["dismissed"] = True
+        self.cfg.save()
+        return {"dismissed": True}
 
     def app_diagnostics(self, path: str = "", log_lines: int = 400) -> dict[str, Any]:
         """导出一个诊断 zip：环境 + 脱敏配置 + 最近日志。

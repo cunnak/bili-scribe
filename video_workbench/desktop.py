@@ -214,8 +214,8 @@ def _fatal(message: str) -> None:
         pass
 
 
-def _emit_json(payload: dict[str, Any]) -> str:
-    """把 ``--check`` 的结果交出去，返回落盘路径（打印了就是空串）。
+def _emit_json(payload: dict[str, Any], *, name: str = "wb-check.json") -> str:
+    """把 ``--check`` / ``--roles`` 的结果交出去，返回落盘路径（打印了就是空串）。
 
     打包成 windowed exe 之后 **没有 stdout**：`print` 静默丢失，`--check`
     就只剩退出码，脚本没法核「几条 RPC、依赖齐不齐」。所以没有 stdout 时
@@ -225,7 +225,7 @@ def _emit_json(payload: dict[str, Any]) -> str:
     # 打包态一律落文件：exe 会把 stdout 接到 video-workbench.log，
     # `print` 看着成功、脚本却拿不到（日志里混着启动行，grep 不稳）。
     # 给一个固定路径，CI 与「打不开时先自查」都只读这一个文件。
-    target = Path(sys.executable).resolve().parent / "wb-check.json"
+    target = Path(sys.executable).resolve().parent / name
     wrote = ""
     if getattr(sys, "frozen", False):
         try:
@@ -288,6 +288,51 @@ def _check(config_path: str | None = None) -> int:
     # 一行 JSON：`--check` 是给脚本和人 grep 用的，多行反而难消费。
     # README / 用户手册写的都是「打印一行 JSON」，这里跟文档对齐。
     _emit_json(payload)
+    return 0
+
+
+def _roles(config_path: str | None = None) -> int:
+    """`--roles`：离线打印角色名单与各自真源，不开窗口、不联网、不写配置。
+
+    为什么打包版需要这条：包内那 6 篇 txt 真源是**运行期**从
+    ``_internal/video_workbench/resources/prompts`` 读的，构建脚本只能证明
+    "字节进包了"，证明不了"冻结态真读到了、绑对了角色"。开发态跑
+    ``python -m video_workbench.cli roles`` 不算数——那是另一套 import 路径。
+    窗口子系统没有 stdout，所以结果按 ``_emit_json`` 的规矩落到 exe 旁边的
+    ``wb-roles.json``，脚本只读这一个文件。
+
+    ``prompt_sha8`` 就是包内那一份的哈希：与仓库侧的 sha 对得上，才说明
+    "冻结包跑的提示词 == 仓库里的那一版"。
+    """
+    try:
+        service = WorkbenchService(config_path=config_path)
+        try:
+            data = service.summary_roles()
+        finally:
+            service.close()
+    except Exception as exc:  # noqa: BLE001 - 自检失败也要给出可 grep 的形状
+        _emit_json({"ok": False, "what": "roles", "error": str(exc)}, name="wb-roles.json")
+        return 1
+    rows = list(data.get("roles") or [])
+    payload = {
+        "ok": True,
+        "what": "roles",
+        "count": len(rows),
+        "default": data.get("default"),
+        "retired": list(data.get("retired") or []),
+        "roles": [
+            {
+                "key": r.get("key"),
+                "name": r.get("name"),
+                "passes": r.get("passes"),
+                "prompt_source": r.get("prompt_source"),
+                "prompt_bytes": r.get("prompt_bytes"),
+                "prompt_sha8": r.get("prompt_sha8"),
+            }
+            for r in rows
+        ],
+    }
+    _emit_json(payload, name="wb-roles.json")
     return 0
 
 
@@ -404,13 +449,18 @@ def main(argv: list[str] | None = None) -> int:
     _ensure_streams()
 
     parser = argparse.ArgumentParser(description=f"{APP_NAME} 桌面版")
-    parser.add_argument("--config", default=None, help="配置文件路径（默认 ~/.bili-scribe/config.yaml）")
+    parser.add_argument("--config", default=None, help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只在首次启动时被只读搬运一次）")
     parser.add_argument("--debug", action="store_true", help="打开 WebView 开发者工具")
     parser.add_argument("--check", action="store_true", help="只做装配自检，不开窗口")
+    parser.add_argument("--roles", action="store_true",
+                        help="离线打印角色名单与各自真源（写 exe 旁的 wb-roles.json，不开窗口）")
     args = parser.parse_args(argv)
 
     if args.check:
         return _check(args.config)
+
+    if args.roles:
+        return _roles(args.config)
 
     try:
         service = WorkbenchService(config_path=args.config)

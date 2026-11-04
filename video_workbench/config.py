@@ -29,7 +29,7 @@ import shutil
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
-from typing import Any, get_args, get_type_hints
+from typing import Any, ClassVar, get_args, get_type_hints
 
 import yaml
 
@@ -48,19 +48,32 @@ from bili_scribe.config import (
 )
 from video_workbench.app.errors import WBError
 
-DEFAULT_HOME = Path.home() / ".bili-scribe"
+DEFAULT_HOME = Path.home() / ".video-workbench"
 DEFAULT_CONFIG_PATH = DEFAULT_HOME / "config.yaml"
+
+# 旧家 = Workbench 曾经和 bili-scribe 同住一个目录、共用同一个 config.yaml 的地方。
+# 搬家之后这两个常量**只用来找迁移来源**，不是生效配置：旧家目录下的字节从今往后
+# 一个都不许被写（连 `.bak` 都不行）——那是对方程序的配置，写进去等于替用户改了
+# bili-scribe 的行为。`~/.bili-scribe` 仍然留着：数据库与 B 站登录凭据在那儿，
+# 那是刻意复用，不是没搬干净（见 ``StorageConfig`` 的默认值）。
+LEGACY_HOME = Path.home() / ".bili-scribe"
+LEGACY_CONFIG_PATH = LEGACY_HOME / "config.yaml"
 
 # Workbench 的配置比 bili-scribe 多得多：``app`` / ``download`` / ``transcribe`` /
 # ``subtitle`` / ``clip`` 是整整五段新段，另外 ``ui`` 里加了 ``rail_collapsed`` /
 # ``onboarded``、``storage`` 里加了四个目录与 ``retention``、``llm`` 里加了
 # ``providers`` / ``active_provider`` / ``tasks``。
-# 共用一个 config.yaml 是方案书要的（B站 凭证、库路径都复用），但 bili-scribe 的
-# ``AppConfig.load`` 遇到不认识的键**直接报错**而不是忽略：
-# 实测只要文件里出现 ``llm.tasks``，它就是
+# 以前共用一份 config.yaml，而 bili-scribe 的 ``AppConfig.load`` 遇到不认识的键
+# **直接报错**而不是忽略：实测只要文件里出现 ``llm.tasks``，它就是
 # ``ValueError: LlmConfig 存在未知配置项：tasks`` —— 用户打开 bili-scribe 只会看到
 # 一句"起不来"，压根想不到是配置里多了个键。
-# 所以这里划一条硬边界，两个文件各管一摊：
+# 搬家之后这份 yaml 归 Workbench 自己，「怕打挂 bili-scribe」这个理由不再成立，
+# 但这次**只搬家、不改存储格式**，所以那条限制原样保留，换成两条还站得住的理由：
+#   1) 形状继续由 bili-scribe 的 ``render_config_yaml`` 生成，不用维护两份模板；
+#   2) 这份文件仍可被 bili-scribe 的加载器直接读（实测），搬家后不依赖它，
+#      但也没必要主动把它变成一个读不了的形状。
+# 两边互不影响靠的是**目录不同**，不再靠键名单。
+# 两个文件各管一摊：
 #   config.yaml    —— 只写 bili-scribe 认识的键，形状由它自己的 render_config_yaml 决定；
 #   workbench.json —— 同目录 sidecar，存 Workbench 的全部配置（含扩展键）。
 # 读的时候合并：共享键以 yaml 为准（用户可能直接改文件），扩展键只有 sidecar 有。
@@ -178,6 +191,62 @@ def foreign_keys(raw: Any) -> list[str]:
             known = set(_fields(ftype))
             bad += [f"{name}.{k}" for k in sorted(set(value) - known)]
     return bad
+
+
+def _legacy_foreign_keys() -> list[str]:
+    """旧家那份 yaml 里 bili-scribe 不认识的键。读不到/不合法一律当「没有」。
+
+    只读。这个函数存在的意义是：旧家那份文件从今以后没人清了，得有人知道它坏在哪。
+    """
+    if not LEGACY_CONFIG_PATH.exists():
+        return []
+    try:
+        raw = yaml.safe_load(LEGACY_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:      # 坏 YAML 不是这次要报的事： bili 自己会报，别在这里抢话
+        return []
+    if not isinstance(raw, dict):
+        return []
+    return sorted(str(k) for k in foreign_keys(raw))
+
+
+def _migration_notice(target: Path, origin: Path, migrated_from: "str | None",
+                      foreign: list[str], merged: dict[str, Any], *, explicit: bool):
+    """这次要不要给用户记一条「搬家把 bili-scribe 的坑留在旧家了」的事实。
+
+    为什么必须讲：搬家之前 ``load()`` 里那句 ``if foreign: cfg.save(target)`` 会顺手把
+    共享 ``~/.bili-scribe/config.yaml`` 里 bili 不认识的脏键重写干净，老用户其实是靠这个
+    才打得开 bili-scribe。搬家之后重写只作用于新家（这是「不许写对方文件」的合同要求，
+    正确），于是旧家那份脏文件再没人清 —— 老用户的 bili-scribe 照样起不来，而且不知道
+    为什么。代价落在用户身上，至少得让他看得见代价落在哪几个键上。
+
+    两条记录路径：
+
+    1) **本次真的搬了**（``migrated_from`` 非空）：直接用刚读到的 ``foreign``，零额外盘。
+    2) **新家早就存在**（本机在这条提示写出来之前就搬完了）：旧家那份如果还留着未知键，
+       照样得说 —— 不然产品主线那批用户永远看不到这条提示，而这个任务要修的就是他们。
+       代价是每次 ``load()`` 多读一次旧家 yaml，所以只在没有「已确认」标记时才读：
+       用户点过「知道了」以后，WB 连读都不读对方的文件。
+
+    只抄键名（``foreign_keys`` 给什么就用什么）：``keys`` 是要印到屏幕上的，值里可能有
+    ``api_key``。旧家干净 → 什么都不记，也不提示也不写日志。显式 ``--config`` 指到哪读到
+    哪，不替用户发明一条提示。
+    「根本没搬」与「搬了但旧家干净」靠 ``cfg.migrated_from`` 区分：那个字段只在真的搬运过
+    一次的路径上挂值，而且刻意不持久化。
+    """
+    existing = (merged.get("ui") or {}).get("migration_notice")
+    if isinstance(existing, dict) and existing.get("dismissed"):
+        return None                       # 说过了，不再重复打扰，也不再碰旧家
+    if explicit or target == LEGACY_CONFIG_PATH:
+        return None                       # 显式指定 / 读的就是旧家：不发明提示
+    if migrated_from is not None:
+        keys = sorted(str(k) for k in foreign)
+        src = str(LEGACY_CONFIG_PATH)
+    else:
+        keys = _legacy_foreign_keys()
+        src = str(LEGACY_CONFIG_PATH)
+    if not keys:
+        return None
+    return {"to": str(target), "from": src, "keys": keys, "dismissed": False}
 
 
 # 仅密钥可以从环境变量覆盖。把整份配置开放给环境变量会让"到底读到了什么"
@@ -446,6 +515,19 @@ class ClipConfig:
 
 @dataclass
 class LlmConfig(_LlmConfig):
+    # 总结角色。父类 bili_scribe/config.py:85 的默认值是 "standard"，而 standard
+    # 在 Workbench 里已经退役（不套方法论的裸总结），所以这里必须覆写：service.py
+    # 六处取角色的顺序都是 ``payload.role or self.cfg.llm.role or DEFAULT_ROLE``，
+    # 配置里的 "standard" 排在 DEFAULT_ROLE 前面——没覆写的话，从没选过角色的用户
+    # 第一次点「生成」就会被拒，报的还是一个他没见过的角色名。
+    # 注意：config.yaml 是两边共用的同一份文件，文件里写了 role 就以文件为准。
+    role: str = "wengao"
+    # 附加提示词：把 `resources/prompts/大概率管用 .txt` 的全文再接进 system。
+    # **默认关**——那篇是对抗性双角色提示词（要求 [lbk]Guardian[rbk] /
+    # [lbk]Maverick[rbk] 两段必出），和总结要的 JSON 输出契约正面冲突，默认开着会拖垮
+    # 产出。要不要吃它交给人决定；生效方式与拼接顺序见 core/prompt_source.py
+    # （按请求走 contextvar，不在绑定时烘死，并发任务互不影响）。
+    extra_prompt: bool = False
     tasks: LlmTasksConfig = field(default_factory=LlmTasksConfig)
     # 服务商列表。空列表在 load()/apply() 里会由扁平字段合成一条（见
     # ``WorkbenchConfig.sync_providers``），所以运行期永远至少有一条。
@@ -463,6 +545,10 @@ class LlmConfig(_LlmConfig):
 
 @dataclass
 class StorageConfig(_StorageConfig):
+    # ``db_path`` / ``key_path`` 刻意**不在这里重新声明**：搬家搬的是配置文件，不是数据
+    # 文件。库与 B 站登录凭据继续住在 bili-scribe 的家里（它自己的 ``StorageConfig`` 默认值），
+    # 用户已有的项目与 86 条总结历史都在那个库里 —— 顺手搬进新家等于让他的列表凭空变空。
+    # 谁要"搬干净"，先回答这两个路径为什么不能跟着 ``DEFAULT_HOME`` 走。
     # 扩展字段全部带默认值：这样即使读到的是一份只有 db_path/key_path 的
     # 旧 bili-scribe 配置文件，也不会因为「缺字段」而装不起来。
     media_root: str = "%APPDATA%/VideoWorkbench/media"
@@ -488,6 +574,17 @@ class UiConfig(_UiConfig):
     # 首次启动向导看过没有。默认 False：新装的机器第一次开窗口就把五件事摆出来，
     # 用户跳过也算看过（否则每次启动都弹，会变成骚扰）。
     onboarded: bool = False
+    # 搬家一次性提示。**默认 None 才是默认态**：没有要提示的事。
+    # 里面只放四样事实——搬到哪（``to``）、从哪搬来（``from``）、旧家里 bili-scribe
+    # 不认识的**键名**清单（``keys``）、以及看过没有（``dismissed``）。
+    # **绝不放值**：那些键的值里可能有 ``api_key``，弹给用户看等于把密钥印在屏幕上。
+    # 为什么声明成 dataclass 字段而不是往 sidecar 里塞一个裸键：``_fill`` 对未知键是
+    # 直接抛 ``VALIDATION`` 而不是忽略（那是它该有的行为，``max_frame`` 少个 s 就靠它
+    # 报错），塞一个没声明的键等于让所有用户的 WB 起不来。``rail_collapsed`` /
+    # ``onboarded`` 就是这个先例的正确形态。
+    # 它也不进 ``config.yaml``：``render_yaml`` 按 bili 的 ``AppConfig`` 投影，扩展键
+    # 天生被滤掉 —— 所以 bili-scribe 永远不会因为这个键再报一次「未知配置项」。
+    migration_notice: dict | None = None
 
 
 # =========================================================== 根对象
@@ -510,6 +607,13 @@ class WorkbenchConfig:
     publish: PublishConfig = field(default_factory=PublishConfig)
 
     source_path: str | None = field(default=None, repr=False, compare=False)
+
+    # 搬家标记：本次 load 是不是从旧家（``~/.bili-scribe/config.yaml``）搬过来的，
+    # 是就记那份旧文件的绝对路径，否则 ``None``。刻意写成 ``ClassVar`` —— 它不是
+    # dataclass 字段，所以 ``dataclasses.asdict``（= ``workbench.json`` 的内容）、
+    # ``==`` 比较、设置页视图都不会带上它；它只是给日志和验收用例一个可断言的形式。
+    # 类级默认 ``None`` 保证「不是通过 load() 造出来的配置对象」也能安全读这个属性。
+    migrated_from: ClassVar[str | None] = None
 
     # ------------------------------------------------------- 服务商归一
 
@@ -686,10 +790,24 @@ class WorkbenchConfig:
     def load(cls, path: str | os.PathLike | None = None) -> "WorkbenchConfig":
         """装载。文件不存在时用默认值（首次启动不该因为没配置而起不来）。"""
         target = Path(cls._abs(str(path))) if path is not None else DEFAULT_CONFIG_PATH
+        # 搬家：新家还没落过文件、旧家有 → 读旧家那一对（config.yaml + workbench.json，
+        # 里面再回落旧的 workbench.llm.json），然后落到新家。判「旧家有没有东西」要两个
+        # 都看：只有 sidecar 没有 yaml 也是有人在用的配置，只认 yaml 就等于把他的服务商
+        # 丢了。显式 --config（``path is not None``）**绝不触发迁移** —— 指到哪读到哪是
+        # 用户的意图，不能被一条"帮你搬家"的逻辑改写。两边都没有 → 内置默认，照旧。
+        origin = target
+        migrated_from: str | None = None
+        if (
+            path is None
+            and not target.exists()
+            and (LEGACY_CONFIG_PATH.exists() or ext_path(LEGACY_CONFIG_PATH).exists())
+        ):
+            origin = LEGACY_CONFIG_PATH
+            migrated_from = str(LEGACY_CONFIG_PATH)
         raw: dict[str, Any] = {}
-        if target.exists():
+        if origin.exists():
             try:
-                with open(target, "r", encoding="utf-8") as fh:
+                with open(origin, "r", encoding="utf-8") as fh:
                     raw = yaml.safe_load(fh) or {}
             except yaml.YAMLError as exc:
                 # 坏 YAML 必须在这里停下来。放过去的话 PyYAML 的报错会在启动链路里
@@ -697,13 +815,17 @@ class WorkbenchConfig:
                 raise WBError(
                     "VALIDATION",
                     "config.yaml 解析失败：检查缩进与冒号（YAML 不吃 Tab）",
-                    f"{target}: {exc}",
+                    f"{origin}: {exc}",
                 ) from exc
             if not isinstance(raw, dict):
-                raise WBError("VALIDATION", "config.yaml 顶层必须是映射结构", str(target))
-        merged = _merge_raw(raw, read_ext(target))
+                raise WBError("VALIDATION", "config.yaml 顶层必须是映射结构", str(origin))
+        merged = _merge_raw(raw, read_ext(origin))
         # 老版本把扩展键写进了共享 yaml：记下来，构造完立刻按新形状重写一次。
         foreign = foreign_keys(raw)
+        notice = _migration_notice(target, origin, migrated_from, foreign, merged,
+                                   explicit=path is not None)
+        if notice is not None:
+            merged.setdefault("ui", {})["migration_notice"] = notice
         cfg = cls(
             app=_fill(AppSectionConfig, merged.get("app"), "app"),
             ui=_fill(UiConfig, merged.get("ui"), "ui"),
@@ -721,11 +843,33 @@ class WorkbenchConfig:
         # 服务商先归一，再谈环境变量：反过来的话 ``sync_providers`` 会把文件里那把密钥
         # 抄回扁平字段，环境变量覆盖就被吃掉了（表现为"设了 env 还是 401"）。
         cfg.sync_providers()
-        # 文件里还留着 bili-scribe 不认识的键（老版本写进去过）就立刻按新形状重写：
-        # 留着不管，用户每次打开 bili-scribe 都是一句 ValueError。
-        # 放在 sync_providers 之后：save 会把服务商列表写进 sidecar，
-        # 反过来的话这次重写会把刚归一出来的那张卡写成空列表，用户的服务商就没了。
-        if foreign:
+        # 迁移证据：本次真的搬了才挂，值就是那份旧文件的绝对路径；没搬就是 ``None``。
+        # 刻意**不持久化** —— 新家一旦有文件就不再满足搬运条件，第二次 load 必须报
+        # ``None``，否则日志与界面每次启动都会骗用户一次「刚从旧家搬过来」。
+        # 挂在实例上而不是 dataclass 字段：``asdict`` / ``==`` / 落盘内容都不带它。
+        cfg.migrated_from = migrated_from
+        if migrated_from is not None:
+            # 搬家落地：**只写新家**。旧家一个字节都不写，连 ``.bak`` 都不产生 ——
+            # 那是 bili-scribe 的文件，替它备份一次就等于动了对方目录。
+            # 逐字段忠实搬运：值一个都不改、不"顺手修"。旧家那份 ``role=standard`` /
+            # ``max_tokens=4096`` 确实是坏的，但修值是另一件事，掺进迁移里
+            # 迁移就不可预测了（用户/同事得能推出搬完之后是什么）。
+            # 也不走下面的 foreign 重写：``render_yaml`` 只渲染 bili-scribe 认识的键，
+            # 写出来的新家文件天生没有脏键，再重写一次纯属多一趟盘。
+            try:
+                cfg.save()
+            except OSError:
+                pass  # 新家暂时写不进去不影响本次启动，下次保存会补
+        elif foreign and target != LEGACY_CONFIG_PATH:
+            # 文件里还留着 bili-scribe 不认识的键（老版本写进去过）就立刻按新形状重写：
+            # 留着不管，用户每次打开 bili-scribe 都是一句 ValueError。
+            # ``target != LEGACY_CONFIG_PATH`` 这一半是补「旧家只读」的最后一个洞：
+            # 谁要显式 ``--config ~/.bili-scribe/config.yaml``（老习惯、老脚本），读是允许
+            # 的（指到哪读到哪），但这次重写会连带把对方的 sidecar 一起写出来 —— 那是
+            # bili-scribe 的地盘，脏键留不留归它自己判，WB 不替它改。
+            # 放在 sync_providers 之后：save 会把服务商列表写进 sidecar，
+            # 反过来的话这次重写会把刚归一出来的那张卡写成空列表，用户的服务商就没了。
+            # 走 ``target``（新家的路径，或用户显式指的路径），旧家永远不在这个分支上。
             try:
                 cfg.save(target)
             except OSError:
@@ -1052,18 +1196,24 @@ def validate(cfg: WorkbenchConfig) -> None:
 def render_yaml(cfg: WorkbenchConfig) -> str:
     """渲染 config.yaml —— **只含 bili-scribe 认识的键**。
 
-    直接用它的 ``render_config_yaml``：这个文件是两边共用的，形状必须由它说了算，
-    连注释风格一起复用，省得两份模板各说一套、越走越远。
-    Workbench 自己的设置（服务商列表、任务模型、下载/转录/切片/发布各项）在
-    ``workbench.json``，由 ``save()`` 写。
+    这个限制从「共用一份文件、怕打挂 bili-scribe」时代留下来。搬家之后这份 yaml 归
+    Workbench 自己（``~/.video-workbench/config.yaml``），那条理由已经不成立了，但格式
+    照旧，理由换成两条：形状继续复用 bili-scribe 的 ``render_config_yaml``，不用维护
+    两份模板各说一套；而且这份文件仍然能被 bili-scribe 的加载器直接读 —— 我们不依赖
+    它了，也没必要主动把它变成一个读不了的形状。
+    **新键进来的规则因此变了**：以前加一个 bili-scribe 不认识的键 = 对方起不来（硬事故），
+    现在 = 只有 bili-scribe 万一又去读这份文件才会炸（自家事故）。仍然保守 —— 扩展键
+    一律进 ``workbench.json``（由 ``save()`` 写），因为设置页、任务模型、下载/转录/切片
+    那一大堆本来就该只有一个地方负责，别把同一份配置拆成两种形状去读。
     """
     import bili_scribe.config as bc
 
     head = "\n".join(
         [
-            "# 本文件由 bili-scribe 与 VideoWorkbench 共用，只放两边都认识的键。",
-            "# VideoWorkbench 自己的设置（服务商列表、任务模型、下载/转录/切片等）",
-            f"# 存在同目录的 {EXT_NAME}。别往这里加新键 —— bili-scribe 遇到不认识的键会直接报错。",
+            "# VideoWorkbench 配置（本目录归 Workbench 自己，不是 bili-scribe 的配置）。",
+            "# 只放 bili-scribe 也认识的键；Workbench 自己的设置（服务商列表、任务模型、",
+            f"# 下载/转录/切片等）存在同目录的 {EXT_NAME}。新键请进那个文件，别加在这里 ——",
+            "# bili-scribe 的加载器遇到不认识的键会直接报错，这份文件保持能被它读。",
             "",
         ]
     )
