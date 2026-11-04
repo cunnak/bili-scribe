@@ -705,7 +705,11 @@
       one_line: content.theme, revise_note: "", theme: content.theme, content: content
     };
     var second = {
-      id: "sum_col_2", version: 2, role: "xueshu", model: "deepseek-chat",
+      // task-31 之前这一行是 role: "xueshu"。学术分析已删、视频总结合并进说人话，
+      // 演示数据里不放退役 key：mock 不承载 retired 那个判定结果（那来自真后端
+      // summary.roles.retired），所以留一个退役 key 会让这一行显示成「未知角色」——
+      // 那句是假话。合并的继任者就是 renhua，用它。
+      id: "sum_col_2", version: 2, role: "renhua", model: "deepseek-chat",
       chars: 1120, created_at: "2026-10-30 09:41:22", status: "ready",
       one_line: content.theme, revise_note: "", theme: content.theme, content: content
     };
@@ -1537,18 +1541,18 @@
       case "summary.roles":
         return ok({
           roles: [
-            { key: "xueshu", name: "学术", tagline: "论证结构与证据边界", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
-            { key: "renhua", name: "人话", tagline: "把术语翻成日常说法", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            // 顺序照后端 ROLE_KEYS。task-31：xueshu（学术分析）已删，shipin（视频总结）
+            // 合并进 renhua——所以 renhua 这一条的 tagline 就是 resources/prompts/
+            // 视频总结.txt 实测出来的那四条原则，不是照记忆编的。
+            { key: "renhua", name: "人话", tagline: "锚点撑全文·推理外显·变形替代定义·体感优先", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
             { key: "shensi", name: "深思", tagline: "追问前提与反例", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
             { key: "wengao", name: "文稿", tagline: "可直接朗读的稿子", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
             { key: "xiezuo", name: "写作", tagline: "重结构与节奏", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
             { key: "fenxi", name: "分析", tagline: "拆机制与因果", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
-            { key: "jinglian", name: "精炼", tagline: "压到最短", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
-            // 视频总结：WB 权威层自造的第 8 个角色，唯一 passes=1 的那个（顺序照后端
-            // ROLE_KEYS 排在最后）。它的 tagline 是按 resources/prompts/视频总结.txt 实测
-            // 写的，不是照记忆编的——文件里只有那四条原则，没有批判/修订段。
-            { key: "shipin", name: "视频总结", tagline: "锚点撑全文·推理外显·变形替代定义·体感优先", passes: 1, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" }
+            { key: "jinglian", name: "精炼", tagline: "压到最短", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" }
           ],
+          // 这里**不写 retired 名单**：退役角色只有一个出处（权威层 RETIRED_ROLES），
+          // mock 里再抄一份就是第二个 owner，而 summary.js:234 本来就按「读不到当空」处理。
           default: "wengao"
         });
       case "summary.models": {

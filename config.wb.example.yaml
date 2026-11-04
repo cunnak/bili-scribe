@@ -40,11 +40,15 @@ llm:
   timeout_seconds: 300
   # 调用模型时走的代理。留空 = 直连，且不读 HTTP_PROXY/HTTPS_PROXY。
   proxy: ""
-  # 总结角色：xueshu / renhua / shensi / wengao / xiezuo / fenxi / jinglian / shipin。
-  # 前 7 个走三轮改写（生成→自我批判→修订），耗时约为单轮的 3 倍；shipin（视频总结）
-  # 是唯一的单轮角色——它的 txt 真源里本来就没有批判/修订环节，所以不套那两轮。
-  # 原 standard（不套方法论的裸总结）在 Workbench 里已停用；这份模板以前写的是
-  # standard，照抄的人会第一次点生成就被拒，所以这里改成 wengao。
+  # 总结角色：这份模板**不复制角色名单**——名单的唯一出处是程序里的 ROLE_KEYS
+  # （core/summary/__init__.py），界面下拉与 `--roles` 都读它。写死在这里迟早变成
+  # 第二份真源并漂掉（本文件以前列过 8 个键、还写过「shipin 是唯一单轮角色」，
+  # 两句在角色合并后都成了假话）。要看当前有哪几个：
+  #   .venv/Scripts/python.exe -m video_workbench.cli roles
+  # 全部在用角色都走三轮改写（生成→自我批判→修订），耗时约为单轮的 3 倍；
+  # 「单轮角色」那一档已随 shipin 一起退役，现在没有更快的档。
+  # 已停用的键（standard / xueshu / shipin）仍能在历史版本里读到，导出与界面会标
+  # 「（已停用）」；但照抄进这个 role 字段会被拒——所以这里给一个在用的键。
   role: "wengao"
   # 附加提示词：把 resources/prompts/大概率管用 .txt 的**全文**接在当前角色的 txt 真源之后、
   # 输出契约之前（顺序固定：txt → extra → 契约；契约必须在最后，它专门压住 txt 里

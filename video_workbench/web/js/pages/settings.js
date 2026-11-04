@@ -62,11 +62,14 @@
           // 两边必须同步：parity 有一条常驻门把这张表的 key 序列与 ROLE_KEYS 逐字比对
           // （tests/wb/test_settings_role_warning_ui.py 的
           // test_the_option_table_in_settings_js_is_still_a_copy_of_the_backend_list）。
-          options: [["xueshu", "xueshu（学术）"], ["renhua", "renhua（人话）"], ["shensi", "shensi（深思）"], ["wengao", "wengao（文稿）"], ["xiezuo", "xiezuo（写作）"], ["fenxi", "fenxi（分析）"], ["jinglian", "jinglian（精炼）"], ["shipin", "shipin（视频总结）"]],
+          // 顺序照 ROLE_KEYS，别在这儿排序。task-31 起 xueshu（学术分析）已删、
+          // shipin（视频总结）合并进 renhua，两者都退出清单；历史行仍显示「（已停用）」，
+          // 那条口径在后端 summary.roles 的 retired 里，前端不写死任何 key。
+          options: [["renhua", "renhua（人话）"], ["shensi", "shensi（深思）"], ["wengao", "wengao（文稿）"], ["xiezuo", "xiezuo（写作）"], ["fenxi", "fenxi（分析）"], ["jinglian", "jinglian（精炼）"]],
           // 轮数由角色的 passes 决定（判定在 core/summary/summarizer.py:572 那个门），
-          // 所以这里不写「全部角色都走三轮」——shipin 就是单轮。具体每个角色几轮，
-          // 由下面注入的选项标签和真源清单行自己说，别在文案里再数一遍角色数。
-          help: "带「三轮」的角色走 生成→自我批判→修订，耗时约为单轮的 3 倍；带「单轮」的只跑一次。配置里那个值不能直接用的时候，这一栏下面会出现一行说明（内容来自后端，不在这里点名具体角色，免得下次退役或新增就得多改一处前端）。"
+          // 选项标签里的「三轮 / 单轮」是后端注入的，别在文案里数角色数——
+          // 数一次就得多改一处前端，下次新增或退役角色必然对不上。
+          help: "表里这些角色都走 生成→自我批判→修订 三轮，耗时约为单轮的 3 倍（轮数以选项标签为准，它按角色的 passes 注入）。配置里那个值不能直接用的时候，这一栏下面会出现一行说明（内容来自后端，不在这里点名具体角色，免得下次退役或新增就得多改一处前端）。"
         },
         {
           // 附加提示词：把 resources/prompts/大概率管用 .txt 全文接在角色提示词后面。
@@ -284,17 +287,20 @@
   var roleOptionList = null;     // 后端 summary.roles 给的名单（顺序/名称/轮数），null＝还没拿到
 
   // 配置里那个角色不在选项中时，下拉框必须选后端给的那个 default，而不是列表第一项。
-  // 「退到第一项」是 DOM 的副作用：`selected: String(value) === String(opt[0])` 七个选项
-  // 全不匹配时，浏览器就把第一项当成选中态显示出来——于是红字说「本次按默认角色『文稿
-  // 编辑』」，框里却亮着「学术」，用户顺手一保存，配置就被改成他没选过的角色。
+  // 「退到第一项」是 DOM 的副作用：`selected: String(value) === String(opt[0])` 在所有
+  // 选项都不匹配时，浏览器就把第一项当成选中态显示出来——于是红字说「本次按默认角色
+  // 『文稿编辑』」，框里却亮着列表第一项，用户顺手一保存，配置就被改成他没选过的角色。
+  // （当年亮着的是「学术」；那个角色后来被删了，所以这里不点名，免得下一个读代码的人
+  // 去角色表里找一个已经不存在的 key。）
   // 这里不写 "wengao" 字面量：default 由后端 resolve_role 定（配置干净时它等于配置值本身，
   // 脏时就是它真正会用的兜底），抄一份进来等于多了第二个 owner，下次换默认角色必漂。
   // 角色名单的唯一权威是后端（video_workbench/core/summary/__init__.py 的 ALL_ROLES）：
   // 顺序、显示名、几轮，全从 summary.roles 那一次返回里现取，不在前端再数一遍。
   // 读到就用这份，读不到才退回上面那张字面量兜底表——reject 时页面必须照常可用，
   // 这条需求钉在 test_roles_endpoint_failure_does_not_break_the_settings_page。
-  // 标签里的「三轮/单轮」按 passes 推：shipin 单轮、其余方法论角色三轮；写死任何一边
-  // 都会在下次加/退役角色时变成假话。
+  // 标签里的「三轮/单轮」按 passes 推，不点名任何角色：task-31 合并掉 shipin 之后
+  // 清单里全是三轮，但轮数是角色的属性、不是名单的属性——写死任何一边，
+  // 下次加/退役角色都会把它变成假话。
   function roleOptionsFrom(roles) {
     var list = roles || [];
     if (!list.length) return null;
