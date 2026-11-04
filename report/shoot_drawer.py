@@ -29,7 +29,13 @@ def free_port() -> int:
 
 def make_cfg(skin: str, port: int) -> Path:
     src = (PROJ / "config.yaml").read_text(encoding="utf-8")
-    out = [f"  port: {port}" if l.startswith("  port:") else l for l in src.splitlines()]
+    # 同 shoot.py / shoot_pop.py：这份配置落进受版本控制的 report/drawer-*.yaml，
+    # 原样复制 root config.yaml 会把活凭证推进公开仓库。截图不需要凭证。
+    # 守住这条的是 tests/wb/test_report_config_redaction.py。
+    out = [('  api_key: ""  # 截图用不到凭证，凭证只留在 root config.yaml'
+            if l.strip().startswith("api_key:")
+            else f"  port: {port}" if l.startswith("  port:") else l)
+           for l in src.splitlines()]
     text = "\n".join(out) + "\n"
     if "ui:" in text:
         text = text.replace("skin: ark", "skin: " + skin)

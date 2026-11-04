@@ -15,7 +15,7 @@ server:
 llm:
   # 任意 OpenAI 兼容端点。默认 DeepSeek。
   base_url: "https://aihubmix.com/v1"
-  api_key: "sk-MsJrYB6cFakT2Sia2d00D3E12cA14f6295352b561fA56702"
+  api_key: ""  # 原值曾提交进公开仓库，已脱敏；运行时真源只认根目录 config.yaml
   model: "qwen3.8-omni-flash"
   temperature: 0.3
   max_tokens: 4096

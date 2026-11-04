@@ -29,6 +29,12 @@ def make_cfg(skin: str, port: int) -> Path:
     for line in src.splitlines():
         if line.startswith("  port:"):
             out.append(f"  port: {port}")
+        elif line.strip().startswith("api_key:"):
+            # 这份配置会被写进 report/ 下**受版本控制**的文件（report/shot-*.yaml）。
+            # 原样复制 root config.yaml 等于把活凭证推进公开仓库——2026-11 就这么
+            # 泄露过一次。截图不需要 LLM 凭证，这里一律抹掉。
+            # 守住这条的是 tests/wb/test_report_config_redaction.py。
+            out.append('  api_key: ""  # 截图用不到凭证，凭证只留在 root config.yaml')
         elif line.strip().startswith("disclose_ai:"):
             out.append(line)
         else:

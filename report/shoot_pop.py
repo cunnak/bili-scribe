@@ -34,7 +34,15 @@ def make_cfg(skin: str, port: int) -> Path:
     src = (PROJ / "config.yaml").read_text(encoding="utf-8")
     out = []
     for line in src.splitlines():
-        out.append(f"  port: {port}" if line.startswith("  port:") else line)
+        if line.startswith("  port:"):
+            out.append(f"  port: {port}")
+        elif line.strip().startswith("api_key:"):
+            # 同 shoot.py：这份配置落进受版本控制的 report/pop-*.yaml，
+            # 原样复制会把活凭证推进公开仓库。截图不需要凭证。
+            # 守住这条的是 tests/wb/test_report_config_redaction.py。
+            out.append('  api_key: ""  # 截图用不到凭证，凭证只留在 root config.yaml')
+        else:
+            out.append(line)
     text = "\n".join(out) + "\n"
     if "ui:" in text:
         text = text.replace("skin: ark", "skin: " + skin)
