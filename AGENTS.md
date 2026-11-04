@@ -104,4 +104,5 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 | 只读诊断口不许写用户配置、不许建库建 logs | `tests/wb/test_cli_roles_route.py` C4（首次运行即不写）+ C5（无 `workbench.json`/`cli.db`/`logs`）+ **正向对照**（`info` 真会落 `cli.db` 与 `logs/`，防四个 `not exists` 因路径写错变永真） |
 | 退役显示名只有一个 owner，且必须**现取**（不许 import 别名） | `tests/wb/test_cli_roles_route.py` D 组两条行为锁：patch 权威层 `video_workbench.core.summary.role_label` 后，CLI 那句退役与 `resolve_role` 的两条 notice 必须跟着变。牙齿变体 T-6（把三处取法退回别名）→ 只红这两条 |
 | `retired` 与 `retired_labels` 同源**同序**、前端只吃裸 key | `test_cli_roles_route.py` 判据 5（`[x["key"] for x in retired_labels] == retired`，list 相等）+ `test_summary_retired_roles.py` 钉 `grep retired_labels video_workbench/web/js/**` 为 0 |
+| 字面量禁令只看代码行、注释可以有（退役名/旧写法这类禁令的扫描域必须是**非注释行**） | `tests/wb/test_cli_roles_route.py` 的禁令用例（先剥注释再扫；同一条用例必须断言解释性注释仍在场——删解释等于删护栏） |
 | 交差必须贴出受影响文件的原始读数 | 见第六节「每个数字后面必须附产生它的那条命令原文」。**全量是否跑由用户当轮命令决定**（2026-11-04 20:33 起命令为「不跑测试」）⇒ 没跑全量就不许写「全量 0 failed / 已验证不回归」，必须落在「没验证到的」里 |
