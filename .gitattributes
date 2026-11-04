@@ -13,3 +13,9 @@
 *.jpg binary
 *.zip binary
 *.ico binary
+
+# 六篇提示词真源是用户手写的原文，字节被 sha256 锁着（tests/wb/test_summary_prompt_source.py
+# 的 P1 登记表、构建期 verify 的包内字节比对，都拿它的字节数当判据）。
+# 任何 CRLF/LF 规范化都会让"别人的机器上是另一版"，所以这里显式关掉转换：
+# 工作区什么字节，仓库 blob 就是什么字节。
+video_workbench/resources/prompts/*.txt -text
