@@ -47,6 +47,13 @@ git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
 
 WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrowser 启动器，不是 WB 的。WB 入口只有 `video_workbench/desktop.py:main(argv)`（`--config/--debug/--check`）。
 
+### 只读入口的写盘边界（2026-11-04 定，task-34）
+
+- `load()` 里**除「搬家落新家」与「显式保存」外不写盘**。曾经有一条自愈：`if foreign: cfg.save(target)` 原地重写用户的配置文件——已撤，改成只把键名记进 ClassVar `cfg.foreign_keys`（不进 `asdict`/设置页/落盘），装配处 `logger.warning` 报**键名**。**那个重写修不了它想修的病**：bili-scribe 读的是 `~/.bili-scribe/`，不是新家那一份；脏键的清理是 bili-scribe 自己的事。
+- 取只读名单**不许装配服务**。`roles_payload(cfg)` 是模块级唯一 owner（`app/service.py:650`），`WorkbenchService.summary_roles()`（`:2591`）只是它的一层委托；`cli.cmd_roles`（`:238`）与 `desktop._roles`（`:313`）直接吃 `roles_payload`。`cli.open()` 已改成懒装配（只在 `rpc()`/`wait()` 里装）。
+- **已知残留（有意保留，不是缺陷）**：`info` 与 `--check` **仍会建库、建 `logs/`、落 DB 备份**——它们的语义就是体检「配置写得进去、数据目录可写」。**别为了"统一"把它们也改成不装配**，那会让 `--check` 变成 no-op；要改得先让 `app.onboard` 不摸网关，那是另一笔改动。
+- 复现这条要用**含 foreign 键的夹具**（`storage.cache_root` 一个就够）。真实两家现在 `foreign_keys()` 都是 `[]`，**拿真实配置当夹具复现不出来 —— 那不等于缺陷不存在**（本轮 lead 就在这上面错过一次，并据此否掉过一张真单）。
+
 ## 五、打包版（`dist/VideoWorkbench`）
 
 - 构建：`.venv/Scripts/python.exe scripts/build_wb.py`（`SPEC` 指向**仓库根**的 `video_workbench.spec`，不在 `scripts/` 下）。
@@ -76,7 +83,7 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 |---|---|
 | 副本与 bs 逐字节一致（除 import 段与 `__init__.py` 权威层） | `pytest tests/wb/test_summary_drift.py`（14 条） |
 | 6 个 txt 真源不许被改一个字节 | `tests/wb/test_summary_prompt_source.py` P1 的 sha256 登记表 + 打包期字节比对 |
-| 被字节锁住的路径不许被 git 规范化 | `.gitattributes` 的 `-text` 行 + 上面 ①②③ 三比（人工，暂无自动闸） |
+| 被字节锁住的路径不许被 git 规范化 | `tests/wb/test_git_no_normalization_on_locked_paths.py`（自动闸：锁清单现读自 `scripts/build_wb.py:PROMPT_TXT_NAMES` + `test_summary_drift.py`；四道判据 J1–J4，含 `core.autocrlf=true` 与 `* text=auto eol=lf` 组合在场的读数）+ `.gitattributes` 的 `-text` 行 |
 | 界面字段必须真的可达可点 | `tests/wb/test_settings_role_warning_ui.py` N1/N2/N3（同快照三条件：内容盒高>0、行在盒内、`elementFromPoint` 命中） |
 | 配置搬家不改任何值 | `tests/wb/test_*_migration*` 反向常驻用例（旧家 `max_tokens:4096` → 新家仍 4096） |
 | 全量测试通过才谈交差 | `.venv/Scripts/python.exe -m pytest tests/wb -q` + `node tests/frontend_test.js` + `tests/smoke_test.py` |
