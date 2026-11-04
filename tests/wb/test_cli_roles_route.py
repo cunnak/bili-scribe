@@ -584,7 +584,11 @@ def _cli_function_lines(name: str) -> tuple:
     import io
     import tokenize
 
-    src = (ROOT / "video_workbench" / "cli.py").read_text(encoding="utf-8")
+    # 牙齿开关：非空 ⇒ 扫描域指到 Temp 副本（AGENTS.md 第六节禁止为验红改工作区产品码）。
+    # 常驻判据不设这个变量 ⇒ 读的仍是工作区真实文件，行为不变。照 `WB_WEB_ROOT` 先例。
+    override = os.environ.get("WB_CLI_SOURCE_OVERRIDE", "").strip()
+    cli_path = Path(override) if override else (ROOT / "video_workbench" / "cli.py")
+    src = cli_path.read_text(encoding="utf-8")
     lines = src.splitlines()
     tree = ast.parse(src)
     wanted = [n for n in ast.walk(tree)
@@ -602,21 +606,28 @@ def _cli_function_lines(name: str) -> tuple:
                 first = body[0]
                 doc_lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
 
+    # COMMENT token 的行号：只有「代码部分为空」的整行注释才排除。
+    # 写成「这行有 # 就跳过」会把 `x = 1  # 已停用` 整行剥掉——牙齿 v2 实测就是这样空枪的。
+    comment_only = set()
+    comment_at = {}
     try:
-        comment_lines = {t.start[0] for t in tokenize.generate_tokens(
-            io.StringIO(src).readline) if t.type == tokenize.COMMENT}
+        for t in tokenize.generate_tokens(io.StringIO(src).readline):
+            if t.type == tokenize.COMMENT:
+                comment_at[t.start[0]] = t.start[1]
     except (tokenize.TokenError, IndentationError, SyntaxError) as exc:
         pytest.fail(f"扫描域建不起来（tokenize 过不去）：{exc}——先修解析，再谈禁令")
 
     block = "\n".join(lines[lo - 1: hi])
     code = []
     for no in range(lo, hi + 1):
-        if no in doc_lines or no in comment_lines:
+        if no in doc_lines:
             continue
         text = lines[no - 1]
-        cut = text.find("#")
-        if cut >= 0:
-            text = text[:cut]
+        col = comment_at.get(no)
+        if col is not None:
+            if not text[:col].strip():
+                continue                      # 整行注释：不是代码，放行
+            text = text[:col]                 # 行尾注释：剥掉注释，代码部分照扫
         if text.strip():
             code.append((no, text))
     return block, code
@@ -645,3 +656,80 @@ def test_the_comment_that_explains_why_there_is_no_such_table_is_still_there():
         "只留一条代码行禁令、把解释删掉，下一个人就会顺手把表加回来"
         "（那正是 task-36 之前 CLI 印三个英文 key 的成因）。请把解释补回注释，"
         "不要改本判据的期望值。")
+
+
+
+def test_the_comment_stripper_keeps_the_code_part_of_a_line_with_trailing_comment(tmp_path):
+    """扫描器形状锁：行尾注释只剥注释，**不许连同一行的代码一起丢**。
+
+    为什么单独有这条：判据 ① 的价值全在「代码行」这三个字上。第一版实现写成
+    「这一行有 `#` 就整行跳过」，于是 `shown = [1]  # 已停用` 这种行的代码部分被丢掉
+    ⇒ 塞进代码行的字面量扫不到 ⇒ 判据 ① 变成空枪（牙齿 v2 实测 2 passed 暴露的）。
+    没有这条，下一个人把剥注释改回整行跳过，判据 ① 照样绿，而且没人会重跑牙齿。
+
+    这条不依赖产品当前是否违规：样本行由我自己造，断的是扫描器的行分类。
+    """
+    sample = tmp_path / "cli-shape.py"
+    sample.write_text("\n".join([
+        "def cmd_roles(self):",
+        '    """文档行：已停用也不算代码。"""',
+        "    shown = [1]  # 已停用：同一行的代码部分必须照扫",
+        "    # 纯注释行：整行跳过",
+        '    return "标准（已停用）"',
+        "",
+    ]), encoding="utf-8")
+    prev = os.environ.get("WB_CLI_SOURCE_OVERRIDE", "")
+    os.environ["WB_CLI_SOURCE_OVERRIDE"] = str(sample)
+    try:
+        _block, code = _cli_function_lines("cmd_roles")
+    finally:
+        if prev:
+            os.environ["WB_CLI_SOURCE_OVERRIDE"] = prev
+        else:
+            os.environ.pop("WB_CLI_SOURCE_OVERRIDE", None)
+
+    texts = [t.strip() for _no, t in code]
+    # 函数体里三行真代码；docstring 与纯注释行都不该在里面。
+    assert len(code) == 3, f"代码行应为 3（docstring/纯注释行排除），实得 {len(code)}：{texts}"
+    assert any("shown = [1]" in t for t in texts), \
+        f"「代码 + 行尾注释」的那半行代码没被扫到——判据 ① 就是空枪：{texts}"
+    assert not any(t.startswith("#") for t in texts), f"纯注释行被当成代码：{texts}"
+    # 违规只落在**代码部分真含字面量**的那行（第 5 行那个 return）。
+    # 第 3 行不算违规——它的字面量在行尾注释里，口径是「注释可以有、代码行不行」。
+    # 这两件事必须分开断：第 3 行「被扫到」是形状，「不被 flag」是口径。
+    flagged = sorted({no for literal, _why in _CLI_FORBIDDEN_ON_CODE_LINES
+                      for no, t in code if literal in t})
+    assert flagged == [5], f"字面量违规应且仅应命中代码部分含它的那行，实得 {flagged}"
+    shown_lines = [no for no, t in code if "shown = [1]" in t]
+    assert shown_lines and set(shown_lines).isdisjoint(flagged), (
+        f"第 3 行该被扫到（代码部分）且不该被 flag（字面量在注释里）："
+        f"扫到={shown_lines} 违规={flagged}")
+
+
+def test_the_source_override_switches_the_file_not_the_verdict():
+    """开关的语义边界：**只**改读哪个文件，判据一分不动。
+
+    做法：把开关指到**真实** `cli.py` 本身，与默认路径各读一遍，两边结果必须逐位相等。
+    这条拦的不是产品，是「为了跑牙齿而给副本开的后门」——那种后门会让牙齿红得没意义。
+    """
+    real_cli = ROOT / "video_workbench" / "cli.py"
+    assert real_cli.exists(), f"扫描域的真身不见了：{real_cli}"
+
+    block_default, code_default = _cli_function_lines("cmd_roles")
+    prev = os.environ.get("WB_CLI_SOURCE_OVERRIDE", "")
+    os.environ["WB_CLI_SOURCE_OVERRIDE"] = str(real_cli)
+    try:
+        block_via, code_via = _cli_function_lines("cmd_roles")
+    finally:
+        if prev:
+            os.environ["WB_CLI_SOURCE_OVERRIDE"] = prev
+        else:
+            os.environ.pop("WB_CLI_SOURCE_OVERRIDE", None)
+
+    assert block_via == block_default, "开关换了文件之后，块内容也变了——判据语义被带偏"
+    assert [no for no, _ in code_via] == [no for no, _ in code_default], (
+        "同一份文件经开关读出的代码行行号与默认路径不一致："
+        f"{[no for no, _ in code_via]} vs {[no for no, _ in code_default]}")
+    assert [t for _, t in code_via] == [t for _, t in code_default], \
+        "同一份文件经开关读出的代码行文本与默认路径不一致"
+    assert code_default, "默认扫描域读出 0 行代码（这条会变成空对照）"
