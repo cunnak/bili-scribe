@@ -1090,5 +1090,165 @@ def test_an_input_with_a_broken_repr_currently_raises():
         role_label(value)
     assert "repr" in str(exc.value), (
         f"{tag} 抛了，但不是 repr 那条路径（{exc.value}）——成因变了，请重读")
+class _HostileStr:
+    """`__str__` 自己抛异常的对象：`str(key)` 这一步就炸，轮不到后面的查表。
+
+    与 `_HostileRepr` 区分开：那条是对象**没定义** `__str__` 时 `str(obj)` 回落到
+    `__repr__`；这条是 `__str__` 定义了且自己抛。两支成因不同，各钉一条。
+    """
+
+    def __str__(self):
+        raise RuntimeError("夹具：__str__ 故意炸")
 
 
+def _authority_module():
+    import video_workbench.core.summary as authority
+
+    return authority
+
+
+def test_a_broken_input_currently_falls_back_to_a_retired_key_in_the_copy_path():
+    """变更探测器（**不是我认为的对**）：同一个坏输入，两份取角色入口语义不同。
+
+    现读（本用例自己会跑，别信 docstring，信断言）：
+      · 权威层 `get_role(<坏输入>)` 抛 `UnknownRole`；
+      · 注入给副本的 `_bound_get_role(<坏输入>)` 静默返回一个角色，
+        而那个键**就在 `RETIRED_ROLES` 里** —— 回落目标是已被退役的 `standard`。
+
+    为什么只钉现状、不许当缺陷修：回落语义来自 bili-scribe 原件
+    （`bili_scribe/core/roles.py` 的「未知键回落 standard」），副本
+    `core/summary/summarizer.py:512` 调的就是这个名字，`:105-108` 的注释还明写
+    「查表行为（含"未知回落 standard"）与原函数逐字一致，对账测试才不会被这件事影响」。
+    在 WB 侧改成抛＝**主动偏离 bili-scribe**，而这个项目的整个前提就是与 bs 输出一致，
+    需要用户拍板（lead 在 task-44 里把这条切成 (b)「不许顺手做」）。
+    所以：用户拍板那天、或有人改了副本语义那天，这条必须红——红是信号，不是回归。
+
+    期望值全部现读：回落目标由 `_raw_get_role(<一把肯定不存在的键>)` 现取，
+    不写死 `'standard'`；输入用 `Ellipsis`（builtin 哨兵，`str()` 后不是任何键名）。
+    """
+    authority = _authority_module()
+    missing = "zzz-definitely-not-a-role"
+    fallback_key = authority._raw_get_role(missing).key
+    assert fallback_key in RETIRED_ROLES, (
+        f"副本的未知键回落目标是 {fallback_key!r}，它已经不在退役名单里了——"
+        "回落目标换了/退役名单变了，请重读这条判据再决定叙述")
+
+    with pytest.raises(UnknownRole):
+        authority.get_role(Ellipsis)
+
+    got = authority._bound_get_role(Ellipsis)
+    assert got.key == fallback_key, (
+        f"`_bound_get_role(Ellipsis)` 不再静默回落到 {fallback_key!r}（实得 "
+        f"{got.key!r}）——副本语义已被改动或用户已拍板，请把这条翻成"
+        "「坏输入必须抛 UnknownRole」")
+    assert got.key not in ROLE_KEYS, (
+        "回落目标居然是现役键，那这条探测器就没有意义了：请重读退役名单")
+
+
+def test_the_adapter_never_hands_the_copy_a_retired_key():
+    """可达性锁（今天成立、必须一直成立）：副本收到的角色键全部是现役键。
+
+    上面那条探测器钉的是「副本入口会把坏输入静默换成退役方法论」，
+    但今天**没有真实入口踩得到**：适配层两条生成入口（`core/summarizer.py:876`、
+    `:958`）都先 `resolve_role(...)` 再 `get_role(key)`，交给副本的是
+    `role_key=role_obj.key`，而副本那一行是
+    `role = roles.get_role(role_key or llm_cfg.role)` —— `role_key` 恒非空时
+    `llm_cfg.role` 根本不参与。
+
+    所以这条守的就是那个「恒非空」：我把**配置里的默认角色设成退役值**（真库现场就是这么
+    来的，`summary_version` 里就有 `role='standard'` 的历史行），跑一次真生成，断副本
+    `roles.get_role` 收到的每一个键都是现役键。
+    有牙的坏法有三种，都会让这条红：把 `role_key` 改成可空、直接把 `cfg.llm.role` 传下去、
+    或者把清洗从 `resolve_role` 撤掉。任何一种的现场都是**用户拿到已停用的方法论而界面上
+    没有任何提示**——那正是 task-7 定的底线要拦的东西。
+    """
+    import json
+
+    import video_workbench.core.summarizer as adapter
+    import video_workbench.core.summary.roles as copy_roles
+    from test_summary import GOOD, FakeCtx, StubClient, _cfg
+
+    seen: list = []
+    original = copy_roles.get_role
+
+    def spy(key):
+        seen.append(key)
+        return original(key)
+
+    cfg = _cfg()
+    cfg.llm.role = sorted(RETIRED_ROLES)[0]          # 现读一把退役键当配置值
+    assert cfg.llm.role in RETIRED_ROLES, "夹具失效：配置里没带上退役值"
+    assert cfg.llm.role not in ROLE_KEYS, (
+        "夹具失效：那把键同时是现役键，这条就证不了「配置带着脏值」")
+
+    copy_roles.get_role = spy
+    try:
+        result = adapter.run(
+            {"title": "标题", "up_name": "UP"},
+            [{"start_ms": 0, "text": "内容"}],
+            client=StubClient([json.dumps(GOOD)] * 3),
+            cfg=cfg,
+            ctx=FakeCtx(),
+        )
+    finally:
+        copy_roles.get_role = original                # 还原，别污染其它用例
+
+    assert seen, "副本的取角色入口一次都没被调用——这条成了空枪，请重读接线"
+    assert all(str(k or "").strip() for k in seen), (
+        f"副本收到空角色键（{seen!r}）：`role_key or llm_cfg.role` 那条真值判断"
+        "会被配置里的退役值接住，退役方法论将静默生效")
+    bad = [k for k in seen if k in RETIRED_ROLES]
+    assert not bad, (
+        f"副本收到退役键 {bad}：配置里的 {cfg.llm.role!r} 被直接传下去了，"
+        "适配层的清洗没起作用")
+    assert result["role"] == DEFAULT_ROLE, (
+        f"配置是退役值时，适配层应回落到 {DEFAULT_ROLE!r}，实得 {result['role']!r}")
+
+
+def test_an_input_whose_dunder_str_raises_currently_breaks_the_never_raises_contract():
+    """已知边界（期望值就是「抛」）：`__str__` 自己抛的对象，判空那一步就炸。
+
+    契约那句「任何输入都不抛」对它不成立，因为整条路径的唯一转换手段就是 `str(key)`。
+    要治只能给转换包一层 try，或改用 `type(key).__name__` 兜底——我不替产品决定该不该管：
+    这种对象只有测试夹具造得出来，真实 RPC/配置/历史行里的 role 都是 `str`。
+    vendor 会在 task-44 把同一句话写进注释，这条负责让它别只活在交付正文里。
+
+    与 `test_an_input_with_a_broken_repr_currently_raises` 的分工：那条钉「没定义
+    `__str__` 时 `str(obj)` 回落到 `__repr__`」，这条钉「`__str__` 自己抛」。
+    两条各拦一支，合并就会有一支失去覆盖。将来谁给转换加了兜底，这两条都会红——
+    那时请把两支一起翻成正向断言，别只翻一条。
+    """
+    with pytest.raises(RuntimeError):
+        role_label(_HostileStr())
+def test_the_copy_lookup_still_matches_bili_scribe_for_a_padded_key():
+    """副本入口的查表必须与 bili-scribe 逐字同形：带空白的键照旧回落，不许被去过空白查中。
+
+    现读形状（vendor 在 task-44 特意保留，注释就写在那一行上面）：
+      · 权威层 `get_role` **先清洗**（`str(key).strip()`）再查表 ⇒ `" <现役键> "` 查中；
+      · 注入给副本的 `_bound_get_role` 判空用清洗后的 `text`，但**交给原件查表的是原始
+        `key`** ⇒ `" <现役键> "` 落进原件的「未知键回落 standard」。
+    两份入口对同一个输入不同形，是**有意的**：一侧要给用户兜住脏配置，另一侧必须与
+    `bili_scribe` 的输出一致（整个项目的前提）。下一个想把两边"统一"的人会先撞上这条。
+
+    对照物不是我算出来的，是 bili-scribe 原件本身：`bili_scribe.core.roles.get_role`。
+    """
+    import bili_scribe.core.roles as bs_roles
+
+    authority = _authority_module()
+    padded = f" {sorted(ROLE_KEYS)[0]} "            # 现读：现役键两侧各加一个空格
+    assert padded not in ROLE_KEYS and padded.strip() in ROLE_KEYS, (
+        "夹具造错：`padded` 必须是不在名单里、去掉空白才在名单里的键形状")
+
+    bs_key = bs_roles.get_role(padded).key           # bs 原件怎么处理这个输入
+    copy_key = authority._bound_get_role(padded).key  # 副本入口（总结主路径实际走的）
+    assert copy_key == bs_key, (
+        f"副本入口对 {padded!r} 的处理与 bili-scribe 不一致：WB 给 {copy_key!r}、"
+        f"bs 给 {bs_key!r}。多半是有人把 `_raw_get_role(key)` 改成了交 `text`——"
+        "那是主动偏离 bs 的查表语义，需要用户拍板，不是实现层的自由")
+    assert bs_key not in ROLE_KEYS, (
+        f"bs 原件居然查中了 {bs_key!r}，那这条对照失去意义，请重读原件的查表形状再改写")
+
+    cleaned = authority.get_role(padded).key
+    assert cleaned == padded.strip(), (
+        f"权威层不再清洗脏配置了（实得 {cleaned!r}）——用户在配置里多敲一个空格"
+        "就会拿到回落，这条底线要单独保住")
