@@ -538,3 +538,110 @@ def test_the_two_role_notices_are_taken_from_the_same_authority_label():
     assert "SENTINEL" not in notice2, f"补丁没还原干净：{notice2!r}"
     assert auth.role_label(DEFAULT_ROLE) in notice2, (
         f"还原后回落 notice 里没有真名，这条锁本来就没内容：{notice2!r}")
+
+
+# ---------------------------------------------------------------------------
+# task-46 第 1 件事：把「字面量禁令只看非注释行」落成机械判据
+#
+# 来历（AGENTS.md 第六节那条口径的机械化）：本轮两次 grep 命中都在注释里——
+# task-36 的中文退役名、task-44 的 `str(key or`，两处都是实现层写的「为什么这里
+# 没有这张表」。vendor 按 task-36 的裁定**没删解释、只改措辞**，这是对的。
+# 但只钉「代码行干净」会诱导下一个人在打扫告警时把解释一起删掉，而解释是护栏。
+# 所以这条判据两半都要：
+#   ① 代码行（剥掉 `#` 注释与 docstring 之后）不许出现禁令字面量；
+#   ② 那段解释必须仍然在场（现读可 grep 的短语，不写行号——行号会漂）。
+#
+# 扫描域为什么用 AST 行区间而不是字符串切片：`cmd_roles` 是 `Cli` 类里的方法，
+# 切片会把首行的缩进切掉、方法体却留着，ast 直接报 IndentationError（第一版就这么红着
+# 抓到自己的错）。整文件 AST 定位才不受缩进与兄弟方法的影响。
+# ---------------------------------------------------------------------------
+
+#: 被禁的字面量＝在**代码行**里自带退役名表或退役判定。每条附它拦的坏法。
+_CLI_FORBIDDEN_ON_CODE_LINES = (
+    ("已停用", "CLI 自己拼停用后缀＝第二个显示名 owner（真源是权威层 `role_label()`）"),
+    ("RETIRED_ROLES", "CLI 自己读退役集合做判定＝把权威层清单搬进展示层"),
+    ("UnknownRole", "CLI 自己捕 `UnknownRole` 再改名＝拿异常当显示逻辑的分支"),
+    ("role_label", "CLI 自己调 `role_label()`＝绕过载荷，前端与 CLI 会各说各话"),
+)
+
+#: 解释必须在场的短语（可 grep，不写行号）。缺任何一个 ⇒ 有人拆了护栏。
+#: 只挑**单行内完整出现**的说法，跨行折行的句子不能当锚点（第一版我挑了
+#: 「显示名的唯一 / owner 是权威层」那种被注释折成两行的句子，整串匹配恒 False）。
+_CLI_EXPLANATION_MARKERS = (
+    "不许出现 key→中文",
+    "退回裸 key",
+    "权威层",
+)
+
+
+def _cli_function_lines(name: str) -> tuple:
+    """现读 cli.py 里某个函数的行区间，返回 (全部行文本, 代码行 [(行号, 剥注释后的文本)])。
+
+    代码行＝区间内、既不在 `#` 注释行、也不在 docstring 行区间、并剥掉行内注释后仍非空。
+    docstring 用 AST 取，因为本轮 vendor 那次命中就在 docstring 里，只按 `#` 剥盖不住。
+    """
+    import ast
+    import io
+    import tokenize
+
+    src = (ROOT / "video_workbench" / "cli.py").read_text(encoding="utf-8")
+    lines = src.splitlines()
+    tree = ast.parse(src)
+    wanted = [n for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
+    assert len(wanted) == 1, f"`{name}` 在 cli.py 里找到 {len(wanted)} 个，扫描域要重新定义"
+    node = wanted[0]
+    lo, hi = node.lineno, (node.end_lineno or node.lineno)
+
+    doc_lines = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = getattr(sub, "body", None)
+            docs = ast.get_docstring(sub, clean=False)
+            if docs and body and isinstance(body[0], ast.Expr):
+                first = body[0]
+                doc_lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+
+    try:
+        comment_lines = {t.start[0] for t in tokenize.generate_tokens(
+            io.StringIO(src).readline) if t.type == tokenize.COMMENT}
+    except (tokenize.TokenError, IndentationError, SyntaxError) as exc:
+        pytest.fail(f"扫描域建不起来（tokenize 过不去）：{exc}——先修解析，再谈禁令")
+
+    block = "\n".join(lines[lo - 1: hi])
+    code = []
+    for no in range(lo, hi + 1):
+        if no in doc_lines or no in comment_lines:
+            continue
+        text = lines[no - 1]
+        cut = text.find("#")
+        if cut >= 0:
+            text = text[:cut]
+        if text.strip():
+            code.append((no, text))
+    return block, code
+
+
+def test_the_cli_carries_no_retired_name_table_in_its_code_lines():
+    """判据 ①：`cmd_roles` 的**代码行**里不许出现退役名相关的第二份 owner 字面量。"""
+    _block, code = _cli_function_lines("cmd_roles")
+    assert code, "扫描域为空——这条判据会变成永绿，先修扫描域"
+    hits = [f"代码行 {no} 出现 {literal!r}（{why}）：{text.strip()[:90]}"
+            for literal, why in _CLI_FORBIDDEN_ON_CODE_LINES
+            for no, text in code if literal in text]
+    assert not hits, "\n".join(hits)
+
+
+def test_the_comment_that_explains_why_there_is_no_such_table_is_still_there():
+    """判据 ②：解释必须还在场。删解释等于拆护栏，所以反向盯同一个函数。
+
+    只要求那几个短语在该函数范围内还能 grep 到，不要求它在注释里、也不要求行号。
+    短语漂了请改短语，**不许**把这条降级成「只要函数体非空」。
+    """
+    block, _code = _cli_function_lines("cmd_roles")
+    gone = [m for m in _CLI_EXPLANATION_MARKERS if m not in block]
+    assert not gone, (
+        f"`cmd_roles` 里那段「为什么这里没有退役名单」的解释少了这些短语：{gone}。"
+        "只留一条代码行禁令、把解释删掉，下一个人就会顺手把表加回来"
+        "（那正是 task-36 之前 CLI 印三个英文 key 的成因）。请把解释补回注释，"
+        "不要改本判据的期望值。")

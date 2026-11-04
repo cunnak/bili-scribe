@@ -496,3 +496,67 @@ def test_legacy_summary_row_does_not_block_a_refine(service, tmp_path, monkeypat
     assert error["code"] == "VALIDATION"
     assert error["message"] == AUTHORITY_WORDING, (
         f"改稿入口的文案也要走权威层，不许与生成入口各说各话：{error['message']!r}")
+
+def test_resolve_role_never_returns_a_role_outside_the_public_list():
+    """反向证据（task-46 第 2 件事）：`resolve_role` 的返回值**恒在 `ROLE_KEYS` 内**。
+
+    为什么必须有这条：`test_the_adapter_never_hands_the_copy_a_retired_key` 钉的是
+    「适配层交给副本的键不含退役键」，而我在交付里对用户说过「坏输入在真实路径上
+    不可达，实际风险可能比我说的小」——那句当时只有从调用点 grep 推出来的支撑，
+    没有机械证据。这条把推断换成断言：入参空间逐格验（显式退役键、配置脏值、
+    空值、现役键及其组合）。
+
+    抛 `WBError` 是**合法出口**（拒绝比越界安全）；返回 `ROLE_KEYS` 之外的值才是真缺陷
+    ——那时请单独立缺陷、贴复现命令原文，不许放宽本断言。
+    """
+    from video_workbench.app.errors import WBError
+    from video_workbench.core import summarizer
+    from video_workbench.core.summary import RETIRED_ROLES as LIVE_RETIRED
+    from video_workbench.core.summary import ROLE_KEYS as LIVE_PUBLIC
+
+    resolve = getattr(summarizer, "resolve_role", None)
+    if resolve is None:
+        pytest.fail(f"{CONTRACT_GUARD}\n`resolve_role` 还不存在。")
+
+    grid = [(e, f) for e in [None, "", "   ", *LIVE_PUBLIC, *sorted(LIVE_RETIRED),
+                             "ghost", " wengao "]
+            for f in [None, "", "   ", *sorted(LIVE_RETIRED), "ghost"]]
+    assert len(grid) >= 40, f"入参空间只有 {len(grid)} 格，不足以当反向证据"
+
+    offenders, raised = [], 0
+    for explicit, fallback in grid:
+        try:
+            key, _notice = resolve(explicit, fallback)
+        except WBError:
+            raised += 1
+            continue
+        if key not in LIVE_PUBLIC:
+            offenders.append(f"explicit={explicit!r} fallback={fallback!r} → {key!r}")
+
+    assert not offenders, (
+        "这些入参让 `resolve_role` 返回了公开名单之外的角色——「适配层永远不会把退役键"
+        "交给副本」这条前提就此失效：\n  " + "\n  ".join(offenders))
+    assert raised, (
+        f"{len(grid)} 格入参一次都没抛——夹具多半没把退役/未知值喂进去。"
+        "显式提交退役键必须硬拒（A 支），一条不抛就是入参形状错了")
+
+
+def test_a_public_key_survives_resolve_role_as_itself():
+    """配对腿：现役键**原样透传**，不许被换成默认值。
+
+    只断「返回值在名单内」不够——实现若把谁都映射成默认角色，上一条照样绿。
+    这条钉「显式传现役键就得拿回那把键」，两条合起来才夹住返回值。
+    """
+    from video_workbench.core import summarizer
+    from video_workbench.core.summary import RETIRED_ROLES as LIVE_RETIRED
+    from video_workbench.core.summary import ROLE_KEYS as LIVE_PUBLIC
+
+    resolve = getattr(summarizer, "resolve_role", None)
+    if resolve is None:
+        pytest.fail(f"{CONTRACT_GUARD}\n`resolve_role` 还不存在。")
+
+    dirty_fallback = sorted(LIVE_RETIRED)[0]
+    for key in LIVE_PUBLIC:
+        got, notice = resolve(key, dirty_fallback)
+        assert got == key, f"显式传现役键 {key!r} 却被换成 {got!r}：现役键不许被覆盖"
+        assert notice == "", f"干净输入不该带提示，实得 {notice!r}"
