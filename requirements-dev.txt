@@ -1,0 +1,20 @@
+# VideoWorkbench 开发/验收依赖 —— 运行时不装。
+#
+# 装法：.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+#
+# 为什么和 requirements.txt / requirements-wb.txt 分开：这里的东西只服务浏览器验收
+# 用例（tests/wb/test_settings_role_warning_ui.py 那类），打进运行时依赖会让桌面版
+# 发布包白背几十 MB。requirements.txt 保持只有产品跑起来需要的东西。
+#
+# 注意：pip 只装 Python 包，**浏览器二进制不随 pip 安装**，还得跑一次：
+#   .venv/Scripts/python.exe -m playwright install chromium
+# （装过 node 版 playwright 的机器也可以用 `npx playwright install chromium`，落到
+#  同一个用户缓存目录。盘上已经有 ms-playwright/chromium-1248 的机器不用重新下载，
+#  用例启动时会自动用上那份二进制。）
+#
+# 没装上的机器不会假绿：用例文件顶部 pytest.importorskip("playwright.sync_api") 会把
+# 整个模块 skip 掉，装了包但 chromium 起不来时 launch 那条路也走 pytest.skip，两处
+# reason 里都写着上面那条可执行的修复命令。skip 不等于通过——看 pytest 结尾的 skipped
+# 计数，别只看 failed 为 0。
+
+playwright==1.64.1   # 本机 .venv 实装版本（pip show playwright 核对过），钉死以免用例忽红忽绿

@@ -24,6 +24,20 @@ SPEC = PROJ / "video_workbench.spec"
 DIST = PROJ / "dist" / "VideoWorkbench"
 EXE = DIST / "VideoWorkbench.exe"
 
+#: 六份提示词真源 txt 的**逐字**文件名（含全角冒号、末尾句号、`.txt` 前那个空格）。
+#: 这里是唯一的出处，preflight 与 verify 共用——写死名字是刻意的：这份清单是"用户手写的
+#: 那几篇原文必须进包"的构建契约，不跟着 prompt_source.MAP 走，改了 MAP 也不该让自检跟着松。
+#: 事故背景：spec 用整目录收 `resources`，文件名带空格与全角时最容易"收进去但收错一份/半份"，
+#: 只查存在会绿着骗过去，所以 verify 还要比字节（见 verify()）。
+PROMPT_TXT_NAMES = (
+    "文稿编辑.txt",
+    "写作专家.txt",
+    "分析报告.txt",
+    "首席思想精炼师：对于各种文本都处理得较为简洁的总结提示词。.txt",
+    "大概率管用 .txt",
+    "视频总结.txt",
+)
+
 
 def _need(path: Path, what: str, problems: list[str], *, wait_s: float = 0.0) -> None:
     """存在性检查。
@@ -47,6 +61,11 @@ def preflight() -> list[str]:
     _need(PKG / "web" / "index.html", "窗口首页", problems)
     _need(PKG / "resources" / "icon.ico", "图标（先跑 scripts/make_wb_icon.py）", problems)
     _need(PKG / "resources" / "prompts", "提示词目录", problems)
+    # 六份 txt 逐字点名——少任何一份都算前置条件不齐，别白等几分钟构建再报缺。
+    # 构建出来的包若少了它们，用户双击 exe 只会跑内置压缩版，界面还显示"无 txt 真源"，
+    # 根本看不出问题（这正是 task-28 要堵的洞）。
+    for name in PROMPT_TXT_NAMES:
+        _need(PKG / "resources" / "prompts" / name, "提示词真源 txt（逐字文件名）", problems)
     for mod in ("PyInstaller", "webview"):
         try:
             __import__(mod)
@@ -87,6 +106,30 @@ def verify() -> int:
                 "_internal/video_workbench/web/css/tokens.css",
                 "_internal/video_workbench/resources/icon.ico"):
         _need(DIST / rel, "包内资源", problems, wait_s=20)
+
+    # 六份 txt 真源：不止查存在，还查字节——文件名带空格与全角，历史上最容易
+    # "收进去但收错一份/半份"，只查存在会绿着骗过去。字节数**现读比对**，
+    # 不写死数字：仓库里改了，包没跟上就得红。_need 用 wait_s=20 是因为杀软实时扫描
+    # 会让刚写出的文件短暂不可见（别改成裸 exists()）。
+    repo_prompts = PKG / "resources" / "prompts"
+    for name in PROMPT_TXT_NAMES:
+        packed = DIST / "_internal/video_workbench/resources/prompts" / name
+        _need(packed, "包内 txt 真源", problems, wait_s=20)
+        if not packed.is_file():
+            continue  # _need 已登记缺失，比不了字节
+        repo_file = repo_prompts / name
+        if not repo_file.is_file():
+            problems.append(f"仓库侧缺 txt 真源，无法比对字节：{repo_file}")
+            continue
+        packed_bytes = packed.stat().st_size
+        repo_bytes = repo_file.stat().st_size
+        if packed_bytes != repo_bytes:
+            problems.append(
+                f"包内 txt 字节数与仓库不一致：{name} 包内={packed_bytes} 仓库={repo_bytes}"
+            )
+        else:
+            print(f"[verify] ✓ {name} 包内 {packed_bytes}B == 仓库 {repo_bytes}B")
+
     if problems:
         for item in problems:
             print(f"[verify] ✗ {item}")
