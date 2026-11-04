@@ -1534,11 +1534,17 @@
           children: rows
         });
       }
-      // 判据：mock 只承载形状，不承载会变的判定结果（configured_unrecognized/configured_hint 之类不写死）。
-      // 角色真源三个字段同理：只补**键的形状**，值留空——哪个角色吃哪个 txt、多少字节、
-      // sha 前 8 位都由后端 core/prompt_source.py 现算，写死在这里等于第二份映射表，
-      // 用户改一篇 txt 就得跟着漂。
       case "summary.roles":
+        // 判据：mock 只承载**形状**，不承载会变的判定结果。角色真源三个字段
+        // （prompt_source/prompt_bytes/prompt_sha8）就是这种情况：哪个角色吃哪个 txt、
+        // 多少字节、sha 前 8 位都由后端 core/prompt_source.py 现算，写死在这里等于第二份
+        // 映射表，用户改一篇 txt 就得跟着漂。
+        // 但「不写值」不等于「不写键」——2026-11-04 补的就是这一半：真载荷有七个键
+        // （roles/default/retired/retired_labels/extra_prompt/configured_unrecognized/
+        // configured_hint），这里原来只有前两个的形状。缺键和空值在界面上表现**完全一样**
+        // （summary.js:234 是 `(data && data.retired) || []`），所以演示态永远走兜底支、
+        // 不报错、只少一列，而演示态恰恰是最常被拿去截图的那一态：载荷形状漂了没人拦得住。
+        // 下面五个一律给中性值（空数组 / false / 空串），值仍由真后端现算。
         return ok({
           roles: [
             // 顺序照后端 ROLE_KEYS。task-31：xueshu（学术分析）已删，shipin（视频总结）
@@ -1551,8 +1557,17 @@
             { key: "fenxi", name: "分析", tagline: "拆机制与因果", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
             { key: "jinglian", name: "精炼", tagline: "压到最短", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" }
           ],
-          // 这里**不写 retired 名单**：退役角色只有一个出处（权威层 RETIRED_ROLES），
-          // mock 里再抄一份就是第二个 owner，而 summary.js:234 本来就按「读不到当空」处理。
+          // 这两键**值不抄**（退役名单唯一出处是权威层 RETIRED_ROLES），但**键要补齐**：
+          // 空数组与缺键在界面上等价，写出来才能让人看出「这里刻意留空」而不是「这个字段不存在」。
+          retired: [],
+          retired_labels: [],
+          // 真载荷里 configured_unrecognized 是**字符串**（脏的那个值本身，干净时是空串），
+          // 不是我先前猜的布尔——类型现读自 `roles_payload()`，中性值按真实类型给。
+          configured_unrecognized: "",
+          configured_hint: "",
+          // 附加提示词开关：真载荷里是布尔（读的是 cfg.llm.extra_prompt）。演示态一律 false，
+          // 与上面 :38 那份 SETTINGS.llm.extra_prompt 默认值同向，不在这里发明第三种状态。
+          extra_prompt: false,
           default: "wengao"
         });
       case "summary.models": {
