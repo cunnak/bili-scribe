@@ -76,6 +76,8 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 - **跨工具比 sha 必须比原始字节，禁止用 `read_text()` 归一化后的内容算 sha。** `video_workbench/web/js/pages/settings.js` 是 **CRLF**，而 `prompt_source.py`/`mock.js` 是 LF：`sha256sum` 打磁盘字节得 `18a9fc3a…`，Python `Path.read_text()` 把 `\r\n` 折成 `\n` 再 encode 得 `4339f77f…`。本轮「同一文件两次 sha 不同」被当成并发写/静默还原来排查，实际全是读法差异。⇒ 快照登记、字节锁闸、牙齿的"恢复后一致"核对，三处都必须 `open(p,'rb').read()` 或 `sha256sum` / `git cat-file -s :path`。
 - **判"落地了没有"只读工作区路径本身，并且必须在同一条命令里同时打印 工作区 / 索引 / HEAD 三份 sha256 + grep 命中，写明引用的是哪一份。** 我（lead）用 `git show :path` 读到旧版，判成"工作区被打回旧版"，给两位成员各开了一张重建单——这种单子会让人真去重写本来好好的代码，比误删文件更贵。`M` 只代表工作区≠索引；落地未 commit 时索引=HEAD=旧版是**正常状态**，不是回退。
 - 逐字节锁定的副本不许"顺手修"：那是刻意保留的上游行为，改一处就等于放弃了"一比一"的整个价值。要偏离，走 `core/summary/__init__.py`。
+- **"单一 owner"这类规则，值相等的断言拦不住取法退化，必须写行为锁。** 本轮实例：`core/summarizer.py` 用 `from … import role_label` 别名取退役显示名，别名在导入时就绑死函数对象 ⇒ 改权威层输出下游纹丝不动，而"值相等"那条断言照样绿。改成经模块属性现取 `summary_pkg.role_label(...)` 后行为锁才成立。写判据时：patch **权威层的模块属性**（不是适配层别名、不是 subprocess），并同测 `resolve_role` 的两条 notice。
+- `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
 ## 七、规则表
 
@@ -86,4 +88,7 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 | 被字节锁住的路径不许被 git 规范化 | `tests/wb/test_git_no_normalization_on_locked_paths.py`（自动闸：锁清单现读自 `scripts/build_wb.py:PROMPT_TXT_NAMES` + `test_summary_drift.py`；四道判据 J1–J4，含 `core.autocrlf=true` 与 `* text=auto eol=lf` 组合在场的读数）+ `.gitattributes` 的 `-text` 行 |
 | 界面字段必须真的可达可点 | `tests/wb/test_settings_role_warning_ui.py` N1/N2/N3（同快照三条件：内容盒高>0、行在盒内、`elementFromPoint` 命中） |
 | 配置搬家不改任何值 | `tests/wb/test_*_migration*` 反向常驻用例（旧家 `max_tokens:4096` → 新家仍 4096） |
-| 全量测试通过才谈交差 | `.venv/Scripts/python.exe -m pytest tests/wb -q` + `node tests/frontend_test.js` + `tests/smoke_test.py` |
+| 只读诊断口不许写用户配置、不许建库建 logs | `tests/wb/test_cli_roles_route.py` C4（首次运行即不写）+ C5（无 `workbench.json`/`cli.db`/`logs`）+ **正向对照**（`info` 真会落 `cli.db` 与 `logs/`，防四个 `not exists` 因路径写错变永真） |
+| 退役显示名只有一个 owner，且必须**现取**（不许 import 别名） | `tests/wb/test_cli_roles_route.py` D 组两条行为锁：patch 权威层 `video_workbench.core.summary.role_label` 后，CLI 那句退役与 `resolve_role` 的两条 notice 必须跟着变。牙齿变体 T-6（把三处取法退回别名）→ 只红这两条 |
+| `retired` 与 `retired_labels` 同源**同序**、前端只吃裸 key | `test_cli_roles_route.py` 判据 5（`[x["key"] for x in retired_labels] == retired`，list 相等）+ `test_summary_retired_roles.py` 钉 `grep retired_labels video_workbench/web/js/**` 为 0 |
+| 交差必须贴出受影响文件的原始读数 | 见第六节「每个数字后面必须附产生它的那条命令原文」。**全量是否跑由用户当轮命令决定**（2026-11-04 20:33 起命令为「不跑测试」）⇒ 没跑全量就不许写「全量 0 failed / 已验证不回归」，必须落在「没验证到的」里 |

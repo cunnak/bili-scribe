@@ -73,7 +73,23 @@ def test_adapter_asks_again_once_then_succeeds(loose_env):
     text = llm.chat([{"role": "user", "content": "x"}], json_mode=True,
                     note=notes.append)
     assert json.loads(text)["one_line"] == "救回来了"
-    assert llm.calls >= 4, llm.calls
+    # 次数钉**精确值**，不钉下界：`>= 4` 是下界，5 也叫 ≥4，多花一次请求它不响。
+    # 探针实测真值 5（`.venv/Scripts/python.exe <Temp>/t38_jsonfix_count.py`）。
+    assert llm.calls == 5, f"阶梯调用数不是 5：{llm.calls}\nnotes={notes}"
+
+    def _stage(note: str) -> str:
+        if "分两次要" in note:
+            return "split"          # 正文/时间线分批这一步
+        if "正文这一步" in note:
+            return "body-bad"       # 正文那批没给出可用 JSON
+        if "重问" in note:
+            return "retry"          # 严格化重问一次
+        return f"other:{note}"
+
+    # 次序＝先分批 → 正文坏 → 重问 → **又**分批（第二次 split 才是 5 次的来源）。
+    # 有人把重问之后改成直接收摊，这里会少一次 split 并连带 calls 变 4 —— 那是要谈的
+    # 成本变更，不是顺手改绿；想让它绿得先说清「省掉的这一轮拿回了什么」。
+    assert [_stage(n) for n in notes] == ["split", "body-bad", "retry", "split"], notes
     assert any("重问" in note for note in notes)
     # 重问那轮要把上一次的输出带回去，模型才知道要改什么
     echoed = [c for c in client.calls if len(c) >= 2 and c[-2]["role"] == "assistant"]

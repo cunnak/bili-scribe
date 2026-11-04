@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -87,6 +88,9 @@ EXPECTED_RETIRED = {"standard", "xueshu", "shipin"}
 UNKNOWN_KEY = "zzz-not-a-role"
 
 REAL_DB = Path.home() / ".bili-scribe" / "bili-scribe.db"
+# 仓库根：parents[0] 是 tests/wb，parents[1] 是 tests，parents[2] 才是根。
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WEB_JS_DEFAULT = REPO_ROOT / "video_workbench" / "web" / "js"
 
 
 def _retired_not_in_registry(key: str):
@@ -420,6 +424,35 @@ def test_a_live_history_role_produces_no_switch_notice(tmp_path, browser, web_ba
         assert errors == [], f"页面报错：{errors[:6]}"
     finally:
         page.close()
+
+
+def test_the_page_does_not_read_the_label_rows_the_cli_consumes():
+    """判据 5 第三腿：`retired_labels` 是**给 CLI 的**，前端一个字都不许吃。
+
+    前端那份是裸 key 数组 `retired`（`summary.js:234 state.roleRetired =
+    (data && data.retired) || []`），判退役走 `indexOf(key)`。谁哪天「顺手统一一下」
+    把它换成对象数组，`indexOf` 恒 -1 ⇒ 每条历史行都显示成「未知角色」，而且**不会报错**
+    —— 这正是本仓库最贵的那类静默错。所以这条按源码扫，不按渲染扫：渲染只覆盖我
+    当时造的那条数据，扫源码覆盖所有分支。
+
+    目录可指：`WB_WEB_JS_DIR`（照 `WB_WEB_ROOT` 的先例），牙齿据此在 `%TEMP%` 副本上
+    把 `summary.js` 改成吃 `retired_labels`，这条必须红；默认读仓库那份产品树。
+    """
+    js_dir = Path(os.environ.get("WB_WEB_JS_DIR") or WEB_JS_DEFAULT)
+    files = sorted(js_dir.rglob("*.js"))
+    assert files, f"没找到任何 js，这条空转了：{js_dir}"
+    hits = [(f.relative_to(js_dir), ln)
+            for f in files
+            for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+            if "retired_labels" in line]
+    assert hits == [], (
+        "前端开始吃 retired_labels —— 那是 CLI 的字段，"
+        f"换成对象数组会让 indexOf 恒 -1：{hits}")
+    # 控制腿：前端必须**还在**吃裸 key 那份，否则上一条的「0 命中」可能只是因为
+    # 整个退役显示被人删了。
+    page = (js_dir / "pages" / "summary.js").read_text(encoding="utf-8")
+    assert "data.retired" in page, (
+        "summary.js 不再读 `retired` —— 退役显示整块没了，这条锁要重新设计")
 
 
 def test_the_real_database_row_for_standard_is_still_readable():

@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -326,3 +327,214 @@ def test_conflicting_spelling_errors_instead_of_silently_losing_output(temp_cfg)
     blob = proc.stdout + proc.stderr
     assert "--roles" in blob, blob[-400:]
     assert "roles" in blob and ("子命令" in blob or "别" in blob), blob[-400:]
+
+
+    # ======================================================================= D 组
+    # task-38：退役角色的**显示名**只有一个 owner（权威层 role_label），CLI 是消费者。
+    #
+    # 来历：`roles` 曾把三个已停用角色印成英文裸 key（`shipin、standard、xueshu`），
+    # 同一件事在界面上打的却是整句人话（「视频总结（已停用）」…）——一个事实两个 owner，
+    # 而 key 对用户没有信息量（那三个词从来没在界面上出现过）。task-36 之后载荷带
+    # `retired_labels`（`{key, display}`），`cli.py:246-258` 消费 display、缺字段才回落 key。
+    # 本组钉「改完之后不许再退化」，四条按 lead 21:3x 定稿 + 21:5x 补的形状落：
+    #   1. stdout 的退役段 == 权威层 `role_label()` 的**现读序列**（整句、顺序、连接符一起钉）；
+    #   2. 同进程取载荷：`retired_labels` 的 key 序列 == `retired` 序列（**list == list**，
+    #      写成集合相等就白钉：两边现在都是 `sorted(RETIRED_ROLES)`，同序属**巧合级成立**，
+    #      谁把一边改成权威层顺序就没人拦）；`display` 与 `role_label()` 逐字相等；
+    #   3. **兜底支必须有夹具能打到**（缺 display ⇒ 印裸 key、不抛）；
+    #   4. **行为锁**：换掉权威层 `role_label`，CLI 那句与两条 notice 必须跟着变。
+    #      不用「grep cli.py 无 `已停用` 字面量」当判据 —— 它连注释一起命中，把「注释里
+    #      解释为什么没有表」这种正当写法判成违规（vendor 第一版就栽在这上面）。
+    #
+    # ⚠️ 判据 2/3/4 必须**同进程**：取名发生在 CLI 模块内部，subprocess 起的是另一个解释器，
+    # patch 传不进去（vendor 第一版 patch 了别的层 + subprocess，恒走正常路径＝假绿）。
+    # 同进程只借 `Cli.cmd_roles()` 这一段：它从 `WorkbenchConfig.load(temp_cfg)` 开始、
+    # 经 `roles_payload(cfg)` 取同一份载荷、不调 `open()`，所以不建服务、不建库；配置被
+    # `temp_cfg` 整个关在 Temp 里（`storage.db_path` 不跟配置家走，夹具已显式指 tmp）。
+
+
+def _retired_clause(stdout: str) -> str:
+    """从表头那行抠出「已退役：」后面那一串（不含右括号）。
+
+    抠不到就失败并贴出原输出 —— **这一步不许兜底**，否则判据 1 被自己糊掉。
+    """
+    head = next((ln for ln in stdout.splitlines() if "已退役：" in ln), "")
+    assert head, f"表头里没有「已退役：」这一节：\n{stdout[:400]}"
+    tail = head.split("已退役：", 1)[1].strip()
+    # 只剥**一个**右括号（表头自己那对）。`rstrip("）")` 是错的：退役名以
+    # 「…（已停用）」结尾，连着两个右括号会被一起剥掉，把每条断言都推向假红。
+    return tail[:-1] if tail.endswith("）") else tail
+
+
+def _authority_retired_sequence() -> list[tuple[str, str]]:
+    """唯一 owner 的现读序列：`(key, role_label(key))`，顺序 == `sorted(RETIRED_ROLES)`。
+
+    故意**不写死三个键**（lead 判据 2 明说）：以后退役到四个键，这里自动跟着长，
+    而断言仍然要求 CLI 与载荷一一对应。
+    """
+    from video_workbench.core import summary as auth
+
+    return [(key, auth.role_label(key)) for key in sorted(auth.RETIRED_ROLES)]
+
+
+def _run_roles_in_process(temp_cfg, capsys, *, mutate_payload=None,
+                          label_override=None):
+    """跑一次真 `cmd_roles()`，返回 `(rc, stdout, 补丁生效时取到的载荷)`。
+
+    `mutate_payload` 拿真载荷改形状（判据 3 剥 display 用）；`label_override` 直接
+    patch **权威层模块属性**（判据 4 的行为锁）——不是 patch 适配层里的 import 别名，
+    别名在 import 期就绑死了，换它什么也不会变（这正是本组要拦的那类退化）。
+    """
+    from video_workbench import cli as cli_mod
+    from video_workbench.core import summary as auth
+
+    real_payload = cli_mod.roles_payload      # 装补丁之前先抓真函数
+    saved_label = auth.role_label
+    if label_override is not None:
+        auth.role_label = label_override
+    try:
+        # 顺序两件事都不可换：取名补丁要先生效（`display` 在载荷里现取），
+        # 载荷要用真函数算（拿自己塞回去的 lambda 算，就得到一个空字典）。
+        shown = dict(real_payload(cli_mod.WorkbenchConfig.load(str(temp_cfg))))
+        if mutate_payload is not None:
+            mutate_payload(shown)
+        cli_mod.roles_payload = lambda cfg: shown
+        argv = argparse.Namespace(config=str(temp_cfg), json=False, quiet=True,
+                                  timeout=0, cmd="roles")
+        rc = cli_mod.Cli(argv).cmd_roles()
+    finally:
+        cli_mod.roles_payload = real_payload
+        auth.role_label = saved_label
+    return rc, capsys.readouterr().out, shown
+
+
+def test_the_roles_header_prints_the_retired_names_in_the_authority_order(temp_cfg):
+    """判据 1：stdout 的退役段**逐序列**等于权威层 `role_label()` 现读结果。
+
+    钉三件事，一件都不能少：条目**内容**（整句中文停用名）、条目**顺序**（与
+    `sorted(RETIRED_ROLES)` 一致）、**连接符**（`、`）。比 `test_the_roles_header_names_…`
+    那条更严：那条只断「每个名字都出现了」，顺序被打乱或混进第四个词它照样绿。
+    另外单独钉「不许出现『未知角色』」：退役键被当成未知，就是 task-31 收口前那个症状。
+    """
+    proc = _cli("roles", "--config", str(temp_cfg))
+    assert proc.returncode == 0, proc.stderr[-300:]
+    clause = _retired_clause(proc.stdout)
+    seq = _authority_retired_sequence()
+    assert seq, "权威层现读退役序列是空的 —— 这条会永远为真，先查 owner"
+    assert clause == "、".join(display for _key, display in seq), (
+        f"CLI 的退役段不是权威层序列：\n  CLI : {clause!r}\n  权威: "
+        f"{'、'.join(d for _k, d in seq)!r}\n完整输出：\n{proc.stdout[:400]}")
+    assert "未知角色" not in proc.stdout, proc.stdout[:400]
+    # shipin 不在逐字节副本的角色表里（它是 WB 自造又退役的键），显示名取自文件名登记；
+    # 它必须是「视频总结（已停用）」而不是裸 key —— 用户认识的只有这几个字。
+    assert "视频总结（已停用）" in clause, clause
+    for key, _display in seq:
+        assert key not in clause, f"退役段里还混着裸 key {key!r}：{clause!r}"
+
+
+def test_the_retired_labels_pair_the_key_list_in_order(temp_cfg):
+    """判据 2 + 判据 5 前半：`retired` 与 `retired_labels` **同序同源**（list == list）。
+
+    写成 `set(...) == set(...)` 就白钉了。两个字段现在各自 `sorted(RETIRED_ROLES)`，
+    所以同序属**巧合级成立**：谁把 `retired` 换成权威层自己的顺序、`retired_labels`
+    仍 `sorted()`，前端 `indexOf` 按 key 查不受影响，只有把两列当同一序列 zip 的消费方
+    会错 —— 拦的就是那一步。
+
+    **同进程**取载荷，理由见本节头：subprocess 咬不住运行时改顺序的牙齿。
+    `--json` 的封皮与「CLI == 设置页载荷」由 C2 那条继续钉，两件事不重叠。
+    """
+    from video_workbench.app.service import roles_payload
+    from video_workbench.config import WorkbenchConfig
+
+    data = roles_payload(WorkbenchConfig.load(str(temp_cfg)))
+    seq = _authority_retired_sequence()
+    keys = [k for k, _d in seq]
+    assert data["retired"] == keys, (
+        f"`retired` 不是 sorted(RETIRED_ROLES)：{data['retired']!r} vs {keys!r}")
+    rows = data["retired_labels"]
+    assert [r["key"] for r in rows] == keys, (
+        f"两列序列不相等（顺序也是契约）：{[r['key'] for r in rows]!r} vs {keys!r}")
+    for row, (key, display) in zip(rows, seq):
+        assert row["display"] == display, (
+            f"{key} 的 display 与权威层不一致：{row['display']!r} vs {display!r}")
+        assert row["display"] != key, (
+            f"{key} 的 display 退化成裸 key，判据 1 会跟着空转：{row!r}")
+
+
+def test_a_retired_row_without_display_prints_bare_keys_and_still_exits_zero(
+        temp_cfg, capsys):
+    """判据 3：退役项**缺 `display`** 时 CLI 退回裸 key、不抛 KeyError。
+
+    这条以前只是代码里一个 `or key`，没有任何夹具打得到＝死代码；一旦有人把兜底写成
+    「拼个（已停用）后缀」或干脆抛错，界面与脚本两条消费路都会当场炸。故意**同进程**跑，
+    理由见本节头。断言里同时钉「不许出现停用名」：兜底只能少信息，不能造假信息。
+    """
+    def strip_display(payload):
+        rows = payload.get("retired_labels")
+        assert rows, "载荷里没有 retired_labels，判据 3 会空转"
+        payload["retired_labels"] = [{"key": r["key"]} for r in rows]
+
+    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys,
+                                              mutate_payload=strip_display)
+    keys = [k for k, _d in _authority_retired_sequence()]
+    clause = _retired_clause(out)
+    assert rc == 0, f"缺 display 居然失败了（rc={rc}）：\n{out[:400]}"
+    assert clause == "、".join(keys), (
+        f"兜底应当逐字退回裸 key，实得 {clause!r}，期望 {'、'.join(keys)!r}")
+    assert "已停用" not in clause, clause
+
+
+def test_the_cli_retired_names_are_taken_from_role_label_not_a_local_table(temp_cfg,
+                                                                          capsys):
+    """判据 4（第一半）：换掉权威层 `role_label`，CLI 那句**必须跟着变**。
+
+    这是「名字现取、不是本地表」唯一的机械证据：值相等（判据 2 那种比法）把取法退回
+    import 别名照样绿，而别名在 import 期就绑死了，以后改权威层根本传不进来。
+    落点在 `core/summarizer.py:1143`（载荷里的 `display`）。
+    """
+    sentinel = lambda key: "SENTINEL·" + str(key)  # noqa: E731
+    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys,
+                                              label_override=sentinel)
+    keys = [k for k, _d in _authority_retired_sequence()]
+    assert rc == 0, out[:400]
+    assert _retired_clause(out) == "、".join(sentinel(k) for k in keys), (
+        f"改了权威层 CLI 却不跟着变 ⇒ 它自己存了一份表：{_retired_clause(out)!r}")
+
+
+def test_the_two_role_notices_are_taken_from_the_same_authority_label():
+    """判据 4（第二半）：`resolve_role` 的回落 notice 与设置页那句也必须是现取。
+
+    同一规则的另外两个现取点：`core/summarizer.py:145`（配置/历史行里的退役值 →
+    回落默认角色时那句「本次按默认角色「…」」）与 `:169`（`configured_role_issue`
+    给设置页的「生成时会自动按「…」走」）。lead 点名这两处先前**没人钉**，和 `:1143`
+    是同一条规则。两句断言都必须落在**补丁还活着的窗口里** —— 我上一版在 helper 跑完
+    之后才断 notice（它的 `finally` 已把 `role_label` 还原回去），等于在补丁外测补丁，
+    必然假红；拆成两条才是它本来的形状。
+
+    A 支（用户显式提交退役值）抛的是权威层原话、**不含默认角色名**，所以不受本补丁
+    影响 —— 那条由 `tests/wb/test_summary_role_resolution.py` 单独钉，别在这儿混。
+    """
+    import video_workbench.core.summarizer as ad
+    from video_workbench.core import summary as auth
+    from video_workbench.core.summary import DEFAULT_ROLE
+
+    sentinel = lambda key: "SENTINEL·" + str(key)  # noqa: E731
+    retired_key = sorted(auth.RETIRED_ROLES)[0]
+    saved = auth.role_label
+    auth.role_label = sentinel
+    try:
+        _key, notice = ad.resolve_role(None, fallback=retired_key)
+        assert sentinel(DEFAULT_ROLE) in notice, (
+            f"回落 notice 没走权威层取名（:145）：{notice!r}")
+        dirty, message = ad.configured_role_issue(retired_key)
+        assert dirty == retired_key, (
+            f"退役值没被认定成脏配置，第二句根本走不到：{(dirty, message)!r}")
+        assert sentinel(DEFAULT_ROLE) in message, (
+            f"设置页那句没走权威层取名（:169）：{message!r}")
+    finally:
+        auth.role_label = saved
+    # 控制腿：还原之后必须回到真名 —— 否则上面那两句可能一直为真（自己考自己）。
+    _key2, notice2 = ad.resolve_role(None, fallback=retired_key)
+    assert "SENTINEL" not in notice2, f"补丁没还原干净：{notice2!r}"
+    assert auth.role_label(DEFAULT_ROLE) in notice2, (
+        f"还原后回落 notice 里没有真名，这条锁本来就没内容：{notice2!r}")
