@@ -99,7 +99,7 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 |---|---|
 | 副本与 bs 逐字节一致（除 import 段与 `__init__.py` 权威层） | `pytest tests/wb/test_summary_drift.py`（14 条） |
 | 6 个 txt 真源不许被改一个字节 | `tests/wb/test_summary_prompt_source.py` P1 的 sha256 登记表 + 打包期字节比对 |
-| 被字节锁住的路径不许被 git 规范化 | `tests/wb/test_git_no_normalization_on_locked_paths.py`（自动闸：锁清单现读自 `scripts/build_wb.py:PROMPT_TXT_NAMES` + `test_summary_drift.py`；四道判据 J1–J4，含 `core.autocrlf=true` 与 `* text=auto eol=lf` 组合在场的读数）+ `.gitattributes` 的 `-text` 行 |
+| 被字节锁住的路径不许被 git 规范化 | `tests/wb/test_git_no_normalization_on_locked_paths.py`（自动闸：锁清单现读自 `scripts/build_wb.py:PROMPT_TXT_NAMES` + `tests/wb/test_summary_drift.py`；四道判据 J1–J4，含 `core.autocrlf=true` 与 `* text=auto eol=lf` 组合在场的读数）+ `.gitattributes` 的 `-text` 行 |
 | 界面字段必须真的可达可点 | `tests/wb/test_settings_role_warning_ui.py` N1/N2/N3（同快照三条件：内容盒高>0、行在盒内、`elementFromPoint` 命中） |
 | 配置搬家不改任何值 | `tests/wb/test_*_migration*` 反向常驻用例（旧家 `max_tokens:4096` → 新家仍 4096） |
 | 只读诊断口不许写用户配置、不许建库建 logs | `tests/wb/test_cli_roles_route.py` C4（首次运行即不写）+ C5（无 `workbench.json`/`cli.db`/`logs`）+ **正向对照**（`info` 真会落 `cli.db` 与 `logs/`，防四个 `not exists` 因路径写错变永真） |
