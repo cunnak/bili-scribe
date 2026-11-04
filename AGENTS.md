@@ -82,6 +82,14 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   - lead 自己也被这条咬过一次：task-38 结板时我用 edit 写了「判通过」正文，把原始四条判据压成了摘要——原文只活在提交信息 `4fa5aa6` 与消息里，板上不再逐字存在。
 - **补键不补值的「同形」判据，必须说清哪些键是惰性的。** 本轮给 `mock.js` 的 `summary.roles` 补齐七个键后，牙齿证明：`retired` 抄真值 ⇒ `state.roleRetired.length` 会变（有消费者）；`extra_prompt` 抄 `true` ⇒ 页面读数**全不动**（前端只从 `settings.get` 读它，`summary.roles` 里那个键没人消费，见 `settings.js:79`/`:338` 对 `app/service.py:694`）。⇒ 形状同源是**维护性规则**（防"真载荷加一列没人跟"），不是行为规则；写判据时行为断言只挂在真被消费的键上，别给惰性键编一条"页面会变"的假判据。
 - **"单一 owner"这类规则，值相等的断言拦不住取法退化，必须写行为锁。** 本轮实例：`core/summarizer.py` 用 `from … import role_label` 别名取退役显示名，别名在导入时就绑死函数对象 ⇒ 改权威层输出下游纹丝不动，而"值相等"那条断言照样绿。改成经模块属性现取 `summary_pkg.role_label(...)` 后行为锁才成立。写判据时：patch **权威层的模块属性**（不是适配层别名、不是 subprocess），并同测 `resolve_role` 的两条 notice。
+- **引用代码位置一律用符号名，不要给行号。** 行号会漂：vendor 在 task-44 里多加一行注释，就把他上一轮报给我的全部行号（`:131`→`:132`、`:273`→`:274` 等）整体推走一位，我自己按旧号去读会读错位置。要定位就 `grep -n "^def role_label\|^def _bound_get_role\|text = \"\" if key is None"` 现取，或在注释/文档里写「`role_label` 里的判空」这种可 grep 的说法。
+- **字面量禁令（`grep -n "已停用\|str(key or"` 这类）必须只看非注释行，否则会把"解释为什么没有这张表"判成违规。** 本轮两次实测命中：task-36 的中文退役名、task-44 的 `str(key or` —— 两处命中都在注释里，是实现层写的理由。正确口径是**注释可以有、代码行不行**；写判据时把扫描域收成"非注释行"，同时保留那段解释（删解释等于删掉下一个人的护栏）。
+- **牙齿打补丁的时机分两面，搞反就红不成或红一片**：① 要改**产品侧模块属性**（权威层 `role_label`、`_NEVER_BIND` 这类）必须赶在 **collection 之前**，因为测试模块 `from … import` 的别名在 import 期就绑死了（`import test_xxx as M` 还会 `ModuleNotFoundError`、rc=3）；② 要**红得精准**（只红该红的那一条）就把补丁放进 `pytest_runtest_setup` 按 `item.name` 命中，放 `pytest_configure` 会红一片或根本红不到。
+- **同一族三个未决口径，全部属于「偏离 bili-scribe 或收紧契约」，需用户拍板，实现层与测试层都不许自己动**（现状各由一条用例钉住，拍板那天这些用例必须红）：
+  ① 副本入口 `_bound_get_role` 对未知/坏输入**静默回落到一把退役键 `standard`**（权威层 `get_role` 是正确抛 `UnknownRole`）—— 回落语义来自 `bili_scribe/core/roles.py:612-613`，由 `test_a_broken_input_currently_falls_back_to_a_retired_key_in_the_copy_path` 钉住；
+  ② 带空白的键两条路结果不同：`get_role(" wengao ")` → `'wengao'`（清洗侧），`_bound_get_role(" wengao ")` → `'standard'`（原样交给 bs 查表）—— 由 `test_the_copy_lookup_still_matches_bili_scribe_for_a_padded_key` 拿 bs 原件当对照物钉住；
+  ③ 「非字符串按 `str()` 查表」意味着 `__str__` 返回键名的对象会被当合法键 —— 现状登记，没有收紧。
+  另有一条**已确认的契约边界**（不是缺陷）：`__str__` 自己抛异常的对象在 `str(key)` 这一步就抛 `ValueError`，三个入口都抛，由 `test_an_input_whose_dunder_str_raises_currently_breaks_the_never_raises_contract` 钉成「期望值就是抛」。
 - `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
 ## 七、规则表
