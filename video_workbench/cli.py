@@ -650,7 +650,10 @@ def main(argv: list[str] | None = None) -> int:
     # 把它当命令名就会让 `--roles --config X` 这条最自然的写法报错。
     # `info --roles` 这种两个都写的自相矛盾用法下面直接报错，不静默丢掉用户要的那一份。
     if "--roles" in tokens and not _has_subcommand(tokens):
-        tokens = ["roles", *[t for t in tokens if t != "--roles"]]
+        # 命令名要插在**全局旗标之后**：argparse 只认 `--config X roles`，
+        # 把 roles 放到最前就把 `--config` 挤到子解析器里去了
+        # （`error: unrecognized arguments: --config …`，我第一版就是这么红的）。
+        tokens = [t for t in tokens if t != "--roles"] + ["roles"]
     args = parser.parse_args(tokens)
     if args.roles and args.cmd != "roles":
         parser.error(f"--roles 就是 roles 子命令，别再和 {args.cmd} 一起写")
