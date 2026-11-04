@@ -72,6 +72,8 @@ from video_workbench.core.summary import DEFAULT_ROLE, RETIRED_ROLES, ROLE_KEYS
 from video_workbench.core.summary import UnknownRole, get_role
 
 from test_summary import GOOD, FakeCtx, StubClient, _cfg  # 同目录、无 __init__.py
+from playwright._impl._errors import Error as PlaywrightError  # noqa: E402
+
 from test_summary_real_backend_ui import (  # noqa: F401  两个 fixture 由 pytest 注入
     browser,
     web_base_url,
@@ -439,20 +441,95 @@ def test_the_page_does_not_read_the_label_rows_the_cli_consumes():
     把 `summary.js` 改成吃 `retired_labels`，这条必须红；默认读仓库那份产品树。
     """
     js_dir = Path(os.environ.get("WB_WEB_JS_DIR") or WEB_JS_DEFAULT)
-    files = sorted(js_dir.rglob("*.js"))
-    assert files, f"没找到任何 js，这条空转了：{js_dir}"
+    # 扫描域＝**页面逻辑**，`mock.js` 除外。mock 是演示态的载荷夹具，task-42 要它的恰恰
+    # 是「键要补齐、值留中性」，它里面出现 `retired_labels` 是**应该**的；把它算进「前端
+    # 吃 CLI 字段」会把补形状判成事故（2026-11-04 vendor 落地那一版就是被这条判红的）。
+    # 夹具那一半改由 `test_the_mock_payload_has_every_key_the_real_service_sends` 反向钉：
+    # 逻辑不许吃、载荷必须有，两条合起来才是完整合同——只留前一条等于把后半删了。
+    logic = [f for f in sorted(js_dir.rglob("*.js")) if f.name != "mock.js"]
+    assert logic, f"没找到任何页面 js，这条空转了：{js_dir}"
     hits = [(f.relative_to(js_dir), ln)
-            for f in files
+            for f in logic
             for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
             if "retired_labels" in line]
     assert hits == [], (
-        "前端开始吃 retired_labels —— 那是 CLI 的字段，"
+        "页面逻辑开始吃 retired_labels —— 那是 CLI 的字段，"
         f"换成对象数组会让 indexOf 恒 -1：{hits}")
     # 控制腿：前端必须**还在**吃裸 key 那份，否则上一条的「0 命中」可能只是因为
     # 整个退役显示被人删了。
     page = (js_dir / "pages" / "summary.js").read_text(encoding="utf-8")
     assert "data.retired" in page, (
         "summary.js 不再读 `retired` —— 退役显示整块没了，这条锁要重新设计")
+
+
+def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base_url,
+                                                                tmp_path):
+    """判据 5（task-41）：演示态载荷的**键集合**必须等于真服务那一份，两边都现读。
+
+    为什么必须有这条：缺键与空值在界面上表现**完全一样**——`summary.js:234` 是
+    `(data && data.retired) || []`，读不到就当空。于是 mock 少一个键不会报错、不会白屏，
+    只会让演示态**永远走兜底支**；而演示态恰是最常被拿去截图、做验收的那一态。形状漂了
+    没人拦得住，这一格此前无人认领（task-39 交板时我先发现，lead 现读比我说的更严重：
+    真载荷七个键，mock 原来只有 `default` + `roles` 两个）。
+
+    写法上有两条硬要求：
+    1. **不许写死七个键的名单**——那是第三个 owner。两边各自现读：真侧走进程内
+       `roles_payload()`，演示侧走页面里的 `WB.rpc("summary.roles")`（mock 模式经
+       `rpc.js:85` 转 `WB.mock.call`，与页面真实消费路径同一条）。
+    2. 断的是**键集合**，不是值。值按 task-42 的规定一律是中性值（空数组/false/空串），
+       真侧是现算的，比对值必然假红。
+    """
+    from urllib.parse import urlsplit
+
+    from video_workbench.app.service import roles_payload
+    from video_workbench.config import WorkbenchConfig
+
+    from test_summary_real_backend_ui import _temp_config
+
+    cfg_path = _temp_config(tmp_path)
+    real_keys = set(roles_payload(WorkbenchConfig.load(str(cfg_path))))
+    assert real_keys, "真载荷空了：下面那条集合相等会退化成『空==空』的假绿"
+
+    parts = urlsplit(web_base_url)
+    page = browser.new_page(viewport={"width": 1440, "height": 960})
+    page_errors: list[str] = []
+    page.on("pageerror", lambda exc: page_errors.append(str(exc)[:220]))
+    mock_keys = None
+    rpc_failure = None
+    try:
+        page.goto(f"{parts.scheme}://{parts.netloc}/index.html?mock=1",
+                  wait_until="load")
+        # 两条谓词分开等：`WB.rpc` 存在是脚本加载完了，`WB.isMock()` 为真才是演示态。
+        # 演示态没起来却拿真后端载荷比键，两边同源，这条就成了假绿。
+        page.wait_for_function(
+            "() => !!(window.WB && typeof WB.rpc === 'function')", timeout=15000)
+        page.wait_for_function(
+            "() => !!(window.WB && WB.isMock && WB.isMock())", timeout=15000)
+        # `WB.rpc` **成功就返回 data**（`rpc.js:102` 注释与 `:112 return res.data`），
+        # 失败抛 `RpcError`。前一版我按「它回信封」写判据，是把 `WB.raw` 的语义安到了
+        # `WB.rpc` 上——那样 Object.keys(信封) 得到 ok/data/request_id，恒不等于真键集合，
+        # 一条永远红的锁。信封形状要验就得显式用 WB.raw。
+        mock_keys = page.evaluate("""async () => {
+          const d = await WB.rpc('summary.roles', {}, {silent: true});
+          return Object.keys(d || {});
+        }""")
+    except PlaywrightError as exc:
+        rpc_failure = str(exc)[:400]
+    finally:
+        page.close()
+
+    assert rpc_failure is None, (
+        f"演示态取 `summary.roles` 没成功（{rpc_failure}）；页内错误：{page_errors}。"
+        "页面没起来 ≠ 载荷形状不符，别把这一支读成判据红。")
+    assert not page_errors, f"取完键页面仍报错，读数不可信：{page_errors}"
+    assert mock_keys is not None, "上面两个断言与这条不可能同时不成立——走到这就是夹具坏了"
+    assert set(mock_keys), "演示态载荷是空对象：集合相等会变成『空 == 空』的假绿"
+    missing = sorted(real_keys - set(mock_keys))
+    extra = sorted(set(mock_keys) - real_keys)
+    assert not missing and not extra, (
+        f"演示态载荷形状与真服务不一致：mock 缺 {missing}，多 {extra}。"
+        "缺键与空值在界面上表现完全一样（`summary.js:234` 那句 `|| []`），所以演示态"
+        "会永远走兜底支且不报错——这条就是拦这个的。")
 
 
 def test_the_real_database_row_for_standard_is_still_readable():
@@ -597,14 +674,28 @@ def test_the_roles_rpc_still_serves_retired_keys_when_a_row_has_no_display(tmp_p
         envelope = _rpc_roles_envelope(tmp_path)
     finally:
         ad.retired_row_labels = original
-    assert envelope["ok"] is True, (
-        f"少一列 display 就把整条 summary.roles 打死了：{envelope.get('error')}")
+    # 判据 1（task-41）：**不许**把这条写成「必须 ok=True」。合同是一句不变量——
+    # 「无论响应长成哪一支，界面依赖不能塌」：
+    #   A 支（今天这一支）＝整条照旧，只是 retired_labels 少一列 ⇒ 退役判定 `retired`
+    #     必须三把不少，前端 `summary.js:234` 的 indexOf 才有得查；
+    #   B 支（将来若改成逐键兜底）＝不许把整条打死，活角色清单 `roles` 必须仍在。
+    # 两支任一成立即通过；两条都不成立＝界面塌了，那才是这条要拦的。
+    retired_intact = (envelope["ok"] is True
+                      and envelope["data"].get("retired") == keys)
+    roles_intact = bool((envelope.get("data") or {}).get("roles"))
+    assert retired_intact or roles_intact, (
+        f"界面依赖塌了：既没有完整的退役名单（A 支），也没有活角色清单（B 支）。"
+        f"实得 ok={envelope['ok']} error={envelope.get('error')}")
+    # 下面这行不是上面那行的重复，是**变更探测器**：它钉「今天走的是 A 支」。哪天有人
+    # 把兜底改成逐键降级（B 支），这条必须红，要求把上面 A 支那一段的具体断言（少一列
+    # display 的形态）搬到 B 支重写——而不是让合同悄悄变成「两种都行、什么都不检查」。
+    assert retired_intact, (
+        "当前分支已从 A（少一列、整条照旧）变成 B（整条失败但 roles 还在）——"
+        "请同步改写上面那段断言，并保留『不许打死接口』这条不变量")
     data = envelope["data"]
-    assert data["retired"] == keys, f"没了 display 连退役判定也丢了：{data['retired']}"
     assert [r.get("display") for r in data["retired_labels"]] == [None] * len(keys), (
         "兜底腿自己把 display 补出来了 —— 这一条只测「缺字段不许打死接口」，"
         "补谁的名字是另一个决定，不许顺手猜")
-    assert data["roles"], "角色清单空了：前端连活角色都选不了"
 
 
 def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tmp_path):
@@ -619,6 +710,16 @@ def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tm
 
     修好之后本条会**变红**：那时请改成期望 ok=True 并保留「其他键照常念得出」的断言，
     同时把上面这段说明删掉——别只把断言放宽成两种都行。
+
+    **与上一条（缺 display）的分工**（task-41 判据 2，lead 定）：那条测的是「载荷少一列」
+    ＝输入形状退化，接口不许塌；这条测的是「标签计算本身抛」＝整条名单一起没。两者不是
+    同一件事，别合并成一条「都要优雅降级」。
+
+    **为什么产品侧不该包 try/except**（lead 现读 `core/summary/__init__.py:233` 后定的）：
+    `role_label()` 的 docstring 逐字写着「任何输入都不抛」，那是**契约**。在载荷层套一层
+    try/except 是给**契约上不存在**的输入加分支，等于把「有人违反了 role_label 自己的契约」
+    这个 bug 压成静默——真要抛就该修 `role_label` 本身，不在调用方盖症状。所以这条长期
+    钉现状、不推动产品加分支；它同时是「role_label 违约」的报警器。
     """
     import video_workbench.core.summary as authority
 
@@ -640,6 +741,38 @@ def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tm
         "并加一条「其余键的 display 仍要正常」的断言")
     error = envelope.get("error") or {}
     assert error.get("code") == "INTERNAL", f"错误码不是现状登记的 INTERNAL：{error}"
-    assert "xueshu" not in str(error.get("message", "")), (
-        "错误信封里已经带上键名了（现状是不带，只带异常原文）——"
-        "这条探测器的另一半随修随删")
+
+
+def test_the_error_envelope_currently_names_no_broken_role_key(tmp_path):
+    """判据 3（task-41，lead 判**先不修**）：错误信封的 `message` 现在**不含坏掉的键名**。
+
+    现场难受的地方：`ok=False` 时用户和排障的人只看到异常原文（夹具那句
+    「这一个键念不出来」），`xueshu` 这个键只出现在 detail 的 traceback 里。也就是说
+    「设置页整张角色名单没了」这件事，日志与界面都指不出是哪个键坏的。
+
+    lead 的处置：不修产品码，但把「现在不带键名」钉成常驻用例——将来谁把键名加进
+    message（这是最省事的修法），这条会**变红**，要求那时把它抬成「必须带键名」并删掉
+    本条的现状说明。别把断言写成「带不带都行」。
+    """
+    import video_workbench.core.summary as authority
+
+    original = authority.role_label
+
+    def boom(key):
+        if str(key) == "xueshu":
+            raise authority.UnknownRole("夹具：这一个键念不出来")
+        return original(key)
+
+    authority.role_label = boom
+    try:
+        envelope = _rpc_roles_envelope(tmp_path)
+    finally:
+        authority.role_label = original
+
+    assert envelope["ok"] is False, "控制腿失效：整条接口今天没有失败"
+    message = str((envelope.get("error") or {}).get("message", ""))
+    assert "xueshu" not in message, (
+        "错误信封已经开始带键名了（现状：只有异常原文）。这是好消息——请把这条改成"
+        f"『message 必须含坏掉的键名』，并删掉上面那段现状说明。实得 message={message!r}")
+    assert "这一个键念不出来" in message, (
+        f"错误信封连异常原文都不回了，界面将完全没有线索：{message!r}")

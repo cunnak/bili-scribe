@@ -1028,3 +1028,105 @@ def test_the_settings_save_path_can_actually_turn_the_switch_on():
     assert ad.extra_prompt_on(cfg, None) is True, (
         "cfg 存进去了但 `extra_prompt_on` 没读它——with 那层接错线")
     assert ad.extra_prompt_on(cfg, False) is False, "显式入参必须还能压过配置"
+
+
+# ---------------------------------------------------------------------------
+# task-41 判据 4：导入期对账的两个打断实验（lead 要求「要真断言，不要 print」）
+#
+# 三条对账住在 `video_workbench/core/summary/__init__.py:127 _reconcile_role_lists()`，
+# 导入时跑一次：`known(RETIRED ∪ ROLE_KEYS) == owned(_NEVER_BIND ∪ MAP ∪ NO_SOURCE)`、
+# `NO_SOURCE == ROLE_KEYS − MAP`、`MAP ∩ RETIRED == ∅`。产品码里的注释自称「少写一键
+# 就必须红」，但**这句话本身此前没有任何用例验过**。下面三条就是把它验一遍：
+# 每条都在内存里把一份名单改坏（盘上零写入），再直接重跑那个函数，断它必须抛、
+# 且异常文本点得出是哪一个键坏、坏在哪一侧；每条都带「原样不抛」的控制腿，
+# 免得将来有人把断言改成「怎么都抛」——那等于什么都没测。
+# ---------------------------------------------------------------------------
+
+
+def _reconcile_now():
+    """直接重跑导入期那三条对账（它是普通函数，不必重新 import 整个包）。"""
+    import video_workbench.core.summary as authority
+
+    authority._reconcile_role_lists()
+
+
+def test_the_reconciliation_passes_on_the_shipped_lists():
+    """控制腿：盘上现在这三份名单是自洽的——否则下面三条「必须抛」全是空响。"""
+    _reconcile_now()          # 不抛即通过；抛了就是产品当前状态坏了
+
+
+def test_a_sourced_role_pushed_into_no_source_is_caught(tmp_path):
+    """打断实验 1：把一个**有源**角色塞进 `NO_SOURCE`，对账必须炸，不许静默通过。
+
+    为什么这种坏法危险：`NO_SOURCE` 的语义是「这个角色没有 txt 真源，用内置压缩版」。
+    若 `wengao` 同时出现在 `MAP` 和 `NO_SOURCE` 里，绑定与回落两条声明就互相盖——
+    `bind()` 按 MAP 走、`describe_roles()` 那列显示按 NO_SOURCE 走，界面与请求不一致，
+    而**导入不会报错**，全量测试也可能照样绿（这正是 task-31 那次的形状）。
+    """
+    import video_workbench.core.prompt_source as ps
+    import video_workbench.core.summary as authority
+
+    sourced = sorted(ps.MAP)[0]
+    original = ps.NO_SOURCE
+    ps.NO_SOURCE = tuple(dict.fromkeys(original + (sourced,)))
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            authority._reconcile_role_lists()
+    finally:
+        ps.NO_SOURCE = original
+    message = str(exc.value)
+    assert sourced in message, f"炸了但没点出是哪个键：{message!r}"
+    assert "多写" in message, f"没走到『NO_SOURCE 多写』那一条对账：{message!r}"
+    # 还原后必须重新自洽——否则这条的「红」是被前一条污染的。
+    _reconcile_now()
+
+
+def test_a_retired_key_missing_from_never_bind_is_caught(tmp_path):
+    """打断实验 2：`_NEVER_BIND` 少一个退役键，对账必须炸。
+
+    产品注释写得很清楚（`prompt_source.py:85-88`）：漏一个键的后果本来是**静默**的——
+    被漏掉的退役角色会落进 `kept_compressed`（`bind()` 里 MAP 查不到就走那条），
+    于是它既不在界面上（清单已过滤）、又出现在给测试看的绑定结果里，第三种不报错
+    也不留白的状态。所以这里断两件事：①对账拦住；②拦住的是「只在名单侧」那一半
+    （`RETIRED_ROLES` 有它、真源三桶没它），不是别的噪声。
+    """
+    import video_workbench.core.prompt_source as ps
+    import video_workbench.core.summary as authority
+
+    dropped = sorted(authority.RETIRED_ROLES)[0]
+    original = ps._NEVER_BIND
+    ps._NEVER_BIND = frozenset(set(original) - {dropped})
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            authority._reconcile_role_lists()
+    finally:
+        ps._NEVER_BIND = original
+    message = str(exc.value)
+    assert dropped in message, f"炸了但没点出是哪个键：{message!r}"
+    assert "只在名单侧" in message, f"没走到『known ⊃ owned』那一条对账：{message!r}"
+    _reconcile_now()
+
+
+def test_a_txt_bound_to_a_retired_role_is_caught(tmp_path):
+    """附赠第三条（同一把对账，历史事故的那一种）：MAP 把 txt 绑到退役角色上必须炸。
+
+    这是 task-31 记下的形状——「txt 挂在退役角色上、用户命令一字没落地而全量测试照样绿」。
+    `bind()` 会跳过 `_NEVER_BIND`，所以这种绑定等于没绑：那份 txt 永远不会生效，
+    而 manifest、设置页、请求序列都看不出异常。对账第三条专门拦它。
+    """
+    import video_workbench.core.prompt_source as ps
+    import video_workbench.core.summary as authority
+
+    retired = sorted(authority.RETIRED_ROLES)[0]
+    original_map = dict(ps.MAP)
+    ps.MAP = {**original_map, retired: ps.EXTRA_FILE}
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            authority._reconcile_role_lists()
+    finally:
+        ps.MAP = original_map
+    message = str(exc.value)
+    assert retired in message, f"炸了但没点出是哪个退役键被绑：{message!r}"
+    assert "不会生效" in message or "bind()" in message, (
+        f"没走到『MAP ∩ RETIRED』那一条对账：{message!r}")
+    _reconcile_now()

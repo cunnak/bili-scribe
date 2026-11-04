@@ -75,7 +75,9 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 - **新建 `tests/wb/*.py` 落地后必须马上 `git add`（只 add，不 commit）。** 未跟踪的文件在任何一次误删/换机/快照还原里都会永久消失，已经消失过一次。
 - **跨工具比 sha 必须比原始字节，禁止用 `read_text()` 归一化后的内容算 sha。** `video_workbench/web/js/pages/settings.js` 是 **CRLF**，而 `prompt_source.py`/`mock.js` 是 LF：`sha256sum` 打磁盘字节得 `18a9fc3a…`，Python `Path.read_text()` 把 `\r\n` 折成 `\n` 再 encode 得 `4339f77f…`。本轮「同一文件两次 sha 不同」被当成并发写/静默还原来排查，实际全是读法差异。⇒ 快照登记、字节锁闸、牙齿的"恢复后一致"核对，三处都必须 `open(p,'rb').read()` 或 `sha256sum` / `git cat-file -s :path`。
 - **判"落地了没有"只读工作区路径本身，并且必须在同一条命令里同时打印 工作区 / 索引 / HEAD 三份 sha256 + grep 命中，写明引用的是哪一份。** 我（lead）用 `git show :path` 读到旧版，判成"工作区被打回旧版"，给两位成员各开了一张重建单——这种单子会让人真去重写本来好好的代码，比误删文件更贵。`M` 只代表工作区≠索引；落地未 commit 时索引=HEAD=旧版是**正常状态**，不是回退。
-- 逐字节锁定的副本不许"顺手修"：那是刻意保留的上游行为，改一处就等于放弃了"一比一"的整个价值。要偏离，走 `core/summary/__init__.py`。
+- **`team_task_update(action=edit)` 的 `description` 是整份替换，没有追加语义。** 想补证据必须先 `team_task_get` 拿全文，在原文后面接，再整份 edit 回去；直接写新内容会**静默吃掉前人写的判据与合同正文**。本轮 vendor 想用「追加」方式补牙齿证据，一次就把 task-42 的合同正文 + 交付证据全删了（返回值里 `description` 只剩他那段），靠他自己上下文重建才恢复到 rev6。这条比「别人报的行号要现读」更狠：那毁的是读数，这毁的是合同。
+  - lead 自己也被这条咬过一次：task-38 结板时我用 edit 写了「判通过」正文，把原始四条判据压成了摘要——原文只活在提交信息 `4fa5aa6` 与消息里，板上不再逐字存在。
+- **补键不补值的「同形」判据，必须说清哪些键是惰性的。** 本轮给 `mock.js` 的 `summary.roles` 补齐七个键后，牙齿证明：`retired` 抄真值 ⇒ `state.roleRetired.length` 会变（有消费者）；`extra_prompt` 抄 `true` ⇒ 页面读数**全不动**（前端只从 `settings.get` 读它，`summary.roles` 里那个键没人消费，见 `settings.js:79`/`:338` 对 `app/service.py:694`）。⇒ 形状同源是**维护性规则**（防"真载荷加一列没人跟"），不是行为规则；写判据时行为断言只挂在真被消费的键上，别给惰性键编一条"页面会变"的假判据。
 - **"单一 owner"这类规则，值相等的断言拦不住取法退化，必须写行为锁。** 本轮实例：`core/summarizer.py` 用 `from … import role_label` 别名取退役显示名，别名在导入时就绑死函数对象 ⇒ 改权威层输出下游纹丝不动，而"值相等"那条断言照样绿。改成经模块属性现取 `summary_pkg.role_label(...)` 后行为锁才成立。写判据时：patch **权威层的模块属性**（不是适配层别名、不是 subprocess），并同测 `resolve_role` 的两条 notice。
 - `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
