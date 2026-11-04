@@ -55,25 +55,38 @@ MAP: dict[str, str] = {
     "xiezuo": "写作专家.txt",
     "fenxi": "分析报告.txt",
     "jinglian": "首席思想精炼师：对于各种文本都处理得较为简洁的总结提示词。.txt",
-    # WB 权威层自造的角色（副本 roles.py 里没有这一个）：唯一吃 txt 的单轮角色。
-    "shipin": "视频总结.txt",
+    # task-31：用户命令「合并掉，只留「说人话」」——``视频总结.txt`` 原来绑在权威层
+    # 自造的 ``shipin`` 上，现在直接绑到 ``renhua``。角色表里没有 shipin 了，这份 txt
+    # 也不再挂在退役角色上（挂在退役角色上等于没绑，而全量测试可能照样绿）。
+    "renhua": "视频总结.txt",
 }
 
-#: 没有 txt 真源的角色：继续用副本 roles.py 的压缩版，界面上要能看出来。
-NO_SOURCE: tuple[str, ...] = ("shensi", "xueshu", "renhua")
+#: 公开角色里**没有 txt 真源**的那批：继续用副本 roles.py 的压缩版，界面上要能看出来。
+#: 口径只有这一条——「在 ``ROLE_KEYS`` 里，且 ``prompt_source is None``」。
+#: 别把退役角色塞进来：``xueshu`` 离开这份清单的理由是**它退役了、不在公开名单里**，
+#: 不是「它没源」。两种意思挤在同一个元组里，将来谁再退役一个**有源**角色，会同时
+#: 撞 ``MAP ∪ NO_SOURCE == 公开名单`` 和 ``MAP ∩ NO_SOURCE`` 两条不变量。
+#: 判据落点：``tests/wb/test_summary_prompt_source.py`` 的 :242 / :245 / :321 三条。
+NO_SOURCE: tuple[str, ...] = ("shensi",)
 
 #: 已经在包里、但**暂未绑给任何角色**的文件（等用户拍去向）。
 #: 留在清单里是为了让设置页显示"这个文件在，但没接进任何角色"，而不是凭空少一篇。
-#: 2026-11-04 起为空：六份 txt 都有了归宿（四份绑方法论角色、一份绑 shipin、
-#: 一份是可选附加）。清单与 manifest 的"没接进任何角色"这条通道保留——
-#: 以后往 resources/prompts 里再塞一份还没接的，它照样会被列出来。
+#: 2026-11-04 起为空：六份 txt 里五份都绑在方法论角色上（含 task-31 之后归 ``renhua``
+#: 的 ``视频总结.txt``）、最后一份（``大概率管用 .txt``）是可选附加提示词。清单与
+#: manifest 的"没接进任何角色"这条通道保留——以后往 resources/prompts 里再塞一份
+#: 还没接的，它照样会被列出来。
 UNBOUND: tuple[str, ...] = ()
 
 #: 可选附加提示词。文件名 `.txt` 前有一个空格，逐字保留。
 EXTRA_FILE = "大概率管用 .txt"
 
 #: 退役角色不绑：它压根不该再生成（副本里它只是历史数据的标签）。
-_NEVER_BIND: frozenset[str] = frozenset({"standard"})
+#: 这份名单必须与权威层 ``RETIRED_ROLES`` 逐字相同——``video_workbench/core/summary/__init__.py``
+#: 在 ``bind()`` 之前对账，不一致就直接抛。为什么两份而不是一份：本模块不能反过来
+#: import 权威层（那是循环导入），而漏一个键的后果是**静默**的——被漏掉的退役角色会
+#: 落进 ``kept_compressed``（``bind()`` 里 ``MAP`` 查不到就走那条），于是它既不在界面
+#: 上（清单已过滤）、又出现在给测试看的绑定结果里，成为第三种不报错也不留白的状态。
+_NEVER_BIND: frozenset[str] = frozenset({"standard", "xueshu", "shipin"})
 
 _extra_on: ContextVar[bool] = ContextVar("wb_summary_extra_prompt", default=False)
 
@@ -85,11 +98,13 @@ _VIEW_CACHE: dict[tuple[str, bool, str], str] = {}
 #: 缺文件时要回落的就是它——不抓的话，绑过一次之后就没有"压缩版"可回了。
 _BASELINE: dict[str, str] = {}
 
-#: 权威层登记的「只存在于 WB 的角色」（task-24 的 shipin：副本的 ALL_ROLES 里不许有它，
-#: 位置约束由 task-25 钉住）。登记一次，下面四个函数默认都带上它们。
+#: 权威层登记的「只存在于 WB 的角色」位置约束的承接点（历史上是 task-24 造的 ``shipin``，
+#: task-31 之后这份登记是空的——副本的 ``ALL_ROLES`` 里不许出现 WB 自造的角色）。
+#: 登记一次，下面四个函数默认都带上它们。
 #: 为什么非要登记而不是靠调用方传 `extra`：少传这一个参数就静默漏掉一个**有 txt 真源**
 #: 的角色——它的 system 停在旧值上、missing_source 也不报它，`bound != MAP` 这种不一致
 #: 谁都看不见，直到某天真模型端出旧提示词。参数留着当显式入口，登记是兜底。
+#: 现在传进来的是空元组，这套机制**别当死代码删**：它是下一个 WB 自造角色的入口。
 _WB_ONLY: dict[str, Any] = {}
 
 
