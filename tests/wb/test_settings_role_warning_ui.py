@@ -175,7 +175,8 @@ PowerShell：
    ：vendor 明确只读 DOM 没点按钮。两条合起来才是那句承诺的完整覆盖——
    **没碰角色就不该写角色**（`buildPatch` 只收标脏的 path，payload 是
    `{values: {llm: {role: …}}}` 的嵌套形状，`:223`），**碰了就要写后端 default**
-   （不能是停用的 `standard`，也不能是 DOM 第一项 `xueshu`）。
+   （不能是停用的 `standard`，也不能是 DOM 第一项——现读自后端名单，task-31 之前是
+   `xueshu`，现在是 `renhua`；写死名字会让这条在下一次角色增删时又红一轮）。
 
    实测发现（没钉成规格，只记在这里）：脏配置但用户一个字段都没改时，底部条是
    「没有改动」、保存按钮 `disabled: true`（`settings.js:354`/`:382`）——所以
@@ -290,10 +291,12 @@ def test_the_authority_behind_these_expectations():
     - `standard` 必须在 `RETIRED_ROLES` 里：脏态用例注入的就是这个值，它要是被恢复成
       可用角色，「红字」根本没有触发条件，后面几条断言全是空转。
     - 下拉框的**选项数与顺序**由 `ROLE_KEYS` 决定，所以这里钉的是它的**结构**而不是个数：
-      共有的那一段（= bs 存活角色，顺序一致）在前，WB 权威层自造的排在后面。
-      task-24 加 `shipin` 时本文件红过一轮，原因就是把「7 个」当成了合同值——
-      个数会随角色增删移动（`shipin` 与 `renhua` 方法论同源，随时可能合并），
-      结构不会。写死个数的用例等于给下一次角色变更预置一次返工。
+      共有的那一段（= bs 存活角色去掉权威层退役的那些，顺序一致）在前，
+      权威层自造的排在后面（task-31 之后那段**合法地是空**）。
+      task-24 加 `shipin` 时本文件红过一轮，原因就是把「7 个」当成了合同值；
+      task-31 合并 `shipin`、退役 `xueshu` 又红了一轮，同一笔债——
+      个数会随角色增删移动（`shipin` 与 `renhua` 方法论同源，果然被合并掉了），结构不会。
+      写死个数的用例等于给下一次角色变更预置一次返工。
     """
     from bili_scribe.core import roles as bs_roles
 
@@ -913,7 +916,8 @@ def test_confirming_the_displayed_default_and_saving_writes_that_default(browser
 
     3a 管的是「没碰它就不该写它」，这条管的是「碰了就要写对」：用户看见框里亮着
     「文稿编辑」，动一下下拉（选中的正是显示值），保存下去必须是后端 default——
-    既不能是配置里那个已经停用的 `standard`，也不能是 DOM 副作用第一项 `xueshu`。
+    既不能是配置里那个已经停用的 `standard`，也不能是 DOM 副作用第一项
+    （现读自后端名单：task-31 之前是 `xueshu`，现在是 `renhua`）。
     这就是 lead 给用户那句承诺的另一半。
 
     `DEFAULT_ROLE` 从后端权威层 import，不在测试里写字面量 `"wengao"`：前端不许有第二个

@@ -3,7 +3,7 @@
 要证明的是四件事，缺一条这个功能就该被打回：
 
 1. **素材对得上**：字幕进得去，时间戳还在（丢了时间戳，模型就不许写 timeline）；
-2. **角色换得动**：选 ``xueshu`` 真的换了提示词，不是换了个下拉框；
+2. **角色换得动**：换一个现役角色真的换了提示词，不是换了个下拉框（角色名现读，别写死）；
 3. **版本存得住**：每次生成/打磨各存一版，恢复不删历史；
 4. **失败说得清**：模型不吐 JSON 时报 LLM_BAD_RESPONSE，而不是把空总结入库。
 
@@ -196,14 +196,23 @@ def test_run_produces_summary_with_role_and_model():
 
 
 def test_role_changes_the_system_prompt():
-    """角色不是装饰：选学术角色时必须换掉 system 提示词。"""
+    """角色不是装饰：换一个**现役**角色必须换掉 system 提示词。
+
+    第二个角色现读自 `ROLE_KEYS`（task-31 之前写死 `xueshu`，退役之后它连生成入口都进不去了，
+    那条用例红的原因不是产品坏，是样本角色过期）。默认角色之外随便挑一个现役的够用：
+    这里要证的是「角色真的参与提示词」，不是「某个特定角色的提示词长什么样」——
+    特定角色的提示词由 `test_summary_prompt_source.py` 逐字钉。
+    """
+    other = next(key for key in summarizer.ROLE_KEYS
+                 if key != summarizer.DEFAULT_ROLE)
     one = StubClient([json.dumps(GOOD)])
     summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=one, cfg=_cfg(), ctx=FakeCtx(), role="wengao")
+                   client=one, cfg=_cfg(), ctx=FakeCtx(), role=summarizer.DEFAULT_ROLE)
     two = StubClient([json.dumps(GOOD)])
     summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=two, cfg=_cfg(), ctx=FakeCtx(), role="xueshu")
-    assert one.calls[0][0]["content"] != two.calls[0][0]["content"]
+                   client=two, cfg=_cfg(), ctx=FakeCtx(), role=other)
+    assert one.calls[0][0]["content"] != two.calls[0][0]["content"], (
+        f"{summarizer.DEFAULT_ROLE} 与 {other} 的 system 相同——角色没参与提示词")
 
 
 def test_unknown_role_is_rejected():
@@ -418,14 +427,18 @@ def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
 
 
 def test_two_versions_both_kept_and_numbered(service, tmp_path, monkeypatch):
+    # 第二版用哪个角色现读（原来写死 xueshu，task-31 退役后它进不了生成入口）。
+    # 这条管的是「两版都在、版本号对、各自记住自己的角色」，角色只要是**两个不同的现役值**。
+    second = next(key for key in summarizer.ROLE_KEYS
+                  if key != summarizer.DEFAULT_ROLE)
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-            {"kind": "fresh", "role": "wengao"}, project)
+            {"kind": "fresh", "role": summarizer.DEFAULT_ROLE}, project)
     run_job(service, monkeypatch, StubClient([json.dumps({**GOOD, "one_line": "第二版"})]),
-            {"kind": "fresh", "role": "xueshu"}, project)
+            {"kind": "fresh", "role": second}, project)
     rows = service.repo.summary_list(project["id"])
     assert [row["version"] for row in rows] == [2, 1]
-    assert {row["role"] for row in rows} == {"wengao", "xueshu"}
+    assert {row["role"] for row in rows} == {summarizer.DEFAULT_ROLE, second}
 
 
 def test_refine_creates_new_version_with_note(service, tmp_path, monkeypatch):
@@ -486,30 +499,32 @@ def test_get_returns_latest_and_versions(service, tmp_path, monkeypatch):
 
 
 def test_roles_endpoint_lists_every_role(service):
-    """角色清单：standard 已退役不再出现；清单 = 「两侧共有的那段」+「WB 自造的尾巴」。
+    """角色清单：退役的不再出现；清单 = 「两侧共有的那段」+「权威层自造的尾巴（现在为空）」。
 
     分类标准第 3 类（角色清单 → 按退役更新）：这条以前断言的是「八个角色都在」，
     其中 standard 还是默认位。退役之后它**不该再出现**——用户选到一个不能生成总结的角色，
     比少一个角色糟得多。顺序也钉住，因为那就是界面下拉的顺序。
 
-    task-24 加了 `shipin` 之后，逐字等于那 7 个不再成立。这里刻意**不写死总数**
-    （`shipin` 与 `renhua` 方法论同源，用户可能拍板合并），改成两段式：
-    前段必须逐字等于 bs 存活角色（共有段，漂了就说明副本被单方面动过），
-    后段只许是 bs 没有的角色（WB 权威层自造的，且必须排在后面——插到中间会改下拉顺序，
-    历史版本对比会错位）。退役那半判据一个字没松。
+    task-24 加了 `shipin` 之后改成两段式；task-31 把 `shipin` 合并进 `renhua`、把 `xueshu`
+    退役之后，**后段合法地变成空**，那句 `assert extras` 删掉（它当初拦「新角色没进清单」，
+    今天没有新角色要进清单；留着等于要求产品永远得有一个自造角色）。
+    共有段改成现读：bs 的键序去掉权威层退役的那些——**不写死 6/7/8 任何一个**，
+    本仓库已经因为写死名单在每次角色增删时红一整片（task-24 红 5 条、task-31 红 15 条）。
+    现读不自证：锚点是逐字节锁定的 bs 原件（`test_summary_drift.py` 守着），
+    而「退役集合等于哪三个键」这个身份信息只由 `test_summary_retired_roles.py` 钉一份。
     """
     from bili_scribe.core import roles as bs_roles
 
     data = rpc(service, "summary.roles")
     keys = [item["key"] for item in data["roles"]]
     bs_keys = [role.key for role in bs_roles.ALL_ROLES]
-    survivors = [key for key in bs_keys if key != "standard"]
-    assert keys[:len(survivors)] == survivors, (
-        f"共有角色那一段漂了：期望 {survivors} 开头，实得 {keys}")
-    extras = keys[len(survivors):]
-    assert extras, f"公开面只剩 bs 那 {len(survivors)} 个：WB 自造的角色没进清单"
-    assert all(key not in bs_keys for key in extras), (
-        f"后段 {extras} 里出现了 bs 已有的角色：前段被删短了，不是新角色进来了")
+    retired = set(summarizer.RETIRED_ROLES)
+    shared = [key for key in bs_keys if key not in retired]
+    assert keys[:len(shared)] == shared, (
+        f"共有角色那一段漂了：期望 {shared} 开头，实得 {keys}")
+    tail = keys[len(shared):]
+    assert all(key not in bs_keys for key in tail), (
+        f"后段 {tail} 里出现了 bs 已有的角色：前段被删短了，不是新角色进来了")
     assert "standard" not in keys, "退役角色还在清单里，用户选了就会拿到 VALIDATION"
     assert data["default"] in keys
     assert data["default"] == "wengao"

@@ -261,11 +261,21 @@ def test_run_stores_notes_inside_content():
 
 
 def test_run_does_not_use_role_three_pass_prompts():
-    """合集总览只发一次请求——套角色三轮回会多花两倍钱且写得更不像总览。"""
+    """合集总览只发一次请求——套角色三轮回会多花两倍钱且写得更不像总览。
+
+    角色**现读**自 `ROLE_KEYS` 里 `passes >= 3` 的那几个（原来写死 `xueshu`，
+    task-31 之后它是退役键，传进去连生成入口都进不去，用例就没在测「几轮」了）。
+    必须挑一个多轮角色：单轮角色吃不吃角色提示词都只发一次，那条断言会平凡成立。
+    """
+    from video_workbench.core import summary as pkg
+
+    three_pass = [key for key in pkg.ROLE_KEYS if pkg.get_role(key).passes >= 3]
+    assert three_pass, "公开面里没有 passes>=3 的角色：这条失去主语，先决定它该测什么"
     client = StubClient([json.dumps(GOOD, ensure_ascii=False)])
     ov.run("合集", [child({"title": "一"}), child({"title": "二"})],
-           client=client, ctx=FakeCtx(), role="xueshu")
-    assert len(client.calls) == 1
+           client=client, ctx=FakeCtx(), role=three_pass[0])
+    assert len(client.calls) == 1, (
+        f"{three_pass[0]}（passes>=3）的三轮回套进合集总览了：多发 {len(client.calls) - 1} 次请求")
 
 
 def test_markdown_has_disclaimer():

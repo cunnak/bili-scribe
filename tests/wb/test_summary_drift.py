@@ -68,14 +68,24 @@ WAIT_FOR_VENDOR = (
     "产品侧完成之前，本文件这些断言**应该**是红的——这不是测试写坏了，别放宽断言。"
 )
 
-#: bs 的 8 个角色里除 standard 之外全部存活。这 7 个就是「两侧共有」的角色，
-#: 也是对外清单**开头那一段**的顺序（与副本 ALL_ROLES 一致）。
+#: 两侧共有的角色 = bs 认得、WB 权威层也没退役的那几个，按 bs 原有顺序。
 #:
-#: task-24 之后 WB 权威层可以自己造角色（`shipin` 是第一个），所以「对外清单」不再
-#: 等于这 7 个：它等于「共有的 7 个（顺序不变）+ 权威层自造的那些（排在后面）」。
-#: 总数**刻意不写死**——`视频总结.txt` 的写作四则与 `renhua` 的 tagline 同源，用户随时
-#: 可能拍板合并成一个角色；写死 8 会在合并那天变成又要改一轮的靶子。
-SHARED_ROLE_KEYS = ("xueshu", "renhua", "shensi", "wengao", "xiezuo", "fenxi", "jinglian")
+#: task-31 之前这里是写死的 7 元组（含 `xueshu`），并且下面那条公开面用例还额外要求
+#: 「后段非空」——因为 `shipin` 是权威层自造的第一个角色。task-31 把 `xueshu` 退役、
+#: 把 `shipin` 合并进 `renhua` 之后，那两处都成了过期的合同值：名单少了一个、自造段
+#: 空了。所以**名单改成现读**，不再留第四份写死的角色表（本仓库已经因为写死名单在每
+#: 一次角色增删时红一整片：task-24 红过 5 条、task-31 又红 15 条）。
+#:
+#: 现读不等于没牙：共有段的锚点是 `bili_scribe.core.roles.ALL_ROLES`——那是**逐字节锁定
+#: 的原件**（漂移锁本身守着它），所以「退役集合少配一键」会让共有段变长而公开面没变短，
+#: 这条立刻红。退役集合**等于哪三个键**这个身份信息不在本文件钉（唯一 owner 是
+#: `tests/wb/test_summary_retired_roles.py`），本文件只管「漂移」这一维。
+def _shared_role_keys(wb_package) -> tuple:
+    """现读：bs 的键序去掉权威层退役的那些，就是两侧共有段。"""
+    from bili_scribe.core import roles as bs_roles
+
+    retired = set(wb_package.RETIRED_ROLES)
+    return tuple(role.key for role in bs_roles.ALL_ROLES if role.key not in retired)
 
 
 class _QuietCtx:
@@ -415,20 +425,24 @@ def test_unknown_role_fallback_asymmetry_is_intentional():
 
 
 def test_retired_standard_role_is_absent_from_the_public_surface():
-    """退役角色不在公开面，且公开面 = 「共有的 7 个（顺序不变）+ WB 自造的」。
+    """退役角色不在公开面，且公开面 = 「两侧共有的那段（顺序不变）+ 权威层自造的尾巴」。
 
-    task-24 之后这条的形状变了，但**退役判据一个字没松**（`standard` 既不在清单里、
-    又必须在 `RETIRED_ROLES` 里）——变的是「清单等于什么」：权威层现在可以自己造角色
-    （`shipin` 是第一个），所以逐字等于那 7 个不再成立。改成两段式，两段的判据各管各的：
+    **退役判据一个字没松**（`standard` 既不在清单里、又必须在 `RETIRED_ROLES` 里），
+    变的是「清单等于什么」。task-24 时后段必须非空（`shipin` 是权威层自造的第一个角色）；
+    task-31 把 `shipin` 合并进 `renhua`、把 `xueshu` 退役之后，**后段合法地变成空**，
+    所以那句 `assert extras` 删掉了。这不是放宽：它当初拦的是「新角色没进清单」，
+    而今天没有新角色要进清单；留着它等于要求产品永远得有一个自造角色。
 
-    1. **前段**必须逐字等于 `SHARED_ROLE_KEYS`。这段是两侧共有的，漂了就说明副本的角色
-       顺序/内容被动过，漂移锁的意义正好在这。
-    2. **后段**只许是「bs 没有、WB 自己造的」角色，并且**必须排在后面**。这条同时拦住
-       两种坏法：把 WB 自造的插到中间（前端下拉顺序变了，历史版本对比会错位），以及
-       把 bs 的角色悄悄删掉（那样前段就短了）。
+    剩下的判据各管各的：
 
-    总数不写死：`shipin` 与 `renhua` 的方法论同源，用户可能拍板合并，写死 8 到那天就是
-    一堵会自己倒的墙。
+    1. **前段**必须逐字等于 `_shared_role_keys(wb)`（bs 键序去掉权威层退役的那些）。
+       这段是两侧共有的，漂了就说明副本的角色顺序/内容被动过；而「退役集合少配一键」
+       会让这段变长、公开面却没跟着变长 ⇒ 同样红。锚点是逐字节锁定的 bs 原件，
+       所以现读不自证。
+    2. **后段**只许是 bs 没有的角色（权威层自造的），并且必须排在后面。拦住两种坏法：
+       把自造角色插到中间（前端下拉顺序变了，历史版本对比会错位），以及把 bs 的角色
+       悄悄删掉（那样前段就短了）。
+    3. `ROLE_KEYS` 与 `describe_roles()` 的顺序不许分叉（一个给机器、一个给界面）。
     """
     from bili_scribe.core import roles as bs_roles
 
@@ -436,13 +450,13 @@ def test_retired_standard_role_is_absent_from_the_public_surface():
     keys = [item["key"] for item in wb.describe_roles()]
     bs_keys = {role.key for role in bs_roles.ALL_ROLES}
 
-    shared_len = len(SHARED_ROLE_KEYS)
-    assert keys[:shared_len] == list(SHARED_ROLE_KEYS), (
-        f"共有角色那一段漂了（顺序或内容）：前 {shared_len} 个实得 {keys[:shared_len]}")
-    extras = keys[shared_len:]
-    assert extras, "公开面只剩 bs 那 7 个：权威层自造的角色（shipin）没进清单"
-    assert all(key not in bs_keys for key in extras), (
-        f"后段出现了 bs 已有的角色 {extras}：说明前段被删短了，不是 WB 自造的角色进来了")
+    shared = _shared_role_keys(wb)
+    assert keys[:len(shared)] == list(shared), (
+        f"共有角色那一段漂了（顺序或内容）：前 {len(shared)} 个期望 {list(shared)}，"
+        f"实得 {keys[:len(shared)]}")
+    tail = keys[len(shared):]
+    assert all(key not in bs_keys for key in tail), (
+        f"后段出现了 bs 已有的角色 {tail}：说明前段被删短了，不是 WB 自造的角色进来了")
 
     assert "standard" not in keys
     assert "standard" in tuple(wb.RETIRED_ROLES)

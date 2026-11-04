@@ -105,6 +105,7 @@ from test_summary_parity import (  # 同目录、无 __init__.py，直接复用�
     three_pass_script,
 )
 from wb_parity_tiers import default_env  # noqa: F401  fixture，P9 那组显式钉默认档
+from wb_prompt_sizes import TXT_SHORTER_THAN_COMPRESSED  # 长度方向登记的唯一 owner
 
 MAP_SYSTEM = bs_summarizer.MAP_SYSTEM
 
@@ -207,19 +208,18 @@ def test_the_desk_source_folder_still_matches_the_packaged_prompts():
 
 # ------------------------------------------------------------------ P2：覆盖度与 prompt_source
 
-def test_the_source_map_covers_exactly_four_roles_and_names_files_verbatim():
-    """P2 之一：MAP 的**两段**各自钉死，文件名逐字（不许被「顺手规范化」）。
+def test_the_source_map_covers_the_public_roles_and_names_files_verbatim():
+    """P2 之一：MAP 的绑定表逐字钉死（文件名不许被「顺手规范化」）。
 
     `大概率管用 .txt` 的 `.txt` 前有一个空格、`首席……。.txt` 带全角冒号与句号：
-    任何一次「清理文件名」都会让绑定静默失效。
+    任何一次「清理文件名」都会让绑定静默失效。**这张表是「谁绑哪篇」的唯一 owner**
+    （对账那边 `test_summary_parity.py` 的 plan A 只要求「一篇 txt 恰好有一个公开持有者」，
+    不重抄归属名单——两处各写一遍就是第二个 owner，本仓库栽过）。
 
-    task-24 之后 MAP 从 4 项变成 5 项（多了 `shipin → 视频总结.txt`）。名字里的「four」
-    指的是**与 bs 共有**的那四个——那部分是方案 A 落地时的原样决定，不该跟着权威层
-    新增的角色一起动。所以这张表拆成两段：
-
-    - 共有段（两侧都认识的角色）：逐字钉死，改一个字符就红。
-    - WB 自造段：只认「`shipin` 绑的是 `视频总结.txt`」这一件事，**不写死 MAP 总数**
-      （`shipin` 与 `renhua` 的方法论同源，用户可能拍板合并，总数是会被移动的）。
+    task-31 的形状变化：`shipin` 合并进 `renhua`，所以 `视频总结.txt` 现在绑的是一个
+    **bs 也认识的共有角色**。这张表因此从 4 项变 5 项，而「WB 自造段」那半**整段删掉**
+    ——不是放宽，是它没有主语了；改成一条负向断言：MAP 里不许再出现 bs 不认的键
+    （谁把 `shipin` 造回来并顺手绑一篇 txt，就在这里红，逼他做显式决定）。
 
     再加三条覆盖不变量，它们比「等于某个字面量 dict」更能拦住未来的错法：
     每个公开角色要么有源要么明确无源（不许第三种状态）、`UNBOUND` 必须归零
@@ -229,14 +229,16 @@ def test_the_source_map_covers_exactly_four_roles_and_names_files_verbatim():
     bs_keys = {role.key for role in bs_roles.ALL_ROLES}
     shared_bound = {key: name for key, name in ps.MAP.items() if key in bs_keys}
     assert shared_bound == {
+        "renhua": "视频总结.txt",
         "wengao": "文稿编辑.txt",
         "xiezuo": "写作专家.txt",
         "fenxi": "分析报告.txt",
         "jinglian": JINGLIAN_FILE,
-    }, "共有那四个角色绑的文件变了：谁绑哪篇是真源问题，改它必须是有意的并同步这条"
-    wb_only_bound = {key: name for key, name in ps.MAP.items() if key not in bs_keys}
-    assert wb_only_bound.get("shipin") == "视频总结.txt", (
-        f"WB 自造角色的真源不对，实得 {wb_only_bound}")
+    }, "共有角色绑的文件变了：谁绑哪篇是真源问题，改它必须是有意的并同步这条"
+    # 权威层已无自造角色：MAP 的键必须全是 bs 也认识的。
+    assert not (set(ps.MAP) - bs_keys), (
+        f"MAP 里出现了 bs 不认的角色 {sorted(set(ps.MAP) - bs_keys)}："
+        f"重新自造角色要先决定它的回落基准与漂移锁，不是加一行绑定")
 
     public = set(wb_summary.ROLE_KEYS)
     assert set(ps.MAP) | set(ps.NO_SOURCE) == public, (
@@ -245,7 +247,12 @@ def test_the_source_map_covers_exactly_four_roles_and_names_files_verbatim():
     assert not (set(ps.MAP) & set(ps.NO_SOURCE)), (
         "同一个角色既算有源又算无源：绑定与压缩版会互相盖")
     assert tuple(ps.UNBOUND) == (), f"又出现没人认领的 txt：{tuple(ps.UNBOUND)}"
-    assert tuple(sorted(ps.NO_SOURCE)) == ("renhua", "shensi", "xueshu")
+    # 无源名单**不再写死**（task-31 之后它只剩 `shensi` 一个，写死名单每次角色增删都要红一轮）。
+    # 上面两条不变量已经把 NO_SOURCE 唯一确定：MAP ∪ NO_SOURCE == 公开面 且 两者不相交
+    # ⇒ NO_SOURCE == 公开面 − MAP。这里只补一条防空转：无源段必须还有人，
+    # 否则 P3「无源角色两侧逐字相同」那条比较就失去主语。
+    assert ps.NO_SOURCE, (
+        "无源段空了：公开面全都有源，P3 那条「与 bs 逐字相同」的对照会静默空转")
     assert ps.EXTRA_FILE == "大概率管用 .txt"
     assert ps.EXTRA_FILE not in set(ps.MAP.values()), (
         "附加提示词被当成某个角色的真源：它会双份进请求")
@@ -354,34 +361,31 @@ def test_missing_prompt_files_fall_back_to_the_compressed_version_not_to_empty(
             assert role.system, f"{key}：缺文件回落成了**空 system**——副本会走无角色路径"
             assert role.prompt_source is None, f"{key}：缺文件却还挂着真源文件名"
             if key not in _bs_known_role_keys():
-                # **WB 自造的角色不能拿 bs 当基准**：bs 的 `get_role("shipin")` 静默回落
-                # 到 `standard`，而 `standard.system` 是空串——照共有角色那样比，这条就
-                # 成了「断言回落成空 system」，恰好是它要防的那件事。
-                # WB-only 角色的回落基准是权威层自己注册的压缩位
-                # （`core/summary/__init__.py:70-79`：起手给的就是 `COMMON_BOTTOM_LINE`，
-                # 注释明写「不能留空串」，空串会让副本走无角色的 `SYSTEM_PROMPT` 路径）。
-                assert role.system == wb_summary._roles.COMMON_BOTTOM_LINE.strip(), (
-                    f"{key}：回落的东西不是权威层注册的压缩底线（方法论被换了）")
-                assert role.system != _read_txt(ps.MAP[key]), (
-                    f"{key}：缺文件却还拿着 txt 全文——回落没发生")
-            else:
-                assert role.system == bs_roles.get_role(key).system, (
-                    f"{key}：回落的东西不是压缩版原文（方法论被换了）")
+                # 这条分支原本管的是 **WB 自造的角色**（`shipin`）：bs 的 `get_role("shipin")`
+                # 会静默回落到 `standard`，而 `standard.system` 是空串——照共有角色那样比，
+                # 这条就成了「断言回落成空 system」，恰好是它要防的那件事。
+                # task-31 合并之后 MAP 里没有这样的键了，分支不再被走到。留着一个永远
+                # 不执行的分支等于留一条假绿，所以改成**触发线**：谁再造一个带真源的
+                # 自造角色，必须先回来决定它的回落基准（权威层注册的压缩底线
+                # `COMMON_BOTTOM_LINE`，见 `core/summary/__init__.py` 的注册注释
+                # 「不能留空串」，空串会让副本走无角色的 `SYSTEM_PROMPT` 路径）。
+                pytest.fail(
+                    f"MAP 里出现 bs 不认的角色 {key}：WB 已无自造角色，这条回落判据的 "
+                    f"WB-only 分支失去主语。要恢复自造角色，先在这里补它的回落基准。")
+            assert role.system == bs_roles.get_role(key).system, (
+                f"{key}：回落的东西不是压缩版原文（方法论被换了）")
         # 回落之后仍然要能正常生成，并且请求里带的是「压缩版 + 契约」，不是 SYSTEM_PROMPT。
         cfg = make_cfg()
-        llm = FakeLLM(three_pass_script())
-        wb_summary.summarize(make_bundle(SHORT_BODY), llm, cfg, role_key="wengao")
-        expected = (bs_roles.get_role("wengao").system.strip() + "\n"
-                    + bs_roles.OUTPUT_CONTRACT)
-        assert llm.requests[0]["messages"][0]["content"] == expected, (
-            "缺文件回落后的生成请求不是「压缩版 + 契约」——它走了无角色路径")
-        # WB 自造的角色必须走同一条形状：它的回落位不是空串，所以请求里要带「底线 + 契约」。
-        shipin_llm = FakeLLM(three_pass_script())
-        wb_summary.summarize(make_bundle(SHORT_BODY), shipin_llm, cfg, role_key="shipin")
-        shipin_expected = (wb_summary._roles.COMMON_BOTTOM_LINE.strip() + NL
-                           + bs_roles.OUTPUT_CONTRACT)
-        assert shipin_llm.requests[0]["messages"][0]["content"] == shipin_expected, (
-            "shipin 缺文件后没走「回落底线 + 契约」——空 system 会把它切去无角色路径")
+        # 原来这里只验 `wengao` 一个，另外单独给 WB 自造的 `shipin` 补了一条「底线 + 契约」。
+        # 自造角色没了之后那条没有主语，改成**每个有源角色都验一遍**：覆盖面比原来宽，
+        # 而不是少了一个角色就少一类形状。
+        for key in ps.MAP:
+            llm = FakeLLM(three_pass_script())
+            wb_summary.summarize(make_bundle(SHORT_BODY), llm, cfg, role_key=key)
+            expected = (bs_roles.get_role(key).system.strip() + "\n"
+                        + bs_roles.OUTPUT_CONTRACT)
+            assert llm.requests[0]["messages"][0]["content"] == expected, (
+                f"{key} 缺文件后的请求不是「压缩版 + 契约」——它走了无角色路径")
     finally:
         monkeypatch.delenv(ps.PROMPTS_DIR_ENV, raising=False)
         ps.restore(wb_summary._roles, before)
@@ -427,21 +431,30 @@ def test_a_single_missing_file_only_drops_that_one_role(monkeypatch, tmp_path):
 # ------------------------------------------------------------------ P5：拼接顺序（定死，不许调）
 
 def test_the_extra_applies_to_every_role_with_a_non_empty_system_including_unsourced():
-    """附加提示词的作用面 = **所有 system 非空的角色**，无源那三个也一样吃；只有 standard 不吃。
+    """附加提示词的作用面 = **所有 system 非空的角色**，无源的那些也一样吃；只有 standard 不吃。
 
-    这是按实测登记（shensi/xueshu/renhua 开与关各差 993/993/993 字，wengao 也一样；
-    standard 的 base 是空串，被 `system_for` 里的 `base.strip()` 挡掉）。为什么值得钉：
+    这是按实测登记（开与关各差 993 字，有源/无源都一样；standard 的 base 是空串，
+    被 `system_for` 里的 `base.strip()` 挡掉）。为什么值得钉：
     「附加提示词」是**方法论之外的通用增益**，与有没有 txt 真源无关；而 standard 是唯一
     「没有方法论」的角色，给它接附加等于凭空造出一个方法论。
+    遍历域现读自 `ROLE_KEYS`（task-31 把 `xueshu` 退役之后它自动退出——这条原来写死四个
+    名字，里面就有那个已停用的学术角色）。
     如果 vendor 认为无源角色不该吃附加，要改的就是这一条——改之前得先回答
-    「那 `llm.extra_prompt` 对学术/人话/深思到底生不生效」。
+    「那 `llm.extra_prompt` 对「人话」「深思」到底生不生效」。
     """
     off = {}
+    # 遍历域现读 = 公开面里 system 非空的角色（task-31 之后 6 个，`xueshu` 退役就自动退出）。
+    # 原来写死 ("shensi","xueshu","renhua","wengao")，那份名单把退役角色当公开角色遍历，
+    # 于是「已停用」的键越积越多、名单越来越假。
+    subjects = [key for key in wb_summary.ROLE_KEYS
+                if wb_summary._roles.get_role(key).system]
+    assert len(subjects) >= 2, (
+        f"公开面里 system 非空的角色只剩 {subjects}：这条比较会空转，先确认是不是绑定被清空了")
     with ps.use_extra_prompt(False):
-        for key in ("shensi", "xueshu", "renhua", "wengao"):
+        for key in subjects:
             off[key] = ps.system_for(key, wb_summary._roles.get_role(key).system)
     with ps.use_extra_prompt(True):
-        for key in ("shensi", "xueshu", "renhua", "wengao"):
+        for key in subjects:
             on = ps.system_for(key, wb_summary._roles.get_role(key).system)
             assert on != off[key], f"{key}：开着附加却没生效"
             assert on.startswith(off[key][:40]), f"{key}：附加不该换掉开头的方法论本体"
@@ -740,10 +753,13 @@ def test_manifest_reports_every_named_file_including_the_lost_ones(monkeypatch, 
     assert by_name["分析报告.txt"]["bound_role"] == "fenxi"
     assert by_name[JINGLIAN_FILE]["bound_role"] == "jinglian"
     assert by_name["大概率管用 .txt"]["is_extra"] is True
-    # task-24 之前这里是 `bound_role == ""` / `in_map is False`（那篇没人认领）。
-    # 现在它绑给了权威层自造的 `shipin`，两半都翻过来钉：绑定关系变了必须是有意的，
+    # task-24 之前这里是 `bound_role == ""` / `in_map is False`（那篇没人认领）；
+    # task-24 把它绑给权威层自造的 `shipin`；task-31 合并 `shipin` → `renhua`，
+    # 归属跟着换成 `renhua`。三次变化每一半都翻过来钉：绑定关系变了必须是有意的，
     # 而「文件还在、归属没了」这种静默退化正是这两行会抓的。
-    assert by_name["视频总结.txt"]["bound_role"] == "shipin", (
+    # 「谁绑哪篇」的名单 owner 是 P2 那张逐字表；这里钉的是**文件视角**的投影
+    # （manifest 是设置页读的那份，角色视角对了、文件视角没跟着对，界面就会说谎）。
+    assert by_name["视频总结.txt"]["bound_role"] == "renhua", (
         f"视频总结.txt 的归属又变成 {by_name['视频总结.txt']['bound_role']!r} 了")
     assert by_name["视频总结.txt"]["in_map"] is True, (
         "已绑定的文件被算成 in_map=False：设置页会说它没接进任何角色")
@@ -800,24 +816,39 @@ def test_bili_scribe_still_ships_the_compressed_roles():
     assert "resources/prompts" not in source, "bs 开始读包内 txt 了——A 的前提被推翻"
     assert "prompt_source" not in source, "bs 引用了 WB 的绑定层（依赖方向反了）"
     bs_keys = _bs_known_role_keys()
-    # **只对共有角色比**。WB 自造的角色（`shipin`）在 bs 侧走的是「未知 key 静默回落
-    # standard」，`standard.system` 是空串：那三条断言（!= txt、不以 txt 开头、比 txt 短）
-    # 对一个空串全部平凡成立——这条就变成「比了个没内容的东西」还显示绿。
-    # 顺手把「bs 确实没有这些角色」钉成正向断言：它才是 A 边界真正要说的东西。
-    wb_only = [key for key in ps.MAP if key not in bs_keys]
-    assert wb_only and all(key not in bs_keys for key in wb_only), (
-        f"WB 自造角色应当不在 bs 表里，实得 {wb_only} vs {sorted(bs_keys)}")
+    # bs 的 8 个键**逐字钉死**（这是上游事实的警报，不是 WB 的合同值： bili_scribe/** 谁都不许改，
+    # 哪天 bs 自己动角色表，漂移锁会红，而这条会先告诉我们是「加了/删了/改了名字」里的哪一种）。
+    assert set(bs_keys) == {"standard", "xueshu", "renhua", "shensi", "wengao",
+                            "xiezuo", "fenxi", "jinglian"}, (
+        f"bs 的角色表不再是这 8 个：{sorted(bs_keys)}")
+    # WB 已无自造角色（task-31 合并）。这条从「防越界」收紧成「防越界 + 承认现状」：
+    # MAP 的键必须全部落在 bs 表里，任何 bs 不认的键出现就是有人把自造角色造回来了，
+    # 那需要显式决定（并同步 P2 那张逐字绑定表），**不为了让它绿去造一个 wb_only**。
+    # 原来这里断 `wb_only` 非空，是因为 `shipin` 在 bs 侧走「未知 key 静默回落 standard」，
+    # `standard.system` 是空串：三条比较（!= txt、不以 txt 开头、比 txt 短）对空串全部
+    # 平凡成立——所以必须靠「bs 确实没有它」这条正向断言撑着，现在靠的是反向那两条。
+    assert not (set(ps.MAP) - set(bs_keys)), (
+        f"MAP 里出现了 bs 不认的角色 {sorted(set(ps.MAP) - set(bs_keys))}")
     compared = 0
     for key, name in ps.MAP.items():
-        if key not in bs_keys:
-            continue
         bs_system = bs_roles.get_role(key).system
         txt = _read_txt(name)
         assert bs_system != txt, f"bs 的 {key} 被换成 txt 全文了"
         assert not bs_system.startswith(txt.strip()[:40]), (
             f"bs 的 {key} 开头已是 txt 全文——绑定泄漏到 bs 侧")
-        assert len(bs_system) < len(txt), (
-            f"bs 的 {key} 不再比 txt 短（{len(bs_system)} vs {len(txt)}），压缩版形同虚设")
+        # 长度方向按登记（唯一 owner：`wb_prompt_sizes.TXT_SHORTER_THAN_COMPRESSED`）。
+        # `视频总结.txt` 全文 511 字**短于** bs `renhua` 压缩版 1509 字——那是 task-31
+        # 把 `shipin` 合并进 `renhua` 的直接后果：人话角色的方法论正文缩到约三分之一。
+        # 原来这里一刀切断「压缩版必然更短」，合并那天就红了：不是绑定错、不是 bs 被改，
+        # 是代理指标覆盖了真实事实。改成登记之后，两种方向各有一条会红的期望。
+        if name in TXT_SHORTER_THAN_COMPRESSED:
+            assert len(bs_system) > len(txt), (
+                f"bs 的 {key} 压缩版不再比 {name} 长（{len(bs_system)} vs {len(txt)}）："
+                f"要么 bs 被改短、要么那篇 txt 被补长了——补过之后请把名字从登记里删掉，"
+                f"别把这条改成永远成立")
+        else:
+            assert len(bs_system) < len(txt), (
+                f"bs 的 {key} 不再比 txt 短（{len(bs_system)} vs {len(txt)}），压缩版形同虚设")
         compared += 1
     assert compared, (
         "共有角色一个都没比到（MAP 与 bs 名单的交集空了）——这条就退化成"

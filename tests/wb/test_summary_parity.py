@@ -52,8 +52,8 @@ txt 全文**，`bili_scribe` 一个字不改、继续用 `roles.py` 里的压缩
 
 三条硬约束跟着 A 一起钉：契约**永远在末尾**（txt 原文里有「打印每个阶段完整输出」这类
 指令，`roles.py:52-56` 那段契约就是来压住它们的，放前面 `_extract_json` 当场坏）；
-差异只落在 `prompt_source.MAP` 那 4 个**有源**角色上，无源 3 个（shensi/xueshu/renhua）
-两侧仍逐字相同；附加提示词（`大概率管用 .txt`，对抗性双角色）默认关，关着时它的特征串
+差异只落在 `prompt_source.MAP` 现读出来的那些**有源**角色上（task-31 之后含 `renhua`，
+它从此吃 `视频总结.txt`），公开面里无源的那些两侧仍逐字相同；附加提示词（`大概率管用 .txt`，对抗性双角色）默认关，关着时它的特征串
 不许出现在 system 里。成本口径按实测：A 只加在生成与修订**两轮**（长素材三轮 system 长度
 形如 [5008, 219, 5008]），**预读不吃角色提示词**（发的是固定的 `MAP_SYSTEM`），
 所以成本不随分段数放大——「长素材每段也带一次角色 system」那个说法不成立。
@@ -165,9 +165,23 @@ MAX_INPUT_CHARS = 24_000
 CHUNK_SIZE = 6_000
 CHUNK_OVERLAP = 400
 
-#: bs 的 8 个角色里除 standard 之外全部存活；这 7 个是 WB 与 bs 的「共有角色」。
-SHARED_ROLE_KEYS = ("xueshu", "renhua", "shensi", "wengao", "xiezuo", "fenxi",
-                    "jinglian")
+#: **副本层**（`video_workbench/core/summary/*`）与 bs 原件共有的角色 = bs 的键序去掉
+#: bs 自己退役的 `standard`。这里刻意不写死名单，但**保留 `xueshu`**：
+#: WB 权威层在 task-31 把 `xueshu`/`shipin` 退役了，那件事发生在
+#: `core/summary/__init__.py`，**不影响副本**——副本必须继续逐字节等于 bs 原件、
+#: 继续对 `xueshu` 出与 bs 相同的输出。下面 A 组/D 组这两组是「副本 vs 原件」的对账，
+#: 主语是副本，所以它们的角色域就是这 7 个；而「哪些公开角色吃 txt 全文」是**权威层**
+#: 的问题，那个用例（plan A）另用 `ROLE_KEYS` 现读，两边不许混用一套名单。
+SHARED_ROLE_KEYS = tuple(role.key for role in bs_roles.ALL_ROLES if role.key != "standard")
+assert "xueshu" in SHARED_ROLE_KEYS, (
+    "副本层丢了 xueshu：WB 退役它是权威层的事，副本删定义会同时打破逐字节漂移锁")
+
+#: 长度方向的登记表在 `tests/wb/wb_prompt_sizes.py`（唯一 owner：plan A 与 P8 两处都要用
+#: 同一个事实，各写一份就是第二个 owner——合并 `shipin` 那次正好被这条绊到，
+#: 一边红一边绿，看不出真正变了的是事实本身）。
+#: 一句话事实：`视频总结.txt` 正文 511 字 **短于** bs `renhua` 压缩版正文 1508 字，
+#: 所以「txt 全文必然更长」这个代理指标在 renhua 上不成立，plan A 改用逐字判据 + 登记方向。
+from wb_prompt_sizes import TXT_SHORTER_THAN_COMPRESSED as SHORTER_THAN_COMPRESSED  # noqa: E402
 
 #: 模型该返回的结构化总结。内容本身不重要，**形状**要与 OUTPUT_CONTRACT 对齐。
 PAYLOAD = {
@@ -397,8 +411,8 @@ PLAN_A_NOTE = (
     "bs 一个字不改、继续用 roles.py 压缩版。允许不同的**只有** system 正文；"
     "调用次数、阶段顺序（json_mode 指纹）、非 system 消息逐字、temperature、"
     "max_tokens、`Summary.to_dict()` 字段集合、timeline 上限语义、错误码——"
-    "一条都不放宽。而且差异只落在 `prompt_source.MAP` 里那 4 个有源角色上，"
-    "无源三角色（shensi/xueshu/renhua）两侧必须仍逐字相同。"
+    "一条都不放宽。而且差异只落在 `prompt_source.MAP` 现读出来的那些有源角色上，"
+    "公开面里无源的那些角色两侧必须仍逐字相同（副本层的名单见 SHARED_ROLE_KEYS 的注释）。"
 )
 
 #: 附加提示词的特征串（对抗性双角色）。默认关时两侧都不该出现。
@@ -527,7 +541,7 @@ def test_copy_and_original_agree_on_every_shared_role(role_key, default_env):
     # 压缩版），继续用元组相等就会把「唯一的有意差异」和「真的漂了」混成同一种红，
     # 而放宽成「不等就通过」又会盖掉阶段顺序与用户素材的漂移。
     # 所以换成逐维度比较：除 system 正文外全部要求一致，system 两侧各按构造规则断言。
-    # 无源三角色（shensi/xueshu/renhua）在 helper 里仍走「两侧逐字相同」那条路。
+    # 无源的那些角色（现读 `ps.MAP` 在副本层名单里的补集）在 helper 里仍走「两侧逐字相同」那条路。
     assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, role_key,
                                   label="副本 vs 原件")
 
@@ -1405,31 +1419,44 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
     """A 的**边界**：只有 `prompt_source.MAP` 里那些角色的 system 变了，其余照旧。
 
     这条不放宽任何维度，它做的是把「允许不同的范围」本身钉死：
-    - 有源角色（与 bs 共有的那 4 个）：WB 的 system 与 bs 的**必然不同**，且不同之处只在
-      正文——两侧都以 OUTPUT_CONTRACT 结尾（`_assert_wb_system_by_rule` 已钉，这里再钉一次
-      「确实不同」，免得哪天绑定失效、两边又变一样而用例还在绿）；
-    - 无源的共有角色：两侧逐字相同；
-    - `shipin` 是**权威层自造**的角色，bs 侧根本没有它 ⇒ 不能拿 bs 比，改成钉「它吃到了
-      `视频总结.txt`，而且那份内容没漏进任何别的角色」。
+    - 有源的公开角色：WB 的 system 与 bs 的**必然不同**，且不同之处只在正文——两侧都以
+      OUTPUT_CONTRACT 结尾（`_assert_wb_system_by_rule` 已钉，这里再钉一次「确实不同」，
+      免得哪天绑定失效、两边又变一样而用例还在绿）；
+    - 无源的公开角色：两侧逐字相同；
+    - `视频总结.txt` 的归属：task-31 把 `shipin` 合并进 `renhua`，那篇 txt 现在的持有者是
+      一个**共有**角色，所以正/反两半照旧能做——正 = 持有者的请求吃得到那份 txt 的开头；
+      反 = 那份内容不许出现在任何别的公开角色里（一份 txt 喂多个角色＝方法论串味）。
 
-    分类口径（task-25 写死在这里，别再用「MAP 有 4 项」当事实）：
-      * 共有 = `SHARED_ROLE_KEYS`（bs 也认识的那几个），A 的比较只在这一层做；
-      * WB-only = `ROLE_KEYS` 里不在 bs 的那些（现在是 `shipin`），它天然没有对侧；
-      * 两段合起来必须等于 `ROLE_KEYS`，出现第三段就说明有人加了角色却没决定它吃不吃 txt。
+    分类口径（task-32 改成现读，别再把「4 有源 / 3 无源 / 1 自造」这种数量当事实）：
+      * 角色域 = 权威层的公开面 `pkg.ROLE_KEYS`。方案 A 是**权威层**的事，主语不是副本，
+        所以这里不许沿用上面那个副本层的 `SHARED_ROLE_KEYS`（那一段仍然含 `xueshu`，
+        因为副本必须逐字节等于 bs 原件——那是另一条锁，两组用例别混用一套名单）；
+      * 有源 = `ROLE_KEYS ∩ ps.MAP`，无源 = 公开面里其余的那些；
+      * 两段合起来必须等于公开面，出现第三段就说明有人加了角色却没决定它吃不吃 txt；
+      * `ps.MAP` 的键必须全部落在公开面里：WB 已经没有自造角色了，重新冒出一个带真源的
+        自造键必须是有意的决定（红在这里）。**不为了绿去造一个 `wb_only`**——
+        那个集合是被合并掉的，不是没实现。
     """
     wb = _wb_summarizer()
     pkg = _wb_package()
     cfg = make_cfg()
+    public = tuple(pkg.ROLE_KEYS)
     bs_keys = {role.key for role in bs_roles.ALL_ROLES}
-    sourced_shared = tuple(key for key in SHARED_ROLE_KEYS if key in ps.MAP)
-    unsourced_shared = tuple(key for key in SHARED_ROLE_KEYS if key not in ps.MAP)
-    wb_only = tuple(key for key in pkg.ROLE_KEYS if key not in bs_keys)
-    assert set(ps.MAP) == set(sourced_shared) | set(wb_only), (
-        f"MAP 里的角色既不在共有段也不在 WB-only 段：{sorted(ps.MAP)}")
-    assert len(unsourced_shared) == 3, (
-        f"无源的共有角色应当还是那 3 个，实得 {unsourced_shared}")
+    sourced = tuple(key for key in public if key in ps.MAP)
+    unsourced = tuple(key for key in public if key not in ps.MAP)
+    assert set(ps.MAP) <= set(public), (
+        f"MAP 绑了不公开的角色 {sorted(set(ps.MAP) - set(public))}：退役的角色不许还占着真源")
+    assert not (set(ps.MAP) - bs_keys), (
+        f"WB 又出现带真源的自造角色 {sorted(set(ps.MAP) - bs_keys)}：task-31 已合并，"
+        f"重新出现要是有意的决定并同步 P2 那张逐字绑定表")
+    assert set(public) <= bs_keys, (
+        f"公开面出现 bs 不认的角色 {sorted(set(public) - bs_keys)}："
+        f"「与 bs 比 system」失去基准，下面那条逐字相等会空转")
+    assert sourced and unsourced, (
+        f"有源/无源两段有一段的预期会空转（sourced={sourced}, unsourced={unsourced}）："
+        f"这段比较整体失去意义，必须显式决定而不是留在这里绿着")
 
-    for role_key in SHARED_ROLE_KEYS:
+    for role_key in public:
         wb_llm = FakeLLM(three_pass_script())
         bs_llm = FakeLLM(three_pass_script())
         bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg, role_key=role_key)
@@ -1437,11 +1464,31 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
         wb_system = wb_llm.requests[0]["messages"][0]["content"]
         bs_system = bs_llm.requests[0]["messages"][0]["content"]
         if role_key in ps.MAP:
+            name = ps.MAP[role_key]
+            txt = ps.load(name).strip()
+            assert txt, f"{role_key} 绑的 {name} 读出来是空串：下面三条会空转"
+            # 逐字判据（比长度强）：有源角色的 system **就是**「那篇 txt 全文 + 输出契约」。
+            assert wb_system == txt + "\n" + bs_roles.OUTPUT_CONTRACT, (
+                f"{role_key}：WB 的 system 不是「{name} 全文 + 契约」的逐字形状")
+            assert bs_system == (bs_roles.get_role(role_key).system.strip() + "\n"
+                                 + bs_roles.OUTPUT_CONTRACT), (
+                f"{role_key}：bs 侧形状也变了（这条不该动 bs，动了一定是谁单方面改了原件）")
             assert wb_system != bs_system, (
                 f"{role_key} 绑了 txt 但两侧 system 仍然相同——绑定没生效")
-            assert len(wb_system) > len(bs_system), (
-                f"{role_key}：txt 全文应当比压缩版长（实测 {len(wb_system)} vs "
-                f"{len(bs_system)}），现在反了")
+            # 长度方向单独登记：过去「全文必然比压缩版长」被当成 A 的语义代理，
+            # task-31 把 `shipin` 合并进 `renhua` 之后这个代理**破了**——
+            # `视频总结.txt` 正文 511 字，而 bs 内置的 `renhua` 压缩版正文 1508 字，
+            # 全文反而更短。改成：除登记过的那篇之外，其余有源角色仍然必须「全文 > 压缩版」；
+            # 登记过的那篇必须**确实更短**（将来有人往 txt 里补内容、补过压缩版，
+            # 这条就红着提醒把登记删掉）。换判据不是放宽：逐字形状本来就比长度强。
+            if name in SHORTER_THAN_COMPRESSED:
+                assert len(wb_system) < len(bs_system), (
+                    f"{name} 已经不再比压缩版短（{len(wb_system)} vs {len(bs_system)}）："
+                    f"请把 {name!r} 从 SHORTER_THAN_COMPRESSED 里删掉")
+            else:
+                assert len(wb_system) > len(bs_system), (
+                    f"{role_key}：txt 全文应当比压缩版长（实测 {len(wb_system)} vs "
+                    f"{len(bs_system)}），现在反了——要么绑定被换、要么有人把 txt 掏空了")
         else:
             assert wb_system == bs_system, (
                 f"无源角色 {role_key} 的 system 被改了——A 不该碰它")
@@ -1449,16 +1496,21 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
     video_summary_text = ps.load("视频总结.txt").strip()
     assert video_summary_text, "视频总结.txt 读不到，下面两条断言都会空转"
     head = video_summary_text[:40]
-    # 它现在绑给 shipin：shipin 的请求里必须吃得到（这条是「绑定确实发生」的正证）。
-    assert "shipin" in wb_only, (
-        f"前置不成立：shipin 应当在 WB-only 段里，实得 {wb_only}")
-    shipin_llm = FakeLLM(three_pass_script())
-    wb.summarize(make_bundle(SHORT_BODY), shipin_llm, cfg, role_key="shipin")
-    shipin_system = shipin_llm.requests[0]["messages"][0]["content"]
-    assert head in shipin_system, (
-        f"视频总结.txt 没接进 shipin 的 system——MAP 里那一项失效了：{shipin_system[:80]!r}")
+    # 归属现读：一篇 txt 只许有一个公开持有者。「谁绑哪篇」的唯一 owner 在
+    # `test_summary_prompt_source.py` 的 P2 那张逐字表里，这里只要求「有且只有一个」，
+    # 两处各写一遍归属名单就是第二个 owner（本仓库栽过两次）。
+    holders = [key for key in public if ps.MAP.get(key) == "视频总结.txt"]
+    assert len(holders) == 1, (
+        f"视频总结.txt 的公开持有者不是恰好一个，实得 {holders}")
+    holder = holders[0]
+    holder_llm = FakeLLM(three_pass_script())
+    wb.summarize(make_bundle(SHORT_BODY), holder_llm, cfg, role_key=holder)
+    holder_system = holder_llm.requests[0]["messages"][0]["content"]
+    assert head in holder_system, (
+        f"视频总结.txt 没接进 {holder} 的 system——MAP 里那一项失效了："
+        f"{holder_system[:80]!r}")
     # 反向：那份内容不许出现在任何**别的**角色里（一条 txt 喂多个角色＝方法论串味）。
-    for role_key in [key for key in pkg.ROLE_KEYS if key != "shipin"]:
+    for role_key in [key for key in public if key != holder]:
         other_llm = FakeLLM(three_pass_script())
         wb.summarize(make_bundle(SHORT_BODY), other_llm, cfg, role_key=role_key)
         joined = "\n".join(str(m["content"]) for m in other_llm.requests[0]["messages"])

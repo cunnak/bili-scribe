@@ -37,8 +37,8 @@
 | 变体 | 坏法（一处最小改动） | 该红的名字 |
 |---|---|---|
 | 4a | JS：`return roleOptionList || (field && field.options) || [];` → 两段顺序互换 | `follow_the_backend` |
-| 4b | JS：`llm.role` 那张 `options: [[…8 项…]],` → `options: [],` | `keeps_the_page_usable`（连带 `ordered_subset`） |
-| 4c | JS：兜底表前两项 `xueshu`/`renhua` 互换（集合不变、只漂顺序） | `ordered_subset` |
+| 4b | JS：`llm.role` 那张 `options: [[…活角色若干项…]],` → `options: [],` | `keeps_the_page_usable`（连带 `ordered_subset`） |
+| 4c | JS：兜底表**前两项互换**（集合不变、只漂顺序；当前前两项是 `renhua`/`shensi`，task-31 之前是 `xueshu`/`renhua`） | `ordered_subset` |
 | OWNERS | JS：`describeRoleSources` 里 `if (item.prompt_source) {` → `if (false) {` | `exactly_one_owner` |
 | 控制组 | JS：原样副本，不改 | —— 必须一条都不红 |
 
@@ -132,7 +132,14 @@ def test_the_role_options_follow_the_backend_when_it_answers(real_page):
     page, errors, backend, _ = real_page
     original, refusing = _refusing_factory(backend)
 
-    injected = ["zzINJECTED", "shipin", "xueshu"]
+    # 注入项现读：一个不可能的键（zzINJECTED，故意的未知值）+ 退役集合里的两个键。
+    # 原来这里写死 `["zzINJECTED", "shipin", "xueshu"]`：那两个键**当时**是「退役但仍在
+    # 历史行里」的样本，今天仍然成立，但写死名单会让下一次退役又红一轮。
+    # 「退役集合等于哪三个键」由 `test_summary_retired_roles.py` 钉一份，这里只取它的投影。
+    from video_workbench.core.summary import RETIRED_ROLES as _RETIRED
+
+    injected = ["zzINJECTED", *sorted(_RETIRED)[:2]]
+    assert len(injected) == 3, f"注入项不足三个（当前退役集只有 {sorted(_RETIRED)}）"
 
     def patched(method, params=None):
         envelope = original(method, params)
