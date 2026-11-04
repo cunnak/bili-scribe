@@ -68,7 +68,9 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 - **牙齿（故意改坏验红）只准在 `%TEMP%` 下自己带哨兵名的副本里做。禁止对仓库工作区文件按快照覆盖回写。** 已发生两次：用"开工前原字节"还原，把同一文件上别人已落地的改动一起抹了（settings.js 的角色下拉注入、已 accepted 的删控件都被抹过）。
 - **新建 `tests/wb/*.py` 要先把路径登记进 sha256 快照清单。** 否则还原逻辑会把"开工前不存在"的文件当垃圾删掉。
 - **交付里每个数字后面必须附产生它的那条命令原文。** 编不出命令原文，就等于没跑过。
-- 别人报告里的函数名/行号/文件名，**引用前自己现读一遍**。盘面在被并发修改时，任何单点读数都不能用来定罪。
+- **`git cat-file -s :路径` 打的是「索引 blob 的字节数」，索引内容已经过 eol 归一化 —— 它不等于工作区字节数。** CRLF 文件两者之差正好等于 CR 个数（实测 `tests/wb/test_summary_retired_roles.py`：索引 44592 / 工作区 45370 / 差 778 = 行数 = CR 数）。我（lead）23:0x 就拿这两个数当"内容一致"的证据，配上自己编的 grep 模式，误报了一次"在途工作被快照还原抹掉"。**判内容是否一致，只有两种正确读法**：① 原始字节直接比（`工作区.read_bytes().replace(b"\r\n", b"\n") == git show :路径`）；② 同一条命令里打三份**归一化后**的 sha 并写明引用哪一份。字节数差不是证据，行尾差异会伪装成内容差异。
+- **grep 模式必须来自对方交付里的真名，禁止自己"按语义猜一个函数名"再拿 0 命中定罪。** 我那次用 `never_raises|same_key_set|形状同源|惰性` 扫 parity 的文件得 0 命中，他的真名是 `test_the_mock_payload_has_every_key_the_real_service_sends`、`test_the_error_envelope_currently_names_no_broken_role_key`、`test_a_retired_key_missing_from_never_bind_is_caught`。同一族错误本轮我犯过三次（`'"display"'` 带引号当字面量、`>= 4` 行号凭记忆、这次猜函数名），前两次只是读错数，这次是拿错钥匙去开一扇有东西的门，然后宣布房间是空的。
+- **`git commit` 必须带 pathspec。** 我 `git add AGENTS.md` 之后不带路径 `git commit`，把 parity 刚 staged 的两个测试文件一起吸收进 `5683253`（`git show --stat` 三个文件），一笔提交里混了两个作者的改动 —— 回滚、cherry-pick、按作者复盘全都不干净。lead 替成员收 staged 文件是常态（成员被要求"落地就 add"），所以 pathspec 不是形式主义。
 - **判别人「报了没跑过的东西」之前，先隔 3–5 分钟重读同一批文件。** 单点读数可能落在失真窗口里。本轮我（lead）就用一次失真窗口的读数判过 vendor 造假，随后被他的只读命令原文推翻——规矩对我也生效。
 - **任何对仓库文件的快照恢复必须先打印 sha256（恢复前/恢复后），禁止静默 `shutil.copy2` / `cp -p` 回盖。** 保留 mtime 的覆盖会让「文件没变」的假象与内容漂移同时成立：本轮 `prompt_source.py` 的 mtime 停在 19:06，内容却在 20:01 读到 HEAD 版、20:04 读到落地版，排查成本极高。
 - **`git diff` 对未跟踪文件恒返回空且不报错。** 判断"有没有人动过"必须 `git status --porcelain` + `git ls-files`（或 `git cat-file -s :path`）。只看 `git diff` 会把"没被跟踪"读成"没被改动"——`tests/wb/test_git_no_normalization_on_locked_paths.py` 那 20 条字节锁闸就是这样被静默删掉、一夜从全量里消失的。
