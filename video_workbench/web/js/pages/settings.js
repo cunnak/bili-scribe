@@ -57,21 +57,39 @@
           label: "默认角色",
           type: "select",
           group: "advanced",
-          options: [["standard", "standard"], ["xueshu", "xueshu（学术）"], ["renhua", "renhua（人话）"], ["wengao", "wengao（文稿）"], ["xiezuo", "xiezuo（写作）"], ["fenxi", "fenxi（分析）"], ["jinglian", "jinglian（精炼）"]],
-          help: "非 standard 走三轮改写，约 3 倍耗时。"
+          // 这张字面量表是「summary.roles 读不到时页面照常可用」的兜底（reject 那条需求），
+          // 正常路径下会被后端返回的名单整表换掉（见 roleOptionsFrom / applyRoleIssue）。
+          // 两边必须同步：parity 有一条常驻门把这张表的 key 序列与 ROLE_KEYS 逐字比对
+          // （tests/wb/test_settings_role_warning_ui.py 的
+          // test_the_option_table_in_settings_js_is_still_a_copy_of_the_backend_list）。
+          options: [["xueshu", "xueshu（学术）"], ["renhua", "renhua（人话）"], ["shensi", "shensi（深思）"], ["wengao", "wengao（文稿）"], ["xiezuo", "xiezuo（写作）"], ["fenxi", "fenxi（分析）"], ["jinglian", "jinglian（精炼）"], ["shipin", "shipin（视频总结）"]],
+          // 轮数由角色的 passes 决定（判定在 core/summary/summarizer.py:572 那个门），
+          // 所以这里不写「全部角色都走三轮」——shipin 就是单轮。具体每个角色几轮，
+          // 由下面注入的选项标签和真源清单行自己说，别在文案里再数一遍角色数。
+          help: "带「三轮」的角色走 生成→自我批判→修订，耗时约为单轮的 3 倍；带「单轮」的只跑一次。配置里那个值不能直接用的时候，这一栏下面会出现一行说明（内容来自后端，不在这里点名具体角色，免得下次退役或新增就得多改一处前端）。"
+        },
+        {
+          // 附加提示词：把 resources/prompts/大概率管用 .txt 全文接在角色提示词后面。
+          // 默认关——那份是对抗性双角色提示词（Guardian / Maverick 两段必出），和总结
+          // 要的 JSON 契约正面冲突，开着会拖垮产出。要不要吃它交给人，判定与拼接都在
+          // core/prompt_source.py，这里只是一个开关。
+          path: "llm.extra_prompt",
+          label: "附加提示词（大概率管用）",
+          type: "switch",
+          group: "advanced",
+          help: "打开后把「大概率管用 .txt」全文接在当前角色的 txt 真源之后、输出契约之前。与 JSON 契约正面冲突，默认关。"
         },
         { path: "llm.temperature", label: "温度", type: "number", group: "advanced", help: "0–2。总结建议 0.2–0.4。" },
         { path: "llm.max_tokens", label: "单次最大输出", type: "number", group: "advanced" },
-        // 下面四项后端早就在用（ChatClient 与分块摘要都读），界面一直没暴露，
+        // 下面三项后端早就在用（ChatClient 与分块摘要都读），界面一直没暴露，
         // 等于"配置里有、界面上没有"——只能手改 YAML。这次一起补上。
-        {
-          path: "llm.thinking",
-          label: "深度思考",
-          type: "segmented",
-          group: "advanced",
-          options: [["auto", "跟随模型"], ["off", "关闭"], ["on", "开启"]],
-          help: "auto＝不发这个参数，非思考模型最兼容；开启后推理过程不吃 max_tokens，容易超时或正文为空。"
-        },
+        //
+        // 「深度思考」这一栏原来在这里，已删（task-26）。删的是控件不是键：
+        // WB 自己**不发送** enable_thinking——`video_workbench/**/*.py` 里对 thinking
+        // 只有一个命中，就是 config.py 那句取值校验（thinking 走 `_enum(...)` 白名单），
+        // 没有任何出网路径读它；而 bili-scribe 会读、会真发这个参数，搬家也带着它走，
+        // 所以键必须留在 LlmConfig / render_yaml / mock 里。留着按钮等于让用户以为
+        // WB 的总结会按这个值走，那是空控件假承诺。真要接这条路，先接出网再放控件。
         {
           path: "llm.max_input_chars",
           label: "单次输入上限（字）",
@@ -253,13 +271,136 @@
     return page;
   }
 
+  // 配置里那个「默认角色」到底能不能直接用，判定只在后端一处（core/summarizer.resolve_role，
+  // 退役与拼错的措辞也在那里定）。这里只当读者：summary.roles 带下 configured_hint 就挂一行，
+  // 不带就什么都不显示。前端不再自己列退役角色名单——那会变成第二个 owner，下次退役就得改这里。
+  var roleWarnNode = null;
+  var roleIssueText = "";
+  var roleSrcNode = null;        // 角色真源清单那一行（每个角色当前吃哪个 txt）
+  var roleSourceText = "";
+  var roleAdvNode = null;        // 「上下文与长素材」那个折叠区，默认角色就在里面
+  var roleIssueData = null;      // 后端最近一次的结论，paint 之后要重新贴一次
+  var roleDefault = "";          // 后端 summary.roles 给的 default：配置不可用时下拉框选它
+  var roleOptionList = null;     // 后端 summary.roles 给的名单（顺序/名称/轮数），null＝还没拿到
+
+  // 配置里那个角色不在选项中时，下拉框必须选后端给的那个 default，而不是列表第一项。
+  // 「退到第一项」是 DOM 的副作用：`selected: String(value) === String(opt[0])` 七个选项
+  // 全不匹配时，浏览器就把第一项当成选中态显示出来——于是红字说「本次按默认角色『文稿
+  // 编辑』」，框里却亮着「学术」，用户顺手一保存，配置就被改成他没选过的角色。
+  // 这里不写 "wengao" 字面量：default 由后端 resolve_role 定（配置干净时它等于配置值本身，
+  // 脏时就是它真正会用的兜底），抄一份进来等于多了第二个 owner，下次换默认角色必漂。
+  // 角色名单的唯一权威是后端（video_workbench/core/summary/__init__.py 的 ALL_ROLES）：
+  // 顺序、显示名、几轮，全从 summary.roles 那一次返回里现取，不在前端再数一遍。
+  // 读到就用这份，读不到才退回上面那张字面量兜底表——reject 时页面必须照常可用，
+  // 这条需求钉在 test_roles_endpoint_failure_does_not_break_the_settings_page。
+  // 标签里的「三轮/单轮」按 passes 推：shipin 单轮、其余方法论角色三轮；写死任何一边
+  // 都会在下次加/退役角色时变成假话。
+  function roleOptionsFrom(roles) {
+    var list = roles || [];
+    if (!list.length) return null;
+    return list.map(function (item) {
+      var label = String(item.name || item.key);
+      return [String(item.key), label + (Number(item.passes) >= 3 ? "（三轮）" : "（单轮）")];
+    });
+  }
+
+  // 这一栏当前该用哪份选项：后端名单优先，没有就用字段自带的兜底表。
+  function roleOptionsOf(field) {
+    return roleOptionList || (field && field.options) || [];
+  }
+
+  function roleSelectValue(field, configured) {
+    var keys = roleOptionsOf(field).map(function (opt) {
+      return String(opt[0]);
+    });
+    var want = String(configured || "");
+    if (keys.indexOf(want) >= 0) return want;            // 配置可用：照配置选，行为不变
+    var fallback = String(roleDefault || "");
+    // 读不到后端结论时（summary.roles 失败）退回配置值本身：宁可不选，也不自己编一个。
+    return keys.indexOf(fallback) >= 0 ? fallback : want;
+  }
+
+  // 折叠区里有两个「用户需要看得见」的东西：脏角色的红字，和附加提示词这个开关本身。
+  // 「附加提示词」默认关，而它就躺在这组里：不展开等于这个开关不存在（task-17 的 V3
+  // 要求用户在 20 秒内能点到它）。所以**本会话第一次进设置页**、且它还是关着的时候，
+  // 把这一组展开一次；开着的人显然已经找到用过它，不展开。用户随后自己收起，我们不再
+  // 插手——`extraGroupForced` 在整个页面生命周期里只放行一次，重复进出页面不会反复强开。
+  var extraGroupForced = false;
+
+  function expandExtraGroup(current) {
+    if (extraGroupForced || !roleAdvNode) return;
+    if (!current || current["llm.extra_prompt"]) return;   // 开着 = 已经找到它，别抢展开
+    extraGroupForced = true;
+    roleAdvNode.open = true;
+  }
+
+  function expandRoleGroup() {
+    if (!roleIssueText || !roleAdvNode) return;
+    roleAdvNode.open = true;
+  }
+
+  function applyRoleIssue(data) {
+    // 两个字段是一对：configured_unrecognized 是那个脏值本身，configured_hint 是说明。
+    // 只认 hint 的话，脏值就没人读了；这里要求两者同时非空才显示——旧后端只带 hint
+    // 时也不会挂出一行没有对象的提示。
+    roleIssueData = data || null;
+    // default 顺手记下来：它是后端 resolve_role 的结论，配置值不可用时下拉框就选它。
+    // 放在早退之前——第一次进页面时提示行还不存在，但结论得先存住，paint 之后才用得上。
+    roleDefault = String((data && data.default) || "");
+    // 名单同样在这里存：选项的顺序/显示名/轮数都跟随后端，加角色不必再改前端。
+    // applyRoleIssue 在 paint 之前会先跑一次，所以第一次画就已经是后端的名单；
+    // 读失败时 roleOptionsFrom 给 null，roleOptionsOf 自动退回那张字面量兜底表。
+    roleOptionList = roleOptionsFrom(data && data.roles);
+    // 真源清单也在这里存：它是同一次 summary.roles 的返回，不值得为它多发一次请求。
+    roleSourceText = describeRoleSources(data && data.roles);
+    var dirty = (data && data.configured_unrecognized) || "";
+    roleIssueText = dirty ? ((data && data.configured_hint) || "") : "";
+    if (roleSrcNode) {
+      roleSrcNode.textContent = roleSourceText;
+      roleSrcNode.style.display = roleSourceText ? "" : "none";
+    }
+    if (!roleWarnNode) return;
+    roleWarnNode.textContent = roleIssueText;
+    roleWarnNode.style.display = roleIssueText ? "" : "none";
+    expandRoleGroup();
+  }
+
+  // 一行一个角色：有 txt 真源的写文件名 + 字节数 + sha 前 8 位，没有的写清楚用的是
+  // 内置压缩版。为什么要把 sha 摆出来：用户改完 txt 想确认「生效的是不是这一份」，
+  // 看哈希比看文件名可靠；而字节数只有后端知道（prompt_source 现算，不存副本）。
+  function describeRoleSources(roles) {
+    var list = roles || [];
+    if (!list.length) return "";
+    var lines = [];
+    list.forEach(function (item) {
+      if (!item || !item.key) return;
+      if (item.prompt_source) {
+        lines.push(item.key + " ← " + item.prompt_source +
+          " · " + (item.prompt_bytes || 0) + " B" +
+          (item.prompt_sha8 ? " · " + item.prompt_sha8 : ""));
+      } else {
+        lines.push(item.key + " ← 无 txt 真源，用内置压缩版");
+      }
+    });
+    return lines.join("\n");
+  }
+
+  function refreshRoleIssue() {
+    return WB.rpc("summary.roles", {}, { silent: true }).then(applyRoleIssue, function () {
+      applyRoleIssue(null);   // 读不到就当没提示：这一页的主功能不能因此打不开
+    });
+  }
+
   function load(body, activeKey) {
     body.textContent = "";
     body.appendChild(ui.h("div", { class: "empty" }, [ui.h("div", { class: "empty__hint", text: "正在读取设置…" })]));
 
-    WB.rpc("app.settings.get")
-      .then(function (settings) {
-        paint(body, settings, activeKey);
+    Promise.all([WB.rpc("app.settings.get"), refreshRoleIssue()])
+      .then(function (done) {
+        paint(body, done[0], activeKey);
+        // 后端结论到得比表单早，那时提示行和折叠区都还没被建出来；画完之后按同一条结论补一次，
+        // 脏的时候这一组才会被展开。
+        applyRoleIssue(roleIssueData);
       })
       .catch(function (err) {
         body.textContent = "";
@@ -398,6 +539,9 @@
           dirty = {};
           saveBtn.textContent = "保存";
           refreshBar();
+          // 角色改完立刻回查一次：改对了那行提示就该消失，还不对就换一句新的说明。
+          // 提示的内容始终来自后端，不在这里做判断。
+          refreshRoleIssue();
           // 皮肤/折叠这类即时项要让外壳跟着变
           if (patch.ui && patch.ui.skin && WB.applySkin) WB.applySkin(data.settings.ui.skin);
           if (patch.ui && typeof patch.ui.rail_collapsed === "boolean" && WB.applyRail) WB.applyRail(patch.ui.rail_collapsed);
@@ -1100,6 +1244,9 @@
       ]),
       body
     ]);
+    roleAdvNode = details;   // 脏结论到达时要把这一组展开（expandRoleGroup）
+    expandRoleGroup();
+    expandExtraGroup(current);   // 附加提示词默认关时，本会话第一次进页面替用户展开一次
     return details;
   }
 
@@ -1289,6 +1436,10 @@
     }
 
     if (field.type === "select") {
+      // 「默认角色」这一栏在配置值不可用时不能退回列表第一项（DOM 的副作用），要选后端
+      // 给的 default，见 roleSelectValue。选项本身也走后端名单（roleOptionsOf），
+      // 其它下拉框行为不变。
+      var picked = field.path === "llm.role" ? roleSelectValue(field, value) : value;
       var select = ui.h(
         "select",
         {
@@ -1297,8 +1448,8 @@
             onChange(select.value);
           }
         },
-        (field.options || []).map(function (opt) {
-          return ui.h("option", { value: opt[0], text: opt[1], selected: String(value) === String(opt[0]) });
+        (field.path === "llm.role" ? roleOptionsOf(field) : (field.options || [])).map(function (opt) {
+          return ui.h("option", { value: opt[0], text: opt[1], selected: String(picked) === String(opt[0]) });
         })
       );
       control = select;
@@ -1474,10 +1625,32 @@
   }
 
   function row(field, control) {
+    var warn = null;
+    var src = null;
+    if (field.path === "llm.role") {
+      // 配置里那个值不能直接用时才显示（文案由后端给，前端不判断）。留在这里是因为
+      // 用户必须在这张表单上看得见问题——不然他保存完才发现总结跑不起来。
+      warn = ui.h("span", {
+        class: "warn-line",
+        text: roleIssueText,
+        style: "display:" + (roleIssueText ? "" : "none")
+      });
+      roleWarnNode = warn;
+      // 每个角色当前吃的是哪份提示词。文件名/字节数/sha 全部来自后端 summary.roles，
+      // 前端不写映射表——映射的唯一出处是 core/prompt_source.py 的 MAP。
+      src = ui.h("span", {
+        class: "field__help",
+        text: roleSourceText,
+        style: "white-space:pre-line;display:" + (roleSourceText ? "" : "none")
+      });
+      roleSrcNode = src;
+    }
     return ui.h("div", { class: "field" }, [
       ui.h("label", { class: "field__label", text: field.label }),
       control,
-      field.help ? ui.h("span", { class: "field__help", text: field.help }) : null
+      field.help ? ui.h("span", { class: "field__help", text: field.help }) : null,
+      src,
+      warn
     ]);
   }
 

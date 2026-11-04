@@ -32,6 +32,9 @@
     projectId: "",
     roles: [],
     role: "",
+    roleDefault: "",     // 后端 summary.roles 给的默认角色（退役角色不在角色列表里）
+    roleRetired: [],     // 后端给的退役角色名单：界面靠它区分「已停用」与「不认识」
+    roleNotice: "",      // 历史行存的是已退役角色时，写清楚「这次换成哪个角色重做」
     models: [],
     model: "",           // "" = 跟随设置（llm.tasks.summary → llm.model）
     modelDefault: "",
@@ -172,6 +175,50 @@
     });
   }
 
+  function findRole(key) {
+    for (var i = 0; i < state.roles.length; i += 1) {
+      if (state.roles[i].key === key) return state.roles[i];
+    }
+    return null;
+  }
+
+  // 版本行与总览脚注里的角色：现役 key 原样显示（那是后端存进库里的值，改动它
+  // 等于篡改出处）；下拉框里已经选不到的 key（退役或脏数据）标出来，
+  // 既不抛错也不留白——和适配器 to_markdown 那一行同一个口径。
+  // 但「已停用」和「不认识」是两件事：前者要换角色，后者要改配置，界面不能混着说。
+  // 退役名单来自后端 summary.roles.retired，前端不硬编码具体 key（下次退役不用改这里）。
+  function roleText(key) {
+    var wanted = String(key || "");
+    if (!wanted || findRole(wanted)) return wanted;
+    if (state.roleRetired.indexOf(wanted) >= 0) return wanted + "（已停用）";
+    return wanted + "（未知角色）";
+  }
+
+  // 历史版本行里存的可能是已经退役的角色（standard）。直接把那个 key 交回后端，
+  // summary_start 每次都报「没有这个角色」，用户点一次错一次。这里换成可选项里的
+  // 角色，并把换掉这件事写在界面上——静默替换会让人以为文风变了是自己选的。
+  function adoptRole(key) {
+    var wanted = String(key || "");
+    if (!wanted) return;
+    if (!state.roles.length) {   // 角色列表还没到（理论上不会发生：boot 先 loadRoles）
+      state.role = wanted;
+      return;
+    }
+    var hit = findRole(wanted);
+    if (hit) {
+      state.role = hit.key;
+      state.roleNotice = "";
+      return;
+    }
+    var fallback = findRole(state.roleDefault) || state.roles[0] || null;
+    if (!fallback) return;
+    state.role = fallback.key;
+    // 措辞跟着原因走：退役＝我们撤掉了它，不认识＝这个 key 从来不在列表里（多半是配置写错
+    // 后存下来的），两种情况用户要做的事不一样。名单同样来自后端，不在这儿硬编码。
+    var why = state.roleRetired.indexOf(wanted) >= 0 ? "已停用" : "已经不在角色列表里";
+    state.roleNotice = "上一版的角色「" + wanted + "」" + why + "，重新生成改用「" + fallback.name + "」";
+  }
+
   function loadRoles() {
     call("summary.models").then(function (data) {
       state.models = (data && data.items) || [];
@@ -182,9 +229,13 @@
 
     return call("summary.roles").then(function (data) {
       state.roles = (data && data.roles) || [];
-      if (!state.role) {
-        state.role = (data && data.default) || (state.roles[0] || {}).key || "";
-      }
+      // 退役名单与提示都由后端给（判定只在 core/summarizer.resolve_role 那一处）；
+      // 老后端不带这两个字段时就退化成空名单 + 不提示，界面照常能用。
+      state.roleRetired = (data && data.retired) || [];
+      // default 来自配置，配置里可能还留着已退役的角色——不能直接当选中项用，
+      // 统一过一遍 adoptRole：可选项就收下，不可选项换成列表里的第一个。
+      state.roleDefault = (data && data.default) || "";
+      adoptRole(state.role || state.roleDefault);
       return state.roles;
     });
   }
@@ -217,7 +268,7 @@
       state.overview = (data && data.overview) || null;
       state.overviewVersions = (data && data.versions) || [];
       state.children = (data && data.children) || [];
-      if (state.overview && state.overview.role) state.role = state.overview.role;
+      adoptRole(state.overview && state.overview.role);
       return state.overview;
     });
   }
@@ -234,7 +285,7 @@
       state.summary = (data && data.summary) || null;
       state.versions = (data && data.versions) || [];
       state.totals = (data && data.totals) || null;
-      if (state.summary && state.summary.role) state.role = state.summary.role;
+      adoptRole(state.summary && state.summary.role);
       return state.summary;
     });
   }
@@ -514,7 +565,7 @@
       class: "input input--select",
       id: "sum-role",
       title: "角色只影响这一份总览的文风，不会改动子项总结",
-      onchange: function (event) { state.role = event.target.value; }
+      onchange: function (event) { state.role = event.target.value; state.roleNotice = ""; }
     }, roleOptions);
 
     var box = currentCollection();
@@ -603,9 +654,16 @@
         document.createTextNode("共 " + state.versions.length + " 版")]));
     }
     if (state.role) {
-      var picked = state.roles.filter(function (r) { return r.key === state.role; })[0];
+      var picked = findRole(state.role);
       box.push(ui.h("span", {}, [ui.h("em", { text: (picked ? picked.name : state.role) }),
         document.createTextNode(picked && picked.passes >= 3 ? " · 三轮" : "")]));
+    }
+    if (state.roleNotice) {
+      // 只用现有的 chip 结构（.sum-chips > span / em），不新造 class——CSS 不在本次改动范围。
+      box.push(ui.h("span", { title: "后端已不再提供这个角色；历史版本仍按原角色存档，只是不能再原样重做。" }, [
+        ui.h("em", { text: "注意 " }),
+        document.createTextNode(state.roleNotice)
+      ]));
     }
     box.push(ui.h("span", { text: whenDay(new Date().toISOString()) }));
     return ui.h("div", { class: "sum-hd" }, [
@@ -681,7 +739,7 @@
         field("sum-project", "PROJECT", "选一条素材，总结只用它自己的字幕",
           projectOptions, pickProject),
         field("sum-role", "ROLE", "角色决定用哪套方法论写这份总结",
-          roleOptions, function (value) { state.role = value; }),
+          roleOptions, function (value) { state.role = value; state.roleNotice = ""; }),
         modelSelect(),
         ui.h("button", {
           class: "sum-go",
@@ -973,7 +1031,7 @@
     var current = state.overview ? state.overview.id : "";
     state.overviewVersions.forEach(function (item) {
       var active = item.id === current;
-      var meta = [whenDay(item.created_at), item.role, item.chars + " 字"]
+      var meta = [whenDay(item.created_at), roleText(item.role), item.chars + " 字"]
         .filter(function (part) { return !!part; }).join(" · ");
       list.appendChild(ui.h("div", {
         class: "ver-row" + (active ? " is-active" : ""),
@@ -1053,7 +1111,7 @@
     card.appendChild(body);
 
     var meta = [];
-    if (state.overview.role) meta.push("角色：" + state.overview.role);
+    if (state.overview.role) meta.push("角色：" + roleText(state.overview.role));
     if (state.overview.model) meta.push("模型：" + state.overview.model);
     if (state.overview.chars) meta.push(state.overview.chars + " 字");
     if (state.overview.created_at) meta.push(whenDay(state.overview.created_at));

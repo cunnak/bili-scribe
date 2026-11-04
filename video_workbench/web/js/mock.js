@@ -33,7 +33,9 @@
       thinking: "auto",
       timeout_seconds: 300,
       proxy: "",
-      role: "standard",
+      role: "wengao",
+      // 附加提示词开关（与后端 config.LlmConfig.extra_prompt 同形状，默认关）。
+      extra_prompt: false,
       user_agent: "",
       extra_headers: {},
       // 服务商列表：跟后端 config.LlmProviderConfig 同形状。mock 里给两家，
@@ -412,7 +414,7 @@
       comment_short: "一句话：这条视频的价值不在结论，而在它把结论推到能动手的步骤——先证伪直觉，再把变量拆开逐个对比，最后给出一份能照做的顺序。最容易踩的两个坑也在片尾点到了。",
       chunks: 1,
       model: "deepseek-chat",
-      role: "standard",
+      role: "wengao",
       frames: 0,
       revise_note: ""
     };
@@ -698,7 +700,7 @@
     if (COLS[title]) return COLS[title];
     var content = overviewContentFor(title);
     var first = {
-      id: "sum_col_1", version: 1, role: "standard", model: "deepseek-chat",
+      id: "sum_col_1", version: 1, role: "wengao", model: "deepseek-chat",
       chars: 980, created_at: "2026-10-29 21:12:04", status: "ready",
       one_line: content.theme, revise_note: "", theme: content.theme, content: content
     };
@@ -933,8 +935,8 @@
   function seedSummary(projectId) {
     if (SUMMARIES[projectId]) return SUMMARIES[projectId];
     var content = summaryContentFor(projectId);
-    var first = summaryRow(1, content, "standard", "");
-    var second = summaryRow(2, content, "standard", "要点压到三条，去掉形容词");
+    var first = summaryRow(1, content, "wengao", "");
+    var second = summaryRow(2, content, "wengao", "要点压到三条，去掉形容词");
     SUMMARIES[projectId] = {
       summary: second,
       versions: [second, first]
@@ -1172,6 +1174,16 @@
       }
       case "app.onboard.done": {
         return ok({ onboarded: true, skipped: !!(p && p.skipped) });
+      }
+      case "app.migration_notice": {
+        // 演示态**没有真搬家这回事**，所以这里只给「无提示」的空形状：
+        // 前端拿到 notice=null 就不弹。真机上这份由 load() 从旧家现读出来。
+        // app.js 的 maybeMigrationNotice 里还有一道 isMock 闸，两道闸说的是同一件事：
+        // 这条提示只讲真实发生过的事，不进演示。
+        return ok({ notice: null, dismissed: false });
+      }
+      case "app.migration_notice.dismiss": {
+        return ok({ dismissed: true });
       }
       case "app.open_url": {
         var url = String((p && p.url) || "");
@@ -1485,7 +1497,7 @@
         var fresh = {
           id: "sum_col_" + (bin.versions.length + 1),
           version: bin.versions.length + 1,
-          role: p.role || "standard",
+          role: p.role || "wengao",
           model: "deepseek-chat",
           chars: 1050,
           created_at: "2026-10-30 12:03:18",
@@ -1518,19 +1530,26 @@
           children: rows
         });
       }
+      // 判据：mock 只承载形状，不承载会变的判定结果（configured_unrecognized/configured_hint 之类不写死）。
+      // 角色真源三个字段同理：只补**键的形状**，值留空——哪个角色吃哪个 txt、多少字节、
+      // sha 前 8 位都由后端 core/prompt_source.py 现算，写死在这里等于第二份映射表，
+      // 用户改一篇 txt 就得跟着漂。
       case "summary.roles":
         return ok({
           roles: [
-            { key: "standard", name: "标准", tagline: "克制的结构化总结", passes: 1 },
-            { key: "xueshu", name: "学术", tagline: "论证结构与证据边界", passes: 3 },
-            { key: "renhua", name: "人话", tagline: "把术语翻成日常说法", passes: 3 },
-            { key: "wengao", name: "文稿", tagline: "可直接朗读的稿子", passes: 3 },
-            { key: "xiezuo", name: "写作", tagline: "重结构与节奏", passes: 3 },
-            { key: "fenxi", name: "分析", tagline: "拆机制与因果", passes: 3 },
-            { key: "jinglian", name: "精炼", tagline: "压到最短", passes: 3 },
-            { key: "shensi", name: "深思", tagline: "追问前提与反例", passes: 3 }
+            { key: "xueshu", name: "学术", tagline: "论证结构与证据边界", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "renhua", name: "人话", tagline: "把术语翻成日常说法", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "shensi", name: "深思", tagline: "追问前提与反例", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "wengao", name: "文稿", tagline: "可直接朗读的稿子", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "xiezuo", name: "写作", tagline: "重结构与节奏", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "fenxi", name: "分析", tagline: "拆机制与因果", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            { key: "jinglian", name: "精炼", tagline: "压到最短", passes: 3, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" },
+            // 视频总结：WB 权威层自造的第 8 个角色，唯一 passes=1 的那个（顺序照后端
+            // ROLE_KEYS 排在最后）。它的 tagline 是按 resources/prompts/视频总结.txt 实测
+            // 写的，不是照记忆编的——文件里只有那四条原则，没有批判/修订段。
+            { key: "shipin", name: "视频总结", tagline: "锚点撑全文·推理外显·变形替代定义·体感优先", passes: 1, prompt_source: null, prompt_bytes: 0, prompt_sha8: "" }
           ],
-          default: "standard"
+          default: "wengao"
         });
       case "summary.models": {
         // 与真后端同构：把配置里的服务商展开成「服务商id/模型名」

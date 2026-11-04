@@ -1899,7 +1899,17 @@ select,
 
 .adv[open] .adv__summary { border-bottom: 1px solid var(--line); }
 
+/* 收起时必须是真隐藏。这里原来无条件写 display:flex，盖掉了 Chromium 对
+   「未 open 的 <details> 里非 summary 子元素」的 UA 隐藏，结果是内容照样绘制、
+   但 <details> 盒子只有 summary 那么高，这些高度不计进 .page 的 scrollHeight ——
+   收起的折叠组里 12+ 个字段（含默认角色、附加提示词）看得见、滚不到、点不到。
+   基线 none、展开才恢复纵向布局；padding 也一起放进 [open]，收起时不留残影。
+   不用 position/visibility/max-height 那类把戏：那只会让滚动区照样不对。 */
 .adv__body {
+  display: none;
+}
+
+.adv[open] .adv__body {
   padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
