@@ -1035,6 +1035,10 @@ def test_timeline_is_emptied_when_the_material_has_no_timestamps():
 #: task-9 之前这张表挂在「默认模式」名下，那是错的：默认档现在是严格档，
 #: 这三处只有在有人显式设 0 时才成立。下面两条 H 组用例就是这张表的实测证据，
 #: 每条都钉在 `loose_env` 上。默认档的一致性由 B 组与 I 组负责。
+#: **本清单是文档，没有任何用例读它**（现读核对：`grep -rn ALLOWED_DIFFERENCES
+#: tests/ scripts/ video_workbench/` 去掉 `__pycache__` 只剩下面这一行定义）。
+#: 真在守差异的是 H 组那几条用例——它们红了才是信号。改差异请同时改这里，
+#: 否则这份「WB 与 bs 允许差在哪」的唯一总览会先过期，而测试仍然全绿。
 ALLOWED_DIFFERENCES = (
     "1) timeline 长度：bs 硬截 20 条，宽松档下 WB 的 `_apply_dense` 会把模型给的更长时间线"
     "覆盖回去（默认档由 task-11 的只读捕获承担同一职责）；"
