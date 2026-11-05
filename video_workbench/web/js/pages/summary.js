@@ -1131,6 +1131,91 @@
     return card;
   }
 
+  /**
+   * 报错提示条（B 方案：主文案一句 + 可展开）。
+   *
+   * 这里**不切分那一行**。`wb_job` 只有 error_code / error_message 两格，
+   * 「原因 —— 原文」由 app/jobs.py 的 error_message_for_row 拼好并按
+   * ERROR_MESSAGE_MAX_CHARS 封顶——分隔符与截断只在那一处。前端按 " —— " 把它切回来
+   * 就是第二个 owner，并且实测会把常驻用例
+   * test_the_page_does_not_rebuild_the_sentence_the_backend_already_joined 打红
+   * （2026-11-05 现跑：1 failed, 6 passed；那句「有一条锁比对分隔符」并不存在）。
+   * 所以收起态交给 CSS 收成第一视觉行，展开态还是同一句全文，一字不丢、也不重拼。
+   *
+   * 不用 title= 悬浮提示——WebView2 里等于没有；开关是真 <button>，真点击路径。
+   */
+  var errorOpenText = "";
+
+  function errorExpanded(text) {
+    return errorOpenText !== "" && errorOpenText === text;
+  }
+
+  /**
+   * 把 state.error 渲染进提示条。两个 paint 路径共用这一个函数。
+   * 同一句错误重复 paint（轮询每次都画）**不重建节点**，否则键盘焦点会被吞掉。
+   */
+  function setErrorBar(node) {
+    if (!node) return;
+    var text = state.error || "";
+    node.style.display = text ? "" : "none";
+    if (!text) { node.textContent = ""; return; }
+    var body = document.getElementById("summary-error-body");
+    var more = document.getElementById("summary-error-more");
+    if (!body || !more || body.textContent !== text) {
+      node.textContent = "";
+      body = ui.h("div", { class: "callout__body is-clamped", id: "summary-error-body", text: text });
+      more = ui.h("button", {
+        class: "callout__more", id: "summary-error-more", type: "button",
+        "aria-expanded": "false", onclick: toggleErrorBar
+      });
+      node.appendChild(body);
+      node.appendChild(more);
+    }
+    paintErrorBar(body, more);
+  }
+
+  /** 开关露不露，量的是「这一句真被裁了没有」，不是文本长度——短错误不该有开关。 */
+  function paintErrorBar(body, more) {
+    var open = errorExpanded(state.error || "");
+    if (open) { body.classList.remove("is-clamped"); } else { body.classList.add("is-clamped"); }
+    var clipped = body.scrollHeight > body.clientHeight + 1;
+    more.style.display = (clipped || open) ? "" : "none";
+    more.textContent = open ? "收起" : "展开";
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function toggleErrorBar() {
+    var text = state.error || "";
+    errorOpenText = (errorOpenText === text) ? "" : text;
+    var body = document.getElementById("summary-error-body");
+    var more = document.getElementById("summary-error-more");
+    if (!body || !more) return;
+    paintErrorBar(body, more);
+    // 展开之后开关可能被顶出屏幕：360x740 实测提示条顶边在 400，正文框限高 45vh
+    // 之后开关落在 740~758，正好整条掉出视口 ⇒ document.elementFromPoint 返回
+    // null，用户「看得见全文、点不到收起」。收起开关是展开态唯一的出口，它必须
+    // 留在屏幕上。block:"nearest" 只把露出去的那一小截推回来，不会跳整页；
+    // behavior 用默认的瞬间滚动，免得动画期间量到的还是旧位置。
+    // 展开之后开关可能被顶出「能点到的地方」：360x740 实测正文框限高 45vh 之后
+    // 开关落在 740~758，整条掉出视口；375x812 / 440x800 实测开关顶边 772 / 767
+    // 看似在屏内，其实已经被 `.page` 的滚动框底边裁进状态条那一行，
+    // document.elementFromPoint 命中的是状态条 ⇒ 用户「看得见全文、点不到收起」。
+    // 收起开关是展开态唯一的出口，判据直接用「它自己能不能被命中」，
+    // 不去猜视口高度、也不去猜状态条多高。
+    var rect = more.getBoundingClientRect();
+    var hit = (rect.width > 0 && rect.height > 0)
+      ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      : null;
+    if (hit !== more && !(hit && more.contains(hit))) {
+      try {
+        more.scrollIntoView({ block: "nearest" });
+      } catch (err) {
+        // 与 gotoPublish 同一套兜底：老 WebView 不认 options。
+        more.scrollIntoView();
+      }
+    }
+  }
+
   function paintCollection() {
     var host = document.getElementById("summary-host");
     if (!host) return;
@@ -1140,11 +1225,7 @@
       ui.h("div", { class: "sum-main" }, [overviewCard()]),
       ui.h("div", { class: "sum-side" }, [childrenCard(), overviewVersionsCard()])
     ]));
-    var errorNode = document.getElementById("summary-error");
-    if (errorNode) {
-      errorNode.textContent = state.error || "";
-      errorNode.style.display = state.error ? "" : "none";
-    }
+    setErrorBar(document.getElementById("summary-error"));
   }
 
   function paintProgress() {
@@ -1189,11 +1270,7 @@
       ].filter(Boolean))
     ]));
     mountPublish();
-    var errorNode = document.getElementById("summary-error");
-    if (errorNode) {
-      errorNode.textContent = state.error || "";
-      errorNode.style.display = state.error ? "" : "none";
-    }
+    setErrorBar(document.getElementById("summary-error"));
   }
 
   /** 发布卡排在正文之后（bili_scribe 的卡序），长正文下给一个一步跳过去的入口。 */
@@ -1223,7 +1300,7 @@
     page.appendChild(tabsBar());
     page.appendChild(ui.h("div", { id: "sum-head" }, [head()]));
     page.appendChild(ui.h("div", { class: "sum-bar" }, [
-      ui.h("span", { class: "callout callout--warn", id: "summary-error", style: "display:none" }),
+      ui.h("div", { class: "callout callout--warn", id: "summary-error", style: "display:none" }),
       ui.h("span", { class: "muted", id: "sum-note" })
     ]));
     page.appendChild(ui.h("div", { id: "summary-host" }));

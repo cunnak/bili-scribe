@@ -14,9 +14,72 @@
   gap: var(--gap-3);
   margin-bottom: var(--gap-3);
   min-height: 18px;
+  /* task-68 纵向那一半。`.page` 规则是 column flex（`flex:1; min-height:0; overflow:auto`），
+     flex 子项默认 `flex-shrink:1` ⇒ 提示条被压回 min-height，展开态那一大段内容溢出后
+     **画在后面那个兄弟 `#summary-host` 之上**，看得见全文但点不到「收起」
+     （`subtree intercepts pointer events`）。
+     承重关系是分开量的，别并成一条（三视口 × 600 字封顶行，每态一次干净 goto）：
+       收起态：F/G/H 三态 bar 高都是 49.5、相交都是 0 ⇒ 收起态看不出差别。
+       展开态：**相交 = 0 是靠这条 `flex-shrink:0` 拦住的**，不是 `overflow-wrap` 的功劳。
+         F（给 anywhere、不给 shrink、不封顶）相交 94960 / 84056 / 91648，bar 高 2448 / 1843.5 / 1219.5；
+         G（给 anywhere + 45vh 封顶、不给 shrink）相交 11560 / 15266.5 / 25280，bar 高 363 / 395.4 / 390；
+         H（盘上现状，三条都给）相交 0 / 0 / 0。
+       封顶只把溢出量从 ~2400px 压到 ~360px，压不到 0 ⇒ 两条各管各的。
+     下面那条注释里「实测相交都是 0」同样只在收起态成立（展开态要靠这条）。
+     不改宽度、不改 600 封顶、不动侧栏（合同非目标：窄窗文档横向溢出与侧栏占宽是既有条件）。 */
+  flex-shrink: 0;
 }
 
-.sum-bar .callout { padding: 4px 10px; }
+/* task-68：窄窗里撑破 .sum-bar 的，是报错里那些不可断的 ASCII token
+   （invalid_request_error、messages[12].content）。这条只管**横向**：
+   实测（360/375/440 × 600 字封顶行，运行时注入切状态，读数见交付表）
+   拦住「提示条 right ≤ 父 right」「scrollWidth ≤ clientWidth」的是它；
+   **展开态「与下一兄弟相交 = 0」不是它拦的，是上面那条 `flex-shrink:0`**
+   （给 anywhere 而不给 shrink 时，展开态相交仍是 94960 / 84056 / 91648）。
+   两条各管各的轴，别把功劳并到一条上。
+   min-width:0 实测不承重：给了它，横向两条的读数与只给 anywhere 逐值相同；
+   单独只给它则文字被裁看不见（600 字那格 sw 105 > cw 76，单个不可断 token sw 1186 > cw 76）。
+   所以这里只写实测承重的那一条，不为凑验收多写一条。 */
+.sum-bar .callout {
+  padding: 4px 10px;
+  overflow-wrap: anywhere;
+}
+
+/* 收起态收成「这一行的第一视觉行」，展开态是同一句全文：不截字符、不重拼，
+   切的就是一个 class。line-clamp 的写法与本文件 .coll-row__title 同源。
+   展开按文档流把下一兄弟顶下去，靠的是上面那条 `flex-shrink:0` 让 .sum-bar 随内容长高
+   （默认 `flex-shrink:1` 时它被 `.page` 压回 min-height，内容就画到兄弟之上）：
+   实测盘上现状（H）展开态与 #sum-note / #summary-host 相交 0 / 0 / 0，
+   撤掉那条（F/G）同一读数变成 94960 / 11560 等非零。 */
+.sum-bar .callout__body.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* 展开态必须限高、内部滚动。360x740 实测：600 字全文展开后 body 高 2955px，
+   而视口只有 740px——「收起」开关被顶到屏幕外，elementFromPoint 直接返回 None
+   （三轮 battery 里 5 条「展开态开关仍可达」就是这么红的）。仓库界面用例的三条件
+   要求命中开关本身，所以展开不是把整篇顶出去，而是给一个能滚的区域：
+   全文仍在同一节点里一字不丢，开关永远留在屏幕上。
+   只作用于展开态：is-clamped 那条自己用 overflow:hidden 做单行裁切，别混进来。 */
+.sum-bar .callout__body:not(.is-clamped) {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+.sum-bar .callout__more {
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.sum-bar .callout__more:hover { color: var(--text); }
 
 
 /* ------------------------------------------------------------------ 版本列表 */
