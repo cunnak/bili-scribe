@@ -100,6 +100,11 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   ② 带空白的键两条路结果不同：`get_role(" wengao ")` → `'wengao'`（清洗侧），`_bound_get_role(" wengao ")` → `'standard'`（原样交给 bs 查表）—— 由 `test_the_copy_lookup_still_matches_bili_scribe_for_a_padded_key` 拿 bs 原件当对照物钉住；
   ③ 「非字符串按 `str()` 查表」意味着 `__str__` 返回键名的对象会被当合法键 —— 现状登记，没有收紧。
   另有一条**已确认的契约边界**（不是缺陷）：`__str__` 自己抛异常的对象在 `str(key)` 这一步就抛 `ValueError`，三个入口都抛，由 `test_an_input_whose_dunder_str_raises_currently_breaks_the_never_raises_contract` 钉成「期望值就是抛」。
+- **真模型调用要有预算闸，起跑前先报预估，单张任务卡上限 3 次真实调用。** 今天已经烧掉的两笔（写在这里当例子，不是抽象教条）：task-52 长素材 11 次调用 `prompt 154748 / completion 141260`（≈29.6 万 token，602s）；实配抬到 32768 之后走真配置又跑一遍同样的长素材（11 次、约 770s，出处 `%TEMP%/wb_live32768.log`，149 行）。**两张卡的正文都没写过「真模型能花多少」**，所以谁都不觉得自己在花钱。四句口径：
+  ① **起跑前必须写一句预估**：模型名 × 预计调用次数 × 单次大概 token 形状。写不出预估 = 不许起跑。
+  ② **单张卡真实调用上限 3 次**，超过要先拿到 lead 显式放行（lead 拿去问用户）。
+  ③ **桩不算真调用**：像 task-59 那种只记「真发出去的 `max_tokens`」的 `StubClient`（不联网、不建库、不改 HOME 之外）可以放开跑；**不要为了让读数像端到端而给它接真网络**。
+  ④ **真跑过必须报 `calls=N`**，不许只写「跑通了」。只报结论不报次数，下一轮没人在预算里。
 - `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
 ## 七、规则表
@@ -119,4 +124,5 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 | 牙齿变体的注入计数器必须**按实例**记，不许挂在模块/插件对象上 | `tests/wb/test_summary_parity_teeth.py` 的 B4 变体用 `getattr(self, "calls", 0) == 3`（`SummaryLLM.chat()` 每条请求自增）。挂在共享对象上 ⇒ 整个 session 共用，翻倍落在最先到三轮的**别的**用例上，目标用例一次没被改动，读数会被写成「这条没牙」（task-54 实测踩过并自报） |
 | 常驻灵敏度用例不许把「注入函数返回值 ×N」当期望 | 写成比「注入函数返回的值 == 请求里实际记下的值」。写死倍数 ⇒ 外部叠一次同样注入就变 4 倍，假红；这样既保住「管道断了照样红」的非自证性质，又对叠加免疫 |
 | 新建 / 收紧 `tests/wb/*.py` 后，报数之前先贴一行 `git status --porcelain` | 事故实录：`test_git_no_normalization_on_locked_paths.py` 的 task-49 收紧（工作区 18 个用例 / HEAD 17 个，ghost 常驻锁 HEAD 里没有）拖了一整天没入库，双方都把「staged」当成「已交付」——那正是「未入库的闸被当垃圾删」的同族事故。已随 `5c4d956` 收掉 |
+| 真模型调用不许无预算：起跑前报预估，单卡上限 3 次，真跑必须报 `calls=N` | 见第六节那条（含今天两笔实际用量当例子：`prompt 154748 / completion 141260` 与 `%TEMP%/wb_live32768.log`）。**拦住它的是交付正文里必须出现的 `calls=N` 这一个数**——leader 核板时看见真跑却没报次数就退回；这是需要判断的规则，没有机器闸（桩与真调用的区别靠 `StubClient` 不联网的形状自证，不额外造锁） |
 | 失败原因不许只到「生成失败」为止 | 归 `tests/wb`（task-55 落地时钉）：`video_workbench/web/js/pages/summary.js:307` 读 `job.error.message`，而 `wb_job` 实测只有 `error_code`/`error_message` ⇒ 界面写死兜底文案，`finish_reason=length，思考用了 16384 tokens…` 这句能自修的 detail 用户永远看不见。判据锁「总结页读的是真实存在的键」，牙齿＝改回 `job.error.message` 必红 |
