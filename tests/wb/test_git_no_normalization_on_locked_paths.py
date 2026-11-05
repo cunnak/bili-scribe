@@ -487,16 +487,45 @@ def _section_seven_rows(md: str) -> list[list[str]]:
     return data
 
 
+def _resolve_named_token(token: str) -> tuple[bool, str, str]:
+    """文档里一个 `.py` token 的唯一解析口径（点名腿与存在腿共用一个 owner）。
+
+    返回 `(存在, 解析到的相对路径, 判法)`，判法只有三种，错误信息要能把第三种单独指出来：
+
+    - `literal`：**写了目录**（token 含 `/`）⇒ 必须按字面路径判存在。这是 task-49 的收紧：
+      以前点名腿只比 basename，于是 `tests/other/本闸.py` 这种「目录不存在、基名撞对」的
+      幽灵路径会被当成「点名了本闸」。lead 00:3x ② 点的就是这条。
+    - `bare-fallback`：**真裸名**（不含 `/`）⇒ 回落到 `tests/wb/`。这是本表既有书写习惯
+      （第七节 L102/L107 就这么写），保留；但只在字面判法不适用的时候才用。
+    - `ghost`：两种都不中 ⇒ 文档指空气／指了一个不存在的目录下的同名文件。
+    """
+    if "/" in token:
+        if (ROOT / token).is_file():
+            return True, token, "literal"
+        return False, (
+            f"{token}：写了目录「{token.rsplit('/', 1)[0]}/」但那条路径在盘上不存在"
+            f"⇒ 不许靠 basename 放行"), "ghost"
+    rel = f"tests/wb/{token}"
+    if (ROOT / rel).is_file():
+        return True, rel, "bare-fallback"
+    return False, token, "ghost"
+
+
 def _names_gate(cells: list[str]) -> bool:
     """这一行的「由什么拦住」列（按位置=最后一列）是否点名本闸文件。
 
     那一列写的是**散文**（路径带反引号、后面跟全角括号说明），所以不能要求整格等于
-    文件名；把格子里所有 `.py` 路径 token 抽出来比**基名**。仍然是结构判据：
+    文件名；把格子里所有 `.py` token 抽出来，逐个走 `_resolve_named_token`：
+    **基名对上本闸 + 解析得到真实文件**，两个条件同时成立才算点名。仍然是结构判据，
     一个中文字面量都不比对。
     """
     gate = Path(__file__).name
     blocking = cells[-1] if cells else ""
-    return any(Path(tok).name == gate for tok in _PY_PATH_RE.findall(blocking))
+    for tok in _PY_PATH_RE.findall(blocking):
+        exists, resolved, _how = _resolve_named_token(tok)
+        if exists and Path(resolved).name == gate:
+            return True
+    return False
 
 
 def test_section_seven_names_only_files_that_exist_on_disk():
@@ -507,19 +536,51 @@ def test_section_seven_names_only_files_that_exist_on_disk():
     既有书写习惯，不是放宽 —— 两种写法都要求文件真实存在。
     """
     rows = _section_seven_rows(_agents_md_text())
-    resolved, missing = [], []
+    resolved, ghosts = [], []
     for cells in rows:
         for token in _PY_PATH_RE.findall(cells[-1]):
-            as_written = ROOT / token
-            fallback = ROOT / "tests" / "wb" / Path(token).name
-            if as_written.is_file():
-                resolved.append(str(token))
-            elif "/" not in token and fallback.is_file():
-                resolved.append(f"{token}（按裸名回落到 tests/wb/）")
+            exists, where, how = _resolve_named_token(token)
+            if exists:
+                resolved.append(f"{token}→{where}（{how}）")
             else:
-                missing.append((token, str(as_written)))
+                ghosts.append((token, where))
     assert resolved, "第七节的「由什么拦住」列一个 .py 都没点名（闸清单被清空了）"
-    assert not missing, f"AGENTS.md 点名了盘上不存在的文件：{missing}"
+    assert not ghosts, (
+        "AGENTS.md 点名了盘上不存在的文件"
+        f"（带目录的一律按字面路径判，不靠 basename 放行）：{ghosts}")
+
+
+def test_a_ghost_path_with_a_directory_is_not_taken_as_naming_the_gate():
+    """收紧后的形状锁：`目录不对但 basename 撞对` 的幽灵路径，两条腿都不许认。
+
+    只在内存里改文档（不落盘、不碰工作区 AGENTS.md），把点名本闸那一列换成
+    `tests/does-not-exist-here/<本闸>.py`，然后分别喂点名腿与存在腿。
+    这条拦的是「把点名腿退回 basename 比对」——那是 lead 00:3x ② 判的洞，
+    一旦退回，文档可以指一个不存在的目录而依然「点名成功」。
+    """
+    gate = Path(__file__).name
+    md = _agents_md_text()
+    rows = _section_seven_rows(md)
+    named = [c for c in rows if _names_gate(c)]
+    assert named, "前提不成立：原表就没点名本闸，这条会空转"
+    real_cell = named[0][-1]
+    assert f"{gate}" in real_cell
+
+    ghost_dir = "tests/does-not-exist-here"
+    assert not (ROOT / ghost_dir).exists(), f"夹具前提：{ghost_dir} 必须真不存在"
+    ghost = f"{ghost_dir}/{gate}"
+    swapped = real_cell.replace(gate, ghost, 1)
+    assert swapped != real_cell, "没换成幽灵路径，这份对照是空的"
+
+    # 点名腿：幽灵路径不算点名本闸
+    assert not _names_gate([PLACEHOLDER_RULE, swapped]), (
+        f"点名腿被 `{ghost}` 放行：basename 撞上就当点名，等于文档可以指空气")
+    # 存在腿同一个解析器：必须报 ghost，而不是静默放行
+    exists, where, how = _resolve_named_token(ghost)
+    assert exists is False and how == "ghost", f"幽灵路径被判成 {how}：{where}"
+    # 反面对照：真裸名与真路径仍然认（收紧不许顺手把合法写法一起打死）
+    assert _names_gate([PLACEHOLDER_RULE, f"`{gate}`"]), "真裸名写法被顺手打死了"
+    assert _names_gate([PLACEHOLDER_RULE, f"`tests/wb/{gate}`"]), "真路径写法被顺手打死了"
 
 
 def test_the_gate_row_is_found_even_when_the_wording_is_rewritten():

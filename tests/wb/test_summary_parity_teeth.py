@@ -69,6 +69,10 @@ ROWS = 25
 #: 真正被钉的是：同一入参在严格档原样回去、在宽松档抬到下限。
 SMALL_TOKENS = 4096
 
+#: 也是**夹具输入**，不是合同期望值。与 `SMALL_TOKENS` 分开命名，是为了让读的人一眼看出
+#: 下面那条逐轮牙齿不依赖「默认值等于多少」——它只要求「每一轮都等于当次配置值」。
+BUDGET_CFG_TOKENS = 4096
+
 
 @pytest.fixture
 def clean_env(monkeypatch):
@@ -203,3 +207,64 @@ def test_patch_does_not_leak(clean_env):
     assert A._parity_strict.__name__ == "_parity_strict", (
         f"`_parity_strict` 还是被替换着的：{A._parity_strict!r}")
     assert A._parity_strict() is True, "未设开关必须回到默认严格档"
+
+def test_a_per_round_budget_boost_is_caught_by_the_b4_check(clean_env):
+    """灵敏度（只证「抓得到」，不重复结论）：给严格档第三轮单独加预算，B4 那套判据必须抓到。
+
+    分工（重要，别当成第二条逐轮锁）：
+    `test_summary_parity.py::test_default_tier_every_round_budget_equals_the_configured_value`
+    钉的是「**今天**没有逐轮抬升」，那是 B（按轮分配预算）被用户否决后的常驻锁；
+    本条不重复那个 claim（重复＝第二个 owner，`AGENTS.md` 第六节），只做一件事：
+    把「将来有人好心给 revise 轮加预算」这个坏法注入一次，证明 B4 用的那套判据
+    （同一个 `_normalized()` + 同一个逐轮比较）**当场**抓到偏离，而不是因为两侧一起
+    变化而照样绿。
+
+    坏法为什么打在 `SummaryLLM._parity_max_tokens` 上：那是严格档每一轮预算的唯一决策点
+    （`video_workbench/core/summarizer.py` 里 `SummaryLLM.chat()` 在 `_parity_strict()` 为真时
+    把 `max_tokens=self._parity_max_tokens(max_tokens)` 交给注入的 client），所以即使这里注入的
+    是 `FakeLLM`，请求里记下的仍然是**产品算出来的那个数**；类属性每次调用现读、没有 import 期
+    缓存，运行时替换等价于「产品改成按轮分配」，且不碰一个产品字节。「只抬第三轮」正是按轮分配
+    最自然的落地形状：generate/critique 够用了，而 revise 带着素材正文 + 待评稿 + 批判意见、
+    输入最大（`AGENTS.md` 第四节实测那一轮 55013 字符），所以「给最后一段多留点输出」就是
+    这个坏法本人。
+    """
+    cfg = T.make_cfg(max_tokens=BUDGET_CFG_TOKENS)
+    original = A.SummaryLLM._parity_max_tokens
+    seen: list[object] = []
+    injected: list[int] = []
+
+    def boosted(self, max_tokens):                      # self 是被注入的 SummaryLLM 实例
+        value = original(self, max_tokens)
+        seen.append(value)
+        if len(seen) == 3:                              # 只把第三轮（revise）翻倍
+            boosted_value = (value or cfg.llm.max_tokens) * 2
+            injected.append(boosted_value)
+            return boosted_value
+        return value
+
+    A.SummaryLLM._parity_max_tokens = boosted           # type: ignore[method-assign]
+    try:
+        project, segments = T._dense_project(), T._dense_segments()
+        client = T.FakeLLM(list(T.three_pass_script()))
+        A.run(project, segments, client=client, cfg=cfg, ctx=T.QuietCtx(), role="wengao")
+    finally:
+        A.SummaryLLM._parity_max_tokens = original      # type: ignore[method-assign]
+
+    assert len(seen) >= 3, f"三轮都没跑到，坏法根本没注入进去：{seen!r}"
+    assert injected, "第三次请求没经过 `_parity_max_tokens`，坏法没落到预算上"
+    normalized = T._normalized(client.requests, cfg)
+    deviated = [index for index, item in enumerate(normalized)
+                if item["max_tokens"] != cfg.llm.max_tokens]
+    assert deviated == [2], (
+        "注入「第三轮预算翻倍」后，B4 那套逐轮判据必须且只能抓到第 3 次请求："
+        f"实得下标 {deviated}，逐轮读数 {[item['max_tokens'] for item in normalized]}")
+    # 抓到的偏离必须就是产品**真发出去**的那个数：比的是「注入函数返回的值 == 请求里记下的
+    # 值」，所以管道断了（客户端没把 max_tokens 传下去）照样会红，不是自己考自己。
+    # 刻意不写 `== cfg.llm.max_tokens * 2`：那种写法在「外部又叠一次同样注入」时会假红
+    # （驱动器 A 变体就叠了），而本条要证的只是「偏离看得见、且看得准」。
+    assert normalized[2]["max_tokens"] == injected[-1], (
+        f"第三次请求记下的预算不是注入返回的那个数：请求 {normalized[2]['max_tokens']!r}，"
+        f"注入 {injected[-1]!r}（逐轮读数 {[i['max_tokens'] for i in normalized]}）")
+    # 还原腿：`test_patch_does_not_leak` 守的是 `_parity_strict`，这个类属性是另一处运行时
+    # 替换，形状相同、owner 不同，所以在本条末尾自证，不给漏还原留活口。
+    assert A.SummaryLLM._parity_max_tokens is original, "类属性没还原，会污染后面所有用例"

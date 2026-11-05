@@ -29,8 +29,8 @@
 **干脆不发这个字段**——那是请求内容的真实差异，所以严格档由 `_parity_max_tokens()` 把
 `cfg.llm.max_tokens` 补上（两侧同值才算一致）。**期望值一律现读 `cfg.llm.max_tokens`**，
 不抄 `config.yaml` 里的数字当合同：那既是「自己考自己」（夹具本来就是照它设的），
-又会在用户改配置（真模型实测：推理型 auto 在 4096 下把预算全烧在思考上、16384 才出
-合法 JSON）时把用例变成假红。B4 那条现在拿 4096 与 16384 各跑一遍，证明这个数是流过去的。
+又会在用户改配置时把用例变成假红。真模型实测过的那条边界现在写在 `AGENTS.md` 第四节「长素材的输出预算边界」（task-50）：默认值已抬到 32768，而这台机器三份活配置仍是
+16384/16384/4096。B4 那条现在拿 4096/16384/32768 各跑一遍，证明这个数是流过去的。
 
 ## 方案 A：什么必须相同、什么允许不同（2026-11-03 用户拍板，task-18 的重头）
 
@@ -1351,20 +1351,50 @@ def test_loose_tier_failure_does_not_name_the_switch(loose_env):
     assert len(client.requests) > 1, "宽松档必须真的走过阶梯，否则这条只是没提开关而已"
 
 
-def test_default_tier_first_round_budget_equals_the_configured_value(default_env):
-    """B4：默认档第一轮 `max_tokens` 两侧同值，且等于**当前 cfg 里那个数**。
+def test_default_tier_every_round_budget_equals_the_configured_value(default_env):
+    """B4：默认档**每一次**请求的有效预算都等于配置值——这条就是「B 被否决」的锁。
 
-    `max_tokens` 是唯一一处「看原始 kwargs 会看错」的参数：上游根本不写它
-    （`bili_scribe/infra/llm.py:259` 由客户端补配置值），而 WB 的 `ChatClient` 在 `None`
-    时干脆不发这个字段——所以判据必须是**还原后的有效值**相等（`_normalized()`），
-    默认档由 `_parity_max_tokens()` 把配置值显式补上。
+    ## 名字为什么从 first_round 改成 every_round（现读，不是修辞）
+    循环体一直是 `for index, item in enumerate(_normalized(client.requests, cfg))`，
+    它钉的是**每一轮**；「first_round」只是名字留下的旧印象。名字说假话的代价很具体：
+    下一个人想找「逐轮预算」的 owner 会以为没有，于是再写一条——那就是第二个 owner
+    （`AGENTS.md` 第六节反对的正是这个）。现跑 cfg=32768 的读数：逐轮原始
+    `[32768, 32768, 32768]`、归一化后同样 `[32768, 32768, 32768]`。
 
-    **期望值现读 `cfg.llm.max_tokens`，不写死 4096**（lead 2026-11-03 指令）。理由是真模型
-    数据：推理型 `auto/hy4-preview` 在 4096 下 100% 把预算烧在思考上（实测
-    `reasoning_tokens=4096`、正文 0），16384 下才出合法 JSON（121.7s）；非推理 flash 在
-    4096 下 9.5s 出完整 JSON。工作区 `config.yaml` 很可能马上改成 16384——把 4096 写进
-    断言，那次改动会让这条**假红**（产品没错，是用例把配置值当成合同抄了一遍）。
-    下面第二遍用 16384 跑同一套断言，证明这个数是**跟着配置流过去**的。
+    ## 这条在守哪个决定（用户 2026-11-05 拍板，见 `AGENTS.md` 第四节
+    「长素材的输出预算边界，以及 bs 那条自愈腿为什么救不了」＝ task-50）
+    三个选项里用户选了 **A（抬默认值）+ C（把说明改对）**，**否决了 B（按轮分配预算）**。
+    否决理由在同一节里：严格档 `_parity_max_tokens()` 的语义就是「上游不写就照配置原样补、
+    不抬不封」，按轮加预算会主动破掉「与 bili_scribe 逐请求一致」——与 bs 一致属 task-8
+    那类决定，不是实现层能替用户拍的。
+    ⇒ **本条是 B 的常驻锁**：将来任何一方给某一轮单独加预算，这里必须当场红，而且必须
+      显式翻这条判据、留下偏离登记，不许悄悄破掉一致性。
+    灵敏度不在本条重复，由 `tests/wb/test_summary_parity_teeth.py::
+    test_a_per_round_budget_boost_is_caught_by_the_b4_check` 只证「抓得到」。
+
+    ## `max_tokens` 为什么必须比「还原后的有效值」而不是原始 kwargs
+    它是唯一一处看原始 kwargs 会看错的参数：上游 `summarize()` 调 `llm.chat` 时根本不写它
+    （bs 那边由客户端补配置值），而 WB 的 `ChatClient` 在 `None` 时干脆不发这个字段——
+    两边原始形状不同、有效值相同。所以判据走 `_normalized()`，并且 bs 侧那一半也逐轮比
+    （只看 WB 一侧，两侧一起错就看不出来）。
+
+    ## 两档分开写（lead 复跑后的口径更正：别把宽松档读成「默认行为坏了」）
+    - **严格档（默认，不设开关）＝本条钉的那一档**：逐值直通。`_parity_max_tokens()` 只把
+      配置值原样补上、不抬不封，4096/8192/12288/16384/32768 全都**原样回去**
+      ⇒ 抬默认值对默认档没有回归，一个值都没变。
+    - **宽松档（`WB_SUMMARY_PARITY_STRICT=0`）＝本条不管的那一档**：`_json_budget()` 的阶梯
+      生效（`min(max(MIN_JSON_TOKENS=12288, base*2), 16384)`），同一组入参得到
+      12288/16384/16384/16384/**16384** ⇒ base 高于 16384 时补救请求**低于主请求**（倒挂）。
+      这条只在关掉对账那条路上成立；「补救预算 ≥ 主请求」的规则锁等产品改完 `_json_budget`
+      （vendor 的 task-53）落地后再钉，且只写在宽松档语境里，不与本条重叠。
+
+    ## 期望值现读配置，不写死任何一个数
+    早先把 4096 抄进断言过一次，那等于把配置值当合同抄一遍，默认值一改就假红。现在参数表跑
+    `(4096, 16384, 32768)`：**32768 是 2026-11-05 之后的新默认，之前只跑 4096/16384，
+    新默认反而从没被逐轮钉过**。三个值各跑同一套断言，证明这个数是跟着配置流过去的。
+    （这台机器三份活配置现读：`~/.video-workbench/config.yaml` 与仓库根 `config.yaml` 都是
+    16384、`~/.bili-scribe/config.yaml` 是 4096 ⇒ 抬默认值到不了已经显式写了值的用户。
+    那是产品事实，不是本条的期望值，别在这里断言它，也不许为了让它成立去改实配。）
     """
     from video_workbench.core import summarizer as adapter
 
@@ -1372,7 +1402,7 @@ def test_default_tier_first_round_budget_equals_the_configured_value(default_env
     project, segments = _dense_project(), _dense_segments()
     bundle = adapter.build_bundle(project, segments)
 
-    for configured in (4096, 16384):
+    for configured in (4096, 16384, 32768):
         cfg = make_cfg(max_tokens=configured)
         bs_llm = FakeLLM(list(script))
         bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
