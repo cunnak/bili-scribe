@@ -14,7 +14,7 @@
   *任何非 OFF 值都算严格*（`1`/`true`/`2`/拼错值都算），以及给「同档两条路必须一致」
   的对账留一个显式锚点。
 * `loose_env`   —— 显式 `=0`。WB 的三处加固**只在这一档生效**：①时间线补密；②补救步的输出预算按阶梯重算（规则是「不低于本轮预算 `base`」，**数字与三面的 owner 在 `test_summary_truncate.py::test_budget_floors_at_twelve_thousand`，本文件不复述具体数**——上一版这里写着「翻倍/封顶 16384」，task-53 加了 `max(base, …)` 下界之后就成了过期口径，别人照它造期望就会造错）；③坏 JSON 的修复→续写→拆分→重问阶梯。
-  已知缺口（不是本文件能修的）：`summarize()` 这条链路把 `max_tokens` 传成 None，②的阶梯拿不到本轮预算 ⇒ 发出层的倒挂由 `test_summary_parity.py::test_the_repair_budget_never_falls_below_the_main_request` 以 strict xfail 记账（task-57）。
+  曾经缺的一环（task-57 已修，2026-11-05）：`summarize()` 这条链路把 `max_tokens` 传成 None，②的阶梯拿不到本轮预算 ⇒ 发出层倒挂。现在补救步在 `SummaryLLM` 里回落取 `_request_max_tokens(self.app_cfg)`，并由 `test_summary_parity.py::test_the_repair_budget_never_falls_below_the_main_request` 以**正向常驻锁**守着（它挂过 strict xfail，债还完才摘）。
 
 **选错档的两种失败都要防**：把加固用例留在默认档，它会红（产品没错，用例站错边）；
 更糟的是把「默认档什么都不做」写成永远绿的断言——那条看起来在守复刻，其实一个字节都没守。

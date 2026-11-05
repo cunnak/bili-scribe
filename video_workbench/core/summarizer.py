@@ -316,7 +316,20 @@ class SummaryLLM:
 
         为什么修：一份 8 段预读的总结，最后一步因为字符串里一个原始换行就整份失败，
         用户得从头再跑三分多钟。这类输出人眼看着完全正常，是解析器太严。
+
+        为什么这里要把 None 换成配置里的预算（T56-1）：上游方法论调 ``llm.chat`` 时
+        **压根不写 ``max_tokens``**，于是这条链收到的永远是 None，而下面四个消费点
+        （``_finalize`` 重问、``_continue`` 续写、``_split_reply`` 分批、
+        ``_timeline_reply`` 只要时间线）都拿 ``_json_budget(None)`` 算预算——宽松档
+        那是硬编码下限 12288，而同一轮的主请求实际按配置走 32768，**重问比主请求还
+        少 20480**，反而更容易再被截断。task-53 给 ``_json_budget`` 加的下界救不了
+        这条路，因为传进去的 base 是 None 而不是配置值。
+        只在**这一个入口**解析：主请求不动（它照旧按 None 走 ``ChatClient`` 自己的
+        配置兜底），严格档更是不进这个函数（``chat()`` 在对账分支就 return 了），
+        所以改动面只有「宽松档的补救请求」这一格。
         """
+        if max_tokens is None:
+            max_tokens = _request_max_tokens(self.app_cfg)
         fixed = repair_json(text)
         if fixed:
             return self._finalize(fixed, messages, sink, temperature, max_tokens)
@@ -1148,6 +1161,26 @@ def retired_row_labels() -> list[dict[str, str]]:
 #: （2026-11-05 task-52 把默认值抬到 32768，这条下限在 base 更大时不再起作用，
 #: 但仍然是「用户把 max_tokens 调回小值」那条路唯一的兜底，别当死代码删。）
 MIN_JSON_TOKENS = 12288
+
+
+def _request_max_tokens(cfg: Any) -> int | None:
+    """本轮真实的输出预算 = 配置里的 ``llm.max_tokens``，读不到（0）就返回 None。
+
+    为什么要在调用点把它传进去（T56-1）：方法论那条链（副本
+    ``bili_scribe/core/summarizer.py`` 的 ``summarize → _json_or_retry → _split_reply
+    → _timeline_reply``）自己**不看配置**，`summarize()` 的 `max_tokens` 形参默认就是
+    None。副本一路把 None 交给 `_json_budget(None)`，宽松档算出来是硬编码下限
+    ``MIN_JSON_TOKENS``=12288，而同一轮的主请求按配置走 32768——**坏 JSON 的重问比
+    主请求少 20480**，反而更容易再被截断。task-53 在 `_json_budget` 里加的
+    `max(base, …)` 下界对这条路径完全无效，因为 base 压根是 None。
+
+    严格档（默认档）逐值零变化：`_json_budget` 在该档返回入参，
+    `_parity_max_tokens` 还原出来的还是 `cfg.llm.max_tokens`，与改动前"不发这个字段、
+    由 ChatClient 自己按配置补"是同一个数。
+
+    配置读到 0 时仍然传 None：那是"这个字段别发"的原行为，不能在这里变成发 0。
+    """
+    return int(getattr(getattr(cfg, "llm", None), "max_tokens", 0) or 0) or None
 
 
 def _json_budget(max_tokens: int | None, floor: int = MIN_JSON_TOKENS) -> int:

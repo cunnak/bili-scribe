@@ -1103,7 +1103,9 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
     拆分/重问都在宽松档，见 `test_summary_truncate.py` / `test_summary_split.py` /
     `test_jsonfix.py` 里钉了 `loose_env` 的那几条。**注意本条只覆盖 `make_cfg()` 默认
     的 4096 那一档**：base 高于封顶时的发出层形状归
-    `test_the_repair_budget_never_falls_below_the_main_request`（今天 strict xfail）。
+    `test_the_repair_budget_never_falls_below_the_main_request`（正向常驻；它曾经是
+    strict xfail，task-57 接上调用点后以 XPASS 变红、由本单摘掉标记——摘的是标记，
+    不是断言）。
     这条与本条不重叠：那条钉「抬到 12288 + 多一次请求」的登记差异，新那条钉「不许倒挂」。
 
     实测：同一份「JSON 断在半路」的回复——
@@ -1189,19 +1191,6 @@ def _repair_budget_cap_from_source() -> int:
     return cap
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "已知缺陷（task-58 的锁跑出来的，不是我造的）：宽松档里补救步真发出去的 "
-        "max_tokens 恒等于 MIN_JSON_TOKENS=12288，配置值根本没参与——"
-        "`summarize()` 这条链路不传 max_tokens，`_json_budget(None)` 就只看下限。"
-        "默认预算抬到 32768（task-52）之后，这一格就是倒挂：主请求按配置走 32768，"
-        "续写/重问只拿 12288。修法归 vendor：调用点把 cfg.llm.max_tokens 传进 "
-        "`_json_budget`，或让补救预算以「本轮实际预算」为下界。"
-        "**这条是 strict xfail：vendor 修好那天会 XPASS 变红，那时摘掉标记，"
-        "不要把它改成宽松断言。**"
-    ),
-)
 def test_the_repair_budget_never_falls_below_the_main_request(loose_env):
     """**宽松档**：坏 JSON 之后真发出去的补救预算，一律**不低于主请求拿到的预算**。
 
@@ -1215,12 +1204,28 @@ def test_the_repair_budget_never_falls_below_the_main_request(loose_env):
     所以将来 vendor 把 16384 提成常量、或者把封顶抬高，这条照旧成立；
     反过来，只要有人把下界摘掉、或者在调用点再夹一刀把补救步改小，这条必红。
 
-    **今天它是红的（所以挂 strict xfail）**：真跑出来的形状是「主请求 None（按配置 20480
-    走）+ 补救步 12288」。复现命令原文（去掉标记直接跑）：
-    `.venv/Scripts/python.exe -m pytest "tests/wb/test_summary_parity.py::test_the_repair_budget_never_falls_below_the_main_request" -q -p no:randomly`
-    ⇒ `AssertionError: 补救预算比主请求还小（倒挂回来了）：base=20480、封顶现读=16384、
-    补救步拿到 [12288]`。这一条**不算「测试没写好」**：它测的是发出去的请求，
-    而 `_json_budget()` 那一层的下界（task-53）救不到这里，因为这里的入参是 None。
+    **这笔债已经还了（2026-11-05，task-57）**，摘标记的证据链留着，因为它同时是
+    「这条锁真的抓得到东西」的读数：
+    · 病形状：`summarize()` 链路把 `max_tokens` 传成 None ⇒ 补救步恒拿
+      `_json_budget(None)`=12288，配置值从头到尾没参与；task-53 在**函数层**加的
+      `max(base, …)` 下界对这条路径**完全无效**（base 压根是 None）。
+      ⇒ 一句可复用的口径：**修在函数层、病在调用点的缺陷，只有走真链路的锁抓得到。**
+    · 摘标记前一步：`pytest "tests/wb/test_summary_parity.py::test_the_repair_budget_never_falls_below_the_main_request" -q -rA`
+      → `[XPASS(strict)] …` 被 strict 判成 FAILED —— 这正是 lead 定的验收信号。
+    · 改前/改后（同一探针 `%TEMP%/parity-t56/t56_t57_probe.py`、同一夹具，
+      量的是**真发出去的 `max_tokens` 序列**，宽松档 `=0`）：
+      - 改前（helper 只有定义、零调用点）：base=4096/16384/20480/32768 →
+        `[None, 12288, None, None]` **四格一模一样**（倒挂仍在）。
+      - 改后（vendor 在 `SummaryLLM` 里补 `if max_tokens is None:
+        max_tokens = _request_max_tokens(self.app_cfg)`）：→
+        `[None, 12288, None, None]` / `[None, 16384, None, None]` /
+        `[None, 20480, None, None]` / `[None, 32768, None, None]`
+        ⇒ 4096 那一格仍是 12288（**下限该抬还得抬**，没有被改坏），其余三格不低于本轮预算。
+      - 严格档（默认档）逐值零变化：base=4096/16384/20480/32768 →
+        首请求就是 `[base]`，阶梯整条不走（第二次请求前抛 `WBError`），与改前同形。
+    · 函数层对照（同一轮，供比对用）：宽松档 `_json_budget(None)`=12288、
+      传 base 时 4096→12288 / 16384→16384 / 20480→20480 / 32768→32768；
+      严格档 `_json_budget` 直通（`None`→0，但那条链在 `_parity_max_tokens` 就填了配置值）。
 
     与其它几条的分工（lead 的「一个 owner」要求，别开第二份等价断言）：
     * `tests/wb/test_summary_truncate.py::test_budget_floors_at_twelve_thousand`
