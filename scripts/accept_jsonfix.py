@@ -7,6 +7,7 @@
   - 两次都不行才算失败。
 
 不写用户库、不改配置，只发几次对话请求。
+（读配置是必须的：不读就拿不到 shipped 那条路的 `max_tokens`，见 main 里的注释。）
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from video_workbench.config import WorkbenchConfig  # noqa: E402
 from video_workbench.core.summarizer import SummaryLLM  # noqa: E402
 from video_workbench.infra.llm import ChatClient  # noqa: E402
 
@@ -40,7 +42,13 @@ PROMPT = (
 
 def main() -> int:
     client = ChatClient(base_url=BASE, api_key=KEY, model=MODEL, timeout=180.0)
-    llm = SummaryLLM(client)
+    # cfg 必须传进来。不传的时候 `SummaryLLM._parity_max_tokens(None)` 读不到配置，
+    # 返回 None，`ChatClient` 就干脆不发 `max_tokens` 这个字段——于是这条脚本验的是
+    # 「端点自己的默认预算」，而线上那三条路（总结、打磨、总览）发的一直是
+    # `cfg.llm.max_tokens`。两端不同口径，读数就不能当 shipped 行为的证据（task-65）。
+    cfg = WorkbenchConfig.load()
+    llm = SummaryLLM(client, cfg=cfg)
+    print("这次真发出去的 max_tokens =", cfg.llm.max_tokens, "（读的就是 shipped 那条路读的键）")
     notes: list[str] = []
     text = llm.chat(
         [{"role": "user", "content": PROMPT + "\n\n字幕：\n" + TRANSCRIPT}],

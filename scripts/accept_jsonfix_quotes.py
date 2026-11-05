@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from video_workbench.config import WorkbenchConfig  # noqa: E402
 from video_workbench.core.summarizer import SummaryLLM  # noqa: E402
 from video_workbench.infra.llm import ChatClient  # noqa: E402
 
@@ -28,7 +29,11 @@ TRANSCRIPT = '''
 def main() -> int:
     client = ChatClient(base_url="http://127.0.0.1:3425/v1", api_key="magpie",
                         model="qoder-cn/qfmodel", timeout=180.0)
-    llm = SummaryLLM(client)
+    # 同 accept_jsonfix.py：cfg 不传就不发 `max_tokens`，这条脚本验的就不是 shipped
+    # 那条路的口径（task-65）。这里只取配置里的预算，端点与模型仍按上面写死的走。
+    cfg = WorkbenchConfig.load()
+    llm = SummaryLLM(client, cfg=cfg)
+    print("这次真发出去的 max_tokens =", cfg.llm.max_tokens)
     text = llm.chat([{"role": "user", "content": PROMPT + "\n" + TRANSCRIPT}],
                     json_mode=True, note=lambda _m: None)
     data = json.loads(text)
