@@ -104,3 +104,45 @@
 - task-73（修同步入口自锁）归我，它**改的是入口自身**：在它落地前，同步仍然只能用
   现在这个「缺 `-m` 会先写完才报错」的版本 ⇒ 每次跑必须**带 `-m`**，别再把镜像停成脏态。
   这条临时口径写在这里，等 task-73 落地即作废。
+
+## 再补一条（2026-11-06 00:2x）：画面帧——默认**保持开**
+
+用户动作 id `frames-on`，原文「默认保持开」。
+
+这条决定的字面含义是**不改任何默认值**，这一点必须写清楚，否则下一轮会有人去"实现"一个
+本来就不存在的改动：
+
+- 代码默认：`bili_scribe/config.py:107 enabled: bool = True`（`max_frames = 12`、`quality = 85`）。
+- 三家实配现状（我 00:1x 现读）：`~/.video-workbench/config.yaml:68`、`~/.bili-scribe/config.yaml:64`、
+  仓库根 `config.yaml:68` 全部 `enabled: true` / `max_frames: 12` / `quality: 85`。
+- ⇒ **task-70 的落地不含"翻默认值"这一步**；它要做的是把 `collect_frames` 从 bs 那条路
+  **接进 WB 的总结链路**（今天 WB 侧 0 个调用点），也就是**兑现一个已经写在这三份配置里、
+  但一直没人执行的开关**。
+
+三个连带后果，现在就得记账，不要等实现完再发现：
+
+1. **成本对所有人生效**：一次总结多约 1,464 image tokens（这个数出自
+   `bili_scribe/config.py:95 class FramesConfig` 自己的注释「12 帧 ≈ 1,464 image_tokens，
+   约为一条 4 小时视频总输入的 1.7%」）。不是只影响新用户——三家实配已经是 `true`，
+   接上那天起老用户同样开始付。
+2. **对账锁一定会红，这是好事不是回归**。parity 已现读确认：
+   `tests/wb/test_summary_parity.py:406 EFFECTIVE_FIELDS = ("json_mode","temperature","max_tokens","messages")`
+   与 `:499 assert wm["content"] == bm["content"]` 是**逐字**比 ⇒ 一侧接帧（`content` 从 `str`
+   变 `list`）当场红。他另外在 `:411-419 PLAN_A_NOTE` 旁加了一条**前提锁**，钉
+   「适配层记录的每条请求 `content` 都是 `str`」（`grep -rn "frameset\|collect_frames" tests/wb/*.py` 之前是 0）。
+   ⇒ 接上那天由 **parity** 摘锁并显式扩口径（候选甲），或者帧走独立字段不进比对面（候选乙）；
+   **这条只能我拍，实现层不许自己选**。
+3. **界面那句 help 会从谎话变成真话**：`video_workbench/web/js/pages/settings.js:150` 现在写着
+   「给总结配图用；关掉可明显提速。」——在 WB 里这个开关今天**没有任何消费者**，那句"提速"
+   是给用户看的空承诺。接上之后它才第一次成立。⇒ 这条不构成新的改动，但**验收时要贴一次
+   关掉开关的实测对比**（帧确实不发、正文确实变短），证明那个旋钮现在是活的。
+
+不许动的东西（写死在这里防止"顺手改"）：
+
+- 副本 `video_workbench/core/summary/summarizer.py:550`
+  （`frame_blocks = frames_mod.as_content_blocks(frameset) if frameset else []`）**一行不许改**——
+  撞漂移锁；接帧只能接在适配层 `video_workbench/core/summarizer.py`（`:906-908` run、
+  `:990-998` refine 这两处现在都不写 `frameset=`）。
+- 六份提示词真源 txt 与三份 vendored `.py` 的字节；`bili_scribe/**`（含 `config.py:107` 那个默认值，
+  用户选的是"保持"，不是"去 bs 里改成 False"）。
+- `Pillow 13.0.0` 已在场，抽帧不需要新依赖；真模型调用在 task-70 阶段 1 **禁止**（`calls=0`）。
