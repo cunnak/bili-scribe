@@ -69,8 +69,14 @@ def git(cwd: Path, *args: str) -> str:
 
 
 def tracked_lines(cwd: Path) -> list[str]:
-    """git ls-files；仓库没有 commit 时返回空（不是错误）。走 git() 所以带 quotepath=false。"""
-    r = subprocess.run(["git", "-c", "core.quotepath=false", "ls-files"],
+    """**HEAD** 里的跟踪清单（不是索引）。仓库没有 commit 时返回空（不是错误）。
+
+    为什么不用 `git ls-files`（=索引）：2026-11-05 实录 —— 成员被要求「落地就
+    `git add`」，那份 `add` 只是给 lead 的 pathspec 提交用的暂存，**还没进 HEAD**。
+    入口若按索引取交集，就会把「已 staged、未 commit」的那截当合法内容搬进
+    给人下载的镜像。⇒ 面与门都只认 HEAD：谁 staged 了是主仓内部的事。
+    """
+    r = subprocess.run(["git", "-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"],
                        cwd=str(cwd), capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
@@ -147,22 +153,56 @@ def preflight(main: Path, mirror: Path) -> tuple[list[str], list[str]]:
     return blockers, notes
 
 
+def head_bytes(repo: Path, rel: str) -> bytes | None:
+    """取 **HEAD 里**那一版（不是索引、更不是工作区）。None = HEAD 里没有这个路径。
+
+    为什么这条是硬要求（2026-11-05 事故实录，我自己造的）：本入口的 docstring
+    写着「按索引取交集」，但比对与复制用的是 `read_bytes()` / `cp -p` =
+    **工作区字节**。于是只要某个共同跟踪文件在主仓有未提交的在途改动，一次
+    普通 `--apply --commit` 就会把那截未入库内容 `git add` 进镜像并 commit ——
+    正是这张入口本该拦住的事。真发生过：镜像因此拿到 parity 那 36 行未入库改动
+    （那一笔没 push，所以公开镜像至今干净；本地已 reset 回上一笔）。
+    ⇒ 比也按 HEAD 比、写也按 HEAD 写：工作区与索引里有没有在途改动，与门面无关。
+
+    为什么不用 `git cat-file -e` 判在不在（哨兵 L6c 实测推翻我的第一版）：
+    `cat-file -e HEAD:` 这种**空路径**写法返回 **rc=0**（指向 tree 对象，语法合法），
+    拿 rc 当「文件在不在」就会把用法错读成「在」⇒ 下游写空、静默假绿。
+    ⇒ 只认「**能不能读出字节**」：空路径/目录在函数入口就抛，`git show HEAD:<路径>`
+    对目录也必失败（`… is a directory`），只有能明确解释的 128 才读成「没有」。
+    """
+    if not rel or rel.endswith("/"):
+        raise RuntimeError(f"--from-head/--adopt 要的是文件路径，不是目录或空路径：{rel!r}")
+    res = subprocess.run(["git", "-c", "core.quotepath=false", "show", f"HEAD:{rel}"],
+                         cwd=str(repo), capture_output=True)
+    if res.returncode == 0:
+        return res.stdout
+    err = res.stderr.decode("utf-8", "replace")
+    if res.returncode == 128 and "fatal: path" in err and "exists on disk" in err:
+        return None                       # 「工作区有、HEAD 没有」= 未入库
+    if res.returncode == 128 and ("does not have any" in err or "not a valid object" in err
+                                  or "is a directory" in err or "unknown revision" in err):
+        return None                       # 目录/空路径/不存在 —— 都不是合法的可搬内容
+    raise RuntimeError(
+        f"git show HEAD:{rel} 返回 rc={res.returncode}（不是可解释的 0/128），"
+        f"stderr={err[:200]} —— 用法错，不当成「HEAD 里没有」读")
+
+
 def content_targets(main: Path, mirror: Path) -> dict:
-    """按两边**索引**取交集，逐条比字节。"""
+    """按两边 **HEAD** 取交集，逐条比 HEAD 字节。工作区与索引都不参与判断。"""
     a_set = tracked_lines(main)
     b_set = tracked_lines(mirror)
     b_all = set(b_set)
     common = [p for p in a_set if p in b_all and not p.startswith(SKIP_PREFIXES)]
     targets = [p for p in common
                if p not in NEVER_SYNC
-               and (main / p).is_file() and (mirror / p).is_file()
-               and (main / p).read_bytes() != (mirror / p).read_bytes()]
+               and head_bytes(main, p) is not None
+               and head_bytes(main, p) != head_bytes(mirror, p)]
     # 主仓独有：只报数，不新建。
     a_only = [p for p in a_set if p not in b_all and not p.startswith(SKIP_PREFIXES)]
     # 镜像独有（非 junction / 非 submodule 挂载点）：算漂移，人工判。
     b_only = [p for p in b_set if p not in set(a_set) and not p.startswith(SKIP_PREFIXES)]
-    # 两边都跟踪、但主仓已从工作树删除 → 同步删除。
-    gone = [p for p in common if not (main / p).is_file()]
+    # 两边 HEAD 都列过、但主仓 HEAD 已删掉（staged 删除不算）→ 同步删除。
+    gone = [p for p in common if head_bytes(main, p) is None]
     return {"targets": targets, "main_only": a_only, "mirror_only": b_only, "deleted": gone,
             "common_n": len(common)}
 
@@ -188,13 +228,39 @@ def _narrow(cats: dict, exclude: list[str], only: list[str]) -> dict:
     return cats
 
 
+def rel_exists_in_head(main: Path, rel: str) -> bool:
+    """「这个**文件**在不在 HEAD 里」。判据只走 `head_bytes`，不用 `git cat-file -e`。
+
+    事故实录（本轮 L6c，我自己造的）：我第一版拿 `cat-file -e HEAD:<路径>` 的 rc 当
+    「在/不在」用，**rc 语义在盘上被否证** —— 我这一棵树上现跑：
+
+        $ git cat-file -e "HEAD:"            → rc=0    # 根 tree，语法合法
+        $ git cat-file -e "HEAD:docs"        → rc=0    # **目录也算「在」**
+        $ git cat-file -e "HEAD:AGENTS.md"   → rc=0    # 真文件
+        $ git cat-file -e "HEAD:不存在的文件"  → rc=128
+
+    ⇒ 空路径与目录都会返回 0，「在」不等于「是个可搬的文件」，写成 rc==0 就判在
+    是把用法错读成结论（AGENTS 第一节那条 `rc∉(0,1)` 的老坑换了个 rc 刻度重演）。
+    `head_bytes` 的判据是「**能不能读出字节**」：空路径/以 `/` 结尾在入口就抛，
+    目录走 `git show` 那条可解释的 128 读成 None —— 与 `--adopt` 分支同一个读者，
+    不留两个函数对同一问题各给答案。
+    """
+    if not rel or rel.endswith("/"):
+        raise RuntimeError(f"--from-head/--adopt 要的是文件路径，不是目录或空路径：{rel!r}")
+    return head_bytes(main, rel) is not None
+
+
 def apply_sync(main: Path, mirror: Path, targets: list[str], deleted: list[str]) -> list[str]:
     done: list[str] = []
     for rel in targets + deleted:
         if rel.startswith(LOCKED_PREFIXES):
             raise RuntimeError(f"拒绝碰逐字节锁定的路径：{rel}（副本与 6 个真源 txt 不归同步管）")
     for rel in targets:
-        subprocess.run(["cp", "-p", str(main / rel), str(mirror / rel)], check=True)
+        blob = head_bytes(main, rel)
+        if blob is None:
+            raise RuntimeError(f"主仓 HEAD 里没有 {rel}，不该进 targets")
+        (mirror / rel).parent.mkdir(parents=True, exist_ok=True)
+        (mirror / rel).write_bytes(blob)      # 写 **HEAD 版**，不是工作区版、不是索引版
         done.append(rel)
     for rel in deleted:
         dst = mirror / rel
@@ -227,9 +293,14 @@ def main() -> int:
                          "同步本身只走交集，所以这类要人工点名，不自动新建）")
     ap.add_argument("--commit", action="store_true", help="同步后用显式 pathspec 提交（须配 --apply）")
     ap.add_argument("--exclude", action="append", default=[], metavar="PATH",
-                    help="这次同步**跳过**某个共同跟踪路径（可重复）。用在「镜像里某人"
-                         "有在途未入库的改动，先别把它推进给人下载的镜像」这种现场；"
-                         "报数仍打全量，被跳过的会单列一行")
+                    help="这次同步**整体跳过**某个共同跟踪路径（可重复）。注意：跳过 = 镜像"
+                         "保持它**现在这一版**，不是保持主仓已入库那一版 —— 若那个文件在"
+                         "被跳过期间于主仓又入库过改动，镜像就会静默落后一个 commit（本轮"
+                         "真发生过）。只想挡在途改动、又要镜像拿到已入库那版，用 --from-head")
+    ap.add_argument("--from-head", action="append", default=[], metavar="PATH",
+                    help="把这个路径的**主仓 HEAD 版**（已入库、不含工作区未提交改动）写进"
+                         "镜像。用在「某人有在途未入库改动，但镜像里那份已经旧了一个 commit」"
+                         "这种现场 —— 这才是 --exclude 该配的搭档，光排除会把旧版留在门面里")
     ap.add_argument("--only", action="append", default=[], metavar="PATH",
                     help="白名单：只同步点名的路径（可重复），其余全部跳过。与 --exclude "
                          "同时给时先 only 再 exclude")
@@ -288,13 +359,35 @@ def main() -> int:
         if not (ROOT / p).is_file():
             print(f"[x] --adopt 的 {p} 在主仓不存在")
             return 2
+        blob = head_bytes(ROOT, p)
+        if blob is None:
+            print(f"[x] --adopt 的 {p} 还没进主仓 HEAD —— 本入口只搬已入库内容，"
+                  f"未 commit 的东西一律不进门面（要它进镜像请先在主仓 commit）")
+            return 2
         dst = mirror / p
         dst.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["cp", "-p", str(ROOT / p), str(dst)], check=True)
+        dst.write_bytes(blob)
         adopted.append(p)
-        print(f"[ok] adopt {p} → 镜像")
+        print(f"[ok] adopt {p} → 镜像（HEAD 版）")
 
-    done = apply_sync(ROOT, mirror, t["targets"], t["deleted"]) + [f"adopt {p}" for p in adopted]
+    heads = []
+    for p in args.from_head:
+        p = p.replace("\\\\", "/").lstrip("./")
+        if p in NEVER_SYNC or p.startswith(SKIP_PREFIXES):
+            print(f"[x] --from-head 拒绝 {p}（镜像自己维护 / junction 范围）")
+            return 2
+        if rel_exists_in_head(ROOT, p):
+            blob = head_bytes(ROOT, p)
+            (mirror / p).parent.mkdir(parents=True, exist_ok=True)
+            (mirror / p).write_bytes(blob)
+            heads.append(p)
+            print(f"[ok] from-head {p} → 镜像（HEAD 版，不含工作区/索引在途改动）")
+        else:
+            print(f"[x] --from-head 的 {p} 不在主仓 HEAD 里（未入库的文件只能走 --adopt）")
+            return 2
+
+    done = apply_sync(ROOT, mirror, t["targets"], t["deleted"]) + \
+        [f"adopt {p}" for p in adopted] + heads
     print(f"[ok] 处理 {len(done)} 项")
     main_head = git(ROOT, "rev-parse", "HEAD").strip()
     ok, link_msg = align_gitlink(mirror, main_head)
