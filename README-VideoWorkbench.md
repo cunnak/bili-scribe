@@ -60,6 +60,8 @@ python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文�
 
 > 2026-11-04 起 WB 的配置**从 bili-scribe 的家里搬出去了**：以前两边共用 `~/.bili-scribe/config.yaml`，WB 往里面写 `role` / `max_tokens` 会连带改掉 bili-scribe 的行为。现在 WB 只读那一份（首次启动搬运一次），写只写自己的 `~/.video-workbench/`。**数据文件没搬**：库与 B 站凭据仍在 `~/.bili-scribe/`，那是刻意复用（已有项目与总结历史都在里面）。
 
+> **模板只认 `config.wb.example.yaml`。** 仓库根的 `config.example.yaml` 是 **bili-scribe 那份**（文件头逐字「# bili-scribe 配置示例」，`README.md:67` 那句 `copy config.example.yaml config.yaml` 是 bili-scribe 的装法），拿它当 VideoWorkbench 的模板会抄到一份已过期的 `llm` 段注释：里面写着「思考模型那段推理**不吃 `max_tokens`** ……实测设 4096 却跑了 5125 tokens」，而实测结果是——`finish_reason=length` 时**正文为空**、`reasoning_tokens` 正好等于 `max_tokens`，也就是**吃的**。WB 自己渲染配置那一段已经按实测改过（`video_workbench/config.py`，commit `695cd83`），那句错指引留在 bili-scribe 的模板文件里没被改，是因为它归 bili-scribe、本轮明确不许越界动 `bili_scribe/**`（用户 m06291）。**要修得在 bili-scribe 仓库自己那侧做**；在 WB 这边，绕开它就行。
+
 两个文件分工明确：
 
 - `config.yaml`：只放 bili-scribe 也认的六段（`server` / `llm` / `collect` / `publish` / `storage` / `ui`），
