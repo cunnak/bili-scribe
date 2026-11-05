@@ -5,7 +5,7 @@
 | `WB_SUMMARY_PARITY_STRICT` | 档位 | ①时间线补密 | ②输出预算抬升 | ③坏 JSON 阶梯 |
 |---|---|---|---|---|
 | **未设**（用户的常态） | **严格（默认）** | 生效（task-11 的只读捕获，实测 25 条留住、仍 3 次请求） | 关 | 关，一次即失败并报出开关 |
-| `0` / `false` / `off` | 宽松 | 生效 | 12288/翻倍/封顶 16384 | 修复→续写→拆分→重问 |
+| `0` / `false` / `off` | 宽松 | 生效 | 补救步按阶梯重算（规则与数字的 owner 在 `test_summary_truncate.py`，别在这里复述） | 修复→续写→拆分→重问 |
 | 其它任何值（`1`/`TRUE`/`2`…） | 严格 | 同上 | 关 | 关 |
 
 实测这行表来自 `video_workbench/core/summarizer.py:73-78`
@@ -1039,7 +1039,7 @@ ALLOWED_DIFFERENCES = (
     "1) timeline 长度：bs 硬截 20 条，宽松档下 WB 的 `_apply_dense` 会把模型给的更长时间线"
     "覆盖回去（默认档由 task-11 的只读捕获承担同一职责）；"
     "2) max_tokens：bs 不写这个参数（由客户端按 cfg.llm.max_tokens 走），"
-    "WB 的 `_json_budget` 在修复/续写/拆分各步抬到 max(cfg*2, 12288) 封顶 16384；"
+    "WB 的 `_json_budget` 在修复/续写/拆分各步按阶梯重算预算：以 12288 为下限、向上抬、有封顶，且 task-53 起**不低于本轮预算**（具体数与三面的 owner 在 `test_summary_truncate.py::test_budget_floors_at_twelve_thousand`）；"
     "3) 额外请求：WB 的 jsonfix→续写→拆分→重问阶梯会多发请求，bs 一次失败就抛。",
 )
 
@@ -1095,9 +1095,12 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
     档位归位（原名 `test_default_mode_repair_ladder_costs_extra_requests_and_budget`，
     task-9 连名字一起改）：③在默认档整条不走（一次就抛，见 B 组与 I 组），阶梯只能在
     显式 `=0` 上测。留成「未设」就是 C 条点名的写法——永远绿，但什么都没守。
-    预算公式的另外两头（翻倍、封顶 16384）与拆分/重问都在宽松档，见
-    `test_summary_truncate.py` / `test_summary_split.py` / `test_jsonfix.py` 里钉了
-    `loose_env` 的那几条。
+    预算公式的另外两头（向上抬、有封顶，以及 task-53 加的「不低于本轮预算」下界）与
+    拆分/重问都在宽松档，见 `test_summary_truncate.py` / `test_summary_split.py` /
+    `test_jsonfix.py` 里钉了 `loose_env` 的那几条。**注意本条只覆盖 `make_cfg()` 默认
+    的 4096 那一档**：base 高于封顶时的发出层形状归
+    `test_the_repair_budget_never_falls_below_the_main_request`（今天 strict xfail）。
+    这条与本条不重叠：那条钉「抬到 12288 + 多一次请求」的登记差异，新那条钉「不许倒挂」。
 
     实测：同一份「JSON 断在半路」的回复——
       · bs：1 次请求，然后 `SummarizeError`（它没有修复阶梯）；

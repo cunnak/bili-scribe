@@ -101,7 +101,10 @@ def test_budget_floors_at_twelve_thousand(loose_env):
     B4 看的是发出去的请求，本条看的是补救那几步的算法；B4 的 docstring 现在只指路到这里，
     不重复断言。
     """
-    cap = 16384  # 产品里的裸封顶值（不是常量），下面第 2 组的全部前提
+    # 产品里的裸封顶值（`MIN_JSON_TOKENS` 才是常量，这个没有名字可导入）。
+    # 下面第 2 组的全部前提都建立在它之上；vendor 哪天把它提成常量，这一行与
+    # `test_summary_parity.py` 的 AST 现读要一起改，改不到会红，不会静默漂移。
+    cap = 16384
     assert MIN_JSON_TOKENS == 12288
 
     # 1) 下限
