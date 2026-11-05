@@ -304,7 +304,13 @@
           if (!job) { reject(new Error("任务不见了")); return; }
           if (job.status === "succeeded") { resolve(job); return; }
           if (job.status === "failed" || job.status === "canceled") {
-            var error = new Error((job.error && job.error.message) || "生成失败");
+            // 行上只有 error_code / error_message 两列（没有 `job.error` 这个键，
+            // `pragma table_info(wb_job)` 现读），失败原因与 detail 原文由后端拼在
+            // error_message 一句里（app/jobs.py 的 error_message_for_row）。
+            // 以前这里读 `job.error.message` ⇒ 恒 undefined ⇒ 用户只看得到写死的
+            // 「生成失败」，`finish_reason=length…` 那句被丢掉。前端不再拼第二次，
+            // 免得同一句话两个 owner。
+            var error = new Error(job.error_message || "生成失败");
             error.job = job;
             reject(error);
             return;

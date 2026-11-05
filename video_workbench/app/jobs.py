@@ -29,6 +29,49 @@ from video_workbench.infra.repo import Repo, new_id
 
 Handler = Callable[["JobContext", dict[str, Any]], Any]
 
+#: 写进 ``wb_job.error_message`` 那一列的文本怎么拼。**只有一个出处**。
+#:
+#: 为什么要拼在这一列：``wb_job`` 只有 ``error_code`` / ``error_message`` 两格，
+#: 没有 detail 格（`pragma table_info(wb_job)` 现读），而 detail 里恰恰放着唯一能自修
+#: 的那句原文（``finish_reason=length，思考用了 16384 tokens``）。以前只存 message ⇒
+#: 总结页读错键、其他页只看见一句「生成失败」，用户连原因都拿不到。拼进这一列
+#: = 零 schema 迁移、零事件订阅（``job.finished`` 那条不算：后台跑完时页面可能没开着）。
+ERROR_DETAIL_JOINER = " —— "
+ERROR_MESSAGE_MAX_CHARS = 600
+
+
+def _detail_tail(detail: Any) -> str:
+    """把 detail 收成一行。
+
+    多行的那种是 ``traceback.format_exc()``（``INTERNAL`` 那条），整段留在这里会把
+    主文案撑成一屏；栈的最后一条非空行才是「炸在哪」，正文日志里另有全文明细。
+    单行的（LLM 那几条都是）原样回去，一个字不改——那句是要给人照着改配置的。
+    """
+    text = str(detail or "").strip()
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return lines[-1] if len(lines) > 1 else text
+
+
+def error_message_for_row(error: dict[str, Any] | None) -> str | None:
+    """``to_payload()`` 里的 message + detail 收成落库那一句。
+
+    detail 为空时**逐字返回 message**——界面上那八处 ``job.error_message`` 的消费者
+    （clips/merge/subtitles/cli/batch）都按这一句显示，取消、恢复这类没有 detail 的
+    消息不该被拼出一个尾缀分隔符。
+    """
+    message = str((error or {}).get("message") or "")
+    detail = _detail_tail((error or {}).get("detail"))
+    if not detail:
+        return message or None
+    if not message:
+        return detail[:ERROR_MESSAGE_MAX_CHARS]
+    room = ERROR_MESSAGE_MAX_CHARS - len(message) - len(ERROR_DETAIL_JOINER)
+    if room <= 0:
+        return message[:ERROR_MESSAGE_MAX_CHARS]
+    return message + ERROR_DETAIL_JOINER + detail[:room]
+
 
 class JobContext:
     """handler 能看到的一切。刻意只暴露这四件事：
@@ -263,7 +306,7 @@ class JobManager:
             "finished_at": now_iso(),
             "result": result,
             "error_code": (error or {}).get("code"),
-            "error_message": (error or {}).get("message"),
+            "error_message": error_message_for_row(error),
         }
         if status == "succeeded":
             payload["progress"] = 1.0
