@@ -152,6 +152,14 @@ def test_every_secret_bearing_file_is_gitignored() -> None:
     以前比字面行集合，lead 把 `config.yaml.bak` 改成合法 glob `config.yaml.bak*`
     就把它误红了（忽略行为没变）⇒ 那条红是 implementation-coupled，不是缺陷。
     现在只问 git 会不会真的忽略这个路径。
+
+    反过来也得说清：判据不看字面行，**不等于**放过规则退化。名单里带了后缀的候选
+    （`.bak-32768`、`.tmp-20261105-113000`、`.bak-20261105-113000`）就是退化的探针——
+    谁把 `.gitignore` 那八行 glob 改回精确名，忽略行为当场变窄，本用例必红，missing
+    列出的正是 config.yml / config.yaml / sidecar 三族的带后缀名（2026-11-05 自证：
+    星号全改回精确名 → 本用例红，missing = `config.yaml.bak-32768, config.yaml.tmp-…,
+    config.yml.bak-32768, …`；逐字照抄现行规则 → 本用例绿）。所以这里**不再**单开一条
+    常驻「钉 glob 还在」的断言：那会把「行为对不对」重新写成「文本长什么样」。
     """
     not_ignored = [n for n in _secret_bearing_names() if not _ignored_by_git(n)]
     assert not not_ignored, (
