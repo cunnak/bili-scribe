@@ -33,10 +33,16 @@ llm:
   api_key: ""
   model: "deepseek-chat"
   temperature: 0.3
-  max_tokens: 4096
-  # auto=不发相关参数 / off=显式关思考 / on=显式开思考。
-  # 思考模型的推理过程不吃 max_tokens，开着容易超时或正文返回空。
+  max_tokens: 32768
+  # 思考模型（Qwen3 系列、QwQ、带 -thinking 的型号等）先产出一大段推理再作答。
+  # 这段推理算不算进 max_tokens，因端点而异，判据看报错本身：本机 workbuddy/magpie
+  # 实测**算**——预算被打满时 finish_reason=length、正文返回空、usage 里 reasoning_tokens
+  # 正好等于 max_tokens。所以正文空先看 finish_reason 和思考 token 数，别无脑抬这个值。
+  # auto=不发相关参数 / off=显式发 enable_thinking:false / on=显式发 true。
+  # 别指望「空正文会自动关思考重试」：Workbench 这条路没有那条腿，而且这个端点连
+  # enable_thinking:false 都不遵守（实测关掉仍烧 140 思考 tokens），关掉不是根治。
   thinking: "auto"
+  # 单次请求的读超时（秒）。思考模型的耗时主要花在推理上，调大它只是缓解。
   timeout_seconds: 300
   # 调用模型时走的代理。留空 = 直连，且不读 HTTP_PROXY/HTTPS_PROXY。
   proxy: ""

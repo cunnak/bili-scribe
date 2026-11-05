@@ -54,7 +54,7 @@ class LlmConfig:
     api_key: str = ""
     model: str = "deepseek-chat"
     temperature: float = 0.3
-    max_tokens: int = 4096
+    max_tokens: int = 32768
     max_input_chars: int = 24000
     chunk_size: int = 6000
     chunk_overlap: int = 400
