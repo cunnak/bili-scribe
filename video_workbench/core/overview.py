@@ -264,8 +264,15 @@ def run(
     model: str = "",
     prompt_template: str = "",
     extra: str = "",
+    cfg: Any = None,
 ) -> dict[str, Any]:
-    """跑一次合集总览。返回 ``{content, usage, model, role, calls, notes, items}``。"""
+    """跑一次合集总览。返回 ``{content, usage, model, role, calls, notes, items}``。
+
+    ``cfg`` 是给 ``SummaryLLM`` 的那份配置：坏 JSON 的补救预算要按 ``llm.max_tokens``
+    算（见 ``summarizer._request_max_tokens``），不传就走老行为——预算与配置无关。
+    默认 ``None`` 是刻意的向后兼容，**产品内的调用方必须传**（task-59；
+    ``tests/wb/test_summary_llm_cfg_wiring.py`` 锁的就是这一条）。
+    """
     items = collection_items(children)
     if len(items) < MIN_ITEMS:
         raise WBError(
@@ -281,7 +288,10 @@ def run(
             "缺总结的：" + "、".join(missing[:5]),
         )
 
-    llm = SummaryLLM(client, model=model)
+    # 不传 cfg 时，这条路的补救预算恒等于那个写死的下限、与用户配置无关（task-57 的
+    # helper 只在 cfg 在手时才生效）。产品码里不许再出现不传 cfg 的构造点——
+    # 常驻锁见 tests/wb/test_summary_llm_cfg_wiring.py。
+    llm = SummaryLLM(client, model=model, cfg=cfg)
     prompt = build_prompt(title, items, template=prompt_template, extra=extra)
     ctx.progress(0.2, f"读 {len(items)} 集总结")
     ctx.log(f"合并 {len(items)} 集，素材约 {len(prompt)} 字")

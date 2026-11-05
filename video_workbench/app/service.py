@@ -2968,6 +2968,10 @@ class WorkbenchService:
             role=role,
             model=client.model,
             extra=str(payload.get("extra") or ""),
+            # task-59：合集总览也要把配置交给 SummaryLLM，否则坏 JSON 的补救预算与
+            # llm.max_tokens 无关（见 core/overview.py 的 run() docstring 与
+            # tests/wb/test_summary_llm_cfg_wiring.py 那条锁）。
+            cfg=self.cfg,
         )
         ctx.check_cancel()
         content = dict(result["content"])
