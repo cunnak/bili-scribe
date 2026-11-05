@@ -1,0 +1,78 @@
+# Ruff 配置 —— 本轮由用户点头「装进 venv」落地（动作 id `ruff-yes`）。
+#
+# 装法：.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+# 跑法（两条都要跑，含义不同）：
+#   .venv/Scripts/ruff.exe check .        # 找问题（不改文件）
+#   .venv/Scripts/ruff.exe format .       # 排版（改文件）
+#   .venv/Scripts/ruff.exe format --check --diff .   # 只报不改，给 CI/交差用
+#
+# ── 这一版刻意只做「装闸 + 现状登记」，不动任何既有文件 ──
+# 摸底读数（2026-11-05 23:5x，本机 ruff 0.17.3，默认规则集，命令原文）：
+#   ruff check --statistics .   → Found 1272 errors（567 fixable with --fix）
+#   ruff format --diff .        → 288 files would be reformatted, 68 already formatted
+#   锁定面上的违规条数：bili_scribe 755 / video_workbench/core/summary 131 /
+#                       video_workbench/infra/notecache.py 0
+# ⇒ 一次性 --fix 或全量 format 会在发版中途造出几百个文件的 diff，还会撞正在被
+#   别人改的 `video_workbench/app/jobs.py` 与 parity 名下测试。所以本文件把范围
+#   钉到「产品码 + 常驻测试」，历史债另开单还；不在此文件里假装已清。
+
+line-length = 100
+target-version = "py314"
+
+# 默认只开「错到会影响正确性」的一族。每加一族都要先跑一次看新增多少条，
+# 不许一次选 `select = ["ALL"]`——那等于把 1272 条直接变成永久红灯。
+select = [
+  "E4",   # import 位置/数量
+  "E7",   # 明显的语句问题（裸 except 之外的可分性）
+  "E9",   # 语法错误
+  "F",    # pyflakes：未用导入、未定义名、重复定义
+  "I001", # import 排序（可自动修，diff 局限在头部）
+  "UP032",# f-string 替代 .format（低风险）
+]
+
+[lint]
+extend-safe-fixes = ["I001", "UP032", "F401"]
+
+[format]
+# 与 lint 同一族范围；quote-style 保持默认双引号，避免对既有中文注释重排造成无意义 diff。
+docstring-code-format = false
+
+# ── exclude：三类东西，理由各不同，不许合并成一条通配 ──
+exclude = [
+  # (1) 参考侧原样 vendored 的源码：逐字节对齐 bili_scribe，改了就是漂移。
+  #     这份清单现读自 tests/wb/test_git_no_normalization_on_locked_paths.py 的
+  #     PY_LOCK_FLOOR + drift 闸的 Path 常量（实测 5 个 .py + 6 个 txt）。
+  "video_workbench/core/summary/roles.py",
+  "video_workbench/core/summary/summarizer.py",
+  "video_workbench/core/summary/__init__.py",
+  "video_workbench/core/prompt_source.py",
+  "video_workbench/infra/notecache.py",
+  "video_workbench/resources/prompts",
+  # (2) 参考侧本体：本会话硬边界「禁改 bili_scribe/**」，它 755 条违规与本次无关。
+  "bili_scribe",
+  # (3) 发布镜像的检出与打包中间产物（不是本仓源码）。
+  "build",
+  "dist",
+  ".venv",
+  "__pycache__",
+  ".pytest_cache",
+  "node_modules",
+]
+
+# ── 历史遗留的一次性脚本：今天还跟踪在库里，但它们该被删掉，不该被"格式化"。
+#     写成逐文件 lint-per-file-ignores（而不是通配），文件真删了以后 `ruff check`
+#     会报 E902 找不到路径 —— 那就是提醒回来清这份名单的牙。
+[lint.per-file-ignores]
+"dump_sub*.py" = ["ALL"]
+"_conv_doc.ps1" = ["ALL"]
+"_extract_docx.py" = ["ALL"]
+"_match_tiku.py" = ["ALL"]
+"_parse_tiku.py" = ["ALL"]
+"_search_tiku.py" = ["ALL"]
+"db_stats.py" = ["ALL"]
+"db_task.py" = ["ALL"]
+"diff_stats.py" = ["ALL"]
+"fetch_task.py" = ["ALL"]
+"poll2.py" = ["ALL"]
+"poll_task.py" = ["ALL"]
+"refine-*.py" = ["ALL"]

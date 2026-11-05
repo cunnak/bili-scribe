@@ -36,6 +36,23 @@ git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
 
 **判据**：新增任何 sha/字节锁时，同一笔改动里就要跑一遍 ①②③ 并贴出三行读数。
 
+## 三点五、代码格式与静态检查（ruff 已装，但**一笔格式化都还没还**）
+
+跑法（`.venv/Scripts/ruff.exe`，版本钉在 `requirements-dev.txt` 的 `ruff==0.17.3`；`pip` 只装包，不需要额外下载任何东西）：
+
+```bash
+.venv/Scripts/ruff.exe check .                    # 找问题，不改文件
+.venv/Scripts/ruff.exe format --check --diff .     # 只报不改 —— 交差用这一条
+.venv/Scripts/ruff.exe format .                    # 真改文件（先看清楚上面那条的 diff）
+```
+
+- 规则范围与 `exclude` 全在仓库根 `ruff.toml`，**基线数记在那份文件的注释里**：装上当天下默认集 `Found 1272 errors`（567 fixable）、`format --diff` = `288 files would be reformatted, 68 already formatted`；按收窄面复跑 `video_workbench` = **28 条 check / 43 个文件待 format**、`tests/wb` = 204 条、`scripts` = 19 条。
+- **锁定面与参考侧本体在 `exclude` 里**（五份 vendored `.py` + 六份 txt + `bili_scribe`）：正常跑碰不到它们；**不许为了让某条规则过而去改 `exclude` 或加 `# noqa`** —— 那等于用格式闸改锁定面，会撞第三节的字节锁。
+- **现状登记**：`ruff format` 至今一次都没执行过。还这笔债的是 **task-71**（分三批、每批一 commit、必须整体排除在途的 `video_workbench/app/jobs.py`）。任何人写「格式闸过了」之前，先想清楚自己跑的是哪条命令、哪个范围。
+- `ruff.toml` 的 `[lint.per-file-ignores]` 逐文件点名根下那批一次性脚本（`dump_sub*.py`、`refine-*.py`、`db_*.py`、`poll*.py`、`_*.py` 等）。**那份名单故意不写成通配**：文件删掉之后 `ruff check` 会因为路径找不到报 `E902` —— 那就是提醒回来清名单的牙。别把它"优化"成 `dump_*` 一条通配，那等于把牙磨掉。
+
+**判据**：交付里出现「format / lint / ruff 过关」这句话时，必须同时给出**命令原文 + 范围 + 剩余条数**三个数。
+
 ## 四、起真 GUI / 真后端的三条硬知识
 
 1. **隔离夹具只准重定向 `HOME` + `USERPROFILE`，必须保留真实 `APPDATA`/`LOCALAPPDATA`。**
@@ -139,3 +156,4 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 | 镜像同步不许手工 `cp -p` + `git add -A`，只能走入口 | `scripts/sync_mirror.py` 的 `preflight()` + 显式 pathspec（`.gitignore` 在 `NEVER_SYNC` 里、镜像那份必须含 `/bili_scribe`、形状与索引面自洽、工作区只放行 gitlink 那一种脏）。哨兵驱动 `C:/Users/b1596/AppData/Local/Temp/lead_sync_guard_check.py` 六组单变量证伪：**①④⑥ 绿 / ②③⑤ 红**（② 只删 marker 行必须红、③ 先证「无 marker 时 `git add -A` 真把 `bili_scribe/__init__.py` 吞进索引」再证 sync_mirror 拦它、⑤ 别人的未跟踪文件必须仍然红——不许被 gitlink 例外顺手放宽）。**这条没有 `tests/wb` 常驻用例**：它是同步入口的判据，`tests/wb` 那半边归 parity，等这条真被复用再开单，不在两处造第二个 owner |
 | 失败原因不许只到「生成失败」为止 | **已落地（task-55，commit b2471b8）**：拼接 owner 是 video_workbench/app/jobs.py 的 error_message_for_row（同文件的常量 ERROR_DETAIL_JOINER 值为「 —— 」、常量 ERROR_MESSAGE_MAX_CHARS 为 600），在 to_payload() 里写进 error_message 那一列；前端在 summary.js 的失败分支里逐字写 new Error(job.error_message ‖「生成失败」)。判据归 tests/wb/test_summary_error_display.py（7 条，lead 复跑 7 passed in 0.22s）。牙齿＝把前端取法改回 job.error.message 必红。**别再把它写成「待落地」**（本轮 lead 就差点拿旧规则表当现状读） |
 | 包内自显示的版本号只有一个 owner | **已落地（task-69 连带三，commit 2e47868；`git log --diff-filter=A -- tests/wb/test_version_owner.py` 现读）**：判据是 tests/wb/test_version_owner.py 六条（lead 现跑 6 passed in 1.28s），断言「载荷／关于显示的版本 == video_workbench.__version__」而**不钉字面量**；同文件里还有一条机械闸——产品码非注释行里版本号字面量只准 video_workbench/__init__.py 那一行出现（扫描前先剥整行与行尾注释，docs 与 tests 不扫，理由写在 docstring）。牙齿＝把那一行的字面量写回 0.2.0 而显示层不动 ⇒ 机械闸与 owner 形状锁必红。归 lead，不派 vendor，与 test_summary_error_display.py 不撞文件。**别再把它写成「待落」**（本轮这条规则表就差一点又变成过期口径） |
+| 「ruff format / check 过关」这句话不许空口说 | 命令口径见第三点五节。ruff 已装进 venv（`requirements-dev.txt` 钉 `ruff==0.17.3`，本机 `ruff --version` 回显 `ruff 0.17.3`），但**至今一次 `ruff format` 都没执行过** —— 装上当天的基线是默认集 1272 条、format 会重排 288 个文件，按 `ruff.toml` 收窄后 `video_workbench` 仍 28 条 check / 43 个文件待 format。还这笔债的是 task-71。**拦住空口的不是机器闸，是「命令原文 + 范围 + 剩余条数」这三个数**：只写「过了」而给不出这三样，核板时按没跑退回。锁定面与 `bili_scribe` 在 `ruff.toml` 的 `exclude` 里，**不许为了让某条规则过而去改 `exclude` 或加 `# noqa`**（那等于用格式闸改字节锁面，撞第三节） |
