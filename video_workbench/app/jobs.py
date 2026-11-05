@@ -15,6 +15,7 @@ faster-whisper），我们做的只是"起进程 + 读 stderr + 汇报进度"—
 
 from __future__ import annotations
 
+import os
 import shutil
 import threading
 import traceback
@@ -38,6 +39,35 @@ Handler = Callable[["JobContext", dict[str, Any]], Any]
 #: = 零 schema 迁移、零事件订阅（``job.finished`` 那条不算：后台跑完时页面可能没开着）。
 ERROR_DETAIL_JOINER = " —— "
 ERROR_MESSAGE_MAX_CHARS = 600
+
+#: 失败/取消收尾那一刻要不要往日志文件补一行「为什么」。
+#:
+#: **默认关**。第 1 步量到的事实（都带命令，写在交付里）决定了这个默认值：
+#: `error_message` 那一列**今天已经在库里、界面上已经逐字显示它**，而那一列**不过 `redact`**
+#: —— 直接把库文件按字节扫一遍，`sk-` 开头的哨兵原文命中、`***` 不命中。所以「接」并不新增
+#: 明文落盘的性质，但也不换来任何新东西：多出来的一份只是同一句话的第二次抄写，
+#: 只是这一份反倒过了码。要不要在日志里留一份打过码的收尾原因，是产品决定，
+#: 现在由这个开关决定；关掉 = 现状，一个字都不写。
+#:
+#: 开关每次调用现读环境变量，不缓存到 import（`_parity_strict` 同族理由）。
+FAILURE_LOG_ENV = "WB_JOB_FAILURE_LOG"
+
+
+def failure_log_enabled() -> bool:
+    """`WB_JOB_FAILURE_LOG` 设成 1/true/on 才写那一行；没设 = 关。"""
+    return str(os.environ.get(FAILURE_LOG_ENV, "")).strip().lower() in {"1", "true", "on"}
+
+
+def job_log_prefix(job_id: str) -> str:
+    """一行任务日志的头。**只有一个出处**，`_log` 与 `_finish` 都用它。
+
+    为什么单拎出来：`log_line` 的前缀是 `%(name)s`（打出来是 `video_workbench.job`），
+    **不带 job_id**；id 是 `_log` 那句 `f"[{job_id}] {text}"` 自己拼的。收尾那行要是再手打
+    一遍同样的字面量，就等于给「一行任务日志长什么样」立了第二个 owner——两处格式一旦分叉，
+    按 `[job_` grep 日志的人只会拿到两种形状。所以这里放一个函数，两处调它，
+    想改形状只能改这一处。
+    """
+    return f"[{job_id}] "
 
 
 def _detail_tail(detail: Any) -> str:
@@ -301,6 +331,20 @@ class JobManager:
             merged["log"] = lines
             result = merged
 
+        # 失败/取消那一刻，把「为什么」补进行日志文件。默认关，见 `FAILURE_LOG_ENV` 那段。
+        #
+        # 这一行刻意不新增任何 owner：句子从 `error_message_for_row` 拿（多行的 detail
+        # 已经由 `_detail_tail` 收成最后一条非空行 ⇒ **恒一个物理行**，不是我手塞 traceback
+        # 原文拼出来的），脱敏从 `log_line` 体内的 `redact` 拿，前缀从 `job_log_prefix` 拿。
+        # 在这三处再各写一遍，就是第二个 owner——那份明细本来就在 `error_message` 列里。
+        if status != "succeeded" and self._logger is not None and failure_log_enabled():
+            reason = error_message_for_row(error) or "（无错误文案）"
+            code = (error or {}).get("code") or "-"
+            try:
+                self._logger(f"{job_log_prefix(job_id)}任务收尾 {status} code={code} → {reason}")
+            except Exception:  # 与 `_log` 同一口径：日志不能反过来把任务搞挂
+                pass
+
         payload = {
             "status": status,
             "finished_at": now_iso(),
@@ -377,7 +421,7 @@ class JobManager:
         self.events.log(job_id, text)
         if self._logger is not None:
             try:
-                self._logger(f"[{job_id}] {text}")
+                self._logger(f"{job_log_prefix(job_id)}{text}")
             except Exception:  # 日志不能反过来把任务搞挂
                 pass
 
