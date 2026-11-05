@@ -1143,23 +1143,33 @@ def retired_row_labels() -> list[dict[str, str]]:
     return [{"key": key, "display": summary_pkg.role_label(key)} for key in sorted(RETIRED_ROLES)]
 
 
-#: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，
-#: 而 llm.max_tokens 的默认值只有 4096——按配置原样重问必然再截断。
+#: 重问/续写时的输出预算下限。一份两小时视频的时间线实测要 8k 上下，而
+#: ``llm.max_tokens`` 当年的默认值只有 4096——按配置原样重问必然再截断。
+#: （2026-11-05 task-52 把默认值抬到 32768，这条下限在 base 更大时不再起作用，
+#: 但仍然是「用户把 max_tokens 调回小值」那条路唯一的兜底，别当死代码删。）
 MIN_JSON_TOKENS = 12288
 
 
 def _json_budget(max_tokens: int | None, floor: int = MIN_JSON_TOKENS) -> int:
-    """重问、续写、分批各步用多少输出预算：取「配置的两倍」与 floor 的较大者，上限 16384。
+    """重问、续写、分批各步用多少输出预算：取「配置的两倍」与 floor 的较大者，
+    封顶 16384，但**永不低于配置本身**（``base``）。
 
     默认（对账档，``WB_SUMMARY_PARITY_STRICT`` 没设就算）不抬到 12288、不翻倍、也不封
     16384：上游用的就是 ``cfg.llm.max_tokens``，多给一个 token 都算 WB 在改变输出预算。
     只有显式设成 0/false/off 才走上面那套抬升——那也是这套阶梯唯一还会被执行的时候
     （严格档下 `chat()` 直通，根本进不到重问/续写/分批）。
+
+    为什么不把 16384 当成安全上限来写这句话：这条封顶比 ``llm.max_tokens`` 的默认值
+    活得久——默认值 2026-11-05 从 4096 抬到 32768（task-52）之后，「封顶 16384」在
+    base>16384 时会把**补救请求削到比主请求还小**，坏 JSON 重问反而更容易被截断。
+    加下界只救 base>16384 那一格（32768→32768），base≤16384 时逐值不变
+    （4096→12288、8192/12288/16384→16384）⇒ 这不是重新设计阶梯，是补一条
+    「补救请求不许比主请求更容易截断」的下界。常量 16384 本身没动。
     """
     if _parity_strict():
         return int(max_tokens or 0)
     base = int(max_tokens or 0)
-    return min(max(int(floor), base * 2), 16384)
+    return max(base, min(max(int(floor), base * 2), 16384))
 
 
 def _short_nonce() -> str:
