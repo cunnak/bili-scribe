@@ -167,6 +167,27 @@ def content_targets(main: Path, mirror: Path) -> dict:
             "common_n": len(common)}
 
 
+def _narrow(cats: dict, exclude: list[str], only: list[str]) -> dict:
+    """按 --exclude / --only 过滤「内容不同」与「同步删」两栏。
+
+    为什么要有这个参数（2026-11-05 实录）：入口原本没有挑选能力，任何一次
+    `--apply` 都会把「未入库的在途改动」和「已入库的改动」混成一笔账搬进
+    给人下载的发布镜像。过滤只作用于**要写的面**；上方报数仍打全量，
+    让人看见被挑掉了几项 —— 报数与写入分叉，就是这里的记账口径。
+    """
+    def keep(p: str) -> bool:
+        if only and p not in only:
+            return False
+        if any(p == e or p.startswith(e.rstrip("/") + "/") for e in exclude):
+            return False
+        return True
+
+    cats["dropped_from_sync"] = [p for p in cats["targets"] + cats["deleted"] if not keep(p)]
+    cats["targets"] = [p for p in cats["targets"] if keep(p)]
+    cats["deleted"] = [p for p in cats["deleted"] if keep(p)]
+    return cats
+
+
 def apply_sync(main: Path, mirror: Path, targets: list[str], deleted: list[str]) -> list[str]:
     done: list[str] = []
     for rel in targets + deleted:
@@ -205,6 +226,13 @@ def main() -> int:
                     help="显式认领某个「主仓独有」路径进镜像（镜像从未跟踪它；"
                          "同步本身只走交集，所以这类要人工点名，不自动新建）")
     ap.add_argument("--commit", action="store_true", help="同步后用显式 pathspec 提交（须配 --apply）")
+    ap.add_argument("--exclude", action="append", default=[], metavar="PATH",
+                    help="这次同步**跳过**某个共同跟踪路径（可重复）。用在「镜像里某人"
+                         "有在途未入库的改动，先别把它推进给人下载的镜像」这种现场；"
+                         "报数仍打全量，被跳过的会单列一行")
+    ap.add_argument("--only", action="append", default=[], metavar="PATH",
+                    help="白名单：只同步点名的路径（可重复），其余全部跳过。与 --exclude "
+                         "同时给时先 only 再 exclude")
     ap.add_argument("-m", "--message", default="", help="镜像那一笔的 commit message")
     args = ap.parse_args()
 
@@ -219,6 +247,11 @@ def main() -> int:
         return 1
 
     t = content_targets(ROOT, mirror)
+    if args.exclude or args.only:
+        t = _narrow(t, args.exclude, args.only)
+        if t["dropped_from_sync"]:
+            print(f"[note] 按 --exclude/--only 跳过 {len(t['dropped_from_sync'])} 项（不写入镜像）："
+                  + "、".join(t["dropped_from_sync"]))
     print(f"[ok] 前置检查通过：共同跟踪 {t['common_n']} 项，其中内容不同 **{len(t['targets'])}** 项")
     print(f"     主仓独有（不新建）{len(t['main_only'])} / 镜像独有（漂移，人工判）{len(t['mirror_only'])} "
           f"/ 主仓已删（同步删）{len(t['deleted'])}")
