@@ -75,10 +75,14 @@ class WBError(Exception):
     1. **同步 RPC 的错误信封带全文**：``app/rpc.py`` 的 ``_error`` 原样返回
        ``to_payload()`` 的四键，前端 ``web/js/rpc.js`` 装进 ``RpcError.detail``；
        ``pages/settings.js``、``pages/merge.js`` 会读它。
-    2. **任务失败事件的载荷也带全文**：``app/jobs.py`` 的 ``_finish`` 把 ``error``
-       原样放进 ``job.finished`` 事件——但界面目前没有任何一处订阅这个事件名
-       （现读 ``grep -rn "job.finished" video_workbench/web/js/`` 为 0），所以这条
-       只是「没被削」，不是「看得见」。
+    2. **任务事件的载荷也带全文，但没有任何一处渲染它**：``app/jobs.py`` 的 ``_finish``
+       把 ``error``（含全文 ``detail``）放进 ``job.finished`` 事件，而 ``web/js/app.js``
+       的事件入口把**任何** ``job.*`` 都转成 ``job.any`` 广播（现读 ``emit("job.any",
+       payload)`` 那一句），所以载荷确实到了浏览器——**别把它读成「加个事件订阅就修好
+       了」**，那修的是不存在的那一环。没渲染它的是这两处：``refreshJobText`` 只合并行和计数，
+       ``job.any`` 的订阅方（``syncJobEvent``，往任务中心弹窗里同步行）也不读
+       ``payload.detail``。⇒ 要让用户在任务这条路上看见全文，改的是**渲染**，
+       不是订阅。
     3. **落库那一列不放全文**：``wb_job`` 没有 detail 格（``pragma table_info(wb_job)``
        现读），存的是 ``app/jobs.py`` 的 ``error_message_for_row`` 收敛后的一句——
        多行 detail 只取最后一条非空行、整句封顶 ``ERROR_MESSAGE_MAX_CHARS``、
@@ -91,7 +95,9 @@ class WBError(Exception):
 
     已知缺口（如实记着，别在代码里假装它不存在）：``detail`` **不写日志文件**
     （``app/jobs.py`` 没往 logger 写它，"复制日志"那条 ``app.log_tail`` 取的是日志
-    文件的尾巴），所以任务失败后若界面恰好没开着，全文就只剩事件那一次投递。
+    文件的尾巴）。叠上第 2 条「到了浏览器但没人渲染」，任务失败时全文实际只有
+    同步 RPC 那条路（第 1 条）能被人读到；任务这条路上，用户看得见的一直只有
+    第 3 条那一句。
     """
 
     def __init__(
