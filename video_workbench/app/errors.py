@@ -69,8 +69,29 @@ RETRYABLE_CODES = {
 class WBError(Exception):
     """带错误码的业务异常。
 
-    ``detail`` 是给人排错用的原文（进程 stderr、接口响应体）。
-    它可能很长，因此**只写日志和"复制日志"，不直接铺在界面主文案里**。
+    ``detail`` 是给人排错用的原文（进程 stderr、接口响应体、traceback），它可能很长。
+    以下是它在盘上真实的三条去处（逐条可核对，不是设想）：
+
+    1. **同步 RPC 的错误信封带全文**：``app/rpc.py`` 的 ``_error`` 原样返回
+       ``to_payload()`` 的四键，前端 ``web/js/rpc.js`` 装进 ``RpcError.detail``；
+       ``pages/settings.js``、``pages/merge.js`` 会读它。
+    2. **任务失败事件的载荷也带全文**：``app/jobs.py`` 的 ``_finish`` 把 ``error``
+       原样放进 ``job.finished`` 事件——但界面目前没有任何一处订阅这个事件名
+       （现读 ``grep -rn "job.finished" video_workbench/web/js/`` 为 0），所以这条
+       只是「没被削」，不是「看得见」。
+    3. **落库那一列不放全文**：``wb_job`` 没有 detail 格（``pragma table_info(wb_job)``
+       现读），存的是 ``app/jobs.py`` 的 ``error_message_for_row`` 收敛后的一句——
+       多行 detail 只取最后一条非空行、整句封顶 ``ERROR_MESSAGE_MAX_CHARS``、
+       detail 为空时逐字就是 ``message``。界面上「为什么失败」读的就是这一句。
+
+    ⇒ 「很长」拦在**拼接层**（那一列），不是拦在 ``detail`` 本身：短 detail
+    （例如 ``finish_reason=length，思考用了 N tokens`` 这种自修提示）会连原因一起
+    进主文案，整段 traceback 不会糊在界面上。拼接规则只有 ``error_message_for_row``
+    一处，别处要带原因请调它，不许再拼第二次。
+
+    已知缺口（如实记着，别在代码里假装它不存在）：``detail`` **不写日志文件**
+    （``app/jobs.py`` 没往 logger 写它，"复制日志"那条 ``app.log_tail`` 取的是日志
+    文件的尾巴），所以任务失败后若界面恰好没开着，全文就只剩事件那一次投递。
     """
 
     def __init__(

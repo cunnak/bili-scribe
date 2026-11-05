@@ -12,7 +12,10 @@
    {"ok": false, "error": {"code","message","detail","retryable"}, "request_id": "..."}
 
 **异常在这里收口。** 业务代码只管 ``raise WBError``；其余异常一律转 ``INTERNAL``
-并把 traceback 放进 ``detail``（只给"复制日志"用，不铺在主文案里）。
+并把整段 traceback 放进 ``detail``（``detail`` 的三条真实去处写在 ``app/errors.py``
+的 ``WBError`` docstring 里，那里是唯一口径，这里不重复一遍）。任务失败时界面上那句
+原因是 ``app/jobs.py`` 的 ``error_message_for_row`` 拼的——整段 traceback 不会铺在
+主文案里，拼接规则只有那一处。
 """
 
 from __future__ import annotations
