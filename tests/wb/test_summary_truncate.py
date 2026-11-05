@@ -72,15 +72,60 @@ def test_looks_truncated_recognises_half_object():
     assert _looks_truncated("") is False
 
 
-# 档位=宽松：②输出预算抬升只在宽松档生效（默认档实测还原 cfg 的 4096，正是这次红的原因）。
+# 档位=宽松：②补救预算的阶梯只在宽松档生效（严格档由 parity 名下的 B4 逐轮钉直通）。
 def test_budget_floors_at_twelve_thousand(loose_env):
-    # 两小时视频 level2 正文一万六千字：8192 token 到头会断在半句（v7 现场），抬到 12288
+    """补救阶梯的三条不变量：下限、封顶、以及「补救不许比主请求还小」。
+
+    以前为什么绿（2026-11-05 之前）：最后一行写的是 `_json_budget(20000) == 16384`，钉的
+    正是「base 高于封顶时照样被削到 16384」。默认值 4096→32768（task-52）之后那就是
+    **倒挂**：坏 JSON 的重问/续写/分批反而只拿到 16384，比主请求少一半以上，越修越容易
+    被截断。task-53（commit `c8b3376`）给阶梯补了下界
+    （`max(base, min(max(floor, base*2), 16384))`），于是那行旧断言**该红**，不是回归。
+
+    现在绿在哪——三面各钉一条，缺一面就没牙（牙齿见 `%TEMP%/parity-t56` 两个变体）：
+    1. **下限**：小配置与 `None` 抬到 `MIN_JSON_TOKENS`；
+    2. **封顶**：`base ≤ cap` 且两倍超 cap 时结果等于 cap —— 这条就是「有人把 16384 删了」
+       的探测器（变体 B 实测只红这一组）；
+    3. **下界（task-53 的规则本身）**：任何 base 的补救预算都 `>= base`，且 base 高于 cap 时
+       **必须高于 cap**。刻意不写 `== base`：今天等于 base 只是两条边界的交集，不是规则；
+       将来谁抬高 cap，规则照旧成立、实现可以变。
+
+    `cap` 为什么写成字面量：产品里 16384 是 `video_workbench/core/summarizer.py` 第 1173 行
+    的**裸数字**（`MIN_JSON_TOKENS` 才是常量），没有可导入的名字。这里把它登记成局部读数并
+    断言「产品此刻确实是这个数」，而不是再造一个看起来像常量的 owner——vendor 哪天提成常量，
+    这条与那行注释要一起改，改不到就会红，不会静默漂移。
+
+    owner 分工（lead 的「一个 owner」要求）：本条只钉 `_json_budget()` **这个函数**的阶梯语义；
+    「严格档每轮预算 == 配置值」由 `tests/wb/test_summary_parity.py::
+    test_default_tier_every_round_budget_equals_the_configured_value`（B4）钉。两处不重叠：
+    B4 看的是发出去的请求，本条看的是补救那几步的算法；B4 的 docstring 现在只指路到这里，
+    不重复断言。
+    """
+    cap = 16384  # 产品里的裸封顶值（不是常量），下面第 2 组的全部前提
     assert MIN_JSON_TOKENS == 12288
-    assert _json_budget(4096) == 12288         # 配置太小 → 抬到下限
-    assert _json_budget(None) == 12288         # 没传 → 用下限
-    assert _json_budget(6000) == 12288         # 两倍仍在下限之下 → 抬到下限
-    assert _json_budget(9000) == 16384         # 两倍超上限 → 封顶
-    assert _json_budget(20000) == 16384        # 封顶
+
+    # 1) 下限
+    assert _json_budget(4096) == MIN_JSON_TOKENS   # 配置太小 → 抬到下限
+    assert _json_budget(None) == MIN_JSON_TOKENS   # 没传 → 用下限
+    assert _json_budget(6000) == MIN_JSON_TOKENS   # 两倍仍在下限之下 → 抬到下限
+
+    # 2a) 封顶的**真**探测器：只取「未封顶值严格大于 cap」且 base 不高于 cap 的格子
+    for base in (9000, 12288, cap):
+        assert base <= cap < max(MIN_JSON_TOKENS, base * 2), (
+            f"夹具前提不成立：base={base} 落不到「该被封顶」那一格")
+        assert _json_budget(base) == cap, f"封顶丢了：base={base} 实得 {_json_budget(base)}"
+
+    # 2b) 边界格（lead 例子里的那一格，如实标注它测不到什么）：8192 的未封顶值**恰好等于**
+    #     cap ⇒ 封顶删不删都是 16384。它能钉的是「task-53 的下界没把这一格改动」，
+    #     不能当封顶的证据——证据在 2a。
+    assert max(MIN_JSON_TOKENS, 8192 * 2) == cap, "8192 这一格的前提是未封顶值恰好等于 cap"
+    assert _json_budget(8192) == cap, f"改前读数被移动了：_json_budget(8192) 实得 {_json_budget(8192)}"
+
+    # 3) 下界：被翻正的那一格现在钉的是规则
+    for base in (cap + 1, 20000, 32768, 65536):
+        got = _json_budget(base)
+        assert got >= base, f"倒挂回来了：base={base} 的补救只有 {got}，比主请求还小"
+        assert got > cap, f"base={base} 高于封顶却被削到 {got}——封顶越过了下界"
 
 
 

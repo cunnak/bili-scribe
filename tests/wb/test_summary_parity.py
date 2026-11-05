@@ -1158,6 +1158,107 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
 #: 上游 `bili_scribe/infra/llm.py:259` 是 `max_tokens or self.cfg.max_tokens`，
 #: 所以 bs 每次请求实际带的就是 cfg 里那个数；默认档要求两侧同值才算一致。
 
+def _repair_budget_cap_from_source() -> int:
+    """从产品源码里现读「补救预算的封顶值」，不在用例里再造一个常量。
+
+    16384 在 `video_workbench/core/summarizer.py` 里是 **裸字面量**（`MIN_JSON_TOKENS`
+    才是可导入的常量），所以这里用 AST 在 `_json_budget` 函数体里找那个整数，而不是
+    从别的模块 import 一个同名数字——后者会变成「用例自己造的 owner」。
+    读不到就 fail：这条锁的整个前提就是「有这么一个比配置低的封顶」，读不到说明产品
+    已经把这件事改了，那时应该改判据，而不是让这条静默通过。
+    """
+    import ast
+
+    source = ADAPTER_PY.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    fn = next((n for n in tree.body
+               if isinstance(n, ast.FunctionDef) and n.name == "_json_budget"), None)
+    if fn is None:
+        raise AssertionError("`_json_budget` 在产品里不见了，封顶值的读法要重新定")
+    ints = {n.value for n in ast.walk(fn) if isinstance(n, ast.Constant) and isinstance(n.value, int)}
+    cap = max(ints - {12288})            # MIN_JSON_TOKENS 是下限，封顶是另一个数
+    if cap <= 12288:
+        raise AssertionError(f"读到的封顶不像话：{cap}（比下限还小），判据要重新想")
+    return cap
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "已知缺陷（task-58 的锁跑出来的，不是我造的）：宽松档里补救步真发出去的 "
+        "max_tokens 恒等于 MIN_JSON_TOKENS=12288，配置值根本没参与——"
+        "`summarize()` 这条链路不传 max_tokens，`_json_budget(None)` 就只看下限。"
+        "默认预算抬到 32768（task-52）之后，这一格就是倒挂：主请求按配置走 32768，"
+        "续写/重问只拿 12288。修法归 vendor：调用点把 cfg.llm.max_tokens 传进 "
+        "`_json_budget`，或让补救预算以「本轮实际预算」为下界。"
+        "**这条是 strict xfail：vendor 修好那天会 XPASS 变红，那时摘掉标记，"
+        "不要把它改成宽松断言。**"
+    ),
+)
+def test_the_repair_budget_never_falls_below_the_main_request(loose_env):
+    """**宽松档**：坏 JSON 之后真发出去的补救预算，一律**不低于主请求拿到的预算**。
+
+    这条是 task-53 立的规则（commit `c8b3376`）。以前为什么是反的：task-52 把默认
+    `llm.max_tokens` 从 4096 抬到 32768 之后，旧公式
+    `min(max(MIN_JSON_TOKENS, base*2), 16384)` 在 base 高于封顶时**反向削**——
+    配置 20000 掉到 16384，也就是「越修越小」，被截断的正文重问时反而更容易再断。
+    task-53 给它补了下界。
+
+    为什么钉规则不钉数：断言写成 `>= base`，`base` 从**封顶现读**推出（比封顶大一点），
+    所以将来 vendor 把 16384 提成常量、或者把封顶抬高，这条照旧成立；
+    反过来，只要有人把下界摘掉、或者在调用点再夹一刀把补救步改小，这条必红。
+
+    **今天它是红的（所以挂 strict xfail）**：真跑出来的形状是「主请求 None（按配置 20480
+    走）+ 补救步 12288」。复现命令原文（去掉标记直接跑）：
+    `.venv/Scripts/python.exe -m pytest "tests/wb/test_summary_parity.py::test_the_repair_budget_never_falls_below_the_main_request" -q -p no:randomly`
+    ⇒ `AssertionError: 补救预算比主请求还小（倒挂回来了）：base=20480、封顶现读=16384、
+    补救步拿到 [12288]`。这一条**不算「测试没写好」**：它测的是发出去的请求，
+    而 `_json_budget()` 那一层的下界（task-53）救不到这里，因为这里的入参是 None。
+
+    与其它几条的分工（lead 的「一个 owner」要求，别开第二份等价断言）：
+    * `tests/wb/test_summary_truncate.py::test_budget_floors_at_twelve_thousand`
+      ＝ `_json_budget()` **函数**的三面（下限 / 封顶 / 下界）——算法 owner；
+    * `test_default_tier_every_round_budget_equals_the_configured_value`（B4）
+      ＝ **严格档**每轮预算 == 配置值——档位 owner；
+    * 本条 ＝ **宽松档真发出去的 `max_tokens`**。前两条一个在函数层、一个在严格档，
+      抓不到「函数没改、调用点被改小」这一类写法；只有走真链路才看得见。
+      与 `test_loose_mode_repair_ladder_costs_extra_requests_and_budget` 也不重叠：
+      那条钉的是「默认配置 4096 时补救步抬到 12288、并多花一次请求」（差异清单第 2、3 项
+      的登记），本条钉的是「base 高于封顶时不许倒挂」——同一阶梯的两个不同区间。
+    """
+    from video_workbench.core import summarizer as adapter
+
+    cap = _repair_budget_cap_from_source()
+    base = cap + 4096                     # 严格高于封顶：倒挂那一格的定义
+    cfg = make_cfg(max_tokens=base)
+
+    head = ('{"one_line":"三件事","summary_md":"## 开头\\n这里讲到一半')
+    tail = ('被截住了","key_points":["第一件"],"timeline":[],"caution":"",'
+            '"comment_short":"短版"}')
+    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
+               "duration_sec": 60, "desc": "固定简介"}
+    segments = [{"start_ms": 0, "text": "内容"}]
+
+    client = FakeLLM([head, tail, CRITIQUE_NOTE,
+                      {**PAYLOAD, "summary_md": "## 开头\n这里讲到一半被截住了"}])
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
+                         role="jinglian")
+    assert result["summary"]["summary_md"].endswith("被截住了"), (
+        "夹具没走到补救步就等于没测：先看这条，别去怀疑判据")
+
+    # 主请求不写这个参数（None ＝「按客户端配置原样」），它的预算就是 base。
+    assert client.requests[0]["max_tokens"] is None, (
+        "主请求的预算写法变了，这条锁的基准线要重新定")
+
+    repair = [r["max_tokens"] for r in client.requests[1:] if r["max_tokens"] is not None]
+    assert repair, (
+        "一条补救请求都没读到 `max_tokens`——夹具空跑，这条锁什么都没守；"
+        "要么阶梯没触发，要么产品改成不写这个参数，两种都得重新登记")
+    below = [n for n in repair if n < base]
+    assert not below, (
+        f"补救预算比主请求还小（倒挂回来了）：base={base}、封顶现读={cap}、补救步拿到 {below}")
+
+
 #: 模型给出超过 bs 硬上限的时间线条数（`_coerce_timeline` 的 `out[:20]` 会咬到）。
 OVER_CAP_ROWS = 25
 #: 没超上限的条数。历史语料 p90=12 / max=19，18 条属于「常见且不该被咬到」那一类。
@@ -1372,6 +1473,13 @@ def test_default_tier_every_round_budget_equals_the_configured_value(default_env
     灵敏度不在本条重复，由 `tests/wb/test_summary_parity_teeth.py::
     test_a_per_round_budget_boost_is_caught_by_the_b4_check` 只证「抓得到」。
 
+    ## 与 `test_strict_mode_adapter_requests_are_identical_to_bs` **会同时红，这是有意的**
+    B 方案同时破坏两件事：逐轮抬预算 ⇒ 有效值不再等于配置值（本条），而抬出来的那一次
+    与 bili_scribe 的请求不再逐字一致（那条）。两条各钉一面——本条钉「预算从哪来」，
+    那条钉「跟 bs 像不像」。把它们拆成一条、或者为了少一条连带红去放宽任何一边，
+    都会把「用户为什么否决 B」这层因果关系藏掉（lead 2026-11-05 判 T54-3 的原话）。
+    牙齿读数：A 变体（第三轮翻倍）实测红名单就是这两条，`额外红 = []`。
+
     ## `max_tokens` 为什么必须比「还原后的有效值」而不是原始 kwargs
     它是唯一一处看原始 kwargs 会看错的参数：上游 `summarize()` 调 `llm.chat` 时根本不写它
     （bs 那边由客户端补配置值），而 WB 的 `ChatClient` 在 `None` 时干脆不发这个字段——
@@ -1383,10 +1491,14 @@ def test_default_tier_every_round_budget_equals_the_configured_value(default_env
       配置值原样补上、不抬不封，4096/8192/12288/16384/32768 全都**原样回去**
       ⇒ 抬默认值对默认档没有回归，一个值都没变。
     - **宽松档（`WB_SUMMARY_PARITY_STRICT=0`）＝本条不管的那一档**：`_json_budget()` 的阶梯
-      生效（`min(max(MIN_JSON_TOKENS=12288, base*2), 16384)`），同一组入参得到
-      12288/16384/16384/16384/**16384** ⇒ base 高于 16384 时补救请求**低于主请求**（倒挂）。
-      这条只在关掉对账那条路上成立；「补救预算 ≥ 主请求」的规则锁等产品改完 `_json_budget`
-      （vendor 的 task-53）落地后再钉，且只写在宽松档语境里，不与本条重叠。
+      生效，task-53（commit `c8b3376`）之后的形状是
+      `max(base, min(max(MIN_JSON_TOKENS=12288, base*2), 16384))`，同一组入参得到
+      12288/16384/16384/16384/**32768**：base 高于 16384 时**不再被削**（改之前那一格是
+      16384，正是「补救比主请求还小」的倒挂）。
+      **阶梯规则的 owner 不在本条**——在
+      `tests/wb/test_summary_truncate.py::test_budget_floors_at_twelve_thousand`
+      （三面：下限 / 封顶 / 下界）。本条只在文字里指路，不重复断言（lead 的「一个 owner」
+      要求，task-56）；两处分工：本条看**发出去的请求**，那条看**补救那几步的算法**。
 
     ## 期望值现读配置，不写死任何一个数
     早先把 4096 抄进断言过一次，那等于把配置值当合同抄一遍，默认值一改就假红。现在参数表跑
