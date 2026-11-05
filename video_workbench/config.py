@@ -25,6 +25,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
@@ -1203,6 +1204,75 @@ def validate(cfg: WorkbenchConfig) -> None:
 # =========================================================== 渲染
 
 
+#: ``llm.max_tokens`` 下面那几行注释，WB 版的说法。之所以要接管它，是因为
+#: bili-scribe 渲染的那两句在**本机这类端点上是错的指引**，而用户正好是在「总结返回空」
+#: 的时候来翻这个文件。两句都按 2026-11-05 的实测写（证据见 AGENTS.md 第四节 task-50 小节）：
+#:   * 「这段推理不吃 max_tokens」——分两类端点。本机 workbuddy/magpie 实测**算进去**
+#:     （预算 16384 被思考打满、``finish_reason=length``、正文空）；另一类端点确实不算
+#:     （bs 当年实测设 4096 仍跑了 5125 tokens，其中 5120 是思考）。所以两种都不许写成绝对，
+#:     判据是报错里的 ``finish_reason`` 与思考 token 数，不是这个数的大小。
+#:   * 「客户端发现空正文会自动关思考重试一次」——那条腿在 bili-scribe 的客户端里，
+#:     Workbench 这条路没有；而且这个端点连 ``enable_thinking: false`` 都不遵守
+#:     （实测关掉那发仍烧 140 思考 tokens）。「把 thinking 设成 off」不是有效解，
+#:     不能照着 bs 那句把它写成根治办法。
+WB_THINKING_NOTES = (
+    "  # 思考模型（Qwen3 系列、QwQ、带 -thinking 的型号等）先产出一大段推理再作答。",
+    "  # 这段推理算不算进 max_tokens，因端点而异，判据看报错本身：本机 workbuddy/magpie",
+    "  # 实测**算**——预算被打满时 finish_reason=length、正文返回空、usage 里 reasoning_tokens",
+    "  # 正好等于 max_tokens。所以正文空先看 finish_reason 和思考 token 数，别无脑抬这个值。",
+    "  # auto=不发相关参数 / off=显式发 enable_thinking:false / on=显式发 true。",
+    "  # 别指望「空正文会自动关思考重试」：Workbench 这条路没有那条腿，而且这个端点连",
+    "  # enable_thinking:false 都不遵守（实测关掉仍烧 140 思考 tokens），关掉不是根治。",
+)
+
+#: ``llm.timeout_seconds`` 上面那行注释：bili-scribe 写的是「根治靠关思考」，按上面同一条
+#: 实测就是错的（关不掉）。这里只留「调大是缓解」这半句，不给不存在的根治办法。
+WB_TIMEOUT_NOTE = (
+    "  # 单次请求的读超时（秒）。思考模型的耗时主要花在推理上，调大它只是缓解。",
+)
+
+
+_SECTION_RE = re.compile(r"^[a-z_]+:[ \t]*$")
+
+
+def _rewrite_llm_comments(body: str) -> str:
+    """把 ``llm`` 段里那两处注释换成上面的 WB 版；键、值、缩进一个字节都不改。
+
+    **按形状匹配，不按原文匹配**。按原文匹配（「找到含『不吃 max_tokens』的那行」）有个
+    静默失效的坑：bili-scribe 哪天改个措辞，我们的替换就悄悄不生效，用户又看到那句错指引，
+    而钉「WB 写出的文件里没有这句」的测试照样绿（新措辞里没那个子串）。形状匹配不看措辞，
+    只看「紧跟在 ``llm.max_tokens`` 之后的那整块注释」和「``llm.timeout_seconds`` 前面的那行
+    注释」，bs 怎么改措辞都照样被接管。段落判断用 ``^[a-z_]+:$``，所以只可能命中顶层段落名。
+    """
+    lines = body.split("\n")
+    out: list[str] = []
+    section = ""
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _SECTION_RE.match(line):
+            section = line.strip()[:-1]
+        if section == "llm":
+            if line.strip().startswith("max_tokens:"):
+                out.append(line)
+                index += 1
+                while index < len(lines) and lines[index].lstrip().startswith("#"):
+                    index += 1
+                out.extend(WB_THINKING_NOTES)
+                continue
+            if (
+                line.lstrip().startswith("#")
+                and index + 1 < len(lines)
+                and lines[index + 1].strip().startswith("timeout_seconds:")
+            ):
+                out.extend(WB_TIMEOUT_NOTE)
+                index += 1
+                continue
+        out.append(line)
+        index += 1
+    return "\n".join(out)
+
+
 def render_yaml(cfg: WorkbenchConfig) -> str:
     """渲染 config.yaml —— **只含 bili-scribe 认识的键**。
 
@@ -1215,6 +1285,9 @@ def render_yaml(cfg: WorkbenchConfig) -> str:
     现在 = 只有 bili-scribe 万一又去读这份文件才会炸（自家事故）。仍然保守 —— 扩展键
     一律进 ``workbench.json``（由 ``save()`` 写），因为设置页、任务模型、下载/转录/切片
     那一大堆本来就该只有一个地方负责，别把同一份配置拆成两种形状去读。
+
+    唯一一处**不照搬** bili-scribe 文本的地方是 ``llm`` 段那两段注释，见
+    ``_rewrite_llm_comments``。
     """
     import bili_scribe.config as bc
 
@@ -1227,5 +1300,5 @@ def render_yaml(cfg: WorkbenchConfig) -> str:
             "",
         ]
     )
-    body = bc.render_config_yaml(to_bili_config(cfg))
+    body = _rewrite_llm_comments(bc.render_config_yaml(to_bili_config(cfg)))
     return head + (body if body.endswith("\n") else body + "\n")
