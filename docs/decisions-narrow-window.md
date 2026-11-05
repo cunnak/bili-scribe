@@ -57,3 +57,33 @@
 - 同族的错本轮已经犯过三次（把旧快照当现状、把别人的收回理论当事实、把算出来的封顶当产品值），
   共同形状是：**没读那一个真正决定行为的文件，就去判断行为**。
   ⇒ 判「这个场景用户能不能遇到」之前，先读入口参数，再读取证手段是不是绕过了它。
+
+## 补记（2026-11-06 00:0x）：镜像同步入口把自己锁在外面了
+
+用户随后拍了「日志：接全句」（动作 id `log-full`），我去把发布镜像追平主仓时撞上第二条：
+
+- `scripts/sync_mirror.py` 的 `--commit` **要求另给 `-m`**，而它在缺 `-m` 时**已经先把文件复制完、
+  也先把 gitlink 对齐了**，最后才打印 `[x] --commit 需要 -m`（源码：`if not args.message.strip()` 在
+  `apply_sync` 之后的提交分支里）。
+- ⇒ 镜像停在「5 个文件已按 HEAD 写好 + gitlink 已动，但一笔都没 commit」的脏状态。
+- **再跑一次入口，它自己的 `preflight()` 拒绝同步**：「镜像工作区不干净（6 行），先弄清是谁的在途」。
+  也就是说：**这个工具能进入一个它自己不接受的状态**，而且没有任何恢复入口——
+  只能靠人在镜像里手工 commit，而 AGENTS.md 第六节写的恰恰是「同步只准走这个入口」。
+
+当场处置（都是入口本该自己做的事，我手工替它做完）：
+- 手工核对镜像那 6 行**全部等于主仓 HEAD 版**（逐字节 `cmp`：`requirements-dev.txt`、
+  `scripts/sync_mirror.py`、`tests/wb/test_summary_parity.py`、`tests/wb/test_summary_error_display.py`
+  回显逐行 SAME-HEAD：`AGENTS.md`、`requirements-dev.txt`、`scripts/sync_mirror.py`、
+  `tests/wb/test_summary_error_display.py`、`tests/wb/test_summary_parity.py` 五份；
+  gitlink 现场是 `+78ca5bb` 而镜像 HEAD 仍记 `4756382`），
+  然后按显式 pathspec 提交、抬 submodule 指针、`push`。
+
+要修的两件事（归 lead，已落 task-73）：
+1. **参数校验前移**：`--commit` 缺 `-m` 必须在**任何写入之前**失败，不许先复制再报错。
+2. **给自己一个恢复入口**：当脏文件恰好等于「主仓 HEAD 版 + 已对齐的 gitlink」时，
+   这就是上一次中断留下的现场，应当认出它、报 `[resume]` 并允许提交，而不是把人堵死。
+
+顺带记两条同轮现读：
+- 镜像 `bili_scribe/config.py:57` 经 junction 读出 `max_tokens: int = 32768` ⇒ 上一轮「装镜像的人拿到的
+  默认值还是 4096」那个 bug，这次是真的对齐了（gitlink 从 `d823ee9` 一路抬到 `78ca5bb`）。
+- 镜像形状锁在镜像里实测 **6 passed in 2.73s**（`tests/wb/test_junction_content_not_tracked.py`）。
