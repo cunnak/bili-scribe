@@ -124,7 +124,24 @@ def preflight(main: Path, mirror: Path) -> tuple[list[str], list[str]]:
             notes.append(f"两侧 .gitignore 不同（预期镜像多出 junction 排除行）；它已从可写集硬排除")
 
     dirty = [ln for ln in git(mirror, "status", "--porcelain").splitlines() if ln]
-    if dirty:
+    # 只放行一种脏：整行就是 submodule gitlink（` M third_party/bili-scribe`），且 submodule
+    # 自己的内容是干净的。那正是「上次同步对齐了 checkout 却忘了 commit」的现场（今天真撞上），
+    # 它本身就是这一笔要提交的东西，不是别人的在途改动。
+    only_gitlink = dirty and all(ln.strip() == "M third_party/bili-scribe" or
+                                 ln.strip().startswith("M third_party/bili-scribe (")
+                                 for ln in dirty)
+    if only_gitlink:
+        inside = [ln for ln in git(mirror, "status", "--porcelain", "--",
+                                   "third_party/bili-scribe").splitlines() if ln]
+        # 上面那行只能证明父仓看见 gitlink 变了；再看 submodule 内部有没有未提交内容。
+        sm_dirty = [ln for ln in git(mirror / "third_party" / "bili-scribe",
+                                     "status", "--porcelain").splitlines() if ln]
+        if sm_dirty:
+            blockers.append(f"gitlink 变了且 submodule 内部也有 {len(sm_dirty)} 行未提交："
+                            "\n      " + "\n      ".join(sm_dirty[:5]))
+        else:
+            notes.append(f"镜像工作区只有 gitlink 待提交（{len(dirty)} 行）——视为本笔要修的东西，放行")
+    elif dirty:
         blockers.append(f"镜像工作区不干净（{len(dirty)} 行），先弄清是谁的在途：\n      " +
                         "\n      ".join(dirty[:5]))
     return blockers, notes
