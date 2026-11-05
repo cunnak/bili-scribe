@@ -49,6 +49,8 @@ A 之下 `:136`/`:1072` 一行不改，「回落 + 历史行（已停用）」�
 
 ## 顺手记一条产品债（parity 用 `xfail(strict=True)` 常驻钉住）
 
+> **本段已过期，销账如下（2026-11-05 现读）。** 下面提到的那条 `xfail(strict=True)` **早就不存在了**——`grep -rn "pytest.mark.xfail" tests/` = 0 命中。这条债在 task-34 修好、task-48/49 补完判据，现在由两条**常驻用例**守着，不是记债标记：`tests/wb/test_config_shared.py:147 test_legacy_yaml_is_read_but_never_rewritten` 与 `tests/wb/test_config_migration_notice.py:488 test_the_legacy_files_are_read_but_never_written`。这段留着只因为下面「写点已更正」那节的取证过程仍然有用（复现必须用含 foreign 键的夹具那一条）。
+
 只读路由 `roles` / `--roles` / `info` 在服务装配阶段就把用户配置整份重写。已钉的是「真实两家零写入 + 第二次运行幂等」；真正修好后那条 xfail 会 XPASS 变红，提醒删掉它。
 
 **写点已更正（vendor 用 `trace_save2.py` 调用栈取证，本节原写 `app/service.py:987/:1008/:1014` 是错的）**：真实链路是
