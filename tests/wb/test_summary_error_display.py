@@ -1011,12 +1011,23 @@ TEETH_EXPR = ("not a_failure_with_detail_lands and not a_failure_without_detail_
               " and not joiner_is_a_single_owner and not reads_only_keys_that_exist"
               " and not actually_uses_the_message_column"
               " and not does_not_rebuild_the_sentence"
-              " and not scan_domain_switch_changes and not burn_when")
+              " and not scan_domain_switch_changes and not burn_when"
+              # 控制组只在外层跑一次：让它在牙齿子进程里被选中就是无限递归。
+              " and not untouched_copy")
 
 #: 每个变体的期望红名单，逐字抄自现跑读数（`Temp/wb_t68/calib4_all.txt`，
 #: 2026-11-05 20:39 起那一段；夹具改成每格独立 `mkdtemp` home 之后重测）。
 #: 名单里凡是 `[{...}]` 的展开都由 `_CELL_IDS` / `_VP_IDS` 现算，
 #: 参数化 id 一改就会对不上，不会静默空跑。
+#:
+#: **这五组名单是「看着实际输出补的」，不是开跑前先验声明的**——说死在这里，
+#: 别让它们读起来像先验。先验的只有**判定规则**四样：缺红、多红、常驻被红、
+#: `rc ∉ (0,1)`，外加下面那条「干净副本必须 0 红」的地基。名单值按实测补定之后就
+#: **冻结**：谁漂谁红，不许为了让某条变体绿而去动名单或规则的任何一处。
+#: 冻结后的复跑出处（本文件进 `5d0e255` 之后，同一条命令带 / 不带 `PYTHONIOENCODING`
+#: 各一遍 `-k burn_when -q -rf -p no:randomly --tb=line`）：
+#:   带 `utf-8` → `5 passed, 26 deselected in 582.22s`；不带 → `5 passed, 26 deselected in 579.25s`
+#:   ⇒ 逐变体期望红与实际红吻合；环境不改变判定，只改变证据的可读性（见 `_run_suite`）。
 TEETH_EXPECT = {
     # -webkit-line-clamp: 1 -> 2：收起态不再是「一句」。静态那条红；
     # 窄档 8 字列不再被裁（实测 clampedH 39 == freeH 39）⇒ 「开关出现条件 =
@@ -1095,6 +1106,30 @@ def _run_suite(work: Path, expr: str):
         encoding="utf-8", errors="replace")
     failed = set(re.findall(r"^FAILED \S+::(\S+)", proc.stdout, flags=re.M))
     return failed, proc.stdout + proc.stderr, proc.returncode
+
+
+def test_the_untouched_copy_itself_runs_the_teeth_scope_green():
+    """控制组：副本**一个补丁都不打**跑牙齿那批，必须 `rc == 0` 且零红。
+
+    这条是五变体「多余的红」这一支的地基。没有它，「换目录 / 换 `WB_WEB_ROOT`
+    自己就把某几格搞红」和「退化补丁把某几格搞红」会混成一坨，只能靠现跑猜——
+    本仓库真为这个吵过一轮：`[clamp2]` 到底多红 9 个几何格是「名单过期」还是
+    「产品缺口」，两种解释在只有变体、没有控制组的读法下**分不开**。
+
+    `rc == 0` 同时兜住两种空跑：`-k` 一条没选中是 `rc == 5`，收集炸了是 `rc == 2`，
+    都不等于「绿」。实测（本条落地）：`19 passed, 12 deselected in 45.90s`。
+    """
+    if os.environ.get("T68_TEETH_CHILD") == "1":
+        pytest.fail("牙齿子进程里又选中了控制组 —— 递归，立刻停")
+    work = _teeth_copy()
+    try:
+        failed, dump, rc = _run_suite(work, TEETH_EXPR)
+    finally:
+        shutil.rmtree(str(work), ignore_errors=True)
+    assert rc == 0, (f"干净副本就 rc={rc}（期望 0）⇒ 红是副本/环境带来的，"
+                     f"五变体那份名单全部不可信：\n{dump[-1500:]}")
+    assert not failed, (f"干净副本红了 {len(failed)} 条：{sorted(failed)}"
+                        f"\n{dump[-1500:]}")
 
 
 @pytest.mark.parametrize("variant", sorted(TEETH_EXPECT))

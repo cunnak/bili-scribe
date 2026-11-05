@@ -415,6 +415,23 @@ PLAN_A_NOTE = (
     "公开面里无源的那些角色两侧必须仍逐字相同（副本层的名单见 SHARED_ROLE_KEYS 的注释）。"
 )
 
+#: 「一致」这句话的**适用范围**（lead 2026-11-05 采纳的表述，不是缺陷登记）。
+#:
+#: 为什么要单独登记：bs 真产品路径**是**附画面帧的——`bili_scribe/app/service.py` 里
+#: `collect_frames(...)` 产帧后把 `frameset=` 传进 `summarizer.summarize`（`FramesConfig`
+#: 默认 `enabled=True`、`max_frames=12`）；而 WB 适配层 `video_workbench/core/summarizer.py`
+#: 的 `run`/`refine` 两处调用**都不带 `frameset=``（现读：`grep -rn "collect_frames"
+#: video_workbench/ --include=*.py` 除 `video_workbench/config.py` 里
+#: `collect.frames.max_frames/quality` 两行校验外 **0 个调用点**）。
+#: 副本里帧进入请求的唯一入口是 `summarize()` 里那句 `as_content_blocks(frameset)`，
+#: 帧一旦进来，user 消息的 `content` 就从 `str` 变成块列表。
+#: ⇒ 本文件所有「一致」的声称，真实覆盖范围是下面这句；差异不在输出字段，在**输入侧**
+#: （bs 最多 12 个 image block，WB 恒 0）。「WB 到底接不接帧」归 vendor 定方向、归用户拍，
+#: 本文件只对**口径边界**负责——`_normalized()` 里那条 isinstance 守卫就是拦这个的。
+FRAMES_PRECONDITION_NOTE = (
+    "本文件的『逐请求一致』= **无画面帧输入**下、除角色 system 正文外的逐请求一致"
+)
+
 #: 附加提示词的特征串（对抗性双角色）。默认关时两侧都不该出现。
 EXTRA_MARKERS = ("奇美拉", "Guardian")
 
@@ -429,7 +446,21 @@ def _normalized(requests, cfg: AppConfig) -> list[dict]:
     WB 的对账模式 `_parity_max_tokens` 为了做同样的事会把 cfg 值**显式**填进 kwargs。
     所以「原始 kwargs 相等」是错的判据，「还原后的有效值相等」才是 lead 那句
     「请求序列一致」的可执行形式。**期望值一律从传进来的 cfg 现读**，不写死数字。
+
+    这里同时是「一致」这句话的**前提守卫**（口径见 `FRAMES_PRECONDITION_NOTE`）：
+    两侧任何一条消息的 `content` 只要不是 `str`，本函数当场红。画面帧会把它变成
+    `[{"type":"text"}, {"type":"image_url"}]` 这种块列表——那不是本文件在比的东西，
+    不许悄悄把「一致」扩到帧上。两侧都过这个函数（`:wb = _normalized(...)` 与
+    `:bs = _normalized(...)`），所以谁单边接帧都会被抓到。
     """
+    for index, req in enumerate(requests, start=1):
+        for offset, message in enumerate(req["messages"], start=1):
+            content = message["content"]
+            assert isinstance(content, str), (
+                f"第 {index} 次请求第 {offset} 条消息的 content 不是 str，实得 "
+                f"{type(content).__name__}——本文件的『逐请求一致』只覆盖**无画面帧**"
+                f"输入（口径见 FRAMES_PRECONDITION_NOTE）。要么把帧从这条对账路径里"
+                f"拿掉，要么显式改写口径并同步 notes，不许让它悄悄变成『带帧也一致』")
     return [
         {
             "json_mode": bool(r["json_mode"]),
@@ -1567,6 +1598,79 @@ def test_the_normalization_covers_every_listed_field():
     assert rows[0]["messages"] and rows[0]["json_mode"] is not None
     assert rows[0]["temperature"] == cfg.llm.temperature
     assert rows[0]["max_tokens"] == cfg.llm.max_tokens
+
+
+def test_the_parity_scope_is_text_only_and_says_so():
+    """前提锁的正向那一半：真链路两侧记下来的每条 `content` 都是 `str`。
+
+    这条不是「再确认一遍一致」，是把**比较发生的前提**钉住：两侧都没喂画面帧，
+    所以 `FRAMES_PRECONDITION_NOTE` 那句适用范围今天成立。
+    适配层那一侧同样要过——它才是用户真正跑的那条路（`run`/`refine` 不传 `frameset`），
+    而且 **run 与 refine 两条都要过**：帧的落点是最终归约那一次调用（副本 `:479`），
+    只钉 run 就等于放过「将来只在 refine 接帧」这条最可能的接法。
+    """
+    from video_workbench.core import summarizer as adapter
+
+    cfg = make_cfg()
+    bs_llm = FakeLLM(three_pass_script())
+    bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg, role_key="wengao")
+    client = FakeLLM(three_pass_script())
+    adapter.run({"title": "口径素材", "up_name": "UP口径", "bvid": "BV1scopecheck",
+                 "duration_sec": 600, "desc": "固定简介"},
+                [{"start_ms": 0, "text": "开场"}],
+                client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
+    # refine 那一轮才是帧的真落点（副本 :479「frameset 只接在最终归约那一次调用上」），
+    # 只钉 run 会放过「将来只在 refine 接帧」这条路。
+    refine_client = FakeLLM(three_pass_script())
+    adapter.refine(
+        {"title": "口径素材", "up_name": "UP口径", "bvid": "BV1scopecheck",
+         "duration_sec": 600, "desc": "固定简介"},
+        [{"start_ms": 0, "text": "开场"}],
+        {"headline": "旧标题", "synopsis": "旧梗概", "key_points": ["旧要点"],
+         "highlights": [], "conclusions": [], "faq": [], "timeline": [],
+         "word": 100, "role_key": "wengao", "version_id": 1},
+        "把语气改得更口语一点",
+        client=refine_client, cfg=cfg, ctx=QuietCtx(), role="wengao")
+    assert refine_client.requests, "refine 一次请求都没记下来，这一腿会变空断言"
+    for side, llm in (("bs", bs_llm), ("适配层 run", client),
+                      ("适配层 refine", refine_client)):
+        assert llm.requests, f"{side} 一次请求都没记下来，这条会变空断言"
+        for index, req in enumerate(llm.requests, start=1):
+            for offset, message in enumerate(req["messages"], start=1):
+                assert isinstance(message["content"], str), (
+                    f"{side} 第 {index} 次请求第 {offset} 条消息带进了非文本内容"
+                    f"（{type(message['content']).__name__}）——"
+                    f"{FRAMES_PRECONDITION_NOTE} 这句话当场不再成立，去改口径别改判据")
+
+
+def test_the_text_only_guard_reds_when_one_side_attaches_frames():
+    """前提锁的灵敏度：单边喂帧必须红，而且红在守卫那句上。
+
+    为什么要有这条：上面那条正向锁的内容是「都是 str」，如果守卫本身被删掉，
+    正向锁照样绿——那它就是一条没人守的口径说明。这里直接构造一条 list content
+    的请求喂给 `_normalized`，必须抛 AssertionError，且消息里点名画面帧。
+    """
+    cfg = make_cfg()
+    framed = [{
+        "json_mode": True,
+        "temperature": None,
+        "max_tokens": None,
+        "messages": [
+            {"role": "system", "content": "纯文本 system"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "素材"},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AA"}},
+            ]},
+        ],
+    }]
+    with pytest.raises(AssertionError) as caught:
+        _normalized(framed, cfg)
+    text = str(caught.value)
+    assert "画面帧" in text, f"红是红了，但没点名前提：{text[:160]}"
+    # 文本形状必须照常通过，否则上面那条正向锁和这条灵敏度是同一句空话。
+    plain = [{"json_mode": True, "temperature": None, "max_tokens": None,
+              "messages": [{"role": "user", "content": "纯文本"}]}]
+    assert _normalized(plain, cfg)[0]["messages"][0]["content"] == "纯文本"
 
 
 def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
