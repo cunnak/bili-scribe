@@ -36,7 +36,7 @@ git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
 
 **判据**：新增任何 sha/字节锁时，同一笔改动里就要跑一遍 ①②③ 并贴出三行读数。
 
-## 三点五、代码格式与静态检查（ruff 已装，但**一笔格式化都还没还**）
+## 三点五、代码格式与静态检查（ruff 已装；**task-71 三面已还完**，只剩两条有意保留的 E402）
 
 跑法（`.venv/Scripts/ruff.exe`，版本钉在 `requirements-dev.txt` 的 `ruff==0.17.3`；`pip` 只装包，不需要额外下载任何东西）：
 
@@ -48,7 +48,7 @@ git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
 
 - 规则范围与 `exclude` 全在仓库根 `ruff.toml`，**基线数记在那份文件的注释里**：装上当天下默认集 `Found 1272 errors`（567 fixable）、`format --diff` = `288 files would be reformatted, 68 already formatted`；按收窄面复跑 `video_workbench` = **28 条 check / 43 个文件待 format**、`tests/wb` = 204 条、`scripts` = 19 条。
 - **锁定面与参考侧本体在 `exclude` 里**（五份 vendored `.py` + 六份 txt + `bili_scribe`）：正常跑碰不到它们；**不许为了让某条规则过而去改 `exclude` 或加 `# noqa`** —— 那等于用格式闸改锁定面，会撞第三节的字节锁。
-- **现状登记（task-71 已还完，2026-11-06 现读）**：`ruff format` 已分三笔落地——`video_workbench`（58 files already formatted）、`scripts`（54 files already formatted）、`tests/wb`（109 files already formatted）；`ruff check` 三面 `All checks passed!`，唯一例外是 `scripts/verify_cover_fix.py:20-21` 两条**有意保留**的 E402（`sys.path.insert` 之后的 import，挪了会真炸）。check 面另两笔：重导出改成 `X as X` 显式写法（产品侧 `Summary`/`role_label`/`DanmakuConfig`/`FramesConfig`，tests 侧 pytest 夹具同名复用），`target-version` 从 `py314` 改回 `py310`（README 写 3.10+，py314 会让 format 产出 3.14 才合法的 `except A, B:`）。任何人写「格式闸过了」之前，先想清楚自己跑的是哪条命令、哪个范围。
+- **现状登记（task-71 已还完，2026-11-06 现读）**：`ruff format` 已分三笔落地，**现读终态**：`video_workbench`（59 files already formatted）、`scripts`（58）、`tests/wb`（112）——这三个数会随新增文件往上走（task-70 之后多了 `core/frames.py`、两个 `accept_*.py` 与哨兵、两个新判据文件）；引用它们之前先重跑命令，别把本行当常量；`ruff check` 三面 `All checks passed!`，唯一例外是 `scripts/verify_cover_fix.py:20-21` 两条**有意保留**的 E402（`sys.path.insert` 之后的 import，挪了会真炸）。check 面另两笔：重导出改成 `X as X` 显式写法（产品侧 `Summary`/`role_label`/`DanmakuConfig`/`FramesConfig`，tests 侧 pytest 夹具同名复用），`target-version` 从 `py314` 改回 `py310`（README 写 3.10+，py314 会让 format 产出 3.14 才合法的 `except A, B:`）。任何人写「格式闸过了」之前，先想清楚自己跑的是哪条命令、哪个范围。
 - `ruff.toml` 的 `[lint.per-file-ignores]` 逐文件点名根下那批一次性脚本（`dump_sub*.py`、`refine-*.py`、`db_*.py`、`poll*.py`、`_*.py` 等）。**那份名单故意不写成通配**：文件删掉之后 `ruff check` 会因为路径找不到报 `E902` —— 那就是提醒回来清名单的牙。别把它"优化"成 `dump_*` 一条通配，那等于把牙磨掉。
 
 **判据**：交付里出现「format / lint / ruff 过关」这句话时，必须同时给出**命令原文 + 范围 + 剩余条数**三个数。
