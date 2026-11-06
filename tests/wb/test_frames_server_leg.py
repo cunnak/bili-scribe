@@ -135,12 +135,19 @@ def cfg2(quality: int = 85) -> FramesConfig:
     ],
 )
 def test_fetch_sprite_rejects_untrusted_urls(monkeypatch, url):
-    def no_network(*args, **kwargs):
+    # 只断「抛了 FrameError」没有牙：requests.get 的异常会被 fetch_sprite 包成
+    # FrameError（网络层全收成 FrameError），所以白名单被拆掉时这条照样绿。
+    # 真正要断的是「**根本没发请求**」——把调用记下来，一处都不许有。
+    calls: list[tuple] = []
+
+    def record_network(*args, **kwargs):
+        calls.append((args, kwargs))
         raise AssertionError(f"不该发网络请求：{args!r} {kwargs!r}")
 
-    monkeypatch.setattr(frames_core.requests, "get", no_network)
+    monkeypatch.setattr(frames_core.requests, "get", record_network)
     with pytest.raises(frames_core.FrameError):
         frames_core.fetch_sprite(url)
+    assert calls == [], f"白名单/协议守卫没拦住，已经发出去请求：{url}"
 
 
 def test_fetch_sprite_returns_bytes_for_a_whitelisted_subdomain(monkeypatch):

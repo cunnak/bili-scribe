@@ -171,3 +171,82 @@ def test_purge_ignores_files_and_unknown_dirs(tmp_path: Path):
 
 def test_purge_missing_root_is_a_noop(tmp_path: Path):
     assert frames_core.purge_stale_frames(tmp_path / "does-not-exist", 7) == 0
+
+
+def test_startup_sweep_uses_frames_days_and_leaves_fresh_caches(tmp_path: Path):
+    """开机清理真的接了 storage.retention.frames_days，且只清过期的那一层。
+
+    这条盯的是**接线**，不是 purge 自己的逻辑（那几条在上面）。判据故意同时要
+    两个方向的读数：过期的目录必须没了（否则接线断了也没人知道），新目录必须还在
+    （否则说明清理范围比配置更狠，用户刚抽的帧白重下）。
+    """
+    from video_workbench.app.service import WorkbenchService
+    from video_workbench.config import WorkbenchConfig
+
+    cache = tmp_path / "cache"
+    # 目录名要像真 bvid（_is_frame_cache_name 认 BV + 长度 >= 10 + 全 ASCII 字母数字），
+    # 短名字会被当成"别的目录"直接跳过，那条判据就没牙了。
+    stale = cache / "frames" / "BV1xx411c7mD"
+    fresh = cache / "frames" / "BV1xx411c7mE"
+    for box in (stale, fresh):
+        box.mkdir(parents=True)
+        (box / "meta.json").write_text("{}", encoding="utf-8")
+        (box / "0.jpg").write_bytes(bytes.fromhex("ffd8") + b"x" + bytes.fromhex("ffd9"))
+    # purge 判的是"目录内最新的那个文件"的 mtime，所以只把目录本身 utime 不管用：
+    # 里面刚写下的文件还是"现在"，整份会被当成新的。这里把目录和它里面每个文件都往回拨。
+    for item in [stale, *sorted(stale.iterdir())]:
+        set_age(item, 30)
+    thumb = make_cache_tree(cache / "frames")
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg = WorkbenchConfig()
+    cfg.storage.db_path = str(tmp_path / "db.sqlite")
+    cfg.storage.cache_root = str(cache)
+    cfg.storage.media_root = str(tmp_path / "media")
+    cfg.storage.models_root = str(tmp_path / "models")
+    cfg.storage.ffmpeg_dir = str(tmp_path / "bin")
+    cfg.storage.retention.frames_days = 7
+    cfg.save(str(cfg_path))
+
+    service = WorkbenchService(config_path=str(cfg_path), picker=None)
+    try:
+        assert service.frames_swept == 1, (
+            f"frames_days=7 时只该清那个 30 天的目录，实得 {service.frames_swept}"
+        )
+        assert not stale.exists()
+        assert fresh.is_dir(), "没过期的那份被顺手清了，用户白抽一次"
+        assert thumb.is_file(), "frames/thumb.jpg 是封面，不属于缓存目录那一层"
+    finally:
+        service.close()
+
+
+def test_startup_sweep_does_nothing_when_frames_days_is_zero(tmp_path: Path):
+    """frames_days=0 是"不自动清理"，开机不许把用户攒下的帧清掉。"""
+    from video_workbench.app.service import WorkbenchService
+    from video_workbench.config import WorkbenchConfig
+
+    cache = tmp_path / "cache"
+    old = cache / "frames" / "BV1xx411c7mF"
+    old.mkdir(parents=True)
+    (old / "0.jpg").write_bytes(bytes.fromhex("ffd8") + b"x" + bytes.fromhex("ffd9"))
+    # 目录和里面每个文件都要往回拨：purge 取的是目录内最新文件的 mtime，
+    # 只拨目录的话里面那份"现在"的文件会把它整体判成新的，这条就没有牙。
+    for item in [old, *sorted(old.iterdir())]:
+        set_age(item, 365)
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg = WorkbenchConfig()
+    cfg.storage.db_path = str(tmp_path / "db.sqlite")
+    cfg.storage.cache_root = str(cache)
+    cfg.storage.media_root = str(tmp_path / "media")
+    cfg.storage.models_root = str(tmp_path / "models")
+    cfg.storage.ffmpeg_dir = str(tmp_path / "bin")
+    cfg.storage.retention.frames_days = 0
+    cfg.save(str(cfg_path))
+
+    service = WorkbenchService(config_path=str(cfg_path), picker=None)
+    try:
+        assert service.frames_swept == 0
+        assert old.is_dir(), "frames_days=0 表示不清理，结果被清了"
+    finally:
+        service.close()
