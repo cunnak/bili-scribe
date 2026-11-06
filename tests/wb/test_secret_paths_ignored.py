@@ -83,9 +83,9 @@ BACKUP_SUFFIXES = (
 def _secret_bearing_bases() -> list[str]:
     """所有可能写着 api_key 的**本体**文件名，取自代码里的常量，不是抄的。"""
     return [
-        "config.yaml",                  # 含当前服务商的 key
-        "config.yml",                   # 同名兼容写法
-        wb_config.EXT_NAME,             # workbench.json：全量快照，每家的 key 都在
+        "config.yaml",  # 含当前服务商的 key
+        "config.yml",  # 同名兼容写法
+        wb_config.EXT_NAME,  # workbench.json：全量快照，每家的 key 都在
         wb_config.LEGACY_LLM_EXT_NAME,  # 旧 sidecar，仍可能被读到/重写
     ]
 
@@ -103,7 +103,10 @@ def _ignored_by_git(name: str) -> bool:
     """git 自己怎么说：rc==0 ＝ 这个路径被忽略。比对字面行不算判据。"""
     proc = subprocess.run(
         ["git", "check-ignore", "--no-index", "-q", "--", name],
-        cwd=str(IGNORE_REPO), capture_output=True, text=True, encoding="utf-8",
+        cwd=str(IGNORE_REPO),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     if proc.returncode not in (0, 1):
         raise AssertionError(
@@ -118,11 +121,15 @@ def _tracked_by_git(name: str) -> bool:
     """已被跟踪的文件 `.gitignore` 拦不住，那才是真漏路径。"""
     proc = subprocess.run(
         ["git", "ls-files", "--", name],
-        cwd=str(IGNORE_REPO), capture_output=True, text=True, encoding="utf-8",
+        cwd=str(IGNORE_REPO),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     if proc.returncode != 0:
-        raise AssertionError(f"`git ls-files` 对 {name!r} 失败 rc={proc.returncode}："
-                             f"{(proc.stderr or '').strip()}")
+        raise AssertionError(
+            f"`git ls-files` 对 {name!r} 失败 rc={proc.returncode}：{(proc.stderr or '').strip()}"
+        )
     return bool(proc.stdout.strip())
 
 
@@ -136,7 +143,8 @@ def test_a_secret_bearing_candidate_list_is_not_vacuous() -> None:
     bases = _secret_bearing_bases()
     assert len(names) == len(bases) * len(BACKUP_SUFFIXES), (
         f"候选名单 {len(names)} 条 ≠ 本体 {len(bases)} × 后缀 {len(BACKUP_SUFFIXES)} "
-        "⇒ 有本体或某种后缀被摘掉")
+        "⇒ 有本体或某种后缀被摘掉"
+    )
     for base in bases:
         assert base in names, f"本体 {base} 不在名单里"
         assert f"{base}-32768" not in base, "后缀形状别写成含本体名的怪东西"
@@ -166,23 +174,28 @@ def test_every_secret_bearing_file_is_gitignored() -> None:
         f"这些文件会写明文 api_key，但 git 说没忽略（跑在 {IGNORE_REPO}）："
         + ", ".join(not_ignored)
         + "。补进 .gitignore（用 `*` 覆盖带后缀的备份），别靠 git add 时手动挑文件。"
-        + " 也别把这条改回比字面行——那正是今天被合法 glob 写法误红的老判据。")
+        + " 也别把这条改回比字面行——那正是今天被合法 glob 写法误红的老判据。"
+    )
 
 
 def test_no_secret_bearing_file_is_tracked() -> None:
     """「写进 .gitignore」不等于「安全」：已跟踪的文件忽略规则拦不住。"""
     tracked = [n for n in _secret_bearing_names() if _tracked_by_git(n)]
     assert not tracked, (
-        "这些含明文 key 的文件已经在版本库里：" + ", ".join(tracked)
-        + "。`git rm --cached` 之后还要清历史，别只加 .gitignore。")
+        "这些含明文 key 的文件已经在版本库里："
+        + ", ".join(tracked)
+        + "。`git rm --cached` 之后还要清历史，别只加 .gitignore。"
+    )
 
 
 def test_the_ignore_check_actually_discriminates() -> None:
     """反面对照：`git check-ignore` 用错时它会「全都忽略」，这条专治那个假绿。"""
     wrongly_ignored = [n for n in NOT_SECRET if _ignored_by_git(n)]
     assert not wrongly_ignored, (
-        "这些人人都该提交的文件被判成「已忽略」：" + ", ".join(wrongly_ignored)
-        + f"（跑在 {IGNORE_REPO}）⇒ 忽略判据本身不可信，上面几条的红/绿都别信")
+        "这些人人都该提交的文件被判成「已忽略」："
+        + ", ".join(wrongly_ignored)
+        + f"（跑在 {IGNORE_REPO}）⇒ 忽略判据本身不可信，上面几条的红/绿都别信"
+    )
     assert NOT_SECRET and _secret_bearing_names(), "对照名单或候选名单空了＝这条是摆设"
 
 
@@ -197,14 +210,16 @@ def test_sidecar_is_strictly_more_sensitive_than_config_yaml() -> None:
     field_names = {f.name for f in dataclasses.fields(llm)}
     assert {"providers", "api_key"} <= field_names, (
         "LlmConfig 的形状变了：sidecar 现在还会不会写多家密钥？"
-        "确认后同步本文件的判据与 .gitignore 注释")
+        "确认后同步本文件的判据与 .gitignore 注释"
+    )
 
 
 def test_legacy_sidecar_name_is_still_read_only_compatible() -> None:
     """旧 sidecar 文件名不许漂走：漂了就等于有一条含密钥的历史文件不再被忽略。"""
     assert wb_config.LEGACY_LLM_EXT_NAME.endswith(".json")
     assert _ignored_by_git(wb_config.LEGACY_LLM_EXT_NAME), (
-        f"{wb_config.LEGACY_LLM_EXT_NAME} 不再被 git 忽略——旧 sidecar 里也是多家 key")
+        f"{wb_config.LEGACY_LLM_EXT_NAME} 不再被 git 忽略——旧 sidecar 里也是多家 key"
+    )
 
 
 def test_the_default_config_home_lives_outside_the_repo() -> None:
@@ -219,6 +234,7 @@ def test_the_default_config_home_lives_outside_the_repo() -> None:
     home = Path(str(wb_config.DEFAULT_HOME))
     assert not home.is_relative_to(ROOT), (
         f"默认配置家被挪进仓库了：{home} 在 {ROOT} 下面；"
-        "含 api_key 的 workbench.json 会出现在 git status 里")
+        "含 api_key 的 workbench.json 会出现在 git status 里"
+    )
     legacy = Path(str(wb_config.LEGACY_HOME))
     assert not legacy.is_relative_to(ROOT), f"旧家（迁移来源）也不该在仓内：{legacy}"

@@ -48,15 +48,21 @@ import json
 import re
 
 import pytest
+from test_settings_role_warning_ui import WEB_DIR, require_expanded  # noqa: E402
 
 # fixture 与桥的搭法都从真后端那份复用；页面侧「读得到」的定义从 mock 那份复用。
 from test_summary_real_backend_ui import (  # noqa: F401
-    browser,
-    real_page,
-    real_service,
-    web_base_url,
+    browser as browser,
 )
-from test_settings_role_warning_ui import WEB_DIR, require_expanded  # noqa: E402
+from test_summary_real_backend_ui import (
+    real_page as real_page,
+)
+from test_summary_real_backend_ui import (
+    real_service as real_service,
+)
+from test_summary_real_backend_ui import (
+    web_base_url as web_base_url,
+)
 
 NL = chr(10)
 THINKING_PATH = "llm.thinking"
@@ -86,7 +92,7 @@ def _llm_field_paths(source: str) -> list[str]:
         elif source[i] == "]":
             depth -= 1
             if depth == 0:
-                return re.findall(r'path:\s*"([^"]+)"', source[opener:i + 1])
+                return re.findall(r'path:\s*"([^"]+)"', source[opener : i + 1])
     raise AssertionError("SECTIONS 的 llm 段没有闭合，抠取规则已经不适用")
 
 
@@ -102,9 +108,11 @@ def test_the_retired_thinking_control_is_not_in_the_field_table():
     paths = _llm_field_paths(_settings_source())
     assert THINKING_PATH not in paths, (
         f"「深度思考」控件回到设置页字段表里了（现有 {paths}）——"
-        "WB 的总结路径没有出网口读它，magpie 也不透传，这个旋钮只会说谎")
+        "WB 的总结路径没有出网口读它，magpie 也不透传，这个旋钮只会说谎"
+    )
     assert "llm.temperature" in paths, (
-        f"抠取规则失效：连 llm.temperature 都没读到（实得 {paths}），上一条断言因此空转")
+        f"抠取规则失效：连 llm.temperature 都没读到（实得 {paths}），上一条断言因此空转"
+    )
 
 
 # =============================================== 判据 6：真页面上那条 CSS 选择器
@@ -122,17 +130,19 @@ def test_the_rendered_page_has_no_thinking_control(real_page):
     """
     page, errors, backend, _ = real_page
     labels = page.locator("label.field__label").evaluate_all(
-        "els => els.map(e => e.textContent.trim())")
+        "els => els.map(e => e.textContent.trim())"
+    )
     assert labels, "设置页一个字段 label 都没读到：页面没渲染，下面的断言全是空转"
     assert THINKING_LABEL not in labels, (
         f"「{THINKING_LABEL}」回到设置页了（现有 {labels}）——"
-        "WB 的总结路径没有出网口读它，magpie 也不透传，这个旋钮只会说谎")
-    assert "温度" in labels, (
-        f"正对照失效：连「温度」都没读到（实得 {labels}），上面那条因此不可信")
+        "WB 的总结路径没有出网口读它，magpie 也不透传，这个旋钮只会说谎"
+    )
+    assert "温度" in labels, f"正对照失效：连「温度」都没读到（实得 {labels}），上面那条因此不可信"
     payload = json.dumps(backend.call("app.settings.get"), ensure_ascii=False)
     assert '"thinking"' in payload, (
         "后端载荷里 thinking 键没了 —— 那不是撤控件，是把用户的配置抹了，"
-        "判据 7/8 的另一半现在就该红")
+        "判据 7/8 的另一半现在就该红"
+    )
     assert errors == [], f"控制台有 error：{errors}"
 
 
@@ -151,22 +161,27 @@ def test_the_key_still_lives_in_the_config_class_and_the_written_file(tmp_path):
     from dataclasses import fields
 
     from video_workbench.config import LlmConfig, WorkbenchConfig, render_yaml
+
     names = {f.name for f in fields(LlmConfig)}
     assert "thinking" in names, (
         f"LlmConfig 里已经没有 thinking 字段（现有 {sorted(names)}）——"
-        "那等于把用户配置里的这一列删了，不是撤控件")
+        "那等于把用户配置里的这一列删了，不是撤控件"
+    )
 
     # 从 Temp 的那份副本装配，绝不碰真实家目录：`WorkbenchConfig.load()` 不带路径
     # 会读（并按需创建）~/.video-workbench，那是用户的东西，不是我这条用例的现场。
     from test_summary_real_backend_ui import _temp_config
+
     cfg = WorkbenchConfig.load(_temp_config(tmp_path))
     rendered = render_yaml(cfg)
-    assert re.search(r'^\s*thinking\s*:', rendered, re.M), (
-        f"render_yaml 的输出里没有 thinking —— 保存一次这个键就没了：{rendered!r}")
+    assert re.search(r"^\s*thinking\s*:", rendered, re.M), (
+        f"render_yaml 的输出里没有 thinking —— 保存一次这个键就没了：{rendered!r}"
+    )
 
     mock_text = (WEB_DIR / "js" / "mock.js").read_text(encoding="utf-8")
-    assert re.search(r'\bthinking\s*:', mock_text), (
-        "mock.js 里的 thinking 形状被删了：界面用例的载荷形状与真后端不再同源")
+    assert re.search(r"\bthinking\s*:", mock_text), (
+        "mock.js 里的 thinking 形状被删了：界面用例的载荷形状与真后端不再同源"
+    )
 
 
 # =========================== 判据 6 的另一半：撤的是控件，不是那个键的校验
@@ -184,24 +199,27 @@ def test_the_enum_still_rejects_an_unknown_thinking_value(tmp_path):
     「两侧都拒 + 都能看到字段名和可选值」才是判据，逐字对账归 `test_config_home_split`）。
     """
     from test_summary_real_backend_ui import _temp_config
+
     from video_workbench.config import WorkbenchConfig
 
     cfg_path = _temp_config(tmp_path)
     text = cfg_path.read_text(encoding="utf-8")
-    broken = re.sub(r'^(\s*)thinking:.*$', r'\1thinking: "sometimes"', text,
-                    count=1, flags=re.M)
+    broken = re.sub(r"^(\s*)thinking:.*$", r'\1thinking: "sometimes"', text, count=1, flags=re.M)
     assert broken != text, (
-        f"没能把 thinking 改成 sometimes（现读 {[l for l in text.split(NL) if 'thinking' in l]}）"
-        "—— 夹具不成立，这条会空转")
+        f"没能把 thinking 改成 sometimes（现读 {[line for line in text.split(NL) if 'thinking' in line]}）"
+        "—— 夹具不成立，这条会空转"
+    )
     cfg_path.write_text(broken, encoding="utf-8")
     with pytest.raises(Exception) as caught:
         WorkbenchConfig.load(cfg_path)
     message = str(caught.value)
     assert "VALIDATION" in message and "thinking" in message, (
-        f"未知 thinking 值没被枚举挡住，或者报错看不出是谁拒的：{message!r}")
+        f"未知 thinking 值没被枚举挡住，或者报错看不出是谁拒的：{message!r}"
+    )
     for choice in ("auto", "off", "on"):
         assert choice in message, (
-            f"报错里看不到可选值 {choice}：用户手改错了却不知道能填什么 —— {message!r}")
+            f"报错里看不到可选值 {choice}：用户手改错了却不知道能填什么 —— {message!r}"
+        )
 
 
 # ==================================== 判据 7：一次无关保存必须把它逐字带回去
@@ -214,14 +232,14 @@ def thinking_off_page(browser, web_base_url, tmp_path):
     不用默认值 `auto` 当现场：值与默认相同时，「被重置成 auto」和「原本就是 auto」
     长得一样，判据 7 最想拦的那一种坏法就看不见了。
     """
+    from test_summary_real_backend_ui import _open_real, _Service, _temp_config
+
     from video_workbench.app.service import WorkbenchService
-    from test_summary_real_backend_ui import _Service, _open_real, _temp_config
 
     cfg_path = _temp_config(tmp_path)
     text = cfg_path.read_text(encoding="utf-8")
-    if re.search(r'^\s*thinking:', text, re.M):
-        text = re.sub(r'^(\s*)thinking:.*$', r'\1thinking: "off"', text,
-                      count=1, flags=re.M)
+    if re.search(r"^\s*thinking:", text, re.M):
+        text = re.sub(r"^(\s*)thinking:.*$", r'\1thinking: "off"', text, count=1, flags=re.M)
     else:
         lines = []
         for line in text.split(NL):
@@ -256,8 +274,9 @@ def test_an_unrelated_save_carries_the_thinking_value_verbatim(thinking_off_page
     page, errors, backend, cfg_path = thinking_off_page
     seed = cfg_path.read_text(encoding="utf-8")
     assert re.search(r'^\s{2}thinking:\s*"off"\s*$', seed, re.M), (
-        f"夹具没能把 thinking 写成 off（现读 {[l for l in seed.split(NL) if 'thinking' in l]}）"
-        "—— 这一步不成立，下面三条都在测别的东西")
+        f"夹具没能把 thinking 写成 off（现读 {[line for line in seed.split(NL) if 'thinking' in line]}）"
+        "—— 这一步不成立，下面三条都在测别的东西"
+    )
 
     require_expanded(page, "温度在折叠组「上下文与长素材」里，收起态点不到保存按钮")
     # 温度那一行：按 label 定位（本产品没有 data-path 属性，理由见文件头），
@@ -274,17 +293,19 @@ def test_an_unrelated_save_carries_the_thinking_value_verbatim(thinking_off_page
     kept = [ln for ln in saved.split(NL) if "thinking" in ln]
     assert kept and re.search(r'^\s{2}thinking:\s*"off"\s*$', saved, re.M), (
         f"保存别的字段之后，文件里的 llm.thinking 不见了或被改了：{kept}；"
-        "界面上没有控件时，这个键唯一的活路就是随文件往返")
+        "界面上没有控件时，这个键唯一的活路就是随文件往返"
+    )
     sidecar = cfg_path.parent / "workbench.json"
     if sidecar.exists():
         ext = json.loads(sidecar.read_text(encoding="utf-8"))
         assert ext.get("llm", {}).get("thinking") == "off", (
-            f"sidecar 与 yaml 不一致：{ext.get('llm')}")
-    reloaded = importlib.import_module(
-        "video_workbench.config").WorkbenchConfig.load(cfg_path)
+            f"sidecar 与 yaml 不一致：{ext.get('llm')}"
+        )
+    reloaded = importlib.import_module("video_workbench.config").WorkbenchConfig.load(cfg_path)
     assert reloaded.llm.thinking == "off", (
-        f"重新装配读到 {reloaded.llm.thinking!r}，不是磁盘上那句 off")
+        f"重新装配读到 {reloaded.llm.thinking!r}，不是磁盘上那句 off"
+    )
     assert float(reloaded.llm.temperature) == 0.37, (
-        f"温度没保存上（{reloaded.llm.temperature}）：那这次保存压根没发生，"
-        "上面三条是在原地打转")
+        f"温度没保存上（{reloaded.llm.temperature}）：那这次保存压根没发生，上面三条是在原地打转"
+    )
     assert errors == [], f"控制台有 error：{errors}"

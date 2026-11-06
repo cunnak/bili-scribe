@@ -84,17 +84,26 @@ def configure(service, monkeypatch, client):
 def make_project(service, tmp_path: Path, *, texts=None) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
-    project = service.repo.project_create(title="标题", up_name="UP", root_dir=str(root),
-                                          stage="transcribed")
-    items = normalize([
-        {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
-        for i, t in enumerate(texts or ["嗯那个今天讲三件事", "然后然后第一件事", "第二件事"])
-    ])
+    project = service.repo.project_create(
+        title="标题", up_name="UP", root_dir=str(root), stage="transcribed"
+    )
+    items = normalize(
+        [
+            {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
+            for i, t in enumerate(texts or ["嗯那个今天讲三件事", "然后然后第一件事", "第二件事"])
+        ]
+    )
     (root / "transcript.json").write_text(
         json.dumps({"segments": items, "language": "zh", "model": "tiny"}, ensure_ascii=False),
-        encoding="utf-8")
-    service.repo.transcript_upsert(project["id"], segments=items, language="zh", model="tiny",
-                                   srt_path=str(root / "transcript.srt"))
+        encoding="utf-8",
+    )
+    service.repo.transcript_upsert(
+        project["id"],
+        segments=items,
+        language="zh",
+        model="tiny",
+        srt_path=str(root / "transcript.srt"),
+    )
     return project
 
 
@@ -133,7 +142,9 @@ def test_optimize_unknown_project_is_not_found(service, monkeypatch):
 
 def test_optimize_project_without_transcript_is_not_found(service, tmp_path, monkeypatch):
     configure(service, monkeypatch, StubClient([]))
-    project = service.repo.project_create(title="空", root_dir=str(tmp_path / "none"), stage="downloaded")
+    project = service.repo.project_create(
+        title="空", root_dir=str(tmp_path / "none"), stage="downloaded"
+    )
     assert err(service, "subtitle.optimize", {"project_id": project["id"]})["code"] == "NOT_FOUND"
 
 
@@ -166,8 +177,7 @@ def test_optimize_submits_job_with_clamped_batch_size(service, tmp_path, monkeyp
         return {"id": "job_x", "type": job_type, "status": "queued"}
 
     monkeypatch.setattr(service.jobs, "submit", fake_submit)
-    data = rpc(service, "subtitle.optimize",
-               {"project_id": project["id"], "batch_size": 999})
+    data = rpc(service, "subtitle.optimize", {"project_id": project["id"], "batch_size": 999})
     assert data["segments"] == 3 and data["model"] == "stub-model"
     job_type, project_id, payload = seen[0]
     assert job_type == "subtitle.optimize" and project_id == project["id"]
@@ -179,8 +189,7 @@ def test_optimize_can_target_subset(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
     monkeypatch.setattr(service.jobs, "submit", lambda *a, **k: {"id": "job_x"})
-    data = rpc(service, "subtitle.optimize",
-               {"project_id": project["id"], "segment_ids": ["s2"]})
+    data = rpc(service, "subtitle.optimize", {"project_id": project["id"], "segment_ids": ["s2"]})
     assert data["segments"] == 1
 
 
@@ -190,11 +199,21 @@ def test_optimize_can_target_subset(service, tmp_path, monkeypatch):
 def test_handler_returns_changes_and_leaves_db_untouched(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     before = stored_texts(service, project["id"])
-    client = configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "今天讲三件事。"},
-                    {"id": "s2", "text": "第一件事。"},
-                    {"id": "s3", "text": "第二件事。"}]),
-    ]))
+    client = configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "今天讲三件事。"},
+                        {"id": "s2", "text": "第一件事。"},
+                        {"id": "s3", "text": "第二件事。"},
+                    ]
+                ),
+            ]
+        ),
+    )
     ctx = FakeCtx()
     result = service._optimize_job(ctx, {"project_id": project["id"], "batch_size": 30})
     assert result["changed"] == 3
@@ -208,11 +227,17 @@ def test_handler_returns_changes_and_leaves_db_untouched(service, tmp_path, monk
 
 def test_handler_reports_partial_failure_but_keeps_good_batches(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "今天讲三件事。"}]),
-        ChatError("LLM_ERROR", "超时"),
-        ChatError("LLM_ERROR", "超时"),
-    ]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps([{"id": "s1", "text": "今天讲三件事。"}]),
+                ChatError("LLM_ERROR", "超时"),
+                ChatError("LLM_ERROR", "超时"),
+            ]
+        ),
+    )
     ctx = FakeCtx()
     result = service._optimize_job(ctx, {"project_id": project["id"], "batch_size": 1})
     assert result["changed"] == 1
@@ -234,9 +259,12 @@ def test_handler_raises_when_every_batch_failed(service, tmp_path, monkeypatch):
 def test_apply_writes_three_places_and_snapshot(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
-    changes = [{"id": "s1", "before": "嗯那个今天讲三件事", "after": "今天讲三件事。", "kind": "text"}]
-    data = rpc(service, "subtitle.optimize.apply",
-               {"project_id": project["id"], "changes": changes})
+    changes = [
+        {"id": "s1", "before": "嗯那个今天讲三件事", "after": "今天讲三件事。", "kind": "text"}
+    ]
+    data = rpc(
+        service, "subtitle.optimize.apply", {"project_id": project["id"], "changes": changes}
+    )
     assert data["applied"] == 1
     assert data["segments"][0]["text"] == "今天讲三件事。"
     root = Path(project["root_dir"])
@@ -253,8 +281,11 @@ def test_apply_respects_accepted_subset(service, tmp_path, monkeypatch):
         {"id": "s1", "before": "嗯那个今天讲三件事", "after": "今天讲三件事。", "kind": "text"},
         {"id": "s2", "before": "然后然后第一件事", "after": "第一件事。", "kind": "text"},
     ]
-    data = rpc(service, "subtitle.optimize.apply",
-               {"project_id": project["id"], "changes": changes, "accepted_ids": ["s1"]})
+    data = rpc(
+        service,
+        "subtitle.optimize.apply",
+        {"project_id": project["id"], "changes": changes, "accepted_ids": ["s1"]},
+    )
     assert data["segments"][0]["text"] == "今天讲三件事。"
     assert data["segments"][1]["text"] == "然后然后第一件事"
 
@@ -272,10 +303,14 @@ def test_rollback_restores_previous_segments(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
     original = stored_texts(service, project["id"])
-    rpc(service, "subtitle.optimize.apply", {
-        "project_id": project["id"],
-        "changes": [{"id": "s1", "before": original[0], "after": "改过的。", "kind": "text"}],
-    })
+    rpc(
+        service,
+        "subtitle.optimize.apply",
+        {
+            "project_id": project["id"],
+            "changes": [{"id": "s1", "before": original[0], "after": "改过的。", "kind": "text"}],
+        },
+    )
     assert stored_texts(service, project["id"])[0] == "改过的。"
     data = rpc(service, "subtitle.rollback", {"id": project["id"]})
     assert [s["text"] for s in data["segments"]] == original
@@ -291,5 +326,6 @@ def test_rollback_without_snapshot_is_not_found(service, tmp_path):
 def test_rollback_rejects_empty_snapshot(service, tmp_path):
     project = make_project(service, tmp_path)
     (Path(project["root_dir"]) / "transcript.prev.json").write_text(
-        json.dumps({"segments": []}), encoding="utf-8")
+        json.dumps({"segments": []}), encoding="utf-8"
+    )
     assert err(service, "subtitle.rollback", {"id": project["id"]})["code"] == "CONFLICT"

@@ -82,7 +82,15 @@ def test_source_codes_are_all_registered() -> None:
 def test_redact_masks_credentials(raw: str, expected_hint: str) -> None:
     out = log_mod.redact(raw)
     assert expected_hint in out  # 保留字段名，方便人看懂是什么被抹了
-    for secret in ("abcdef1234567890abcd", "eyJhbGciOiJIUzI1NiJ9", "abc123def456", "zzz999", "abcdefgh", "ijklmnop", "abcd1234efgh5678"):
+    for secret in (
+        "abcdef1234567890abcd",
+        "eyJhbGciOiJIUzI1NiJ9",
+        "abc123def456",
+        "zzz999",
+        "abcdefgh",
+        "ijklmnop",
+        "abcd1234efgh5678",
+    ):
         assert secret not in out, f"{secret} 没被抹掉：{out}"
 
 
@@ -93,7 +101,11 @@ def test_redact_keeps_ordinary_text() -> None:
 
 def test_redact_obj_walks_nested_config() -> None:
     cfg = {
-        "llm": {"api_key": "sk-live-1234567890", "model": "deepseek-chat", "proxy": "http://127.0.0.1:7897"},
+        "llm": {
+            "api_key": "sk-live-1234567890",
+            "model": "deepseek-chat",
+            "proxy": "http://127.0.0.1:7897",
+        },
         "download": {"cookies_from": "bili_scribe"},
         "list": [{"token": "abc123456"}],
     }
@@ -160,7 +172,8 @@ def test_log_dir_expands_unresolved_env_vars(monkeypatch, tmp_path: Path) -> Non
 def test_write_bundle_redacts_config_and_includes_logs(tmp_path: Path) -> None:
     log_file = tmp_path / "wb-20261030.log"
     log_file.write_text(
-        "\n".join(["line one", "Authorization: Bearer abcdef123456", "line three"]), encoding="utf-8"
+        "\n".join(["line one", "Authorization: Bearer abcdef123456", "line three"]),
+        encoding="utf-8",
     )
     out = tmp_path / "diag.zip"
     bundle = log_mod.write_bundle(
@@ -214,7 +227,11 @@ def test_diagnostics_bundle_from_service(service) -> None:
     with zipfile.ZipFile(target) as archive:
         names = archive.namelist()
         report = archive.read("report.txt").decode("utf-8")
-        config = archive.read("config.redacted.yaml").decode("utf-8") if "config.redacted.yaml" in names else ""
+        config = (
+            archive.read("config.redacted.yaml").decode("utf-8")
+            if "config.redacted.yaml" in names
+            else ""
+        )
     assert "report.txt" in names
     # 正文里该有的关键事实
     assert "schema_version" in report

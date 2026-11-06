@@ -65,10 +65,6 @@ import hashlib
 import importlib
 from pathlib import Path
 
-import pytest
-from bili_scribe.core import roles as bs_roles
-from video_workbench.core import prompt_source as ps
-
 from test_summary_parity import (  # 同目录、无 __init__.py：直接复用夹具与假 LLM
     SHORT_BODY,
     FakeLLM,
@@ -76,14 +72,18 @@ from test_summary_parity import (  # 同目录、无 __init__.py：直接复用�
     make_cfg,
     three_pass_script,
 )
-from wb_parity_tiers import default_env  # noqa: F401  fixture：成本断言在默认档下跑
+from wb_parity_tiers import default_env as default_env  # noqa: F401  fixture：成本断言在默认档下跑
 from wb_prompt_sizes import TXT_SHORTER_THAN_COMPRESSED
+
+from bili_scribe.core import roles as bs_roles
+from video_workbench.core import prompt_source as ps
 
 NL = chr(10)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WB_SUMMARY_DIR = REPO_ROOT / "video_workbench" / "core" / "summary"
 PROMPT_DIR = REPO_ROOT / "video_workbench" / "resources" / "prompts"
+
 
 #: 这套判据的主角。现读自 `ps.MAP`，不写死：`视频总结.txt` 的持有者是谁由
 #: `test_summary_prompt_source.py` 的 P2 那张逐字表决定，本文件跟着它走，
@@ -93,7 +93,8 @@ def _holder_of_video_summary() -> str:
     holders = [key for key in pkg.ROLE_KEYS if ps.MAP.get(key) == "视频总结.txt"]
     assert len(holders) == 1, (
         f"视频总结.txt 的公开持有者不是恰好一个，实得 {holders}："
-        f"先看 P2 的绑定表，再决定这套判据的主语")
+        f"先看 P2 的绑定表，再决定这套判据的主语"
+    )
     return holders[0]
 
 
@@ -106,7 +107,8 @@ COPY_FILES = (
 )
 COPY_SHA_AT_IMPORT = {
     path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-    for path in COPY_FILES if path.is_file()
+    for path in COPY_FILES
+    if path.is_file()
 }
 
 #: 输出契约的身份（现读 `bili_scribe/core/roles.py:51` 后登记）。
@@ -114,8 +116,7 @@ COPY_SHA_AT_IMPORT = {
 #: `renhua` 从此吃 `视频总结.txt`，而它原文里有「打印完整输出」这类指令，
 #: 单轮还是三轮都靠这句把 JSON 形状保住。
 #: 改它必须是有意的——更新这一行并在交付里点名。
-REGISTERED_CONTRACT_SHA256 = (
-    "e904f5eb2cf0cc835f2a6f4eaa7c7b38e5e3ff6877caac88977a5e546dc9c637")
+REGISTERED_CONTRACT_SHA256 = "e904f5eb2cf0cc835f2a6f4eaa7c7b38e5e3ff6877caac88977a5e546dc9c637"
 
 #: 附加提示词的特征串（与 `test_summary_prompt_source.py` 同一组，那边管开关本身）。
 EXTRA_MARKERS = ("奇美拉", "Guardian", "[lbk]")
@@ -167,16 +168,20 @@ def test_renhua_pays_three_real_calls_and_every_public_role_still_does(default_e
         role = pkg.get_role(role_key)
         assert role.passes == 3, (
             f"{role_key} 的 passes 掉到 {role.passes}：三轮档被降了"
-            f"（用户选了它却要等三轮，或反过来以为只花一轮）")
+            f"（用户选了它却要等三轮，或反过来以为只花一轮）"
+        )
         assert len(llm.requests) == 3, (
             f"{role_key} 实际只发 {len(llm.requests)} 次，字段写着 3 轮但门没生效："
-            f"{[r['json_mode'] for r in llm.requests]}")
+            f"{[r['json_mode'] for r in llm.requests]}"
+        )
         assert [r["json_mode"] for r in llm.requests] == [True, False, True], (
-            f"{role_key} 的三轮顺序/形状变了：阶段被换或某一轮没开 JSON")
+            f"{role_key} 的三轮顺序/形状变了：阶段被换或某一轮没开 JSON"
+        )
         assert summary.to_dict()["one_line"], f"{role_key}：三轮跑出来的东西是空的"
         runs.append(role_key)
     assert subject in runs and len(runs) == len(tuple(pkg.ROLE_KEYS)), (
-        f"公开面没有全跑一遍：跑了 {runs}，清单 {tuple(pkg.ROLE_KEYS)}")
+        f"公开面没有全跑一遍：跑了 {runs}，清单 {tuple(pkg.ROLE_KEYS)}"
+    )
 
 
 def test_renhua_now_ships_the_shorter_txt_prompt(default_env):
@@ -193,7 +198,8 @@ def test_renhua_now_ships_the_shorter_txt_prompt(default_env):
     """
     name = "视频总结.txt"
     assert name in TXT_SHORTER_THAN_COMPRESSED, (
-        "登记表被删了：renhua 这条比较失去方向，请连同 P8/plan A 一起改")
+        "登记表被删了：renhua 这条比较失去方向，请连同 P8/plan A 一起改"
+    )
     txt = _normalized(name).strip()
     assert txt, f"{name} 读不到，下面三条断言都会空转"
 
@@ -208,12 +214,15 @@ def test_renhua_now_ships_the_shorter_txt_prompt(default_env):
     assert len(system) < len(bs_compressed.strip() + NL + bs_roles.OUTPUT_CONTRACT), (
         f"{subject} 的请求侧 system 不再比 bs 那份请求侧短（{len(system)} vs "
         f"{len(bs_compressed.strip() + NL + bs_roles.OUTPUT_CONTRACT)}）："
-        f"要么 {name} 被补长了（那要同步删登记），要么绑定被换回了压缩版")
+        f"要么 {name} 被补长了（那要同步删登记），要么绑定被换回了压缩版"
+    )
     assert len(txt) < len(bs_compressed.strip()), (
-        f"正文层面也一样：txt {len(txt)} vs 压缩版 {len(bs_compressed.strip())}")
+        f"正文层面也一样：txt {len(txt)} vs 压缩版 {len(bs_compressed.strip())}"
+    )
     # 参照物的独立自检：bs 那位角色的 system 必须仍是内置文本，不是那篇 txt。
     assert bs_compressed.strip() != txt, (
-        "bs 原件的 renhua 被换成了 txt 全文——A 的前提（bs 继续发压缩版）被推翻")
+        "bs 原件的 renhua 被换成了 txt 全文——A 的前提（bs 继续发压缩版）被推翻"
+    )
 
 
 # ---------------------------- 判据 2：契约优先（落在请求层，见文件头偏差第 3 条）
@@ -238,11 +247,13 @@ def test_renhua_request_puts_the_contract_last_after_the_full_txt(default_env):
     txt = _normalized(ps.MAP[subject]).strip()
     assert txt and len(txt) > 200, f"现读的 txt 太短，开头的比较没有意义：{len(txt)}"
     assert system.startswith(txt), (
-        f"请求里的 system 不是以 视频总结.txt 全文开头（前 40 字实得 {system[:40]!r}）")
+        f"请求里的 system 不是以 视频总结.txt 全文开头（前 40 字实得 {system[:40]!r}）"
+    )
     contract = bs_roles.OUTPUT_CONTRACT.strip()
     assert system.rstrip().endswith(contract), "输出契约不在最末尾"
     assert system.index(txt[:40]) < system.index(contract[:20]), (
-        "契约在 txt 之前——同一份文本里的先后顺序就是覆盖关系的先后")
+        "契约在 txt 之前——同一份文本里的先后顺序就是覆盖关系的先后"
+    )
 
 
 def test_output_contract_is_byte_identical_on_both_sides_and_unchanged():
@@ -259,9 +270,13 @@ def test_output_contract_is_byte_identical_on_both_sides_and_unchanged():
     assert digest == REGISTERED_CONTRACT_SHA256, (
         f"OUTPUT_CONTRACT 被改过（现读 sha256 {digest}，登记的是 "
         f"{REGISTERED_CONTRACT_SHA256}）。改它必须是有意的：更新登记并在交付里点名——"
-        "这段是全产品唯一的「压住角色原文里打印日志类指令」的防线。")
-    for phrase in ("只输出一个合法 JSON 对象", "禁止输出任何思考过程",
-                   "覆盖上面任何与此冲突的要求"):
+        "这段是全产品唯一的「压住角色原文里打印日志类指令」的防线。"
+    )
+    for phrase in (
+        "只输出一个合法 JSON 对象",
+        "禁止输出任何思考过程",
+        "覆盖上面任何与此冲突的要求",
+    ):
         assert phrase in bs_roles.OUTPUT_CONTRACT, f"契约里那句 {phrase!r} 没了"
 
 
@@ -285,10 +300,10 @@ def test_retired_keys_stay_defined_in_the_copy_and_absent_from_the_public_surfac
     pkg = _pkg()
     copy_keys = tuple(role.key for role in pkg._roles.ALL_ROLES)
     bs_keys = tuple(role.key for role in bs_roles.ALL_ROLES)
-    assert copy_keys == bs_keys, (
-        f"逐字节副本的角色集与 bs 不同：副本 {copy_keys} vs bs {bs_keys}")
+    assert copy_keys == bs_keys, f"逐字节副本的角色集与 bs 不同：副本 {copy_keys} vs bs {bs_keys}"
     assert "xueshu" in copy_keys, (
-        f"副本的 ALL_ROLES 里没有 xueshu：已停用角色被从 vendored 文件里删了 {copy_keys}")
+        f"副本的 ALL_ROLES 里没有 xueshu：已停用角色被从 vendored 文件里删了 {copy_keys}"
+    )
     assert "shipin" not in copy_keys, "shipin 进了副本的 ALL_ROLES——塞进 vendored 文件了"
 
     copy_source = (WB_SUMMARY_DIR / "roles.py").read_text(encoding="utf-8")
@@ -298,13 +313,13 @@ def test_retired_keys_stay_defined_in_the_copy_and_absent_from_the_public_surfac
     assert "shipin" not in bs_source, "bs 的 roles.py 里出现 shipin（越界到上游了）"
 
     assert "xueshu" not in tuple(pkg.ROLE_KEYS), (
-        "已停用的 xueshu 还在公开面：用户选了它就拿不到总结")
+        "已停用的 xueshu 还在公开面：用户选了它就拿不到总结"
+    )
     # 权威层自造段现在**必须为空**（task-31 把唯一的自造角色合并掉了）。
     # 留着这条不是为了纪念：谁再造一个角色，必须先来决定它吃不吃 txt、
     # 以及 `test_summary_prompt_source.py` 那张绑定表怎么改。
     wb_only = tuple(key for key in pkg.ROLE_KEYS if key not in set(bs_keys))
-    assert wb_only == (), (
-        f"权威层又出现 bs 不认的角色 {wb_only}：合并已完成，重新自造要有显式决定")
+    assert wb_only == (), f"权威层又出现 bs 不认的角色 {wb_only}：合并已完成，重新自造要有显式决定"
 
 
 def test_the_vendored_files_are_untouched_for_the_whole_run():
@@ -319,10 +334,11 @@ def test_the_vendored_files_are_untouched_for_the_whole_run():
         now = hashlib.sha256(path.read_bytes()).hexdigest()
         registered = COPY_SHA_AT_IMPORT.get(path.name)
         assert registered is not None, (
-            f"{path.name} 不在 import 期快照里——新文件不进清单就是这条的盲区")
+            f"{path.name} 不在 import 期快照里——新文件不进清单就是这条的盲区"
+        )
         assert now == registered, (
-            f"{path.name} 在这趟测试期间被改过：import 期 {registered[:16]}… "
-            f"现在 {now[:16]}…")
+            f"{path.name} 在这趟测试期间被改过：import 期 {registered[:16]}… 现在 {now[:16]}…"
+        )
 
 
 # ------------------------------------------------ 判据 4：附加提示词对它同样生效
@@ -352,10 +368,14 @@ def test_the_extra_prompt_wraps_the_txt_holder_too(default_env):
     extra = ps.extra_text().strip()
     assert extra, "附加提示词读不到（大概率管用 .txt 不在包里？），差值断言会空转"
     assert all(marker in on for marker in EXTRA_MARKERS), (
-        f"开关开着，{subject} 的 system 里没有附加提示词的特征串")
+        f"开关开着，{subject} 的 system 里没有附加提示词的特征串"
+    )
     assert not any(marker in off for marker in EXTRA_MARKERS), (
-        f"默认档就把附加提示词烘进了 {subject} 的 system——开关对它失效")
+        f"默认档就把附加提示词烘进了 {subject} 的 system——开关对它失效"
+    )
     assert len(on) - len(off) == len(extra) + 1, (
-        f"差值不是「附加全文 + 1 个换行」：{len(on)} - {len(off)} vs {len(extra)} + 1")
+        f"差值不是「附加全文 + 1 个换行」：{len(on)} - {len(off)} vs {len(extra)} + 1"
+    )
     assert on.rstrip().endswith(bs_roles.OUTPUT_CONTRACT.strip()), (
-        "开了附加提示词之后契约不在末尾了——那份是对抗性双角色，正要靠契约压住")
+        "开了附加提示词之后契约不在末尾了——那份是对抗性双角色，正要靠契约压住"
+    )

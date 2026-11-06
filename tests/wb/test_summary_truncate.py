@@ -7,6 +7,7 @@
 
 原样重问还是同一长度、还是在同一位置断。所以适配层要能识别这种形状，让它续写。
 """
+
 from __future__ import annotations
 
 import json
@@ -17,13 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from wb_parity_tiers import loose_env as loose_env  # noqa: F401,E402  档位 fixture 由 pytest 注入
+
 from video_workbench.core.summarizer import (  # noqa: E402
     MIN_JSON_TOKENS,
     SummaryLLM,
     _json_budget,
     _looks_truncated,
 )
-from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 GOOD = {
     "one_line": "一句话结论",
@@ -108,28 +110,30 @@ def test_budget_floors_at_twelve_thousand(loose_env):
     assert MIN_JSON_TOKENS == 12288
 
     # 1) 下限
-    assert _json_budget(4096) == MIN_JSON_TOKENS   # 配置太小 → 抬到下限
-    assert _json_budget(None) == MIN_JSON_TOKENS   # 没传 → 用下限
-    assert _json_budget(6000) == MIN_JSON_TOKENS   # 两倍仍在下限之下 → 抬到下限
+    assert _json_budget(4096) == MIN_JSON_TOKENS  # 配置太小 → 抬到下限
+    assert _json_budget(None) == MIN_JSON_TOKENS  # 没传 → 用下限
+    assert _json_budget(6000) == MIN_JSON_TOKENS  # 两倍仍在下限之下 → 抬到下限
 
     # 2a) 封顶的**真**探测器：只取「未封顶值严格大于 cap」且 base 不高于 cap 的格子
     for base in (9000, 12288, cap):
         assert base <= cap < max(MIN_JSON_TOKENS, base * 2), (
-            f"夹具前提不成立：base={base} 落不到「该被封顶」那一格")
+            f"夹具前提不成立：base={base} 落不到「该被封顶」那一格"
+        )
         assert _json_budget(base) == cap, f"封顶丢了：base={base} 实得 {_json_budget(base)}"
 
     # 2b) 边界格（lead 例子里的那一格，如实标注它测不到什么）：8192 的未封顶值**恰好等于**
     #     cap ⇒ 封顶删不删都是 16384。它能钉的是「task-53 的下界没把这一格改动」，
     #     不能当封顶的证据——证据在 2a。
     assert max(MIN_JSON_TOKENS, 8192 * 2) == cap, "8192 这一格的前提是未封顶值恰好等于 cap"
-    assert _json_budget(8192) == cap, f"改前读数被移动了：_json_budget(8192) 实得 {_json_budget(8192)}"
+    assert _json_budget(8192) == cap, (
+        f"改前读数被移动了：_json_budget(8192) 实得 {_json_budget(8192)}"
+    )
 
     # 3) 下界：被翻正的那一格现在钉的是规则
     for base in (cap + 1, 20000, 32768, 65536):
         got = _json_budget(base)
         assert got >= base, f"倒挂回来了：base={base} 的补救只有 {got}，比主请求还小"
         assert got > cap, f"base={base} 高于封顶却被削到 {got}——封顶越过了下界"
-
 
 
 # 档位=宽松：续写是③阶梯的一步。
@@ -165,20 +169,18 @@ def test_truncated_output_is_continued_not_reasked(loose_env):
 # 档位=宽松：续写→拆分→重问的降级顺序，属③。
 def test_continuation_that_also_truncates_falls_back_to_reask(loose_env):
     # 续写失败 → 分批失败（两步都给废话）→ 才重问
-    client = RecClient([HALF, HALF, "分批正文不行", "分批时间线也不行",
-                        json.dumps(GOOD, ensure_ascii=False)])
+    client = RecClient(
+        [HALF, HALF, "分批正文不行", "分批时间线也不行", json.dumps(GOOD, ensure_ascii=False)]
+    )
     llm = SummaryLLM(client, model="stub-model")
 
-    text = llm.chat(
-        [{"role": "user", "content": "写一份总结"}], json_mode=True, max_tokens=4096
-    )
+    text = llm.chat([{"role": "user", "content": "写一份总结"}], json_mode=True, max_tokens=4096)
 
     assert json.loads(text)["one_line"] == "一句话结论"
     assert len(client.calls) >= 5, "续写 + 分批都失败 → 再重问一次"
     assert any("重问" in n for n in llm.notes), llm.notes
     # 重问那轮同样要抬预算
     assert client.calls[4]["max_tokens"] >= MIN_JSON_TOKENS
-
 
 
 # 档位=宽松：repair_json 短路是③的第一步；严格档不修 JSON。

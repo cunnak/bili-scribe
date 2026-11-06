@@ -55,7 +55,9 @@ def test_project_roundtrip_and_bvid_lookup(tmp_path: Path):
     conn = wbdb.open_and_migrate(tmp_path / "wb.sqlite")
     repo = Repo(conn)
     try:
-        made = repo.project_create(title="某期视频", bvid="BV1xx411c7mD", root_dir=str(tmp_path / "p1"))
+        made = repo.project_create(
+            title="某期视频", bvid="BV1xx411c7mD", root_dir=str(tmp_path / "p1")
+        )
         assert made["id"].startswith("pj")
         assert made["stage"] == "new" and made["status"] == "idle"
 
@@ -103,7 +105,9 @@ def test_job_payload_survives_roundtrip(tmp_path: Path):
     repo = Repo(conn)
     try:
         project = repo.project_create(title="带任务的素材", root_dir=str(tmp_path / "p1"))
-        repo.job_create("job_y1", "dev.demo", project["id"], {"seconds": 2, "nested": {"k": [1, 2]}})
+        repo.job_create(
+            "job_y1", "dev.demo", project["id"], {"seconds": 2, "nested": {"k": [1, 2]}}
+        )
         row = repo.job_get("job_y1")
         assert row["payload"] == {"seconds": 2, "nested": {"k": [1, 2]}}
         assert row["project_id"] == project["id"]

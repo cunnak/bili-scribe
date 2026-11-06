@@ -45,7 +45,10 @@ def collection(count: int = 3):
         title="合集：概率论",
         up_name="某UP",
         collection_title="概率论",
-        items=[Item(bvid=f"BV{i}", page_no=i, title="概率论", part_title=f"第{i}讲") for i in range(1, count + 1)],
+        items=[
+            Item(bvid=f"BV{i}", page_no=i, title="概率论", part_title=f"第{i}讲")
+            for i in range(1, count + 1)
+        ],
     )
 
 
@@ -115,13 +118,20 @@ def test_empty_resolution_is_an_error(service, spy, monkeypatch):
 
 def test_retry_failed_only_resubmits_failures(service, spy, monkeypatch):
     monkeypatch.setattr(service, "_resolver", FakeResolver(collection(3)))
-    job = {"id": "job_parent", "type": "download.batch", "status": "succeeded",
-           "payload": {"quality": "1080P", "up_name": "某UP", "collection_title": "概率论"},
-           "result": {"total": 3, "items": [
-               {"bvid": "BV1", "title": "概率论", "page": 1, "status": "succeeded"},
-               {"bvid": "BV2", "title": "概率论", "page": 2, "status": "failed"},
-               {"bvid": "BV3", "title": "概率论", "page": 3, "status": "failed"},
-           ]}}
+    job = {
+        "id": "job_parent",
+        "type": "download.batch",
+        "status": "succeeded",
+        "payload": {"quality": "1080P", "up_name": "某UP", "collection_title": "概率论"},
+        "result": {
+            "total": 3,
+            "items": [
+                {"bvid": "BV1", "title": "概率论", "page": 1, "status": "succeeded"},
+                {"bvid": "BV2", "title": "概率论", "page": 2, "status": "failed"},
+                {"bvid": "BV3", "title": "概率论", "page": 3, "status": "failed"},
+            ],
+        },
+    }
     monkeypatch.setattr(service.jobs, "get", lambda _id: job)
     out = service.dispatch("download.retry_failed", {"id": "job_parent"})["data"]
     assert out["count"] == 2

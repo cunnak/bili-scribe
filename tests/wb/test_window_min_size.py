@@ -16,8 +16,6 @@ GetWindowRect，见 docs/decisions-product-defaults.md 的窄窗节）负责，
 
 from __future__ import annotations
 
-import pytest
-
 from video_workbench import desktop
 
 
@@ -43,7 +41,7 @@ def test_create_window_passes_the_module_min_size_untouched(monkeypatch):
             self.evaluated: list[str] = []
             self.events = type("E", (), {"shown": _EventHook()})()
 
-        def evaluate_js(self, script: str) -> None:   # pragma: no cover - 不真跑
+        def evaluate_js(self, script: str) -> None:  # pragma: no cover - 不真跑
             self.evaluated.append(script)
 
     def fake_create_window(title, **kwargs):
@@ -73,7 +71,8 @@ def test_create_window_passes_the_module_min_size_untouched(monkeypatch):
     assert "min_size" in captured, "create_window 没有把 min_size 传给 pywebview"
     assert tuple(captured["min_size"]) == tuple(desktop.MIN_SIZE), (
         "传下去的 min_size 与 desktop.MIN_SIZE 不一致："
-        f"{captured['min_size']!r} vs {desktop.MIN_SIZE!r}")
+        f"{captured['min_size']!r} vs {desktop.MIN_SIZE!r}"
+    )
     assert captured["width"] == desktop.WINDOW_SIZE[0]
     assert captured["height"] == desktop.WINDOW_SIZE[1]
 
@@ -88,4 +87,5 @@ def test_min_size_still_constrains_something():
     width, height = desktop.MIN_SIZE
     assert width > 0 and height > 0, f"MIN_SIZE 有非正分量：{desktop.MIN_SIZE!r}"
     assert width >= 320 and height >= 240, (
-        f"MIN_SIZE 小到不构成约束：{desktop.MIN_SIZE!r}（界面在 1200px 以下会走窄版布局）")
+        f"MIN_SIZE 小到不构成约束：{desktop.MIN_SIZE!r}（界面在 1200px 以下会走窄版布局）"
+    )

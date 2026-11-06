@@ -55,10 +55,10 @@ def test_unsafe_filenames_are_mirrored_to_a_clean_path(tmp_path, name):
     src.write_text("1\n00:00:00.500 --> 00:00:01.500\nhi\n", encoding="utf-8")
     out = filter_path(src)
     real = unwrap(out)
-    assert "'" not in real, out                # 引号只剩最外层包裹
+    assert "'" not in real, out  # 引号只剩最外层包裹
     for ch in FILTER_UNSAFE_CHARS:
         assert ch not in Path(real).name
-    assert Path(real).is_file()                # 真的复制出来了
+    assert Path(real).is_file()  # 真的复制出来了
 
 
 def test_mirror_reuses_and_refreshes(tmp_path):
@@ -70,7 +70,7 @@ def test_mirror_reuses_and_refreshes(tmp_path):
     assert first.is_file()
     src.write_text("x" * 5, encoding="utf-8")
     third = mirror_for_filter(src)
-    assert third.stat().st_size == 5           # 源变新了要重新拷
+    assert third.stat().st_size == 5  # 源变新了要重新拷
 
 
 def test_clean_path_is_not_mirrored(tmp_path):

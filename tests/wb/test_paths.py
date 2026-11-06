@@ -17,7 +17,6 @@ from video_workbench.core.layout import (
     build_sidecar,
     finalize_source,
     read_sidecar,
-    source_stem,
     write_sidecar,
 )
 
@@ -47,7 +46,9 @@ def test_single_video_has_no_part_level(tmp_path):
 
 
 def test_multi_p_gets_two_digit_prefix(tmp_path):
-    layout = allocate(tmp_path, up_name="UP", title="多P稿", part_index=3, part_title="第三讲", bvid="BV2", cid=33)
+    layout = allocate(
+        tmp_path, up_name="UP", title="多P稿", part_index=3, part_title="第三讲", bvid="BV2", cid=33
+    )
     assert layout.root.name == "P03_第三讲"
 
 
@@ -57,8 +58,10 @@ def test_multi_p_without_title_keeps_bare_prefix(tmp_path):
 
 
 def test_illegal_characters_are_replaced(tmp_path):
-    layout = allocate(tmp_path, up_name='UP<>:"/\\|?*', title="标题|带?非法*字符", bvid="BV3", cid=1)
-    for seg in layout.root.parts[len(tmp_path.parts):]:
+    layout = allocate(
+        tmp_path, up_name='UP<>:"/\\|?*', title="标题|带?非法*字符", bvid="BV3", cid=1
+    )
+    for seg in layout.root.parts[len(tmp_path.parts) :]:
         assert not set(seg) & set('<>:"/\\|?*')
 
 
@@ -117,17 +120,31 @@ def test_ensure_creates_standard_subdirs(tmp_path):
 
 def test_layout_paths_point_into_root(tmp_path):
     layout = allocate(tmp_path, up_name="UP", title="路径", bvid="BV11", cid=1)
-    for path in (layout.sidecar, layout.audio, layout.transcript_json,
-                 layout.transcript_srt, layout.subtitle_zh_ass, layout.summary_json):
+    for path in (
+        layout.sidecar,
+        layout.audio,
+        layout.transcript_json,
+        layout.transcript_srt,
+        layout.subtitle_zh_ass,
+        layout.summary_json,
+    ):
         assert path.parent == layout.root
 
 
 def test_sidecar_roundtrip_has_all_fields(tmp_path):
     layout = allocate(tmp_path, up_name="示例UP", title="侧车", bvid="BV12", cid=12).ensure()
     data = build_sidecar(
-        bvid="BV12", aid=999, cid=12, page=1, title="侧车", up="示例UP",
-        collection="", quality_requested="1080P", quality_actual="720P",
-        url="https://www.bilibili.com/video/BV12", downloaded_at="2026-10-29T22:00:00+08:00",
+        bvid="BV12",
+        aid=999,
+        cid=12,
+        page=1,
+        title="侧车",
+        up="示例UP",
+        collection="",
+        quality_requested="1080P",
+        quality_actual="720P",
+        url="https://www.bilibili.com/video/BV12",
+        downloaded_at="2026-10-29T22:00:00+08:00",
         tool_version="0.1.0",
     )
     write_sidecar(layout, data)
@@ -149,8 +166,12 @@ def test_quality_downgrade_is_recorded_not_hidden(tmp_path):
     """方案书 5.3.2：不允许静默降级，实际画质必须落盘。"""
     layout = allocate(tmp_path, up_name="UP", title="降级", bvid="BV14", cid=1).ensure()
     data = build_sidecar(
-        bvid="BV14", cid=1, title="降级", up="UP",
-        quality_requested="1080P+", quality_actual="1080P",
+        bvid="BV14",
+        cid=1,
+        title="降级",
+        up="UP",
+        quality_requested="1080P+",
+        quality_actual="1080P",
     )
     write_sidecar(layout, data)
     assert read_sidecar(layout.sidecar)["quality_requested"] == "1080P+"

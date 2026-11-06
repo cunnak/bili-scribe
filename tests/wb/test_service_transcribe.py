@@ -31,20 +31,24 @@ def spied(service, monkeypatch):
     return calls
 
 
-def make_project(service, tmp_path: Path, *, stage: str = "downloaded", status: str = "ready") -> dict:
+def make_project(
+    service, tmp_path: Path, *, stage: str = "downloaded", status: str = "ready"
+) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
     (root / "source.mp4").write_bytes(b"fake")
-    project = service.repo.project_create(title="标题", up_name="UP", root_dir=str(root),
-                                          stage=stage, status=status)
+    project = service.repo.project_create(
+        title="标题", up_name="UP", root_dir=str(root), stage=stage, status=status
+    )
     return project
 
 
 def test_transcribe_start_creates_one_job_per_project(service, spied, tmp_path):
     first = make_project(service, tmp_path)
     second = make_project(service, tmp_path / "b")
-    data = service.dispatch("transcribe.start", {"project_ids": [first["id"], second["id"]],
-                                                 "model": "tiny"})["data"]
+    data = service.dispatch(
+        "transcribe.start", {"project_ids": [first["id"], second["id"]], "model": "tiny"}
+    )["data"]
     assert data["count"] == 2
     assert [c[0] for c in spied] == ["transcribe", "transcribe"]
     assert spied[0][1] == first["id"], "job 要带 project_id，重试和取消都靠它"
@@ -122,8 +126,13 @@ def test_library_get_exposes_transcript_meta(service, tmp_path):
     assert data["project"]["transcript"] is None
     assert data["project"]["has_transcript"] is False
 
-    service.repo.transcript_upsert(project["id"], segments=[{"id": "s1", "text": "hi"}],
-                                   language="zh", model="tiny", srt_path="x.srt")
+    service.repo.transcript_upsert(
+        project["id"],
+        segments=[{"id": "s1", "text": "hi"}],
+        language="zh",
+        model="tiny",
+        srt_path="x.srt",
+    )
     data = service.dispatch("library.get", {"id": project["id"]})["data"]
     meta = data["project"]["transcript"]
     assert meta["segments"] == 1 and meta["language"] == "zh"
@@ -141,8 +150,9 @@ def test_app_info_reports_faster_whisper(service):
 
 def test_transcribe_start_rejects_unknown_language(service, spied, tmp_path):
     project = make_project(service, tmp_path)
-    code = err_code(service, "transcribe.start",
-                    {"project_ids": [project["id"]], "language": "zh-CN"})
+    code = err_code(
+        service, "transcribe.start", {"project_ids": [project["id"]], "language": "zh-CN"}
+    )
     assert code == "VALIDATION"
     assert spied == [], "校验必须发生在提交任务之前，否则队列里会多一条注定失败的 job"
 

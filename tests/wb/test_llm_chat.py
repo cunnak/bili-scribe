@@ -1,4 +1,5 @@
 """ChatClient 的解析与空正文守卫。"""
+
 from __future__ import annotations
 
 import json
@@ -45,7 +46,10 @@ def test_segmented_content_joined() -> None:
                 {
                     "finish_reason": "stop",
                     "message": {
-                        "content": [{"type": "text", "text": "前半"}, {"type": "text", "text": "后半"}]
+                        "content": [
+                            {"type": "text", "text": "前半"},
+                            {"type": "text", "text": "后半"},
+                        ]
                     },
                 }
             ]

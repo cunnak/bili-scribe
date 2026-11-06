@@ -62,11 +62,14 @@ def test_yaml_roundtrip(cfg_path: Path):
 
 
 def test_bad_yaml_reports_clearly(tmp_path: Path):
-    path = _write(tmp_path / "bad.yaml", """
+    path = _write(
+        tmp_path / "bad.yaml",
+        """
         app:
           - 这不是映射
         ui: {
-    """)
+    """,
+    )
     with pytest.raises(WBError) as info:
         WorkbenchConfig.load(path)
     assert info.value.code == "VALIDATION"
@@ -91,7 +94,10 @@ def test_unknown_key_is_rejected_not_ignored(cfg_path: Path):
         ({"ui": {"skin": "nope"}}, "ui.skin"),
         ({"llm": {"proxy": "127.0.0.1:7897"}}, "llm.proxy"),
         ({"download": {"concurrency": 99}}, "download.concurrency"),
-        ({"clip": {"highlight_min_seconds": 90, "highlight_max_seconds": 20}}, "highlight_min_seconds"),
+        (
+            {"clip": {"highlight_min_seconds": 90, "highlight_max_seconds": 20}},
+            "highlight_min_seconds",
+        ),
     ],
 )
 def test_bad_values_rejected(cfg_path: Path, patch: dict, needle: str):

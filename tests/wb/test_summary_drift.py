@@ -68,6 +68,7 @@ WAIT_FOR_VENDOR = (
     "产品侧完成之前，本文件这些断言**应该**是红的——这不是测试写坏了，别放宽断言。"
 )
 
+
 #: 两侧共有的角色 = bs 认得、WB 权威层也没退役的那几个，按 bs 原有顺序。
 #:
 #: task-31 之前这里是写死的 7 元组（含 `xueshu`），并且下面那条公开面用例还额外要求
@@ -147,13 +148,14 @@ def _line_no(data: bytes, offset: int) -> int:
     return data.count(b"\n", 0, offset) + 1
 
 
-def _split_block(data: bytes, first: int, last: int
-                 ) -> tuple[list[bytes], list[bytes], list[bytes]]:
+def _split_block(
+    data: bytes, first: int, last: int
+) -> tuple[list[bytes], list[bytes], list[bytes]]:
     """按 1-based 闭区间 [first, last] 切成 (前段行, 允许差异行, 后段行)。"""
     lines = data.split(b"\n")
     if len(lines) < last:
         pytest.fail(f"文件只有 {len(lines)} 行，撑不起第 {last} 行的允许区间")
-    return lines[: first - 1], lines[first - 1: last], lines[last:]
+    return lines[: first - 1], lines[first - 1 : last], lines[last:]
 
 
 def _assert_bytes_equal(a: bytes, b: bytes, label: str) -> None:
@@ -168,7 +170,8 @@ def _assert_bytes_equal(a: bytes, b: bytes, label: str) -> None:
     )
     pytest.fail(
         f"{label} 漂移：第 {_line_no(a, offset)} 行（首个差异字节偏移 {offset}，"
-        f"全长 {len(a)} vs {len(b)}）。{hint}")
+        f"全长 {len(a)} vs {len(b)}）。{hint}"
+    )
 
 
 def _split_at_import_block(data: bytes) -> tuple[list[bytes], list[bytes], list[bytes]]:
@@ -191,17 +194,15 @@ def _split_at_import_block(data: bytes) -> tuple[list[bytes], list[bytes], list[
         pytest.fail("找不到 `if TYPE_CHECKING` 锚点")
     if lines[tc - 1] != b"":
         pytest.fail("import 段与 if TYPE_CHECKING 之间必须有且仅有一个空行")
-    return lines[:start], lines[start: tc - 1], lines[tc - 1:]
+    return lines[:start], lines[start : tc - 1], lines[tc - 1 :]
 
 
-def _assert_equal_outside_block(a: bytes, b: bytes, label: str,
-                                first: int, last: int) -> None:
+def _assert_equal_outside_block(a: bytes, b: bytes, label: str, first: int, last: int) -> None:
     """第 [first, last] 行允许不同，**其余行**必须逐行相等（行号合同的原话）。"""
     pre_a, mid_a, post_a = _split_block(a, first, last)
     pre_b, mid_b, post_b = _split_block(b, first, last)
     _assert_bytes_equal(b"\n".join(pre_a), b"\n".join(pre_b), f"{label}（第 1–{first - 1} 行）")
-    _assert_bytes_equal(b"\n".join(post_a), b"\n".join(post_b),
-                        f"{label}（第 {last + 1} 行往后）")
+    _assert_bytes_equal(b"\n".join(post_a), b"\n".join(post_b), f"{label}（第 {last + 1} 行往后）")
 
 
 def _assert_body_equal(a: bytes, b: bytes, label: str) -> None:
@@ -209,8 +210,9 @@ def _assert_body_equal(a: bytes, b: bytes, label: str) -> None:
     pre_a, _block_a, post_a = _split_at_import_block(a)
     pre_b, _block_b, post_b = _split_at_import_block(b)
     _assert_bytes_equal(b"\n".join(pre_a), b"\n".join(pre_b), f"{label}（文档串）")
-    _assert_bytes_equal(b"\n".join(post_a), b"\n".join(post_b),
-                        f"{label}（import 段之后的全部正文）")
+    _assert_bytes_equal(
+        b"\n".join(post_a), b"\n".join(post_b), f"{label}（import 段之后的全部正文）"
+    )
 
 
 # ---------------------------------------------------------------- 1. roles.py 逐字节
@@ -230,8 +232,11 @@ def test_roles_original_is_a_full_module_not_an_empty_file():
 
 def test_roles_copy_is_byte_identical_to_bili_scribe():
     """判定标准 1：roles.py 逐字节相等，零例外。"""
-    _assert_bytes_equal(_read_required(BS_ROLES), _read_required(WB_ROLES),
-                        "core/summary/roles.py（对 bili_scribe/core/roles.py）")
+    _assert_bytes_equal(
+        _read_required(BS_ROLES),
+        _read_required(WB_ROLES),
+        "core/summary/roles.py（对 bili_scribe/core/roles.py）",
+    )
 
 
 def test_summarizer_original_is_a_full_module_not_an_empty_file():
@@ -253,12 +258,15 @@ def _assert_import_block_anchors() -> None:
     lines = BS_SUMMARIZER.read_bytes().split(b"\n")
     assert lines[IMPORT_BLOCK_FIRST - 2] == b"", "第 8 行不是空行（文档串结束处）"
     assert lines[IMPORT_BLOCK_FIRST - 1] == b"from __future__ import annotations", (
-        f"原件第 {IMPORT_BLOCK_FIRST} 行不再是 __future__ 导入：允许区间需要跟着改")
+        f"原件第 {IMPORT_BLOCK_FIRST} 行不再是 __future__ 导入：允许区间需要跟着改"
+    )
     assert lines[IMPORT_BLOCK_LAST - 1] == b"from .resolver import format_duration", (
-        f"原件第 {IMPORT_BLOCK_LAST} 行不是 import 段末行：允许区间需要跟着改")
+        f"原件第 {IMPORT_BLOCK_LAST} 行不是 import 段末行：允许区间需要跟着改"
+    )
     assert lines[IMPORT_BLOCK_LAST] == b"", "import 段后一行不是空行"
     assert lines[IMPORT_BLOCK_LAST + 1].startswith(b"if TYPE_CHECKING"), (
-        "第 25 行不是 TYPE_CHECKING 块：允许区间正在吃正文")
+        "第 25 行不是 TYPE_CHECKING 块：允许区间正在吃正文"
+    )
 
 
 def test_summarizer_import_block_range_is_pinned_against_the_original():
@@ -280,8 +288,9 @@ def test_summarizer_body_is_identical_apart_from_the_import_block():
     现在就是绿的、并且真的能在有人改正文时变红。行号合同另见
     `test_summarizer_copy_keeps_the_pinned_import_block_range`。
     """
-    _assert_body_equal(_read_required(BS_SUMMARIZER), _read_required(WB_SUMMARIZER),
-                       "core/summary/summarizer.py")
+    _assert_body_equal(
+        _read_required(BS_SUMMARIZER), _read_required(WB_SUMMARIZER), "core/summary/summarizer.py"
+    )
 
 
 def test_copy_import_block_contains_nothing_but_imports():
@@ -299,7 +308,8 @@ def test_copy_import_block_contains_nothing_but_imports():
             continue
         pytest.fail(
             f"副本 import 段第 {offset} 行不是导入语句：{line[:60]!r}。"
-            "允许差异的段落只给导入语句用，任何可执行代码都属于正文。")
+            "允许差异的段落只给导入语句用，任何可执行代码都属于正文。"
+        )
 
 
 def test_summarizer_copy_keeps_the_pinned_import_block_range():
@@ -323,7 +333,8 @@ def test_summarizer_copy_keeps_the_pinned_import_block_range():
         f"{IMPORT_BLOCK_LAST - actual_last} 行。\n"
         "两个处置方式（选一个，别删断言）：① 产品侧把那两个空行补回来，行号即与合同一致；"
         "② lead 明确把合同改成「import 段按锚点定位、行数不限」，那时本用例连同 "
-        "IMPORT_BLOCK_FIRST/LAST 一起删除，并在文件头的判定标准里登记这个改动。")
+        "IMPORT_BLOCK_FIRST/LAST 一起删除，并在文件头的判定标准里登记这个改动。"
+    )
 
 
 def test_drift_guard_is_not_vacuous():
@@ -377,7 +388,8 @@ def test_drift_guard_is_not_vacuous():
     with pytest.raises(pytest.fail.Exception) as exc:
         _assert_equal_outside_block(bs, grown_block, "import 段变长变体", *block)
     assert f"第 {IMPORT_BLOCK_LAST + 1} 行往后" in str(exc.value), (
-        f"多出来的 import 行没有落进正文区被抓到，报错不符合预期：{exc.value}")
+        f"多出来的 import 行没有落进正文区被抓到，报错不符合预期：{exc.value}"
+    )
     # 行号版也必须抓到正文改动（它和锚点版守的是同一半，不能比锚点版松）
     with pytest.raises(pytest.fail.Exception):
         _assert_equal_outside_block(bs, mutated_body, "正文变体", *block)
@@ -451,12 +463,14 @@ def test_retired_standard_role_is_absent_from_the_public_surface():
     bs_keys = {role.key for role in bs_roles.ALL_ROLES}
 
     shared = _shared_role_keys(wb)
-    assert keys[:len(shared)] == list(shared), (
+    assert keys[: len(shared)] == list(shared), (
         f"共有角色那一段漂了（顺序或内容）：前 {len(shared)} 个期望 {list(shared)}，"
-        f"实得 {keys[:len(shared)]}")
-    tail = keys[len(shared):]
+        f"实得 {keys[: len(shared)]}"
+    )
+    tail = keys[len(shared) :]
     assert all(key not in bs_keys for key in tail), (
-        f"后段出现了 bs 已有的角色 {tail}：说明前段被删短了，不是 WB 自造的角色进来了")
+        f"后段出现了 bs 已有的角色 {tail}：说明前段被删短了，不是 WB 自造的角色进来了"
+    )
 
     assert "standard" not in keys
     assert "standard" in tuple(wb.RETIRED_ROLES)
@@ -502,7 +516,8 @@ def test_configured_default_role_is_not_the_retired_one():
     configured = WorkbenchConfig().llm.role
     assert configured not in wb.RETIRED_ROLES, (
         f"配置默认角色 {configured!r} 已退役：不选角色的用户会直接被拒，"
-        "这是退役没退干净，不是测试写坏了")
+        "这是退役没退干净，不是测试写坏了"
+    )
     assert configured in wb.ROLE_KEYS, f"配置默认角色 {configured!r} 不在可用清单里"
 
 
@@ -531,7 +546,12 @@ def test_adapter_rejects_retired_standard_with_a_validation_error():
     cfg = AppConfig()
     cfg.llm.role = "wengao"
     with pytest.raises(WBError) as exc:
-        summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                       client=_NoCallClient(), cfg=cfg, ctx=_QuietCtx(),
-                       role="standard")
+        summarizer.run(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "x"}],
+            client=_NoCallClient(),
+            cfg=cfg,
+            ctx=_QuietCtx(),
+            role="standard",
+        )
     assert exc.value.code == "VALIDATION"

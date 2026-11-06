@@ -14,7 +14,6 @@ import pytest
 
 from video_workbench.core import reframe
 
-
 # ---------------------------------------------------------------- 滤镜拼装
 
 
@@ -85,7 +84,12 @@ def test_src_crop_prefix_is_first_in_every_chain():
 
 
 def test_crop_rect_accepts_dict_tuple_and_rejects_junk():
-    assert reframe.crop_rect({"w": 10, "h": 20, "x": 1, "y": 2}) == {"w": 10, "h": 20, "x": 1, "y": 2}
+    assert reframe.crop_rect({"w": 10, "h": 20, "x": 1, "y": 2}) == {
+        "w": 10,
+        "h": 20,
+        "x": 1,
+        "y": 2,
+    }
     assert reframe.crop_rect((10, 20, 1, 2)) == {"w": 10, "h": 20, "x": 1, "y": 2}
     assert reframe.crop_rect({"w": 0, "h": 20, "x": 0, "y": 0}) is None
     assert reframe.crop_rect({"w": 10, "h": 20, "x": -1, "y": 0}) is None

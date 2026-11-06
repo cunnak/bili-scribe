@@ -88,15 +88,7 @@ import threading
 from pathlib import Path
 
 import pytest
-
-import video_workbench.core.summary as wb_summary
-from bili_scribe.core import roles as bs_roles
-from bili_scribe.core import summarizer as bs_summarizer
-from video_workbench.core import prompt_source as ps
-
 from test_summary_parity import (  # 同目录、无 __init__.py，直接复用夹具与假 LLM
-    CRITIQUE_NOTE,
-    PAYLOAD,
     SHORT_BODY,
     FakeLLM,
     QuietCtx,
@@ -104,8 +96,13 @@ from test_summary_parity import (  # 同目录、无 __init__.py，直接复用�
     make_cfg,
     three_pass_script,
 )
-from wb_parity_tiers import default_env  # noqa: F401  fixture，P9 那组显式钉默认档
+from wb_parity_tiers import default_env as default_env  # noqa: F401  fixture，P9 那组显式钉默认档
 from wb_prompt_sizes import TXT_SHORTER_THAN_COMPRESSED  # 长度方向登记的唯一 owner
+
+import video_workbench.core.summary as wb_summary
+from bili_scribe.core import roles as bs_roles
+from bili_scribe.core import summarizer as bs_summarizer
+from video_workbench.core import prompt_source as ps
 
 MAP_SYSTEM = bs_summarizer.MAP_SYSTEM
 
@@ -122,18 +119,16 @@ PROMPT_DIR = REPO_ROOT / "video_workbench" / "resources" / "prompts"
 #: 登记过的改动（更新登记表并在交付里点名），不是「顺手润色」。
 #: 元组 = (文件名, 字节数, sha256 全串)。
 PROMPT_FILES: tuple[tuple[str, int, str], ...] = (
-    ("写作专家.txt", 6941,
-     "6b079cf4e338cc43259fd61188350d68883655bd72ceb9e9441b404d5c824b35"),
-    ("分析报告.txt", 4366,
-     "7837f4da54d2937f7e1d6db267b5ac523a94efdbf624f2d3bfc95d6fc17e6d85"),
-    ("大概率管用 .txt", 2223,
-     "4beb577f7438e243e24bae18f9f2dec5b9c69747739476f11ca0eda6711288be"),
-    ("文稿编辑.txt", 8479,
-     "9dae7c1075e5cb816a2553f02bfdb97e1c822553e390c6b5211c3c834c4873aa"),
-    ("视频总结.txt", 1381,
-     "26966b72b9238c9d7060d76d4e4f93c46c11167666141148ec8e6a78fc9de6e5"),
-    ("首席思想精炼师：对于各种文本都处理得较为简洁的总结提示词。.txt", 3224,
-     "c02e4eef650d6123efe74b337a9bfc905bf901e2ccfdc7f9124e0352dfc94404"),
+    ("写作专家.txt", 6941, "6b079cf4e338cc43259fd61188350d68883655bd72ceb9e9441b404d5c824b35"),
+    ("分析报告.txt", 4366, "7837f4da54d2937f7e1d6db267b5ac523a94efdbf624f2d3bfc95d6fc17e6d85"),
+    ("大概率管用 .txt", 2223, "4beb577f7438e243e24bae18f9f2dec5b9c69747739476f11ca0eda6711288be"),
+    ("文稿编辑.txt", 8479, "9dae7c1075e5cb816a2553f02bfdb97e1c822553e390c6b5211c3c834c4873aa"),
+    ("视频总结.txt", 1381, "26966b72b9238c9d7060d76d4e4f93c46c11167666141148ec8e6a78fc9de6e5"),
+    (
+        "首席思想精炼师：对于各种文本都处理得较为简洁的总结提示词。.txt",
+        3224,
+        "c02e4eef650d6123efe74b337a9bfc905bf901e2ccfdc7f9124e0352dfc94404",
+    ),
 )
 
 #: 用户桌面上的原始目录（`视频总结.txt` 尚未绑给任何角色，等拍去向）。
@@ -176,13 +171,16 @@ def test_all_six_prompt_files_are_present_with_their_recorded_hashes():
         path = PROMPT_DIR / name
         assert path.is_file(), f"真源缺文件：{name}"
         assert path.stat().st_size == size, (
-            f"{name} 字节数不是登记的 {size}，实得 {path.stat().st_size}")
+            f"{name} 字节数不是登记的 {size}，实得 {path.stat().st_size}"
+        )
         assert _sha256(path) == digest, (
             f"{name} 的 sha256 变了——用户手写的提示词被改过。要么是有意的（那就更新"
-            f"登记表并在交付里点名），要么是意外（那必须回滚）")
+            f"登记表并在交付里点名），要么是意外（那必须回滚）"
+        )
     found = sorted(p.name for p in PROMPT_DIR.glob("*.txt") if p.is_file())
     assert found == sorted(n for n, _s, _d in PROMPT_FILES), (
-        f"目录里的 txt 与登记表不一致：实得 {found}")
+        f"目录里的 txt 与登记表不一致：实得 {found}"
+    )
     # 目录里另有 7 个 `.md`（提示词笔记），不参与绑定，所以计数只限 *.txt。
 
 
@@ -201,12 +199,14 @@ def test_the_desk_source_folder_still_matches_the_packaged_prompts():
         if not desk.is_file():
             pytest.skip(f"源侧缺 {name}（可能已改名或被清理），这一篇没比对")
         assert _sha256(desk) == digest, (
-            f"{name}：桌面原文与包内发布件不是同一份——发布件落后了，或包内被改过")
+            f"{name}：桌面原文与包内发布件不是同一份——发布件落后了，或包内被改过"
+        )
         checked += 1
     assert checked == len(PROMPT_FILES), "一条都没比对成功，这条就成了空断言"
 
 
 # ------------------------------------------------------------------ P2：覆盖度与 prompt_source
+
 
 def test_the_source_map_covers_the_public_roles_and_names_files_verbatim():
     """P2 之一：MAP 的绑定表逐字钉死（文件名不许被「顺手规范化」）。
@@ -238,24 +238,25 @@ def test_the_source_map_covers_the_public_roles_and_names_files_verbatim():
     # 权威层已无自造角色：MAP 的键必须全是 bs 也认识的。
     assert not (set(ps.MAP) - bs_keys), (
         f"MAP 里出现了 bs 不认的角色 {sorted(set(ps.MAP) - bs_keys)}："
-        f"重新自造角色要先决定它的回落基准与漂移锁，不是加一行绑定")
+        f"重新自造角色要先决定它的回落基准与漂移锁，不是加一行绑定"
+    )
 
     public = set(wb_summary.ROLE_KEYS)
     assert set(ps.MAP) | set(ps.NO_SOURCE) == public, (
         f"既不在 MAP 也不在 NO_SOURCE 的公共角色：{sorted(public - set(ps.MAP) - set(ps.NO_SOURCE))}"
-        f"；名单外的绑定：{sorted((set(ps.MAP) | set(ps.NO_SOURCE)) - public)}")
-    assert not (set(ps.MAP) & set(ps.NO_SOURCE)), (
-        "同一个角色既算有源又算无源：绑定与压缩版会互相盖")
+        f"；名单外的绑定：{sorted((set(ps.MAP) | set(ps.NO_SOURCE)) - public)}"
+    )
+    assert not (set(ps.MAP) & set(ps.NO_SOURCE)), "同一个角色既算有源又算无源：绑定与压缩版会互相盖"
     assert tuple(ps.UNBOUND) == (), f"又出现没人认领的 txt：{tuple(ps.UNBOUND)}"
     # 无源名单**不再写死**（task-31 之后它只剩 `shensi` 一个，写死名单每次角色增删都要红一轮）。
     # 上面两条不变量已经把 NO_SOURCE 唯一确定：MAP ∪ NO_SOURCE == 公开面 且 两者不相交
     # ⇒ NO_SOURCE == 公开面 − MAP。这里只补一条防空转：无源段必须还有人，
     # 否则 P3「无源角色两侧逐字相同」那条比较就失去主语。
-    assert ps.NO_SOURCE, (
-        "无源段空了：公开面全都有源，P3 那条「与 bs 逐字相同」的对照会静默空转")
+    assert ps.NO_SOURCE, "无源段空了：公开面全都有源，P3 那条「与 bs 逐字相同」的对照会静默空转"
     assert ps.EXTRA_FILE == "大概率管用 .txt"
     assert ps.EXTRA_FILE not in set(ps.MAP.values()), (
-        "附加提示词被当成某个角色的真源：它会双份进请求")
+        "附加提示词被当成某个角色的真源：它会双份进请求"
+    )
     for name in list(ps.MAP.values()) + [ps.EXTRA_FILE, *ps.UNBOUND]:
         assert (PROMPT_DIR / name).is_file(), f"点名的文件不在包里：{name!r}"
 
@@ -274,11 +275,9 @@ def test_every_role_carries_its_source_filename_or_none_never_empty_string():
     for role in wb_summary.ALL_ROLES:
         expected = ps.MAP.get(role.key)
         got = getattr(role, "prompt_source", "<没有这个属性>")
-        assert got != "", (
-            f"{role.key}：prompt_source 是空串，界面上会被读成「文件名叫丢了」")
+        assert got != "", f"{role.key}：prompt_source 是空串，界面上会被读成「文件名叫丢了」"
         if expected is None:
-            assert got is None, (
-                f"{role.key}：无源角色的 prompt_source 必须是 None，实得 {got!r}")
+            assert got is None, f"{role.key}：无源角色的 prompt_source 必须是 None，实得 {got!r}"
         else:
             assert got == expected, f"{role.key}：应绑 {expected!r}，实得 {got!r}"
     # describe_roles 走的是同一份 info_for，界面读的是它——两边不许分叉。
@@ -303,10 +302,12 @@ def test_a_bound_role_system_is_the_txt_bytes_not_the_compressed_copy():
             # 只对有对侧的角色比。WB 自造的角色在 bs 侧是「未知 key 静默回落 standard」，
             # 拿空串当参照做不等比较是平凡真——那半句「绑过之后两侧必须不同」对它没意义。
             assert role.system != bs_roles.get_role(key).system, (
-                f"{key}：绑过一次之后 WB 与 bs 的 system 居然相同——绑定失效")
+                f"{key}：绑过一次之后 WB 与 bs 的 system 居然相同——绑定失效"
+            )
 
 
 # ------------------------------------------------------------------ P3：bind() 的返回形状与幂等
+
 
 def test_bind_returns_the_three_buckets_and_is_byte_identical_when_repeated():
     """P3：`bind()` 返回三个固定键；绑两次与绑一次**逐字节相同**（赋值不是拼接）。
@@ -317,22 +318,26 @@ def test_bind_returns_the_three_buckets_and_is_byte_identical_when_repeated():
     """
     first = ps.bind(wb_summary._roles)
     assert set(first) == {"bound", "missing_source", "kept_compressed"}, (
-        f"bind() 的返回键不是合同那三个：{sorted(first)}")
+        f"bind() 的返回键不是合同那三个：{sorted(first)}"
+    )
     after_first = {r.key: r.system for r in wb_summary.ALL_ROLES}
     second = ps.bind(wb_summary._roles)
     after_second = {r.key: r.system for r in wb_summary.ALL_ROLES}
     assert second == first, f"两次 bind 的清单不同：{first} vs {second}"
     assert after_second == after_first, "两次 bind 之后某个角色的 system 变了——不是幂等"
     assert sorted(first["bound"]) == sorted(ps.MAP), (
-        f"bound 桶应当是四个有源角色，实得 {first['bound']}")
+        f"bound 桶应当是四个有源角色，实得 {first['bound']}"
+    )
     assert sorted(first["kept_compressed"]) == sorted(ps.NO_SOURCE)
     assert first["missing_source"] == [], "包内文件齐全时不该有回落，有就是丢文件了"
 
 
 # ------------------------------------------------------------------ P4：缺文件的真实回落（最易出事故）
 
+
 def test_missing_prompt_files_fall_back_to_the_compressed_version_not_to_empty(
-        monkeypatch, tmp_path):
+    monkeypatch, tmp_path
+):
     """P4：`WB_PROMPTS_DIR` 指向空目录 → 四个有源角色**回到压缩版**，绝不许留空串。
 
     空 system 的代价不是「少一句提示词」：副本 `summarizer.py:517` 对空 system 走
@@ -352,10 +357,12 @@ def test_missing_prompt_files_fall_back_to_the_compressed_version_not_to_empty(
         assert ps.load("文稿编辑.txt") == "", "缺文件时 load() 必须返回空串（不许抛）"
         result = ps.bind(wb_summary._roles)
         assert sorted(result["missing_source"]) == sorted(ps.MAP), (
-            f"四个有源角色都该报缺文件，实得 {result['missing_source']}")
+            f"四个有源角色都该报缺文件，实得 {result['missing_source']}"
+        )
         assert result["bound"] == []
         assert sorted(result["kept_compressed"]) == sorted(wb_summary.ROLE_KEYS), (
-            "回落的角色必须同时算「仍在用压缩版」，界面才看得出没生效")
+            "回落的角色必须同时算「仍在用压缩版」，界面才看得出没生效"
+        )
         for key in ps.MAP:
             role = wb_summary._roles.get_role(key)
             assert role.system, f"{key}：缺文件回落成了**空 system**——副本会走无角色路径"
@@ -371,9 +378,11 @@ def test_missing_prompt_files_fall_back_to_the_compressed_version_not_to_empty(
                 # 「不能留空串」，空串会让副本走无角色的 `SYSTEM_PROMPT` 路径）。
                 pytest.fail(
                     f"MAP 里出现 bs 不认的角色 {key}：WB 已无自造角色，这条回落判据的 "
-                    f"WB-only 分支失去主语。要恢复自造角色，先在这里补它的回落基准。")
+                    f"WB-only 分支失去主语。要恢复自造角色，先在这里补它的回落基准。"
+                )
             assert role.system == bs_roles.get_role(key).system, (
-                f"{key}：回落的东西不是压缩版原文（方法论被换了）")
+                f"{key}：回落的东西不是压缩版原文（方法论被换了）"
+            )
         # 回落之后仍然要能正常生成，并且请求里带的是「压缩版 + 契约」，不是 SYSTEM_PROMPT。
         cfg = make_cfg()
         # 原来这里只验 `wengao` 一个，另外单独给 WB 自造的 `shipin` 补了一条「底线 + 契约」。
@@ -382,10 +391,10 @@ def test_missing_prompt_files_fall_back_to_the_compressed_version_not_to_empty(
         for key in ps.MAP:
             llm = FakeLLM(three_pass_script())
             wb_summary.summarize(make_bundle(SHORT_BODY), llm, cfg, role_key=key)
-            expected = (bs_roles.get_role(key).system.strip() + "\n"
-                        + bs_roles.OUTPUT_CONTRACT)
+            expected = bs_roles.get_role(key).system.strip() + "\n" + bs_roles.OUTPUT_CONTRACT
             assert llm.requests[0]["messages"][0]["content"] == expected, (
-                f"{key} 缺文件后的请求不是「压缩版 + 契约」——它走了无角色路径")
+                f"{key} 缺文件后的请求不是「压缩版 + 契约」——它走了无角色路径"
+            )
     finally:
         monkeypatch.delenv(ps.PROMPTS_DIR_ENV, raising=False)
         ps.restore(wb_summary._roles, before)
@@ -414,7 +423,8 @@ def test_a_single_missing_file_only_drops_that_one_role(monkeypatch, tmp_path):
         monkeypatch.setenv(ps.PROMPTS_DIR_ENV, str(staging))
         result = ps.bind(wb_summary._roles)
         assert result["missing_source"] == [missing_key], (
-            f"只该 {missing_key} 回落，实得 {result['missing_source']}")
+            f"只该 {missing_key} 回落，实得 {result['missing_source']}"
+        )
         assert sorted(result["bound"]) == sorted(set(ps.MAP) - {missing_key})
         for key in set(ps.MAP) - {missing_key}:
             role = wb_summary._roles.get_role(key)
@@ -429,6 +439,7 @@ def test_a_single_missing_file_only_drops_that_one_role(monkeypatch, tmp_path):
 
 
 # ------------------------------------------------------------------ P5：拼接顺序（定死，不许调）
+
 
 def test_the_extra_applies_to_every_role_with_a_non_empty_system_including_unsourced():
     """附加提示词的作用面 = **所有 system 非空的角色**，无源的那些也一样吃；只有 standard 不吃。
@@ -446,10 +457,10 @@ def test_the_extra_applies_to_every_role_with_a_non_empty_system_including_unsou
     # 遍历域现读 = 公开面里 system 非空的角色（task-31 之后 6 个，`xueshu` 退役就自动退出）。
     # 原来写死 ("shensi","xueshu","renhua","wengao")，那份名单把退役角色当公开角色遍历，
     # 于是「已停用」的键越积越多、名单越来越假。
-    subjects = [key for key in wb_summary.ROLE_KEYS
-                if wb_summary._roles.get_role(key).system]
+    subjects = [key for key in wb_summary.ROLE_KEYS if wb_summary._roles.get_role(key).system]
     assert len(subjects) >= 2, (
-        f"公开面里 system 非空的角色只剩 {subjects}：这条比较会空转，先确认是不是绑定被清空了")
+        f"公开面里 system 非空的角色只剩 {subjects}：这条比较会空转，先确认是不是绑定被清空了"
+    )
     with ps.use_extra_prompt(False):
         for key in subjects:
             off[key] = ps.system_for(key, wb_summary._roles.get_role(key).system)
@@ -461,7 +472,8 @@ def test_the_extra_applies_to_every_role_with_a_non_empty_system_including_unsou
             assert any(marker in on for marker in EXTRA_MARKERS), f"{key}：没接进附加"
         standard_base = bs_roles.get_role("standard").system
         assert ps.system_for("standard", standard_base) == standard_base, (
-            "standard 是唯一没有方法论的角色，给它接附加等于凭空造方法论")
+            "standard 是唯一没有方法论的角色，给它接附加等于凭空造方法论"
+        )
 
 
 def test_extra_prompt_sits_between_the_txt_and_the_output_contract():
@@ -481,11 +493,13 @@ def test_extra_prompt_sits_between_the_txt_and_the_output_contract():
     assert composed.startswith(txt[:40]), "开关开着，开头就不再是真源 txt 了"
     assert extra in composed, f"开着开关却没接进附加提示词：{len(composed)} 字"
     assert composed.index(txt[:40]) < composed.index(extra[:40]), (
-        "附加提示词跑到 txt 前面了——顺序是定死的")
+        "附加提示词跑到 txt 前面了——顺序是定死的"
+    )
     full = composed.strip() + "\n" + bs_roles.OUTPUT_CONTRACT
     assert full.rstrip().endswith(bs_roles.OUTPUT_CONTRACT.strip()), (
-        "契约不在最末尾：模型会照 txt 的要求把思考过程打进正文，_extract_json 当场坏")
-    tail = full[full.rindex(bs_roles.OUTPUT_CONTRACT.strip()[:20]):]
+        "契约不在最末尾：模型会照 txt 的要求把思考过程打进正文，_extract_json 当场坏"
+    )
+    tail = full[full.rindex(bs_roles.OUTPUT_CONTRACT.strip()[:20]) :]
     assert extra[:40] not in tail, "附加提示词被塞到契约后面了——压不住它"
 
 
@@ -502,6 +516,7 @@ def test_the_extra_prompt_is_absent_by_default():
 
 # ------------------------------------------------------------------ P6：开关语义（两条真判据）
 
+
 def test_the_switch_nests_back_to_the_enclosing_value_not_to_the_default():
     """P6 之一：嵌套退出回到**外层的值**，不是回到默认值。
 
@@ -517,9 +532,12 @@ def test_the_switch_nests_back_to_the_enclosing_value_not_to_the_default():
             seen.append(("inner-off", ps.extra_enabled()))
         seen.append(("after-inner", ps.extra_enabled()))
     seen.append(("after-outer", ps.extra_enabled()))
-    assert seen == [("outer-on", True), ("inner-off", False),
-                    ("after-inner", True), ("after-outer", False)], (
-        f"嵌套还原不对：{seen}——退出内层必须回外层值（token 复位），不是回默认")
+    assert seen == [
+        ("outer-on", True),
+        ("inner-off", False),
+        ("after-inner", True),
+        ("after-outer", False),
+    ], f"嵌套还原不对：{seen}——退出内层必须回外层值（token 复位），不是回默认"
 
 
 def test_get_role_returns_a_different_system_as_the_switch_moves():
@@ -533,13 +551,15 @@ def test_get_role_returns_a_different_system_as_the_switch_moves():
     off_authority = wb_summary.get_role(key).system
     off_copy = wb_summary._roles.get_role(key).system
     assert off_authority == off_copy, (
-        "两条取角色路径给出的 system 不一致（一个过了 view_for 一个没过）")
+        "两条取角色路径给出的 system 不一致（一个过了 view_for 一个没过）"
+    )
     with ps.use_extra_prompt(True):
         on_authority = wb_summary.get_role(key).system
         on_copy = wb_summary._roles.get_role(key).system
     assert on_authority == on_copy, "开着时两条路径又不一致了"
     assert on_authority != off_authority, (
-        "开关切了而 system 没变——附加提示词被烘死了，配置项 `llm.extra_prompt` 是摆设")
+        "开关切了而 system 没变——附加提示词被烘死了，配置项 `llm.extra_prompt` 是摆设"
+    )
     assert off_authority.startswith(ps.load(ps.MAP[key]).strip()[:40])
 
 
@@ -557,8 +577,7 @@ def test_the_view_is_the_same_object_when_off_and_a_copy_when_on():
         view = ps.view_for(role)
         assert view is not role, "开着时必须返回拷贝，否则会写脏共享的 Role"
         assert view.system != role.system
-        assert role.system == _read_txt(ps.MAP["xiezuo"]), (
-            "本体被改写了——并发时另一边会读到脏值")
+        assert role.system == _read_txt(ps.MAP["xiezuo"]), "本体被改写了——并发时另一边会读到脏值"
 
 
 def test_the_cache_is_keyed_by_the_switch_not_just_the_role():
@@ -594,24 +613,28 @@ def test_two_threads_one_on_one_off_do_not_contaminate_each_other():
     def worker(label: str, enabled: bool) -> None:
         lengths: list[int] = []
         with ps.use_extra_prompt(enabled):
-            barrier.wait(timeout=5)          # 两边都进 with 之后再开始，制造真并发
+            barrier.wait(timeout=5)  # 两边都进 with 之后再开始，制造真并发
             for _ in range(24):
                 lengths.append(len(ps.system_for(key, wb_summary._roles.get_role(key).system)))
         results[label] = lengths
 
-    threads = [threading.Thread(target=worker, args=("on", True)),
-               threading.Thread(target=worker, args=("off", False))]
+    threads = [
+        threading.Thread(target=worker, args=("on", True)),
+        threading.Thread(target=worker, args=("off", False)),
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=10)
     assert set(results) == {"on", "off"}, f"有线程没跑完：{sorted(results)}"
     assert len(set(results["on"])) == 1 and len(set(results["off"])) == 1, (
-        "同一线程内长度会跳——并发时被另一个线程改写了")
+        "同一线程内长度会跳——并发时被另一个线程改写了"
+    )
     on_len, off_len = results["on"][0], results["off"][0]
     assert on_len > off_len, f"开着的反而不比关着的长：on={on_len} off={off_len}"
     assert on_len - off_len == extra_len + 1, (
-        f"开与关的差值应当正好是附加提示词（{extra_len}）加一个换行，实得 {on_len - off_len}")
+        f"开与关的差值应当正好是附加提示词（{extra_len}）加一个换行，实得 {on_len - off_len}"
+    )
 
 
 def test_the_unsourced_roles_still_read_the_compressed_version_when_off():
@@ -628,7 +651,8 @@ def test_the_unsourced_roles_still_read_the_compressed_version_when_off():
             assert wb_role.system, f"{key}：无源角色的 system 被清空了"
             assert wb_role.system == bs_role.system, (
                 f"{key}：无源角色的 system 与 bs 压缩版不再逐字相同——"
-                f"WB {len(wb_role.system)} 字 vs bs {len(bs_role.system)} 字")
+                f"WB {len(wb_role.system)} 字 vs bs {len(bs_role.system)} 字"
+            )
             assert getattr(wb_role, "prompt_source", None) is None
 
 
@@ -638,10 +662,12 @@ def test_the_unsourced_roles_still_read_the_compressed_version_when_off():
 #: lead 实测当前 3 处写入全在 `prompt_source.py:300/:304/:330`（bind 两条 + restore 一条），
 #: 但白名单按合同给，不要把自己写得更窄的版本当成合同——那会让将来在权威层做一次合法
 #: 归一化的改动变成假红。
-ALLOWED_SYSTEM_WRITERS = frozenset({
-    "video_workbench/core/prompt_source.py",
-    "video_workbench/core/summary/__init__.py",
-})
+ALLOWED_SYSTEM_WRITERS = frozenset(
+    {
+        "video_workbench/core/prompt_source.py",
+        "video_workbench/core/summary/__init__.py",
+    }
+)
 
 #: **绝不允许**出现写入点的地方：逐字节锁死的副本区。角色对象的 system 只能在权威层绑，
 #: 副本一旦自己改，界面上显示的 sha 与实际发出去的就从此两份真源。
@@ -666,16 +692,19 @@ def _system_assignment_sites() -> list[str]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         for node in ast.walk(tree):
             if isinstance(node, (ast.Assign, ast.AugAssign)):
-                targets = ([node.target] if isinstance(node, ast.AugAssign)
-                           else list(node.targets))
+                targets = [node.target] if isinstance(node, ast.AugAssign) else list(node.targets)
                 for target in targets:
                     if isinstance(target, ast.Attribute) and target.attr == "system":
                         sites.append(f"{rel}:{node.lineno}")
-            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Name)
-                    and node.value.func.id == "setattr" and len(node.value.args) >= 3
-                    and isinstance(node.value.args[1], ast.Constant)
-                    and node.value.args[1].value == "system"):
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "setattr"
+                and len(node.value.args) >= 3
+                and isinstance(node.value.args[1], ast.Constant)
+                and node.value.args[1].value == "system"
+            ):
                 sites.append(f"{rel}:{node.lineno}(setattr)")
     return sites
 
@@ -691,7 +720,8 @@ def test_only_the_prompt_source_layer_writes_role_system():
     files = {site.split(":")[0] for site in sites}
     assert files <= set(ALLOWED_SYSTEM_WRITERS), (
         f"出现合同之外的 role.system 写入点：{sorted(sites)}。绑定只能发生在 "
-        f"`prompt_source.bind/restore`（必要时权威层）；要加新位置先说清为什么不能在那里做")
+        f"`prompt_source.bind/restore`（必要时权威层）；要加新位置先说清为什么不能在那里做"
+    )
 
 
 def test_the_system_writer_detector_is_not_blind():
@@ -702,13 +732,12 @@ def test_the_system_writer_detector_is_not_blind():
     **副本区一条都不许有**——那才是逐字节锁与 sha 清单能同时成立的前提。
     """
     sites = _system_assignment_sites()
-    writer_sites = [s for s in sites
-                    if s.startswith("video_workbench/core/prompt_source.py")]
+    writer_sites = [s for s in sites if s.startswith("video_workbench/core/prompt_source.py")]
     assert len(writer_sites) >= 2, (
-        f"`prompt_source.py` 里应当至少两处 system 写入（绑全文、缺文件回落），实得 {writer_sites}")
+        f"`prompt_source.py` 里应当至少两处 system 写入（绑全文、缺文件回落），实得 {writer_sites}"
+    )
     banned = [s for s in sites if any(s.startswith(f) for f in FORBIDDEN_SYSTEM_WRITERS)]
-    assert not banned, (
-        f"逐字节锁的副本区出现 system 写入点 {banned}——真源就变成两份了")
+    assert not banned, f"逐字节锁的副本区出现 system 写入点 {banned}——真源就变成两份了"
 
 
 def test_a_missing_extra_file_makes_the_switch_a_no_op(monkeypatch, tmp_path):
@@ -728,11 +757,13 @@ def test_a_missing_extra_file_makes_the_switch_a_no_op(monkeypatch, tmp_path):
     with ps.use_extra_prompt(True):
         composed = ps.system_for("wengao", base)
     assert composed == base.strip(), (
-        f"extra 缺失时开关开着仍改了 system（{len(composed)} vs {len(base.strip())}）")
+        f"extra 缺失时开关开着仍改了 system（{len(composed)} vs {len(base.strip())}）"
+    )
     assert not composed.endswith("\n"), "拼了个空段落在末尾——那是「半截 system」的形状"
 
 
 # ------------------------------------------------------------------ P8：清单与界面读的字段
+
 
 def test_manifest_reports_every_named_file_including_the_lost_ones(monkeypatch, tmp_path):
     """P8：`manifest()` 列出**当前目录里实际有什么**，外加被点名却缺失的文件。
@@ -743,7 +774,8 @@ def test_manifest_reports_every_named_file_including_the_lost_ones(monkeypatch, 
     """
     rows = ps.manifest()
     assert len(rows) == len(PROMPT_FILES), (
-        f"清单行数与登记表不符：登记 {len(PROMPT_FILES)} 篇，实得 {len(rows)} 行")
+        f"清单行数与登记表不符：登记 {len(PROMPT_FILES)} 篇，实得 {len(rows)} 行"
+    )
     by_name = {row["name"]: row for row in rows}
     for name, size, digest in PROMPT_FILES:
         row = by_name[name]
@@ -760,9 +792,11 @@ def test_manifest_reports_every_named_file_including_the_lost_ones(monkeypatch, 
     # 「谁绑哪篇」的名单 owner 是 P2 那张逐字表；这里钉的是**文件视角**的投影
     # （manifest 是设置页读的那份，角色视角对了、文件视角没跟着对，界面就会说谎）。
     assert by_name["视频总结.txt"]["bound_role"] == "renhua", (
-        f"视频总结.txt 的归属又变成 {by_name['视频总结.txt']['bound_role']!r} 了")
+        f"视频总结.txt 的归属又变成 {by_name['视频总结.txt']['bound_role']!r} 了"
+    )
     assert by_name["视频总结.txt"]["in_map"] is True, (
-        "已绑定的文件被算成 in_map=False：设置页会说它没接进任何角色")
+        "已绑定的文件被算成 in_map=False：设置页会说它没接进任何角色"
+    )
 
     empty = tmp_path / "gone"
     empty.mkdir()
@@ -771,8 +805,7 @@ def test_manifest_reports_every_named_file_including_the_lost_ones(monkeypatch, 
         missing_rows = ps.manifest()
         names = {row["name"] for row in missing_rows}
         for name in list(ps.MAP.values()) + [ps.EXTRA_FILE]:
-            assert name in names, (
-                f"目录空了就不点名 {name}：丢文件会被显示成「没这个文件」")
+            assert name in names, f"目录空了就不点名 {name}：丢文件会被显示成「没这个文件」"
         lost = {row["name"]: row for row in missing_rows}
         assert lost[ps.MAP["wengao"]]["bytes"] == 0
         assert lost[ps.MAP["wengao"]]["sha256"] == ""
@@ -784,8 +817,11 @@ def test_the_info_for_shape_is_stable_for_sourced_and_unsourced_roles():
     """`info_for` 的两副面孔必须形状一致（界面与测试都按同一组键读）。"""
     sourced = ps.info_for("wengao")
     unsourced = ps.info_for("shensi")
-    assert set(sourced) == set(unsourced) == {
-        "prompt_source", "prompt_bytes", "prompt_sha256", "prompt_sha8"}
+    assert (
+        set(sourced)
+        == set(unsourced)
+        == {"prompt_source", "prompt_bytes", "prompt_sha256", "prompt_sha8"}
+    )
     assert sourced["prompt_source"] == "文稿编辑.txt"
     assert sourced["prompt_bytes"] == 8479
     assert sourced["prompt_sha8"] == sourced["prompt_sha256"][:8]
@@ -818,9 +854,16 @@ def test_bili_scribe_still_ships_the_compressed_roles():
     bs_keys = _bs_known_role_keys()
     # bs 的 8 个键**逐字钉死**（这是上游事实的警报，不是 WB 的合同值： bili_scribe/** 谁都不许改，
     # 哪天 bs 自己动角色表，漂移锁会红，而这条会先告诉我们是「加了/删了/改了名字」里的哪一种）。
-    assert set(bs_keys) == {"standard", "xueshu", "renhua", "shensi", "wengao",
-                            "xiezuo", "fenxi", "jinglian"}, (
-        f"bs 的角色表不再是这 8 个：{sorted(bs_keys)}")
+    assert set(bs_keys) == {
+        "standard",
+        "xueshu",
+        "renhua",
+        "shensi",
+        "wengao",
+        "xiezuo",
+        "fenxi",
+        "jinglian",
+    }, f"bs 的角色表不再是这 8 个：{sorted(bs_keys)}"
     # WB 已无自造角色（task-31 合并）。这条从「防越界」收紧成「防越界 + 承认现状」：
     # MAP 的键必须全部落在 bs 表里，任何 bs 不认的键出现就是有人把自造角色造回来了，
     # 那需要显式决定（并同步 P2 那张逐字绑定表），**不为了让它绿去造一个 wb_only**。
@@ -828,14 +871,16 @@ def test_bili_scribe_still_ships_the_compressed_roles():
     # `standard.system` 是空串：三条比较（!= txt、不以 txt 开头、比 txt 短）对空串全部
     # 平凡成立——所以必须靠「bs 确实没有它」这条正向断言撑着，现在靠的是反向那两条。
     assert not (set(ps.MAP) - set(bs_keys)), (
-        f"MAP 里出现了 bs 不认的角色 {sorted(set(ps.MAP) - set(bs_keys))}")
+        f"MAP 里出现了 bs 不认的角色 {sorted(set(ps.MAP) - set(bs_keys))}"
+    )
     compared = 0
     for key, name in ps.MAP.items():
         bs_system = bs_roles.get_role(key).system
         txt = _read_txt(name)
         assert bs_system != txt, f"bs 的 {key} 被换成 txt 全文了"
         assert not bs_system.startswith(txt.strip()[:40]), (
-            f"bs 的 {key} 开头已是 txt 全文——绑定泄漏到 bs 侧")
+            f"bs 的 {key} 开头已是 txt 全文——绑定泄漏到 bs 侧"
+        )
         # 长度方向按登记（唯一 owner：`wb_prompt_sizes.TXT_SHORTER_THAN_COMPRESSED`）。
         # `视频总结.txt` 全文 511 字**短于** bs `renhua` 压缩版 1509 字——那是 task-31
         # 把 `shipin` 合并进 `renhua` 的直接后果：人话角色的方法论正文缩到约三分之一。
@@ -845,17 +890,21 @@ def test_bili_scribe_still_ships_the_compressed_roles():
             assert len(bs_system) > len(txt), (
                 f"bs 的 {key} 压缩版不再比 {name} 长（{len(bs_system)} vs {len(txt)}）："
                 f"要么 bs 被改短、要么那篇 txt 被补长了——补过之后请把名字从登记里删掉，"
-                f"别把这条改成永远成立")
+                f"别把这条改成永远成立"
+            )
         else:
             assert len(bs_system) < len(txt), (
-                f"bs 的 {key} 不再比 txt 短（{len(bs_system)} vs {len(txt)}），压缩版形同虚设")
+                f"bs 的 {key} 不再比 txt 短（{len(bs_system)} vs {len(txt)}），压缩版形同虚设"
+            )
         compared += 1
     assert compared, (
         "共有角色一个都没比到（MAP 与 bs 名单的交集空了）——这条就退化成"
-        "「只读源码字符串」，下面三条比较全在原地空转")
+        "「只读源码字符串」，下面三条比较全在原地空转"
+    )
 
 
 # ------------------------------------------------------------------ P9：用户勾的那个盒子到哪去了
+
 
 #: 适配层的入口形状（`video_workbench/core/summarizer.py:838` 起）：
 #: `run(project, segments, *, client, cfg, ctx, role=..., extra_prompt=None)`。
@@ -863,15 +912,26 @@ def test_bili_scribe_still_ships_the_compressed_roles():
 #: 「配置里那个布尔值最后有没有变成发出去的 system」，用假 LLM 直接打适配器最省。
 def _tiny_project() -> dict:
     return {
-        "bvid": "BV1promptwiring", "aid": 3, "cid": 4, "page": 1, "page_count": 1,
-        "title": "提示词接线素材", "desc": "固定简介", "up_name": "UP接线",
-        "up_mid": 5, "duration_sec": 60, "tname": "知识", "tags": ["接线", "固定"],
+        "bvid": "BV1promptwiring",
+        "aid": 3,
+        "cid": 4,
+        "page": 1,
+        "page_count": 1,
+        "title": "提示词接线素材",
+        "desc": "固定简介",
+        "up_name": "UP接线",
+        "up_mid": 5,
+        "duration_sec": 60,
+        "tname": "知识",
+        "tags": ["接线", "固定"],
     }
 
 
 def _tiny_segments() -> list[dict]:
-    return [{"start_ms": index * 5000, "text": f"第{index}件固定的事，内容长度稳定。"}
-            for index in range(1, 9)]
+    return [
+        {"start_ms": index * 5000, "text": f"第{index}件固定的事，内容长度稳定。"}
+        for index in range(1, 9)
+    ]
 
 
 #: 长素材：900 段 × 每段约 40 字 ≈ 27,000 字 > `max_input_chars`（24,000），
@@ -880,8 +940,10 @@ LONG_SEG_TAIL = "这是一段固定长度的口语内容，用来把素材推过
 
 
 def _long_segments(count: int = 900) -> list[dict]:
-    return [{"start_ms": index * 4000, "text": f"第{index}段{LONG_SEG_TAIL}"}
-            for index in range(1, count + 1)]
+    return [
+        {"start_ms": index * 4000, "text": f"第{index}段{LONG_SEG_TAIL}"}
+        for index in range(1, count + 1)
+    ]
 
 
 def _markers_in(requests) -> list[bool]:
@@ -903,20 +965,28 @@ def test_the_configured_switch_reaches_the_model_through_run(default_env):
     """
     ad = importlib.import_module("video_workbench.core.summarizer")
     off = FakeLLM(three_pass_script())
-    ad.run(_tiny_project(), _tiny_segments(), client=off, cfg=make_cfg(),
-           ctx=QuietCtx(), role="wengao")
+    ad.run(
+        _tiny_project(), _tiny_segments(), client=off, cfg=make_cfg(), ctx=QuietCtx(), role="wengao"
+    )
     assert _markers_in(off.requests) == [False, False, False], (
-        f"配置没勾却在 system 里出现附加提示词：{_markers_in(off.requests)}")
+        f"配置没勾却在 system 里出现附加提示词：{_markers_in(off.requests)}"
+    )
 
     on = FakeLLM(three_pass_script())
-    ad.run(_tiny_project(), _tiny_segments(), client=on,
-           cfg=make_cfg(extra_prompt=True), ctx=QuietCtx(), role="wengao")
+    ad.run(
+        _tiny_project(),
+        _tiny_segments(),
+        client=on,
+        cfg=make_cfg(extra_prompt=True),
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     flags = _markers_in(on.requests)
     assert flags == [True, False, True], (
         f"勾上之后应当「生成与修订带附加、自我批判不带」，实得 {flags}；"
-        f"三轮的 json_mode 指纹={[r['json_mode'] for r in on.requests]}")
-    assert len(on.requests) == len(off.requests), (
-        "开关不该改变调用次数——它只改 system 正文")
+        f"三轮的 json_mode 指纹={[r['json_mode'] for r in on.requests]}"
+    )
+    assert len(on.requests) == len(off.requests), "开关不该改变调用次数——它只改 system 正文"
 
 
 def test_the_explicit_argument_overrides_the_configuration(default_env):
@@ -927,16 +997,30 @@ def test_the_explicit_argument_overrides_the_configuration(default_env):
     """
     ad = importlib.import_module("video_workbench.core.summarizer")
     llm_cfg_off = FakeLLM(three_pass_script())
-    ad.run(_tiny_project(), _tiny_segments(), client=llm_cfg_off, cfg=make_cfg(),
-           ctx=QuietCtx(), role="wengao", extra_prompt=True)
+    ad.run(
+        _tiny_project(),
+        _tiny_segments(),
+        client=llm_cfg_off,
+        cfg=make_cfg(),
+        ctx=QuietCtx(),
+        role="wengao",
+        extra_prompt=True,
+    )
     assert any(_markers_in(llm_cfg_off.requests)), "显式开了却没接进去（配置把入参盖掉了）"
 
     llm_cfg_on = FakeLLM(three_pass_script())
-    ad.run(_tiny_project(), _tiny_segments(), client=llm_cfg_on,
-           cfg=make_cfg(extra_prompt=True), ctx=QuietCtx(), role="wengao",
-           extra_prompt=False)
+    ad.run(
+        _tiny_project(),
+        _tiny_segments(),
+        client=llm_cfg_on,
+        cfg=make_cfg(extra_prompt=True),
+        ctx=QuietCtx(),
+        role="wengao",
+        extra_prompt=False,
+    )
     assert not any(_markers_in(llm_cfg_on.requests)), (
-        "显式关掉了却还带着附加提示词（配置把入参盖掉了）")
+        "显式关掉了却还带着附加提示词（配置把入参盖掉了）"
+    )
 
 
 def test_refine_honours_the_same_switch(default_env):
@@ -946,19 +1030,41 @@ def test_refine_honours_the_same_switch(default_env):
     这条单独立着，是因为 run 与 refine 是两处包点——只接对一处是很容易犯的分叉。
     """
     ad = importlib.import_module("video_workbench.core.summarizer")
-    previous = {"one_line": "一句话", "summary_md": "正文", "key_points": ["要点"],
-                "timeline": [{"t": "00:00", "text": "开场"}], "caution": "",
-                "comment_short": "短版", "revise_note": ""}
+    previous = {
+        "one_line": "一句话",
+        "summary_md": "正文",
+        "key_points": ["要点"],
+        "timeline": [{"t": "00:00", "text": "开场"}],
+        "caution": "",
+        "comment_short": "短版",
+        "revise_note": "",
+    }
     off = FakeLLM(three_pass_script())
-    ad.refine(_tiny_project(), _tiny_segments(), previous, "把语气收紧一点",
-              client=off, cfg=make_cfg(), ctx=QuietCtx(), role="wengao")
+    ad.refine(
+        _tiny_project(),
+        _tiny_segments(),
+        previous,
+        "把语气收紧一点",
+        client=off,
+        cfg=make_cfg(),
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     assert not any(_markers_in(off.requests)), (
-        f"改稿路径没勾却带了附加提示词：{_markers_in(off.requests)}")
+        f"改稿路径没勾却带了附加提示词：{_markers_in(off.requests)}"
+    )
 
     on = FakeLLM(three_pass_script())
-    ad.refine(_tiny_project(), _tiny_segments(), previous, "把语气收紧一点",
-              client=on, cfg=make_cfg(extra_prompt=True), ctx=QuietCtx(),
-              role="wengao")
+    ad.refine(
+        _tiny_project(),
+        _tiny_segments(),
+        previous,
+        "把语气收紧一点",
+        client=on,
+        cfg=make_cfg(extra_prompt=True),
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     assert any(_markers_in(on.requests)), "改稿路径勾了却没接进去"
 
 
@@ -973,12 +1079,14 @@ class _NoteThenPassLLM(FakeLLM):
     def chat(self, messages, *args, **kwargs):
         system = str(messages[0]["content"]) if messages else ""
         if system.strip().startswith(MAP_SYSTEM.strip()[:12]):
-            self.requests.append({
-                "messages": [dict(item) for item in messages],
-                "json_mode": bool(kwargs.get("json_mode", False)),
-                "temperature": kwargs.get("temperature"),
-                "max_tokens": kwargs.get("max_tokens"),
-            })
+            self.requests.append(
+                {
+                    "messages": [dict(item) for item in messages],
+                    "json_mode": bool(kwargs.get("json_mode", False)),
+                    "temperature": kwargs.get("temperature"),
+                    "max_tokens": kwargs.get("max_tokens"),
+                }
+            )
             return f"第 {len(self.requests)} 段的口语小记，固定一句。"
         return super().chat(messages, *args, **kwargs)
 
@@ -993,20 +1101,29 @@ def test_the_switch_never_touches_the_pre_read_requests(default_env):
     """
     ad = importlib.import_module("video_workbench.core.summarizer")
     llm = _NoteThenPassLLM(three_pass_script())
-    ad.run(_tiny_project(), _long_segments(), client=llm,
-           cfg=make_cfg(extra_prompt=True), ctx=QuietCtx(), role="wengao")
+    ad.run(
+        _tiny_project(),
+        _long_segments(),
+        client=llm,
+        cfg=make_cfg(extra_prompt=True),
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     systems = [str(req["messages"][0]["content"]) for req in llm.requests]
     pre_reads = [s for s in systems if s.strip().startswith(MAP_SYSTEM.strip()[:12])]
-    assert len(pre_reads) >= 2, (
-        f"没量到预读请求（共 {len(systems)} 次），这条就空转了")
+    assert len(pre_reads) >= 2, f"没量到预读请求（共 {len(systems)} 次），这条就空转了"
     for text in pre_reads:
         assert text.strip() == MAP_SYSTEM.strip(), (
-            "预读的 system 被动过——它吃的是固定的 MAP_SYSTEM，与角色与开关都无关")
+            "预读的 system 被动过——它吃的是固定的 MAP_SYSTEM，与角色与开关都无关"
+        )
         assert not any(marker in text for marker in EXTRA_MARKERS), (
-            "附加提示词混进预读了：A 的成本不该随分段数放大")
+            "附加提示词混进预读了：A 的成本不该随分段数放大"
+        )
     reduced = [s for s in systems if not s.strip().startswith(MAP_SYSTEM.strip()[:12])]
     assert any(any(marker in s for marker in EXTRA_MARKERS) for s in reduced), (
-        "预读干净、归约也没带上附加提示词——那 with 到底包住了什么？")
+        "预读干净、归约也没带上附加提示词——那 with 到底包住了什么？"
+    )
+
 
 def test_the_settings_save_path_can_actually_turn_the_switch_on():
     """P9 之五：设置页那个勾选**存得进去**——`cfg.apply({"llm": {"extra_prompt": true}})` 生效。
@@ -1017,16 +1134,17 @@ def test_the_settings_save_path_can_actually_turn_the_switch_on():
     而且没有任何报错。这条只验「配置这一跳」，system 那一跳由上面几条管。
     """
     from video_workbench.config import WorkbenchConfig
+
     cfg = WorkbenchConfig.__new__(WorkbenchConfig)
     # 用真实默认构造，别手搭：手搭的 cfg 会绕过 dataclass 默认值这个真源。
     cfg.__init__()  # type: ignore[misc]
     assert cfg.llm.extra_prompt is False, "附加提示词必须默认关（开了会拖垮 JSON 产出）"
     cfg.apply({"llm": {"extra_prompt": True}})
-    assert cfg.llm.extra_prompt is True, (
-        "设置存不进去：UI 勾了、PUT 发了、cfg 里还是 False")
+    assert cfg.llm.extra_prompt is True, "设置存不进去：UI 勾了、PUT 发了、cfg 里还是 False"
     ad = importlib.import_module("video_workbench.core.summarizer")
     assert ad.extra_prompt_on(cfg, None) is True, (
-        "cfg 存进去了但 `extra_prompt_on` 没读它——with 那层接错线")
+        "cfg 存进去了但 `extra_prompt_on` 没读它——with 那层接错线"
+    )
     assert ad.extra_prompt_on(cfg, False) is False, "显式入参必须还能压过配置"
 
 
@@ -1052,7 +1170,7 @@ def _reconcile_now():
 
 def test_the_reconciliation_passes_on_the_shipped_lists():
     """控制腿：盘上现在这三份名单是自洽的——否则下面三条「必须抛」全是空响。"""
-    _reconcile_now()          # 不抛即通过；抛了就是产品当前状态坏了
+    _reconcile_now()  # 不抛即通过；抛了就是产品当前状态坏了
 
 
 def test_a_sourced_role_pushed_into_no_source_is_caught(tmp_path):
@@ -1128,5 +1246,6 @@ def test_a_txt_bound_to_a_retired_role_is_caught(tmp_path):
     message = str(exc.value)
     assert retired in message, f"炸了但没点出是哪个退役键被绑：{message!r}"
     assert "不会生效" in message or "bind()" in message, (
-        f"没走到『MAP ∩ RETIRED』那一条对账：{message!r}")
+        f"没走到『MAP ∩ RETIRED』那一条对账：{message!r}"
+    )
     _reconcile_now()

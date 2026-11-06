@@ -11,10 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from video_workbench.app.errors import WBError
-
 SUMMARY_CONTENT = {
     "one_line": "这期把注意力机制拆成能照做的步骤",
     "summary_md": "## 这期在讲什么\n讲三件事。",
@@ -39,7 +35,10 @@ def make_project(service, tmp_path: Path, *, title="标题", bvid="BV1xx", aid=1
 def with_summary(service, project, content=None):
     return service.repo.summary_insert(
         # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
-        project["id"], content=content or SUMMARY_CONTENT, content_md="# 总结", role="standard"
+        project["id"],
+        content=content or SUMMARY_CONTENT,
+        content_md="# 总结",
+        role="standard",
     )
 
 
@@ -135,9 +134,7 @@ def test_edited_delta_wins_over_regenerated_markdown(service, tmp_path):
     project = make_project(service, tmp_path)
     with_summary(service, project)
     custom = '[{"insert": "我自己写的正文\\n"}]'
-    data = call(
-        service, "publish.note", {"project_id": project["id"], "content": custom}
-    )["data"]
+    data = call(service, "publish.note", {"project_id": project["id"], "content": custom})["data"]
     assert data["note"]["content"] == custom
     assert data["note"]["content_text"] == "我自己写的正文\n"
 
@@ -155,9 +152,7 @@ def test_second_save_updates_same_row(service, tmp_path):
 def test_over_limit_title_is_refused_not_truncated(service, tmp_path):
     project = make_project(service, tmp_path)
     with_summary(service, project)
-    result = call(
-        service, "publish.note", {"project_id": project["id"], "title": "标" * 100}
-    )
+    result = call(service, "publish.note", {"project_id": project["id"], "title": "标" * 100})
     assert result["ok"] is False
     assert result["error"]["code"] == "VALIDATION"
     assert "标题超过 80 字" in result["error"]["message"]
@@ -167,9 +162,7 @@ def test_over_limit_title_is_refused_not_truncated(service, tmp_path):
 def test_empty_body_is_refused(service, tmp_path):
     project = make_project(service, tmp_path)
     with_summary(service, project, content={"one_line": "只有一句话"})
-    result = call(
-        service, "publish.note", {"project_id": project["id"], "content": "[]"}
-    )
+    result = call(service, "publish.note", {"project_id": project["id"], "content": "[]"})
     assert result["ok"] is False
     assert result["error"]["code"] == "VALIDATION"
 
@@ -228,6 +221,7 @@ def test_publish_event_fires(service, tmp_path):
     with_summary(service, project)
     call(service, "publish.note", {"project_id": project["id"]})
     assert any(name == "publish.updated" for name, _ in seen)
+
 
 # ------------------------------------------------------------------ 并发与越界
 

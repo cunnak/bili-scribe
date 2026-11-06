@@ -45,7 +45,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 from pathlib import Path
 
@@ -98,14 +97,18 @@ def measured(strict: bool) -> dict[str, object]:
         # 干净 JSON：两档都该一次都不多——①是只读捕获，③在好回复上用不上。
         good = T.FakeLLM([payload])
         A.SummaryLLM(good, model="stub").chat(
-            [{"role": "user", "content": "写一份总结"}], json_mode=True)
+            [{"role": "user", "content": "写一份总结"}], json_mode=True
+        )
 
         # 只读捕获：模型给了 25 条，dense 就必须留住 25 条（①与档位无关）。
         # 注意这是「覆盖函数不看档位」的单元证据，不是 B1 的端到端证据（见文件头分工）。
         captured = A.SummaryLLM(T.FakeLLM([]), model="stub")
         captured.dense_timeline = rows
-        kept = len(A._apply_dense(
-            A.bs_summarizer.Summary(timeline=rows[:20], model="stub"), captured).timeline)
+        kept = len(
+            A._apply_dense(
+                A.bs_summarizer.Summary(timeline=rows[:20], model="stub"), captured
+            ).timeline
+        )
 
         # 坏 JSON：严格档一次即弃；宽松档走阶梯，必然 >1。
         # 这里**故意不判异常类型/错误码**——判据只有「次数随不随档位变」；
@@ -114,7 +117,8 @@ def measured(strict: bool) -> dict[str, object]:
         bad = T.FakeLLM(["这不是 JSON"] * 12)
         try:
             A.SummaryLLM(bad, model="stub").chat(
-                [{"role": "user", "content": "写一份总结"}], json_mode=True)
+                [{"role": "user", "content": "写一份总结"}], json_mode=True
+            )
         except Exception:  # noqa: BLE001  两档的出口形状不同（严格档原样抛、宽松档阶梯用尽后抛别的），这里只数请求次数
             pass
     finally:
@@ -142,7 +146,8 @@ def test_budget_strict_restores_the_configured_value(both_tiers, clean_env):
     夹具的输入当输出比，恒真。
     """
     assert both_tiers["strict"]["budget"] == SMALL_TOKENS, (
-        f"严格档预算没原样还原：入参 {SMALL_TOKENS}，实得 {both_tiers['strict']['budget']}")
+        f"严格档预算没原样还原：入参 {SMALL_TOKENS}，实得 {both_tiers['strict']['budget']}"
+    )
 
 
 def test_budget_loose_lifts_to_the_floor(both_tiers, clean_env):
@@ -152,7 +157,8 @@ def test_budget_loose_lifts_to_the_floor(both_tiers, clean_env):
     两条会同时绿或同时红，而现在它们各自只在一档成立。
     """
     assert both_tiers["loose"]["budget"] == A.MIN_JSON_TOKENS == 12288, (
-        f"宽松档没抬到下限：{both_tiers['loose']['budget']}")
+        f"宽松档没抬到下限：{both_tiers['loose']['budget']}"
+    )
 
 
 def test_strict_failure_message_names_the_switch(both_tiers, clean_env):
@@ -168,10 +174,12 @@ def test_loose_failure_message_stays_silent_about_the_switch(both_tiers, clean_e
 def test_clean_reply_never_asks_twice_in_either_tier(both_tiers, clean_env):
     """⑤：干净 JSON 时两档都只发 1 次——钉住「①的捕获与②的预算都不许在正常路径偷请求」。"""
     assert both_tiers["strict"]["good_calls"] == 1, (
-        f"严格档干净回复发了 {both_tiers['strict']['good_calls']} 次")
+        f"严格档干净回复发了 {both_tiers['strict']['good_calls']} 次"
+    )
     assert both_tiers["loose"]["good_calls"] == 1, (
         f"宽松档干净回复发了 {both_tiers['loose']['good_calls']} 次——"
-        "多出来的是补密那一轮，稀疏素材才该付那个钱")
+        "多出来的是补密那一轮，稀疏素材才该付那个钱"
+    )
 
 
 def test_dense_override_keeps_every_row_in_either_tier(both_tiers, clean_env):
@@ -181,21 +189,23 @@ def test_dense_override_keeps_every_row_in_either_tier(both_tiers, clean_env):
     端到端那一半在 `test_summary_parity.py::test_default_tier_keeps_a_timeline_longer_than_the_cap`。
     """
     assert both_tiers["strict"]["kept"] == ROWS, (
-        f"严格档把超上限的条目又截掉了：{both_tiers['strict']['kept']}")
-    assert both_tiers["loose"]["kept"] == ROWS, (
-        f"宽松档也丢了条目：{both_tiers['loose']['kept']}")
+        f"严格档把超上限的条目又截掉了：{both_tiers['strict']['kept']}"
+    )
+    assert both_tiers["loose"]["kept"] == ROWS, f"宽松档也丢了条目：{both_tiers['loose']['kept']}"
 
 
 def test_bad_reply_fails_after_one_request_in_strict_tier(both_tiers, clean_env):
     """⑦：严格档坏 JSON 必须一次即弃（③阶梯整条不走，B 组那条端到端用例的同源证据）。"""
     assert both_tiers["strict"]["bad_calls"] == 1, (
-        f"严格档多问了 {both_tiers['strict']['bad_calls']} 次——加固没关干净")
+        f"严格档多问了 {both_tiers['strict']['bad_calls']} 次——加固没关干净"
+    )
 
 
 def test_bad_reply_walks_the_ladder_in_loose_tier(both_tiers, clean_env):
     """⑧：宽松档坏 JSON 必须真的走阶梯（>1 次），否则「阶梯还在」只是注释。"""
     assert both_tiers["loose"]["bad_calls"] > 1, (
-        f"宽松档一次就弃了，阶梯没在跑：{both_tiers['loose']['bad_calls']}")
+        f"宽松档一次就弃了，阶梯没在跑：{both_tiers['loose']['bad_calls']}"
+    )
 
 
 def test_patch_does_not_leak(clean_env):
@@ -205,8 +215,10 @@ def test_patch_does_not_leak(clean_env):
     搬到 fixture 外面，这里立刻红。顺带确认未设 env 时默认仍是严格档。
     """
     assert A._parity_strict.__name__ == "_parity_strict", (
-        f"`_parity_strict` 还是被替换着的：{A._parity_strict!r}")
+        f"`_parity_strict` 还是被替换着的：{A._parity_strict!r}"
+    )
     assert A._parity_strict() is True, "未设开关必须回到默认严格档"
+
 
 def test_a_per_round_budget_boost_is_caught_by_the_b4_check(clean_env):
     """灵敏度（只证「抓得到」，不重复结论）：给严格档第三轮单独加预算，B4 那套判据必须抓到。
@@ -233,38 +245,41 @@ def test_a_per_round_budget_boost_is_caught_by_the_b4_check(clean_env):
     seen: list[object] = []
     injected: list[int] = []
 
-    def boosted(self, max_tokens):                      # self 是被注入的 SummaryLLM 实例
+    def boosted(self, max_tokens):  # self 是被注入的 SummaryLLM 实例
         value = original(self, max_tokens)
         seen.append(value)
-        if len(seen) == 3:                              # 只把第三轮（revise）翻倍
+        if len(seen) == 3:  # 只把第三轮（revise）翻倍
             boosted_value = (value or cfg.llm.max_tokens) * 2
             injected.append(boosted_value)
             return boosted_value
         return value
 
-    A.SummaryLLM._parity_max_tokens = boosted           # type: ignore[method-assign]
+    A.SummaryLLM._parity_max_tokens = boosted  # type: ignore[method-assign]
     try:
         project, segments = T._dense_project(), T._dense_segments()
         client = T.FakeLLM(list(T.three_pass_script()))
         A.run(project, segments, client=client, cfg=cfg, ctx=T.QuietCtx(), role="wengao")
     finally:
-        A.SummaryLLM._parity_max_tokens = original      # type: ignore[method-assign]
+        A.SummaryLLM._parity_max_tokens = original  # type: ignore[method-assign]
 
     assert len(seen) >= 3, f"三轮都没跑到，坏法根本没注入进去：{seen!r}"
     assert injected, "第三次请求没经过 `_parity_max_tokens`，坏法没落到预算上"
     normalized = T._normalized(client.requests, cfg)
-    deviated = [index for index, item in enumerate(normalized)
-                if item["max_tokens"] != cfg.llm.max_tokens]
+    deviated = [
+        index for index, item in enumerate(normalized) if item["max_tokens"] != cfg.llm.max_tokens
+    ]
     assert deviated == [2], (
         "注入「第三轮预算翻倍」后，B4 那套逐轮判据必须且只能抓到第 3 次请求："
-        f"实得下标 {deviated}，逐轮读数 {[item['max_tokens'] for item in normalized]}")
+        f"实得下标 {deviated}，逐轮读数 {[item['max_tokens'] for item in normalized]}"
+    )
     # 抓到的偏离必须就是产品**真发出去**的那个数：比的是「注入函数返回的值 == 请求里记下的
     # 值」，所以管道断了（客户端没把 max_tokens 传下去）照样会红，不是自己考自己。
     # 刻意不写 `== cfg.llm.max_tokens * 2`：那种写法在「外部又叠一次同样注入」时会假红
     # （驱动器 A 变体就叠了），而本条要证的只是「偏离看得见、且看得准」。
     assert normalized[2]["max_tokens"] == injected[-1], (
         f"第三次请求记下的预算不是注入返回的那个数：请求 {normalized[2]['max_tokens']!r}，"
-        f"注入 {injected[-1]!r}（逐轮读数 {[i['max_tokens'] for i in normalized]}）")
+        f"注入 {injected[-1]!r}（逐轮读数 {[i['max_tokens'] for i in normalized]}）"
+    )
     # 还原腿：`test_patch_does_not_leak` 守的是 `_parity_strict`，这个类属性是另一处运行时
     # 替换，形状相同、owner 不同，所以在本条末尾自证，不给漏还原留活口。
     assert A.SummaryLLM._parity_max_tokens is original, "类属性没还原，会污染后面所有用例"

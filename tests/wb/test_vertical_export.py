@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -55,14 +54,18 @@ def test_load_focus_survives_broken_json(tmp_path: Path):
 
 def test_vertical_filters_follow_needs_focus():
     """没有轨迹时按 0.5 居中出片，而不是抛错——导出不该被检测失败拦住。"""
-    vf, graph = reframe.vertical_filters(vertical_mode="follow", crop_x=0.5, focus=[], duration_ms=5000)
+    vf, graph = reframe.vertical_filters(
+        vertical_mode="follow", crop_x=0.5, focus=[], duration_ms=5000
+    )
     assert graph == ""
     assert "0.5000" in vf
 
 
 def test_crop_expression_scales_to_source_width():
     """表达式里乘号只能出现一次：多乘一次，切点会跑到画面外面。"""
-    expr = reframe.crop_expression([{"t_ms": 0, "x": 0.2}, {"t_ms": 2000, "x": 0.8}], duration_ms=4000)
+    expr = reframe.crop_expression(
+        [{"t_ms": 0, "x": 0.2}, {"t_ms": 2000, "x": 0.8}], duration_ms=4000
+    )
     assert expr.count("iw-ih*9/16") == 1
     assert expr.startswith("(iw-ih*9/16)*")
 
@@ -103,8 +106,12 @@ def test_export_name_marks_vertical(service, tmp_path: Path):
         project["id"], kind="highlight", start_ms=0, end_ms=10000, title="竖屏切片"
     )
     planned = service._clip_export_inputs(
-        project["id"], candidate, mode="precise", subtitle_mode="none",
-        aspect="9x16", vertical_mode="blur",
+        project["id"],
+        candidate,
+        mode="precise",
+        subtitle_mode="none",
+        aspect="9x16",
+        vertical_mode="blur",
     )
     name = Path(planned["output"]).name
     assert "_9x16_" in name and "blur" in name, name

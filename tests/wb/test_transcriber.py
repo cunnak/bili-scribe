@@ -19,7 +19,6 @@ from video_workbench.infra.db import open_and_migrate
 from video_workbench.infra.ffmpeg import MediaInfo
 from video_workbench.infra.repo import Repo
 
-
 # ----------------------------------------------------------------- 夹具
 
 
@@ -81,8 +80,14 @@ def make_project(repo: Repo, tmp_path: Path, *, duration_ms: int = 60_000) -> di
         stage="downloaded",
         status="ready",
     )
-    repo.asset_upsert(project["id"], "source", str(root / "source.mp4"), bytes=13,
-                      duration_ms=duration_ms, status="ready")
+    repo.asset_upsert(
+        project["id"],
+        "source",
+        str(root / "source.mp4"),
+        bytes=13,
+        duration_ms=duration_ms,
+        status="ready",
+    )
     return project
 
 
@@ -113,8 +118,13 @@ def writing_runner(segments=None, *, code: int = 0, error: dict | None = None, o
             "segments": segments
             if segments is not None
             else [
-                {"id": "s1", "start_ms": 0, "end_ms": 1200, "text": "第一句",
-                 "words": [{"start_ms": 0, "end_ms": 600, "text": "第一", "seq": 1}]},
+                {
+                    "id": "s1",
+                    "start_ms": 0,
+                    "end_ms": 1200,
+                    "text": "第一句",
+                    "words": [{"start_ms": 0, "end_ms": 600, "text": "第一", "seq": 1}],
+                },
                 {"id": "s2", "start_ms": 1200, "end_ms": 2600, "text": "第二句", "words": []},
             ],
         }
@@ -144,11 +154,13 @@ def test_cache_key_changes_with_every_parameter(tmp_path: Path):
 
 
 def test_srt_format_is_standard():
-    text = t.format_srt([
-        {"start_ms": 0, "end_ms": 1200, "text": "第一句"},
-        {"start_ms": 3_600_000, "end_ms": 3_601_500, "text": "一小时后"},
-        {"start_ms": 5000, "end_ms": 6000, "text": "   "},
-    ])
+    text = t.format_srt(
+        [
+            {"start_ms": 0, "end_ms": 1200, "text": "第一句"},
+            {"start_ms": 3_600_000, "end_ms": 3_601_500, "text": "一小时后"},
+            {"start_ms": 5000, "end_ms": 6000, "text": "   "},
+        ]
+    )
     lines = text.strip().splitlines()
     assert lines[0] == "1"
     assert lines[1] == "00:00:00,000 --> 00:00:01,200"
@@ -168,10 +180,22 @@ def test_handler_writes_transcript_and_advances_stage(tmp_path: Path):
     make_model(models)
     ff = FakeFF()
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models, cfg=type("C", (), {"model": "tiny", "language": "auto",
-                                                         "vad": True, "word_timestamps": True,
-                                                         "device": "cpu", "compute_type": "int8"})(),
-        ff=ff, runner=writing_runner(),
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=ff,
+        runner=writing_runner(),
     )
 
     result = handler(FakeCtx(), {"project_id": project["id"]})
@@ -213,10 +237,22 @@ def test_second_run_hits_cache_and_skips_worker(tmp_path: Path):
         return writing_runner()(spec, on_event, cancel)
 
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models,
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
-        ff=FakeFF(), runner=runner,
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=FakeFF(),
+        runner=runner,
     )
     handler(FakeCtx(), {"project_id": project["id"]})
     second = handler(FakeCtx(), {"project_id": project["id"]})
@@ -238,10 +274,21 @@ def test_cache_miss_when_model_changes(tmp_path: Path):
         calls.append(spec["model"])
         return writing_runner()(spec, on_event, cancel)
 
-    cfg = type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                         "word_timestamps": True, "device": "cpu", "compute_type": "int8"})()
-    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=cfg,
-                                        ff=FakeFF(), runner=runner)
+    cfg = type(
+        "C",
+        (),
+        {
+            "model": "tiny",
+            "language": "auto",
+            "vad": True,
+            "word_timestamps": True,
+            "device": "cpu",
+            "compute_type": "int8",
+        },
+    )()
+    handler = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=cfg, ff=FakeFF(), runner=runner
+    )
     handler(FakeCtx(), {"project_id": project["id"]})
     handler(FakeCtx(), {"project_id": project["id"], "model": "base"})
     assert calls == ["tiny", "base"], "换模型必须重跑"
@@ -259,10 +306,22 @@ def test_cancel_kills_and_leaves_no_half_result(tmp_path: Path):
         return -2
 
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models,
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
-        ff=FakeFF(), runner=runner,
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=FakeFF(),
+        runner=runner,
     )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": project["id"]})
@@ -279,12 +338,25 @@ def test_worker_error_surfaces_message(tmp_path: Path):
     models = tmp_path / "models"
     make_model(models)
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models,
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
         ff=FakeFF(),
-        runner=writing_runner(code=1, error={"code": "PROCESS_FAILED",
-                                             "message": "Could not locate cudnn_ops64_9.dll"}),
+        runner=writing_runner(
+            code=1,
+            error={"code": "PROCESS_FAILED", "message": "Could not locate cudnn_ops64_9.dll"},
+        ),
     )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": project["id"]})
@@ -298,10 +370,22 @@ def test_empty_transcript_does_not_advance_stage(tmp_path: Path):
     models = tmp_path / "models"
     make_model(models)
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models,
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
-        ff=FakeFF(), runner=writing_runner(segments=[]),
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=FakeFF(),
+        runner=writing_runner(segments=[]),
     )
     result = handler(FakeCtx(), {"project_id": project["id"]})
     assert result["segments"] == 0
@@ -314,10 +398,22 @@ def test_missing_model_reports_dependency(tmp_path: Path):
     repo = make_repo(tmp_path)
     project = make_project(repo, tmp_path)
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=tmp_path / "models",
-        cfg=type("C", (), {"model": "large-v3-turbo", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "auto", "compute_type": "auto"})(),
-        ff=FakeFF(), runner=writing_runner(),
+        repo=repo,
+        models_root=tmp_path / "models",
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "large-v3-turbo",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "auto",
+                "compute_type": "auto",
+            },
+        )(),
+        ff=FakeFF(),
+        runner=writing_runner(),
     )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": project["id"]})
@@ -331,10 +427,22 @@ def test_no_audio_track_is_unsupported(tmp_path: Path):
     models = tmp_path / "models"
     make_model(models)
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=models,
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
-        ff=FakeFF(fail=True), runner=writing_runner(),
+        repo=repo,
+        models_root=models,
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=FakeFF(fail=True),
+        runner=writing_runner(),
     )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": project["id"]})
@@ -344,10 +452,22 @@ def test_no_audio_track_is_unsupported(tmp_path: Path):
 def test_missing_project_reports_not_found(tmp_path: Path):
     repo = make_repo(tmp_path)
     handler = t.make_transcribe_handler(
-        repo=repo, models_root=tmp_path / "models",
-        cfg=type("C", (), {"model": "tiny", "language": "auto", "vad": True,
-                           "word_timestamps": True, "device": "cpu", "compute_type": "int8"})(),
-        ff=FakeFF(), runner=writing_runner(),
+        repo=repo,
+        models_root=tmp_path / "models",
+        cfg=type(
+            "C",
+            (),
+            {
+                "model": "tiny",
+                "language": "auto",
+                "vad": True,
+                "word_timestamps": True,
+                "device": "cpu",
+                "compute_type": "int8",
+            },
+        )(),
+        ff=FakeFF(),
+        runner=writing_runner(),
     )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": "pj_missing"})
@@ -400,8 +520,14 @@ def test_runner_kills_child_without_waiting_for_next_line(monkeypatch, tmp_path)
 
 
 def _cfg(**over):
-    base = {"model": "tiny", "language": "auto", "vad": True, "word_timestamps": True,
-            "device": "cpu", "compute_type": "int8"}
+    base = {
+        "model": "tiny",
+        "language": "auto",
+        "vad": True,
+        "word_timestamps": True,
+        "device": "cpu",
+        "compute_type": "int8",
+    }
     base.update(over)
     return type("C", (), base)()
 
@@ -417,8 +543,9 @@ def test_payload_language_reaches_spec_after_normalizing(tmp_path: Path):
         seen.append(dict(spec))
         return writing_runner()(spec, on_event, cancel)
 
-    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
-                                        runner=runner)
+    handler = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(), runner=runner
+    )
     handler(FakeCtx(), {"project_id": project["id"], "language": " ZH "})
 
     assert seen and seen[0]["language"] == "zh", "用户选的码要原样进 spec，worker 直接读它"
@@ -431,8 +558,9 @@ def test_handler_rejects_bad_language_before_touching_audio(tmp_path: Path):
     models = tmp_path / "models"
     make_model(models)
     ff = FakeFF()
-    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=ff,
-                                        runner=writing_runner())
+    handler = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=_cfg(), ff=ff, runner=writing_runner()
+    )
 
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"project_id": project["id"], "language": "zh-CN"})
@@ -453,15 +581,19 @@ def test_failed_rerun_keeps_the_previous_transcript(tmp_path: Path):
     make_model(models, "tiny")
     make_model(models, "small")
 
-    ok = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
-                                   runner=writing_runner())
+    ok = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(), runner=writing_runner()
+    )
     ok(FakeCtx(), {"project_id": project["id"]})
     root = Path(project["root_dir"])
     good = (root / "transcript.json").read_text(encoding="utf-8")
     assert good
 
     bad = t.make_transcribe_handler(
-        repo=repo, models_root=models, cfg=_cfg(model="small"), ff=FakeFF(),
+        repo=repo,
+        models_root=models,
+        cfg=_cfg(model="small"),
+        ff=FakeFF(),
         runner=writing_runner(code=1, error={"code": "PROCESS_FAILED", "message": "boom"}),
     )
     with pytest.raises(WBError):
@@ -481,8 +613,9 @@ def test_finish_does_not_roll_back_downstream_stage(tmp_path: Path):
     models = tmp_path / "models"
     make_model(models)
 
-    handler = t.make_transcribe_handler(repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(),
-                                        runner=writing_runner())
+    handler = t.make_transcribe_handler(
+        repo=repo, models_root=models, cfg=_cfg(), ff=FakeFF(), runner=writing_runner()
+    )
     handler(FakeCtx(), {"project_id": project["id"]})
 
     assert repo.project_get(project["id"])["stage"] == "clipped", (

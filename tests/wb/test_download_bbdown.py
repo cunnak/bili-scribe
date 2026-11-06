@@ -209,7 +209,9 @@ def test_download_bbdown_failure_is_classified(tmp_path):
     binary = make_binary(tmp_path)
     rec = Recorder(product="", code=1, out="ERROR: 需要大会员才能观看")
     with pytest.raises(WBError) as info:
-        dl.download(url="u", home=tmp_path / "ep", backend="bbdown", bbdown_bin=str(binary), runner=rec)
+        dl.download(
+            url="u", home=tmp_path / "ep", backend="bbdown", bbdown_bin=str(binary), runner=rec
+        )
     assert info.value.code == "AUTH_REQUIRED"
 
 
@@ -237,7 +239,9 @@ def test_download_bbdown_cancel_cleans_partials(tmp_path):
         return -2, ""
 
     with pytest.raises(WBError) as info:
-        dl.download(url="u", home=tmp_path / "ep", backend="bbdown", bbdown_bin=str(binary), runner=runner)
+        dl.download(
+            url="u", home=tmp_path / "ep", backend="bbdown", bbdown_bin=str(binary), runner=runner
+        )
     assert info.value.code == "CANCELED"
     assert not (tmp_path / "ep" / "x.mp4.part").exists()
 
@@ -249,7 +253,7 @@ def test_default_backend_keeps_ytdlp_path(tmp_path, monkeypatch):
     def runner(argv, cwd, on_line, cancel):
         seen.append(list(argv))
         Path(cwd, "source.mp4").write_bytes(b"v" * 10)
-        on_line("wb-meta: {\"type\": \"finished\", \"path\": \"%s\"}" % (Path(cwd, "source.mp4")))
+        on_line('wb-meta: {"type": "finished", "path": "%s"}' % (Path(cwd, "source.mp4")))
         return 0, ""
 
     monkeypatch.setattr(dl, "_module_available", lambda name: True)

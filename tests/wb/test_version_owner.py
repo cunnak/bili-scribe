@@ -102,7 +102,8 @@ def test_no_second_version_literal_in_product_code():
             if re.search(r"""['"]\d+\.\d+\.\d+['"]""", line):
                 hits.append(f"{rel}:{n}")
     assert hits == ["video_workbench/__init__.py:14"], (
-        f"版本号出现在不止 owner 那一行：{hits} —— 那就是第二个版本 owner")
+        f"版本号出现在不止 owner 那一行：{hits} —— 那就是第二个版本 owner"
+    )
 
 
 def test_the_owner_line_is_the_only_place_a_bump_has_to_happen(service):
@@ -117,8 +118,9 @@ def test_the_owner_line_is_the_only_place_a_bump_has_to_happen(service):
     assert info["version"] == live
     # owner 那一行的文本必须还在，否则上面那条会退化成读一个没人维护的常量
     owner_line = (REPO / "video_workbench" / "__init__.py").read_text(encoding="utf-8")
-    assert re.search(rf'^__version__ = "{re.escape(live)}"$', owner_line, re.M), \
+    assert re.search(rf'^__version__ = "{re.escape(live)}"$', owner_line, re.M), (
         "video_workbench/__init__.py 里的 __version__ 行形状变了，本文件的判据要跟着翻"
+    )
 
 
 def test_the_alias_shape_is_registered_as_a_drift_risk_not_a_passing_lock():
@@ -133,12 +135,14 @@ def test_the_alias_shape_is_registered_as_a_drift_risk_not_a_passing_lock():
     try:
         monkey.setattr(video_workbench, "__version__", "9.9.9-probe")
         drifted = [
-            name for name, mod in ALIAS_MODULES
+            name
+            for name, mod in ALIAS_MODULES
             if getattr(mod, "__version__", None) != "9.9.9-probe"
         ]
         assert len(drifted) == len(ALIAS_MODULES), (
             f"取法变了（不再全漂：drifted={drifted}）—— 这条用例的期望要跟着翻正，"
-            "并把 AGENTS.md 规则表那行从「登记」升级成行为锁")
+            "并把 AGENTS.md 规则表那行从「登记」升级成行为锁"
+        )
     finally:
         monkey.undo()
     assert video_workbench.__version__ == live_before, "patch 没还原，后面全脏"
@@ -149,7 +153,9 @@ def test_the_status_bar_reads_the_payload_not_a_literal():
     js = (REPO / "video_workbench" / "web" / "js" / "app.js").read_text(encoding="utf-8")
     code = _code_lines(js)
     assert re.search(r'"v"\s*\+\s*\(?\s*info\.version', code), (
-        "状态条不再是 `\"v\" + info.version`：显示层被换成写死的数、"
-        "或者改成 `paintInfo` 之外的人也在写 `#status-version`")
+        '状态条不再是 `"v" + info.version`：显示层被换成写死的数、'
+        "或者改成 `paintInfo` 之外的人也在写 `#status-version`"
+    )
     assert not re.search(r"""['"]\d+\.\d+\.\d+['"]""", code), (
-        "app.js 里出现了写死的版本号字面量：那是第二个版本 owner")
+        "app.js 里出现了写死的版本号字面量：那是第二个版本 owner"
+    )

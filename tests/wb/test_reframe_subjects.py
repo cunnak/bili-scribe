@@ -89,7 +89,9 @@ def test_labels_use_positions_for_two_people():
 
 
 def test_max_subjects_caps_output():
-    rows = [{"t_ms": 0, "faces": [face_at(400.0), face_at(900.0), face_at(1400.0), face_at(1750.0)]}]
+    rows = [
+        {"t_ms": 0, "faces": [face_at(400.0), face_at(900.0), face_at(1400.0), face_at(1750.0)]}
+    ]
     subjects = reframe.cluster_faces(rows, width=WIDTH, height=HEIGHT, max_subjects=2)
     assert len(subjects) == 2
 
@@ -150,9 +152,7 @@ def test_jump_pairs_insert_instant_switch():
 
 def test_crop_expression_uses_real_interval_at_cut():
     """切点那对关键帧只隔 20ms，分母必须是 0.020，不能按 1 秒算。"""
-    expr = reframe.crop_expression(
-        [{"t_ms": 0, "x": 0.2}, {"t_ms": 4000, "x": 0.8}], cuts=[2000]
-    )
+    expr = reframe.crop_expression([{"t_ms": 0, "x": 0.2}, {"t_ms": 4000, "x": 0.8}], cuts=[2000])
     assert "/0.020" in expr
     assert expr.count("(iw-ih*9/16)") == 1
 
@@ -183,15 +183,22 @@ def test_detect_subjects_honours_requested_subject():
     )
     wanted = subjects[1]["id"]
     got = reframe.detect_subjects(
-        "a.mp4", start_ms=0, end_ms=5000, models_root="/nowhere",
-        sampler=sampler_of(rows), subject=wanted,
+        "a.mp4",
+        start_ms=0,
+        end_ms=5000,
+        models_root="/nowhere",
+        sampler=sampler_of(rows),
+        subject=wanted,
     )
     assert got["subject"] == wanted
 
 
 def test_detect_subjects_reports_unavailable():
     got = reframe.detect_subjects(
-        "a.mp4", start_ms=0, end_ms=1000, models_root="/nowhere",
+        "a.mp4",
+        start_ms=0,
+        end_ms=1000,
+        models_root="/nowhere",
         sampler=sampler_of([], detector="unavailable"),
     )
     assert got["detector"] == "unavailable"
@@ -210,7 +217,10 @@ def test_detect_focus_enhance_off_returns_legacy_shape(monkeypatch):
 
 def test_detect_focus_enhance_on_adds_subjects():
     got = reframe.detect_focus(
-        "a.mp4", start_ms=0, end_ms=5000, models_root="/nowhere",
+        "a.mp4",
+        start_ms=0,
+        end_ms=5000,
+        models_root="/nowhere",
         sampler=sampler_of(samples_two_people(cut_at=2000)),
     )
     assert got["enhance"] is True
@@ -223,8 +233,12 @@ def test_rebuild_focus_switches_subject():
     subjects = reframe.rank_subjects(
         reframe.cluster_faces(rows, width=WIDTH, height=HEIGHT), span_ms=5000, width=WIDTH
     )
-    first = reframe.rebuild_focus(subjects, subject_id=subjects[0]["id"], span_ms=5000, frame_width=WIDTH)
-    second = reframe.rebuild_focus(subjects, subject_id=subjects[1]["id"], span_ms=5000, frame_width=WIDTH)
+    first = reframe.rebuild_focus(
+        subjects, subject_id=subjects[0]["id"], span_ms=5000, frame_width=WIDTH
+    )
+    second = reframe.rebuild_focus(
+        subjects, subject_id=subjects[1]["id"], span_ms=5000, frame_width=WIDTH
+    )
     assert first and second
     assert first[0]["x"] != second[0]["x"]
 
@@ -252,7 +266,9 @@ def test_parse_subject_reply_accepts_id_and_number():
         "subject": "sub_b",
         "reason": "在说话",
     }
-    assert reframe.parse_subject_reply('```json\n{"subject": 2}\n```', subjects)["subject"] == "sub_b"
+    assert (
+        reframe.parse_subject_reply('```json\n{"subject": 2}\n```', subjects)["subject"] == "sub_b"
+    )
 
 
 def test_parse_subject_reply_rejects_garbage():
@@ -263,8 +279,10 @@ def test_parse_subject_reply_rejects_garbage():
 
 def test_vision_pick_subject_maps_number_to_id():
     subjects = reframe.label_subjects(
-        [{"id": "sub_a", "avg_x": 0.1, "track": [], "frames": 1, "area": 0.01},
-         {"id": "sub_b", "avg_x": 0.9, "track": [], "frames": 1, "area": 0.01}]
+        [
+            {"id": "sub_a", "avg_x": 0.1, "track": [], "frames": 1, "area": 0.01},
+            {"id": "sub_b", "avg_x": 0.9, "track": [], "frames": 1, "area": 0.01},
+        ]
     )
     client = FakeClient('{"subject": 2, "reason": "右边那位在说话"}')
     got = reframe.vision_pick_subject(

@@ -88,14 +88,6 @@ import json
 import uuid
 
 import pytest
-
-from bili_scribe.core import roles as bs_roles
-from bili_scribe.core import summarizer as bs_summarizer
-from video_workbench.core import summarizer as ad
-from video_workbench.infra.notecache import NoteCache
-
-# 档位 fixture 的唯一去处；假 LLM 与配置也从对账那边复用（见文件头「为什么不另造假对象」）。
-from wb_parity_tiers import default_env  # noqa: F401  （pytest fixture，不是未使用导入）
 from test_summary_parity import (
     CRITIQUE_NOTE,
     MAX_INPUT_CHARS,
@@ -104,6 +96,14 @@ from test_summary_parity import (
     QuietCtx,
     make_cfg,
 )
+
+# 档位 fixture 的唯一去处；假 LLM 与配置也从对账那边复用（见文件头「为什么不另造假对象」）。
+from wb_parity_tiers import default_env as default_env  # noqa: F401  （pytest fixture，不是未使用导入）
+
+from bili_scribe.core import roles as bs_roles
+from bili_scribe.core import summarizer as bs_summarizer
+from video_workbench.core import summarizer as ad
+from video_workbench.infra.notecache import NoteCache
 
 #: 预读请求的指纹。从 bs 权威常量取，不在测试里抄提示词正文。
 MAP_PREFIX = bs_summarizer.MAP_SYSTEM.strip()[:10]
@@ -134,8 +134,7 @@ class ReuseLLM(FakeLLM):
     def __init__(self, model: str = "reuse-fake") -> None:
         super().__init__([], model=model)
 
-    def chat(self, messages, temperature=None, max_tokens=None, json_mode=False,
-             note=None, **kw):
+    def chat(self, messages, temperature=None, max_tokens=None, json_mode=False, note=None, **kw):
         system = str(messages[0].get("content") or "")
         if system.strip().startswith(MAP_PREFIX):
             kind = "map"
@@ -143,13 +142,15 @@ class ReuseLLM(FakeLLM):
             kind = "json"
         else:
             kind = "critique"
-        self.requests.append({
-            "messages": [dict(item) for item in messages],
-            "json_mode": bool(json_mode),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "kind": kind,
-        })
+        self.requests.append(
+            {
+                "messages": [dict(item) for item in messages],
+                "json_mode": bool(json_mode),
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "kind": kind,
+            }
+        )
         if kind == "map":
             return NOTE_TEXT
         if kind == "json":
@@ -179,15 +180,26 @@ class ReuseLLM(FakeLLM):
 
 def _project(bvid: str = "BV1preparecheck") -> dict:
     return {
-        "bvid": bvid, "aid": 7, "cid": 8, "page": 1, "page_count": 1,
-        "title": "预读复用素材", "desc": "固定简介", "up_name": "UP复用",
-        "up_mid": 9, "duration_sec": 3600, "tname": "知识", "tags": ["复用", "固定"],
+        "bvid": bvid,
+        "aid": 7,
+        "cid": 8,
+        "page": 1,
+        "page_count": 1,
+        "title": "预读复用素材",
+        "desc": "固定简介",
+        "up_name": "UP复用",
+        "up_mid": 9,
+        "duration_sec": 3600,
+        "tname": "知识",
+        "tags": ["复用", "固定"],
     }
 
 
 def _segments(count: int = SEGMENT_COUNT) -> list[dict]:
-    return [{"start_ms": index * 4000, "text": f"第{index}段{SEG_TAIL}"}
-            for index in range(1, count + 1)]
+    return [
+        {"start_ms": index * 4000, "text": f"第{index}段{SEG_TAIL}"}
+        for index in range(1, count + 1)
+    ]
 
 
 def _fresh_key(label: str) -> str:
@@ -208,7 +220,8 @@ def _body_is_long_enough_to_need_pre_reading() -> int:
     body = ad.segments_text(_segments())
     assert len(body) > MAX_INPUT_CHARS, (
         f"夹具失效：素材只有 {len(body)} 字，不超过 max_input_chars="
-        f"{MAX_INPUT_CHARS}，分段预读根本不会触发，本文件的断言会全部变成空断言")
+        f"{MAX_INPUT_CHARS}，分段预读根本不会触发，本文件的断言会全部变成空断言"
+    )
     return len(body)
 
 
@@ -221,19 +234,41 @@ def _fixture_guard():
 def _run(task_key: str, cache, label: str = "run"):
     llm = ReuseLLM()
     ctx = QuietCtx()
-    out = ad.run(_project(), _segments(), client=llm, cfg=make_cfg(), ctx=ctx,
-                 role="wengao", cache=cache, task_key=task_key)
+    out = ad.run(
+        _project(),
+        _segments(),
+        client=llm,
+        cfg=make_cfg(),
+        ctx=ctx,
+        role="wengao",
+        cache=cache,
+        task_key=task_key,
+    )
     assert out["role"] == "wengao", f"{label}：角色不该被复用逻辑改写"
     return llm, ctx, out
 
 
-def _refine(task_key: str, cache, previous, label: str = "refine",
-            requirement: str = "把时间线再压缩一点，保留三个论点"):
+def _refine(
+    task_key: str,
+    cache,
+    previous,
+    label: str = "refine",
+    requirement: str = "把时间线再压缩一点，保留三个论点",
+):
     llm = ReuseLLM()
     ctx = QuietCtx()
-    out = ad.refine(_project(), _segments(), previous, requirement,
-                    client=llm, cfg=make_cfg(), ctx=ctx, role="wengao",
-                    cache=cache, task_key=task_key)
+    out = ad.refine(
+        _project(),
+        _segments(),
+        previous,
+        requirement,
+        client=llm,
+        cfg=make_cfg(),
+        ctx=ctx,
+        role="wengao",
+        cache=cache,
+        task_key=task_key,
+    )
     assert out["requirement"] == requirement.strip(), f"{label}：要求被改写了"
     return llm, ctx, out
 
@@ -255,25 +290,29 @@ def test_generation_then_refine_pays_no_second_pre_reading(default_env, tmp_path
     cold, cold_ctx, first = _run(key, cache, label="首次生成")
     assert cold.count("map") >= 2, (
         f"前置不成立：首次生成只发了 {cold.count('map')} 次预读，素材没真的分段，"
-        "后面的「0 预读」就没有意义")
+        "后面的「0 预读」就没有意义"
+    )
     assert "分段预读 1/" in "\n".join(cold_ctx.logs), "首次生成的日志里看不到分段预读进度"
 
     before = cache.stats()
     warm, warm_ctx, second = _refine(key, cache, first["summary"], label="再改一版")
 
     assert warm.count("map") == 0, (
-        f"同一 task_key 二次打磨仍发了 {warm.count('map')} 次预读——内存层没接上")
+        f"同一 task_key 二次打磨仍发了 {warm.count('map')} 次预读——内存层没接上"
+    )
     assert warm.total() == THREE_PASS_REQUESTS, (
-        f"复用命中后应当只剩三轮回那 {THREE_PASS_REQUESTS} 次，实发 {warm.total()} 次")
+        f"复用命中后应当只剩三轮回那 {THREE_PASS_REQUESTS} 次，实发 {warm.total()} 次"
+    )
     assert warm.count("json") == 2 and warm.count("critique") == 1, (
-        "三轮回的形状变了：生成/批判/修订应是 json、非 json、json")
+        "三轮回的形状变了：生成/批判/修订应是 json、非 json、json"
+    )
 
     after = cache.stats()
     assert after["session_hits"] == before["session_hits"], "内存命中不该去查磁盘"
     assert after["session_misses"] == before["session_misses"], "内存命中不该去查磁盘"
     assert "复用已存的预读笔记" not in "\n".join(warm_ctx.logs), (
-        "这句话只由 prepare_material 在**磁盘**命中时发出；它出现说明走的是磁盘层，"
-        "内存层没生效")
+        "这句话只由 prepare_material 在**磁盘**命中时发出；它出现说明走的是磁盘层，内存层没生效"
+    )
     # 复用不该改变产出：假 LLM 每次回的都是同一份 PAYLOAD，所以这里量的是
     # 「走笔记版 bundle 也能正常出稿」，不是内容比较。
     assert second["summary"]["one_line"] == PAYLOAD["one_line"]
@@ -292,13 +331,14 @@ def test_second_refine_on_the_same_task_key_matches_the_measured_baseline(defaul
     assert first.count("map") >= 2, "前置不成立：首次打磨没触发分段预读"
     cold_total = first.total()
 
-    second, _, again = _refine(key, cache, produced["summary"],
-                               label="第二次打磨", requirement="再顺一遍措辞，别动结构")
-    assert second.count("map") == 0, (
-        f"第二次打磨仍发了 {second.count('map')} 次预读")
+    second, _, again = _refine(
+        key, cache, produced["summary"], label="第二次打磨", requirement="再顺一遍措辞，别动结构"
+    )
+    assert second.count("map") == 0, f"第二次打磨仍发了 {second.count('map')} 次预读"
     assert second.total() == THREE_PASS_REQUESTS
     assert cold_total == second.total() + first.count("map"), (
-        f"次数不守恒：冷 {cold_total} ≠ 暖 {second.total()} + 预读 {first.count('map')}")
+        f"次数不守恒：冷 {cold_total} ≠ 暖 {second.total()} + 预读 {first.count('map')}"
+    )
     # 省下的只有预读那几次；三轮回一次不少，产出照常出稿。
     assert again["summary"]["one_line"] == PAYLOAD["one_line"]
 
@@ -321,20 +361,22 @@ def test_a_reopened_project_hits_the_disk_and_sends_no_pre_reading(default_env, 
     cold, cold_ctx, produced = _run(first_key, NoteCache(root), label="项目一")
     assert cold.count("map") >= 2, "前置不成立：第一次没真的预读"
     entries_after_first = NoteCache(root).stats()["entries"]
-    assert entries_after_first >= 1, (
-        "跑过预读却没写进磁盘缓存——那第二个项目根本无从命中")
+    assert entries_after_first >= 1, "跑过预读却没写进磁盘缓存——那第二个项目根本无从命中"
 
     reopened = NoteCache(root)
     before = reopened.stats()
-    warm, warm_ctx, again = _refine(second_key, reopened, produced["summary"],
-                                    label="项目二（同磁盘目录）")
+    warm, warm_ctx, again = _refine(
+        second_key, reopened, produced["summary"], label="项目二（同磁盘目录）"
+    )
 
     assert warm.count("map") == 0, (
-        f"跨任务未命中磁盘：新 task_key 仍发了 {warm.count('map')} 次预读")
+        f"跨任务未命中磁盘：新 task_key 仍发了 {warm.count('map')} 次预读"
+    )
     assert warm.total() == THREE_PASS_REQUESTS
     after = reopened.stats()
     assert after["session_hits"] == before["session_hits"] + 1, (
-        "磁盘命中必须体现在计数上，否则「0 预读」可能是别的东西被短路了")
+        "磁盘命中必须体现在计数上，否则「0 预读」可能是别的东西被短路了"
+    )
     assert after["session_misses"] == before["session_misses"]
     logs = "\n".join(warm_ctx.logs)
     assert "复用已存的预读笔记" in logs, f"磁盘命中却没念出那句进度：{logs!r}"
@@ -347,17 +389,17 @@ def test_a_cold_disk_cache_must_pay_for_pre_reading_again(default_env, tmp_path)
     （新 task_key + 空磁盘目录 → 预读 5 次）就是这条。同一份素材在两个独立目录
     各付一次，而且两次付的**次数相同**，顺带钉住分段数只由素材与 cfg 决定。
     """
-    cold_a, _, produced_a = _run(_fresh_key("cold-a"), NoteCache(tmp_path / "a"),
-                                 label="冷目录 A")
-    cold_b, _, produced_b = _run(_fresh_key("cold-b"), NoteCache(tmp_path / "b"),
-                                 label="冷目录 B")
+    cold_a, _, produced_a = _run(_fresh_key("cold-a"), NoteCache(tmp_path / "a"), label="冷目录 A")
+    cold_b, _, produced_b = _run(_fresh_key("cold-b"), NoteCache(tmp_path / "b"), label="冷目录 B")
 
     assert cold_a.count("map") >= 2, "冷路径 A 没触发预读"
     assert cold_b.count("map") == cold_a.count("map"), (
         f"同一份素材在两个空目录分别预读 {cold_b.count('map')} / "
-        f"{cold_a.count('map')} 次——分段数不该跟着缓存目录变")
+        f"{cold_a.count('map')} 次——分段数不该跟着缓存目录变"
+    )
     assert produced_a["summary"] == produced_b["summary"], (
-        "冷启动与冷启动的产出不一致：预读结果受缓存状态影响")
+        "冷启动与冷启动的产出不一致：预读结果受缓存状态影响"
+    )
 
 
 # ============================================================ 支撑断言
@@ -382,20 +424,24 @@ def test_reuse_carries_the_notes_not_the_raw_transcript(default_env, tmp_path):
     # 反空断言：标记句必须**确实**在冷路径出现过，否则「暖路径没有它」什么都证明不了
     # （一个从不出现的字符串永远「不在」任何文本里）。
     assert RAW_MARK in cold.all_text(), (
-        "素材标记句连冷路径的预读请求里都没有——夹具失效，下面的反向断言会是空断言")
+        "素材标记句连冷路径的预读请求里都没有——夹具失效，下面的反向断言会是空断言"
+    )
 
     warm, _, _ = _refine(key, cache, produced["summary"], label="再改一版")
     assert RAW_MARK not in warm.all_text(), (
-        "暖路径的请求里出现了素材原文标记句：复用的是原文，不是笔记")
+        "暖路径的请求里出现了素材原文标记句：复用的是原文，不是笔记"
+    )
     # 笔记段数只跟**生成那一次**比：三轮回的批判与修订都各自带一份完整笔记
     # （bs `:590`/`:604` 的「原始素材」就是它），拿全路径的总出现次数比会得到 3 倍。
     generate = next(r for r in warm.requests if r["kind"] == "json")
     generate_text = "\n".join(str(item.get("content") or "") for item in generate["messages"])
     assert "【第 1 段笔记】" in generate_text, (
-        "复用命中后生成请求里却没有笔记——带过去的不是笔记版 bundle")
+        "复用命中后生成请求里却没有笔记——带过去的不是笔记版 bundle"
+    )
     assert generate_text.count("【第 ") == map_calls, (
         f"生成请求里的笔记段数 {generate_text.count('【第 ')} 与预读次数 {map_calls} "
-        "对不上：每次预读应当留下一段笔记")
+        "对不上：每次预读应当留下一段笔记"
+    )
 
 
 def test_without_task_key_and_cache_nothing_is_reused(default_env, tmp_path):
@@ -410,8 +456,7 @@ def test_without_task_key_and_cache_nothing_is_reused(default_env, tmp_path):
     assert first.total() == first.count("map") + THREE_PASS_REQUESTS
 
     second, _, _ = _refine("", None, produced["summary"], label="无键第二次")
-    assert second.count("map") >= 2, (
-        "不传 task_key 却复用了上一次的预读——内存层变成了隐式全局状态")
+    assert second.count("map") >= 2, "不传 task_key 却复用了上一次的预读——内存层变成了隐式全局状态"
 
 
 def test_the_request_kinds_are_identified_from_authoritative_prompts(default_env, tmp_path):
@@ -432,15 +477,16 @@ def test_the_request_kinds_are_identified_from_authoritative_prompts(default_env
     assert map_records, "没有请求被认成预读"
     for record in map_records:
         assert str(record["messages"][0]["content"]) == bs_summarizer.MAP_SYSTEM, (
-            "预读请求的 system 与 bs 的 MAP_SYSTEM 不逐字相同，分类指纹不可信")
-    assert all(not r["json_mode"] for r in map_records), (
-        "预读请求应当不是 JSON 模式")
+            "预读请求的 system 与 bs 的 MAP_SYSTEM 不逐字相同，分类指纹不可信"
+        )
+    assert all(not r["json_mode"] for r in map_records), "预读请求应当不是 JSON 模式"
 
     critique = [r for r in cold.requests if r["kind"] == "critique"]
     assert len(critique) == 1, f"三轮回角色应当恰好一次自我批判，实得 {len(critique)}"
     assert str(critique[0]["messages"][0]["content"]) == bs_roles.get_role("wengao").critique, (
         "非 JSON 那次请求的 system 不等于 wengao 的 critique 提示词——它就是被误计成"
-        "「预读」的那一次：按 json_mode 分桶时批判与预读同为非 JSON")
+        "「预读」的那一次：按 json_mode 分桶时批判与预读同为非 JSON"
+    )
     assert critique[0]["json_mode"] is False
 
     json_records = [r for r in cold.requests if r["kind"] == "json"]
@@ -448,13 +494,15 @@ def test_the_request_kinds_are_identified_from_authoritative_prompts(default_env
     # 生成与修订**共用同一个 system**（bs `:602` 用的还是 `system_prompt`），所以阶段
     # 身份只能从 user 消息读：修订那次以角色的 revise 提示词开头（`{critique}` 之前
     # 那段固定文字，从权威提示词里切出来，不在测试里抄正文）。
-    assert (str(json_records[0]["messages"][0]["content"])
-            == str(json_records[1]["messages"][0]["content"])), (
-        "生成与修订的 system 应当是同一份角色提示词；不一样说明三轮回的结构变了")
+    assert str(json_records[0]["messages"][0]["content"]) == str(
+        json_records[1]["messages"][0]["content"]
+    ), "生成与修订的 system 应当是同一份角色提示词；不一样说明三轮回的结构变了"
     revise_head = bs_roles.get_role("wengao").revise.split("{", 1)[0].strip()
     assert revise_head, "wengao 的 revise 提示词开头就是占位符，取不到阶段指纹"
     revise_user = str(json_records[1]["messages"][1]["content"])
     assert revise_user.startswith(revise_head), (
-        f"第二次 JSON 请求的 user 消息不是以 revise 开头：{revise_user[:40]!r}")
+        f"第二次 JSON 请求的 user 消息不是以 revise 开头：{revise_user[:40]!r}"
+    )
     assert revise_head not in str(json_records[0]["messages"][1]["content"]), (
-        "生成阶段不该带修订指令")
+        "生成阶段不该带修订指令"
+    )

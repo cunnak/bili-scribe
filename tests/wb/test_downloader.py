@@ -15,7 +15,6 @@ import pytest
 from video_workbench.app.errors import WBError
 from video_workbench.core import downloader as D
 
-
 # --------------------------------------------------------------------- 夹具
 
 
@@ -72,7 +71,9 @@ def test_build_command_carries_paths_and_cookies(tmp_path):
         ffmpeg_dir=r"C:\tools",
     )
     home = Path(tmp_path / "ep")
-    assert cmd[-1] == "https://www.bilibili.com/video/BV1xx411c7mD", "URL 必须在最后，前面参数不能吃掉它"
+    assert cmd[-1] == "https://www.bilibili.com/video/BV1xx411c7mD", (
+        "URL 必须在最后，前面参数不能吃掉它"
+    )
     assert cmd[cmd.index("-f") + 1] == D.QUALITY_FORMATS["720P"]
     assert f"home:{home}" in cmd and f"temp:{home / '.tmp'}" in cmd
     assert "source.%(ext)s" in cmd
@@ -171,7 +172,9 @@ def test_download_success_reports_actual_quality(tmp_path, monkeypatch):
         home=tmp_path / "ep",
         quality="1080P",
         on_event=events.append,
-        runner=fake_runner([progress_line(), progress_line(downloaded_bytes=1024)], produce="source.mp4"),
+        runner=fake_runner(
+            [progress_line(), progress_line(downloaded_bytes=1024)], produce="source.mp4"
+        ),
     )
     assert result.path.name == "source.mp4"
     assert result.height == 1080
@@ -225,6 +228,7 @@ def test_download_cancel_kills_tree_and_cleans_partials(tmp_path, monkeypatch):
 
 def test_default_runner_kills_on_cancel(monkeypatch, tmp_path):
     """_default_runner 的取消分支：读到一行就发现 cancel 已经置位。"""
+
     class FakeStdout:
         def __iter__(self):
             yield "line-1\n"

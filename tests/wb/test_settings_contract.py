@@ -36,9 +36,7 @@ def test_dotted_key_is_rejected(service):
 
 
 def test_dotted_key_nested_one_level_is_rejected(service):
-    res = service.dispatch(
-        "app.settings.put", {"values": {"llm.tasks": {"summary": "a/b"}}}
-    )
+    res = service.dispatch("app.settings.put", {"values": {"llm.tasks": {"summary": "a/b"}}})
     assert res["ok"] is False
     assert res["error"]["code"] == "VALIDATION"
 

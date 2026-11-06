@@ -123,7 +123,9 @@ def test_reanalyze_keeps_locked_candidates(service, monkeypatch):
 
 def test_reanalyze_replaces_old_ai_candidates(service, monkeypatch):
     row = _project(service)
-    service.repo.candidate_insert(row["id"], kind="highlight", start_ms=0, end_ms=16_000, title="旧的")
+    service.repo.candidate_insert(
+        row["id"], kind="highlight", start_ms=0, end_ms=16_000, title="旧的"
+    )
     monkeypatch.setattr(service, "_clip_client", lambda: (StubClient(_good_reply()), "stub"))
     wait_job(service, call(service, "clip.analyze", {"project_id": row["id"]})["job"]["id"])
     titles = [item["title"] for item in service.repo.candidate_list(row["id"])]
@@ -164,9 +166,9 @@ def test_clip_update_moves_cut_and_marks_edited(service):
     cand = service.repo.candidate_insert(
         row["id"], kind="highlight", start_ms=0, end_ms=16_000, title="甲"
     )
-    got = call(
-        service, "clip.update", {"id": cand["id"], "start_ms": 2_000, "end_ms": 18_000}
-    )["candidate"]
+    got = call(service, "clip.update", {"id": cand["id"], "start_ms": 2_000, "end_ms": 18_000})[
+        "candidate"
+    ]
     assert (got["start_ms"], got["end_ms"]) == (2_000, 18_000)
     assert got["notes"]["edited_ms"] is True
 
@@ -290,8 +292,14 @@ def test_analyze_runs_vision_when_configured(service, monkeypatch):
         seen.update(kwargs)
         seen["count"] = len(candidates)
         rows = [dict(c, score=99, title="精析过的") for c in candidates]
-        return {"candidates": rows, "refined": len(rows), "failed": 0,
-                "notes": ["精析跑过了"], "model": kwargs.get("model"), "audio": 1}
+        return {
+            "candidates": rows,
+            "refined": len(rows),
+            "failed": 0,
+            "notes": ["精析跑过了"],
+            "model": kwargs.get("model"),
+            "audio": 1,
+        }
 
     monkeypatch.setattr(clip_refine, "refine_candidates", fake_refine)
     job = wait_job(service, call(service, "clip.analyze", {"project_id": row["id"]})["job"]["id"])
@@ -319,8 +327,10 @@ def test_analyze_refine_false_overrides_config(service, monkeypatch):
         raise AssertionError("refine=False 时不该调用精析")
 
     monkeypatch.setattr(clip_refine, "refine_candidates", boom)
-    job = wait_job(service, call(service, "clip.analyze",
-                                 {"project_id": row["id"], "refine": False})["job"]["id"])
+    job = wait_job(
+        service,
+        call(service, "clip.analyze", {"project_id": row["id"], "refine": False})["job"]["id"],
+    )
     assert job["status"] == "succeeded", job
     assert called["n"] == 0
     assert job["result"]["refined"] == 0

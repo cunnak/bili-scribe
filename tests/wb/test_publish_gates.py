@@ -8,14 +8,10 @@
 
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from video_workbench.core import publisher as publisher_core
 
-
 # ---------------------------------------------------------------- 纯函数
+
 
 def _draft(**over):
     base = {
@@ -72,9 +68,7 @@ def test_account_gate_blocks_without_bvid():
 
 
 def test_account_gate_blocks_when_note_bvid_differs():
-    report = publisher_core.gate_report(
-        _draft(), project={"bvid": "BV1aa"}, note={"bvid": "BV1bb"}
-    )
+    report = publisher_core.gate_report(_draft(), project={"bvid": "BV1aa"}, note={"bvid": "BV1bb"})
     assert _by_id(report)["account"]["status"] == "blocked"
 
 
@@ -88,7 +82,9 @@ def test_account_gate_is_todo_when_login_unknown_and_ok_when_logged_in():
 
 
 def test_account_gate_blocks_when_logged_out():
-    gate = _by_id(publisher_core.gate_report(_draft(), project={"bvid": "BV1aa"}, logged_in=False))["account"]
+    gate = _by_id(publisher_core.gate_report(_draft(), project={"bvid": "BV1aa"}, logged_in=False))[
+        "account"
+    ]
     assert gate["status"] == "blocked"
 
 
@@ -144,6 +140,7 @@ def test_ready_requires_every_gate_ok():
 
 
 # ---------------------------------------------------------------- 服务层
+
 
 def _make_project(service, *, bvid="BV1gate", title="门禁样例"):
     from pathlib import Path

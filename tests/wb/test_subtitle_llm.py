@@ -19,7 +19,9 @@ from video_workbench.infra.llm import ChatError
 def segs(*texts):
     out = []
     for i, text in enumerate(texts):
-        out.append({"id": f"s{i + 1}", "start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": text})
+        out.append(
+            {"id": f"s{i + 1}", "start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": text}
+        )
     return out
 
 
@@ -186,14 +188,20 @@ def test_apply_changes_without_changes_is_noop():
 
 
 def test_optimize_collects_changes_and_reports_progress():
-    client = StubClient([
-        json.dumps([{"id": "s1", "text": "我们今天讲三件事。"},
-                    {"id": "s2", "text": "第一件事。"}]),
-    ])
+    client = StubClient(
+        [
+            json.dumps(
+                [{"id": "s1", "text": "我们今天讲三件事。"}, {"id": "s2", "text": "第一件事。"}]
+            ),
+        ]
+    )
     progress = []
-    out = ollm.optimize(segs("嗯那个我们今天讲三件事", "第一件事"),
-                        client, batch_size=10,
-                        on_progress=lambda done, total: progress.append((done, total)))
+    out = ollm.optimize(
+        segs("嗯那个我们今天讲三件事", "第一件事"),
+        client,
+        batch_size=10,
+        on_progress=lambda done, total: progress.append((done, total)),
+    )
     assert out["batches"] == 1 and out["segments"] == 2
     assert out["changed"] == 2 and out["failed"] == []
     assert progress == [(1, 1)]
@@ -219,8 +227,7 @@ def test_optimize_marks_bad_reply_as_failed_not_applied():
 
 def test_optimize_cancel_stops_further_batches():
     client = StubClient([json.dumps([{"id": "s1", "text": "第一段。"}])])
-    out = ollm.optimize(segs("第一段", "第二段"), client, batch_size=1,
-                        cancel=lambda: True)
+    out = ollm.optimize(segs("第一段", "第二段"), client, batch_size=1, cancel=lambda: True)
     assert out["changes"] == []
     assert out["failed"][0]["code"] == "CANCELED"
 

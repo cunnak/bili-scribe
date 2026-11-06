@@ -86,7 +86,10 @@ def _tracked_under(root: Path, name: str) -> list[str]:
     """该仓库索引里 `name/` 下面的文件（跟踪面，不是工作区列表）。"""
     r = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--", name],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     assert r.returncode == 0, f"git ls-files 失败 rc={r.returncode}：{r.stderr.strip()[:200]}"
     return [line for line in r.stdout.splitlines() if line.strip()]
@@ -96,7 +99,10 @@ def _staged_under(root: Path, name: str) -> list[str]:
     """`git add` 之后索引里 `name/` 的条目——**故意不走 `_tracked_under`**，见模块 docstring。"""
     r = subprocess.run(
         ["git", "-C", str(root), "diff", "--cached", "--name-only"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     assert r.returncode == 0, f"git diff --cached 失败：{r.stderr.strip()[:200]}"
     return [line for line in r.stdout.splitlines() if line.startswith(name + "/")]
@@ -104,7 +110,9 @@ def _staged_under(root: Path, name: str) -> list[str]:
 
 def _win32_only(what: str) -> None:
     if sys.platform != "win32":
-        pytest.skip(f"{what}：这台机器造不出 junction ⇒ **机制没跑，不是通过**（形状锁与平台无关，照常跑）")
+        pytest.skip(
+            f"{what}：这台机器造不出 junction ⇒ **机制没跑，不是通过**（形状锁与平台无关，照常跑）"
+        )
 
 
 def _make_repo(repo: Path, *, exclude: bool, keep: bool = True) -> Path:
@@ -124,9 +132,15 @@ def _make_repo(repo: Path, *, exclude: bool, keep: bool = True) -> Path:
         if not keep:
             return repo  # 变更场景：只改 .gitignore，工作树与索引一个字节都不动
         os.rmdir(link)  # junction 只能整体摘掉；递归删会咬进目标目录
-    mk = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(repo / "src")],
-                        capture_output=True, text=True, errors="replace")
-    assert mk.returncode == 0, f"造 junction 失败：{(mk.stdout or '')[:160]}{(mk.stderr or '')[:160]}"
+    mk = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(repo / "src")],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    assert mk.returncode == 0, (
+        f"造 junction 失败：{(mk.stdout or '')[:160]}{(mk.stderr or '')[:160]}"
+    )
     for args in (["git", "init", "-q"], ["git", "add", "-A"]):
         r = subprocess.run(args, cwd=str(repo), capture_output=True, text=True, errors="replace")
         assert r.returncode == 0, f"{args} 失败：{r.stderr.strip()[:200]}"
@@ -169,12 +183,14 @@ def test_the_git_query_works_on_a_known_real_dir() -> None:
     """
     assert not _is_reparse_point(ROOT / KNOWN_REAL_TREE), (
         f"{KNOWN_REAL_TREE} 被读成联接 ⇒ 这台机器上的仓库形状已经和我们假设的不一样，"
-        "形状锁的两种分支都不成立了，必须人工重评，别让判据继续假装能判")
+        "形状锁的两种分支都不成立了，必须人工重评，别让判据继续假装能判"
+    )
     tracked = _tracked_under(ROOT, KNOWN_REAL_TREE)
     assert tracked, f"已知真目录 {KNOWN_REAL_TREE} 查询结果为空 ⇒ `git ls-files` 这条路坏了"
     assert all(p.startswith(KNOWN_REAL_TREE + "/") for p in tracked[:5]), (
         f"跟踪面里出现不以 `{KNOWN_REAL_TREE}/` 开头的路径：{tracked[:5]} "
-        "⇒ ls-files 的 pathspec 没生效，形状锁读的是整个仓库，不是那棵树")
+        "⇒ ls-files 的 pathspec 没生效，形状锁读的是整个仓库，不是那棵树"
+    )
 
 
 # ---------------------------------------------------------- 机制自证（Temp 仓库）
@@ -190,10 +206,12 @@ def test_junction_content_is_staged_unless_the_repo_excludes_it(tmp_path: Path) 
     staged_guarded = _staged_under(guarded, "link")
     assert len(staged_blind) == 2, (
         "不带排除行时 junction 后面两个文件应当被 `git add -A` 收进索引（这就是 lead 事故的机制），"
-        f"实得 {staged_blind} ⇒ 要么 git 语义变了，要么夹具没真造出 junction，形状锁的前提不成立")
+        f"实得 {staged_blind} ⇒ 要么 git 语义变了，要么夹具没真造出 junction，形状锁的前提不成立"
+    )
     assert staged_guarded == [], (
         f"带 `/link` 排除行后仍有 {staged_guarded} 被跟踪 ⇒ 镜像那两行 `/bili_scribe` 挡不住，"
-        "形状锁的修法口径是假的")
+        "形状锁的修法口径是假的"
+    )
 
 
 def test_the_probe_distinguishes_a_junction_from_a_real_dir(tmp_path: Path) -> None:
@@ -206,9 +224,11 @@ def test_the_probe_distinguishes_a_junction_from_a_real_dir(tmp_path: Path) -> N
     _win32_only("本用例要在 Windows 上造 junction")
     repo = _make_repo(tmp_path / "probe", exclude=True)
     assert _is_reparse_point(repo / "link"), (
-        "刚造出来的 junction 没被认成联接 ⇒ 形状锁会走错分支，机制条的归因也不成立")
+        "刚造出来的 junction 没被认成联接 ⇒ 形状锁会走错分支，机制条的归因也不成立"
+    )
     assert not _is_reparse_point(repo / "src"), (
-        "真目录被认成联接 ⇒ 探针反向，形状锁会把有跟踪的树判成事故")
+        "真目录被认成联接 ⇒ 探针反向，形状锁会把有跟踪的树判成事故"
+    )
 
 
 def test_the_exclusion_line_is_the_only_difference_between_the_two_repos(tmp_path: Path) -> None:
@@ -221,10 +241,15 @@ def test_the_exclusion_line_is_the_only_difference_between_the_two_repos(tmp_pat
     assert names_a == names_b, f"两仓工作树内容不一致：{names_a} vs {names_b} ⇒ 差异不是那一行"
     assert not (a / ".gitignore").exists(), "A 仓不该有 .gitignore"
     assert (b / ".gitignore").read_text(encoding="utf-8").strip() == "/link"
-    ci = subprocess.run(["git", "-C", str(b), "check-ignore", "--no-index", "-v", "--", "link/a.py"],
-                        capture_output=True, text=True, errors="replace")
+    ci = subprocess.run(
+        ["git", "-C", str(b), "check-ignore", "--no-index", "-v", "--", "link/a.py"],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
     assert ci.returncode == 0 and "/link" in ci.stdout, (
-        f"排除行没被 git 认账：rc={ci.returncode} out={ci.stdout.strip()!r}")
+        f"排除行没被 git 认账：rc={ci.returncode} out={ci.stdout.strip()!r}"
+    )
 
 
 def test_deleting_the_exclusion_line_reveals_the_junction_contents(tmp_path: Path) -> None:
@@ -237,12 +262,15 @@ def test_deleting_the_exclusion_line_reveals_the_junction_contents(tmp_path: Pat
     repo = _make_repo(tmp_path / "mutate", exclude=True)
     assert _staged_under(repo, "link") == [], (
         f"带 `/link` 排除行的新仓库本该零跟踪 link/，实得 {_staged_under(repo, 'link')} "
-        "⇒ 前提不成立，「删行就现身」这条无从谈起")
+        "⇒ 前提不成立，「删行就现身」这条无从谈起"
+    )
     (repo / ".gitignore").write_text("", encoding="utf-8")
-    r = subprocess.run(["git", "add", "-A"], cwd=str(repo), capture_output=True,
-                       text=True, errors="replace")
+    r = subprocess.run(
+        ["git", "add", "-A"], cwd=str(repo), capture_output=True, text=True, errors="replace"
+    )
     assert r.returncode == 0, f"git add 失败：{r.stderr.strip()[:200]}"
     revealed = _staged_under(repo, "link")
     assert len(revealed) == 2, (
         f"删掉 `/link` 那行后应当有 2 个文件现身（lead 事故里的 24 个就是同一机制），"
-        f"实得 {revealed} ⇒ 形状锁声称要拦的事其实不会发生，判据在防一个不存在的风险")
+        f"实得 {revealed} ⇒ 形状锁声称要拦的事其实不会发生，判据在防一个不存在的风险"
+    )

@@ -154,9 +154,9 @@ from pathlib import Path
 import pytest
 
 from bili_scribe.config import AppConfig
-from bili_scribe.core.collector import Bundle
-from bili_scribe.core import summarizer as bs_summarizer
 from bili_scribe.core import roles as bs_roles
+from bili_scribe.core import summarizer as bs_summarizer
+from bili_scribe.core.collector import Bundle
 from video_workbench.core import prompt_source as ps
 
 #: 合同值：cfg 固定这三个参数（`bili_scribe/config.py` 的默认值就是它们，这里显式写出来，
@@ -174,7 +174,8 @@ CHUNK_OVERLAP = 400
 #: 的问题，那个用例（plan A）另用 `ROLE_KEYS` 现读，两边不许混用一套名单。
 SHARED_ROLE_KEYS = tuple(role.key for role in bs_roles.ALL_ROLES if role.key != "standard")
 assert "xueshu" in SHARED_ROLE_KEYS, (
-    "副本层丢了 xueshu：WB 退役它是权威层的事，副本删定义会同时打破逐字节漂移锁")
+    "副本层丢了 xueshu：WB 退役它是权威层的事，副本删定义会同时打破逐字节漂移锁"
+)
 
 #: 长度方向的登记表在 `tests/wb/wb_prompt_sizes.py`（唯一 owner：plan A 与 P8 两处都要用
 #: 同一个事实，各写一份就是第二个 owner——合并 `shipin` 那次正好被这条绊到，
@@ -238,26 +239,27 @@ class FakeLLM:
     def require(self) -> None:
         return None
 
-    def chat(self, messages, temperature=None, max_tokens=None, json_mode=False,
-             note=None, **kw):
-        self.requests.append({
-            "messages": [dict(item) for item in messages],
-            "json_mode": bool(json_mode),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        })
+    def chat(self, messages, temperature=None, max_tokens=None, json_mode=False, note=None, **kw):
+        self.requests.append(
+            {
+                "messages": [dict(item) for item in messages],
+                "json_mode": bool(json_mode),
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
         if not self.script:
             raise AssertionError(
                 f"假 LLM 的脚本用完了（已发 {len(self.requests)} 次请求）——"
-                "说明这一侧的实际调用次数比用例预期多")
+                "说明这一侧的实际调用次数比用例预期多"
+            )
         item = self.script.pop(0)
         return item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
 
     # --- 只对账用的派生量 -------------------------------------------------
     def shapes(self) -> list[tuple]:
         """每次请求的「阶段指纹」：(json_mode, 第 0 条 message 的内容前 12 字)。"""
-        return [(r["json_mode"], str(r["messages"][0]["content"])[:12])
-                for r in self.requests]
+        return [(r["json_mode"], str(r["messages"][0]["content"])[:12]) for r in self.requests]
 
 
 # --------------------------------------------------------------------- 素材与配置
@@ -278,16 +280,29 @@ def make_cfg(**llm_overrides) -> AppConfig:
 def make_bundle(body: str, *, source_kind: str = "subtitle_ai") -> Bundle:
     """固定素材。**必须带时间戳**，否则 bs 会把 timeline 强制清空，20 条上限那条就测不到。"""
     return Bundle(
-        bvid="BV1paritycheck", aid=1, cid=1, page=1, page_count=1,
-        title="对账素材", desc="固定简介", up_name="UP对账", up_mid=2, duration=600,
-        tname="知识", tags=["对账", "固定"],
-        source_kind=source_kind, source_label="AI 字幕", source_trust="中",
-        source_detail="带时间戳", body=body)
+        bvid="BV1paritycheck",
+        aid=1,
+        cid=1,
+        page=1,
+        page_count=1,
+        title="对账素材",
+        desc="固定简介",
+        up_name="UP对账",
+        up_mid=2,
+        duration=600,
+        tname="知识",
+        tags=["对账", "固定"],
+        source_kind=source_kind,
+        source_label="AI 字幕",
+        source_trust="中",
+        source_detail="带时间戳",
+        body=body,
+    )
 
 
 SHORT_BODY = "[00:00] 开场\n[00:05] 讲第一件\n[00:12] 讲第二件"
 UNIT = "这是固定的一句话内容，用来把素材推过分段预读的阈值。"
-LONG_BODY = UNIT * 1200          # 31,200 字 > max_input_chars，触发分段预读
+LONG_BODY = UNIT * 1200  # 31,200 字 > max_input_chars，触发分段预读
 
 #: `_split(31200, 6000, 400, MAX_CHUNKS=8)`：step=max(ceil(31199/7), 5600)=5600 → 6 段。
 EXPECTED_LONG_CHUNKS = 6
@@ -460,7 +475,8 @@ def _normalized(requests, cfg: AppConfig) -> list[dict]:
                 f"第 {index} 次请求第 {offset} 条消息的 content 不是 str，实得 "
                 f"{type(content).__name__}——本文件的『逐请求一致』只覆盖**无画面帧**"
                 f"输入（口径见 FRAMES_PRECONDITION_NOTE）。要么把帧从这条对账路径里"
-                f"拿掉，要么显式改写口径并同步 notes，不许让它悄悄变成『带帧也一致』")
+                f"拿掉，要么显式改写口径并同步 notes，不许让它悄悄变成『带帧也一致』"
+            )
     return [
         {
             "json_mode": bool(r["json_mode"]),
@@ -489,24 +505,28 @@ def _assert_wb_system_by_rule(system: str, role_key: str, bs_role) -> None:
     text = _txt_for(role_key)
     if text is None:
         assert system == bs_role.system.strip() + "\n" + bs_roles.OUTPUT_CONTRACT, (
-            f"无源角色 {role_key} 的 system 两侧应当逐字相同——A 只换有源的那四个")
+            f"无源角色 {role_key} 的 system 两侧应当逐字相同——A 只换有源的那四个"
+        )
         return
     head = text.strip()[:40]
     assert head, f"{role_key} 的 txt 前 40 字取空了，规则断言会空转"
     assert system.startswith(head), (
-        f"{role_key}：WB 的 system 不是以真源 txt 开头。开头 40 字实得 {system[:40]!r}")
+        f"{role_key}：WB 的 system 不是以真源 txt 开头。开头 40 字实得 {system[:40]!r}"
+    )
     assert system.rstrip().endswith(contract), (
         f"{role_key}：输出契约不在最末尾。这是硬要求——txt 原文里有「打印每个阶段完整输出」"
-        "「输出 ReAct 执行日志」这类指令，契约就是来压住它们的（`roles.py:52-56`）")
+        "「输出 ReAct 执行日志」这类指令，契约就是来压住它们的（`roles.py:52-56`）"
+    )
     assert system.index(head) < system.rindex(contract[:40]), (
-        f"{role_key}：契约跑到了 txt 前面，顺序被调了")
+        f"{role_key}：契约跑到了 txt 前面，顺序被调了"
+    )
     for marker in EXTRA_MARKERS:
-        assert marker not in system, (
-            f"{role_key}：附加提示词默认关着却已经接进 system（{marker}）")
+        assert marker not in system, f"{role_key}：附加提示词默认关着却已经接进 system（{marker}）"
 
 
-def assert_sequences_match_plan_a(wb_requests, bs_requests, cfg: AppConfig,
-                                 role_key: str, *, label: str = "") -> list[int]:
+def assert_sequences_match_plan_a(
+    wb_requests, bs_requests, cfg: AppConfig, role_key: str, *, label: str = ""
+) -> list[int]:
     """除 system 正文外**逐维度要求一致**，system 两侧各按自己的构造规则断言。
 
     返回两侧 system 的长度对照（写进差异清单用，不硬编码）。
@@ -516,34 +536,41 @@ def assert_sequences_match_plan_a(wb_requests, bs_requests, cfg: AppConfig,
     bs = _normalized(bs_requests, cfg)
     assert len(wb) == len(bs), (
         f"{tag}调用次数不一致：WB {len(wb)} / bs {len(bs)}。方案 A 换的是提示词正文，"
-        "不改轮次——这条红了就是有人在某一边多插了一次调用")
+        "不改轮次——这条红了就是有人在某一边多插了一次调用"
+    )
     bs_role = bs_roles.get_role(role_key)
     for index, (w, b) in enumerate(zip(wb, bs), start=1):
         for field in ("json_mode", "temperature", "max_tokens"):
             assert w[field] == b[field], (
                 f"{tag}第 {index} 次请求的 {field} 不一致：WB {w[field]!r} / "
-                f"bs {b[field]!r}（A 只允许 system 正文不同）")
+                f"bs {b[field]!r}（A 只允许 system 正文不同）"
+            )
         assert [m["role"] for m in w["messages"]] == [m["role"] for m in b["messages"]], (
-            f"{tag}第 {index} 次请求的消息角色序列不一致")
-        for offset, (wm, bm) in enumerate(
-                zip(w["messages"][1:], b["messages"][1:]), start=1):
+            f"{tag}第 {index} 次请求的消息角色序列不一致"
+        )
+        for offset, (wm, bm) in enumerate(zip(w["messages"][1:], b["messages"][1:]), start=1):
             assert wm["content"] == bm["content"], (
                 f"{tag}第 {index} 次请求第 {offset} 条**非 system** 消息不一致——"
-                "用户素材、草稿、批判清单、本次要求都必须一字不差")
+                "用户素材、草稿、批判清单、本次要求都必须一字不差"
+            )
         if b["json_mode"]:
             # 生成与修订这两轮的 system 才是「角色本体 + 契约」。
             assert b["messages"][0]["content"] == (
-                bs_role.system.strip() + "\n" + bs_roles.OUTPUT_CONTRACT), (
+                bs_role.system.strip() + "\n" + bs_roles.OUTPUT_CONTRACT
+            ), (
                 f"{tag}bs 侧第 {index} 次生成请求的 system 不是「压缩版 + 契约」："
-                "bs 一个字没改，它要是变了说明有人动了原件")
+                "bs 一个字没改，它要是变了说明有人动了原件"
+            )
             _assert_wb_system_by_rule(w["messages"][0]["content"], role_key, bs_role)
         else:
             # 自我批判那一轮用的是角色自己的批判提示词，**A 不碰它**：两侧必须逐字相同。
             assert w["messages"][0]["content"] == b["messages"][0]["content"] == bs_role.critique, (
                 f"{tag}第 {index} 次（自我批判）的 system 两侧不等同 critique 原文——"
-                "方案 A 只替换角色本体，批判提示词换了就是越界")
+                "方案 A 只替换角色本体，批判提示词换了就是越界"
+            )
     return [len(b["messages"][0]["content"]) for b in bs], [
-        len(w["messages"][0]["content"]) for w in wb]
+        len(w["messages"][0]["content"]) for w in wb
+    ]
 
 
 # ============================================================ A 组 副本 vs 原件
@@ -561,8 +588,7 @@ def test_copy_and_original_agree_on_every_shared_role(role_key, default_env):
     wb_llm = FakeLLM(three_pass_script())
     cfg = make_cfg()
 
-    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg,
-                                     role_key=role_key)
+    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg, role_key=role_key)
     wb_out = wb.summarize(make_bundle(SHORT_BODY), wb_llm, cfg, role_key=role_key)
 
     assert wb_out.to_dict() == bs_out.to_dict()
@@ -573,8 +599,9 @@ def test_copy_and_original_agree_on_every_shared_role(role_key, default_env):
     # 而放宽成「不等就通过」又会盖掉阶段顺序与用户素材的漂移。
     # 所以换成逐维度比较：除 system 正文外全部要求一致，system 两侧各按构造规则断言。
     # 无源的那些角色（现读 `ps.MAP` 在副本层名单里的补集）在 helper 里仍走「两侧逐字相同」那条路。
-    assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, role_key,
-                                  label="副本 vs 原件")
+    assert_sequences_match_plan_a(
+        wb_llm.requests, bs_llm.requests, cfg, role_key, label="副本 vs 原件"
+    )
 
     # 钉住 bs 侧的真实期望：两侧一起跑偏时这一段要红。
     assert bs_out.role == role_key
@@ -589,10 +616,22 @@ def test_copy_and_original_agree_on_every_shared_role(role_key, default_env):
 def test_copy_exports_the_contracted_surface():
     """权威层必须真的导出合同点名的东西（缺一个就是接口没对齐）。"""
     wb = _wb_package()
-    for name in ("DEFAULT_ROLE", "RETIRED_ROLES", "ALL_ROLES", "ROLE_KEYS",
-                 "describe_roles", "UnknownRole", "get_role", "role_label",
-                 "summarize", "prepare_material", "Summary", "PreparedMaterial",
-                 "Refinement", "SummarizeError"):
+    for name in (
+        "DEFAULT_ROLE",
+        "RETIRED_ROLES",
+        "ALL_ROLES",
+        "ROLE_KEYS",
+        "describe_roles",
+        "UnknownRole",
+        "get_role",
+        "role_label",
+        "summarize",
+        "prepare_material",
+        "Summary",
+        "PreparedMaterial",
+        "Refinement",
+        "SummarizeError",
+    ):
         assert hasattr(wb, name), f"video_workbench.core.summary 缺 {name}"
     # 这些名字在副本模块上也得在——漂移测试按字节锁的就是这份文件。
     module = _wb_summarizer()
@@ -630,8 +669,13 @@ def test_strict_mode_adapter_requests_are_identical_to_bs(default_env):
     from video_workbench.core import summarizer as adapter
 
     cfg = make_cfg()
-    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-               "duration_sec": 600, "desc": "固定简介"}
+    project = {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 600,
+        "desc": "固定简介",
+    }
     segments = [{"start_ms": 0, "text": "开场"}, {"start_ms": 5000, "text": "讲第一件"}]
 
     # 适配层内部会自己 build_bundle；先证明它是确定的，再拿同一份喂 bs。
@@ -642,8 +686,7 @@ def test_strict_mode_adapter_requests_are_identical_to_bs(default_env):
     bs_out = bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
 
     client = FakeLLM(three_pass_script())
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
 
     assert result["summary"] == bs_out.to_dict()
     # 口径变更（方案 A）：原来是 `_effective(client.requests, cfg) == _effective(bs_llm.requests, cfg)`，
@@ -651,8 +694,9 @@ def test_strict_mode_adapter_requests_are_identical_to_bs(default_env):
     # 换成逐维度比较：次数/阶段指纹/temperature/max_tokens/非 system 消息仍要求一致，
     # system 两侧各按构造规则断言（bs = 压缩版+契约，WB = txt(+extra)+契约且契约在最末）。
     # 期望值全部从传进来的 `cfg` 现读，不写死数字。
-    assert_sequences_match_plan_a(client.requests, bs_llm.requests, cfg, "wengao",
-                                  label="适配层 vs bs")
+    assert_sequences_match_plan_a(
+        client.requests, bs_llm.requests, cfg, "wengao", label="适配层 vs bs"
+    )
 
 
 def test_strict_mode_adapter_does_not_retry_malformed_json(default_env):
@@ -671,8 +715,12 @@ def test_strict_mode_adapter_does_not_retry_malformed_json(default_env):
     from video_workbench.core import summarizer as adapter
 
     cfg = make_cfg()
-    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-               "duration_sec": 60}
+    project = {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 60,
+    }
     segments = [{"start_ms": 0, "text": "内容"}]
 
     bs_llm = FakeLLM(["这不是 JSON"])
@@ -681,8 +729,7 @@ def test_strict_mode_adapter_does_not_retry_malformed_json(default_env):
 
     client = FakeLLM(["这不是 JSON"])
     with pytest.raises(WBError) as exc:
-        adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                    role="wengao")
+        adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert len(client.requests) == 1, f"严格模式还发了 {len(client.requests)} 次，加固没关干净"
     assert len(bs_llm.requests) == 1
@@ -760,8 +807,7 @@ def test_three_pass_gate_runs_generate_critique_revise_in_order(role_key):
     # 换成逐维度比较——阶段顺序、json_mode、非 system 消息、temperature/max_tokens 全部
     # 继续要求一致；生成两轮的 system 按两侧各自的构造规则断言，批判那轮两侧都必须是
     # 角色自己的 critique 原文（A 不碰它）。
-    assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, role_key,
-                                  label="三轮回")
+    assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, role_key, label="三轮回")
 
     # 三个阶段的 system 提示词各自是谁——顺序写反了这里必红。
     role = bs_roles.get_role(role_key)
@@ -785,17 +831,24 @@ def test_refinement_path_matches_on_both_sides():
     bs_llm = FakeLLM([PAYLOAD, CRITIQUE_NOTE, revised])
     wb_llm = FakeLLM([PAYLOAD, CRITIQUE_NOTE, revised])
     bs_out = bs_summarizer.summarize(
-        make_bundle(SHORT_BODY), bs_llm, cfg, role_key="wengao",
-        refinement=bs_summarizer.Refinement(requirement=requirement, previous=previous))
+        make_bundle(SHORT_BODY),
+        bs_llm,
+        cfg,
+        role_key="wengao",
+        refinement=bs_summarizer.Refinement(requirement=requirement, previous=previous),
+    )
     wb_out = wb.summarize(
-        make_bundle(SHORT_BODY), wb_llm, cfg, role_key="wengao",
-        refinement=wb.Refinement(requirement=requirement, previous=previous))
+        make_bundle(SHORT_BODY),
+        wb_llm,
+        cfg,
+        role_key="wengao",
+        refinement=wb.Refinement(requirement=requirement, previous=previous),
+    )
 
     assert wb_out.to_dict() == bs_out.to_dict()
     # 口径变更（方案 A）：打磨路径同样只有 system 正文允许不同；本次要求（requirement）
     # 出现在三轮的每一轮里，那条由下面的逐字断言守着，不是靠放宽这条换来的。
-    assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, "wengao",
-                                  label="打磨路径")
+    assert_sequences_match_plan_a(wb_llm.requests, bs_llm.requests, cfg, "wengao", label="打磨路径")
     # 三个阶段的请求里都必须有本次要求——批判与修订两轮也要知道「这次只改什么」，
     # 否则角色自己的清单会把使用者已经认可的部分一起重写（见 REFINE_CONSTRAINT 的注释）。
     assert requirement in bs_llm.requests[0]["messages"][1]["content"]
@@ -816,12 +869,18 @@ def test_revise_note_is_forced_empty_on_plain_generation():
     cfg = make_cfg()
     with_note = {**PAYLOAD, "revise_note": "没有上一版却硬写了说明"}
 
-    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY),
-                                     FakeLLM([with_note, CRITIQUE_NOTE, with_note]),
-                                     cfg, role_key="wengao")
-    wb_out = wb.summarize(make_bundle(SHORT_BODY),
-                          FakeLLM([with_note, CRITIQUE_NOTE, with_note]),
-                          cfg, role_key="wengao")
+    bs_out = bs_summarizer.summarize(
+        make_bundle(SHORT_BODY),
+        FakeLLM([with_note, CRITIQUE_NOTE, with_note]),
+        cfg,
+        role_key="wengao",
+    )
+    wb_out = wb.summarize(
+        make_bundle(SHORT_BODY),
+        FakeLLM([with_note, CRITIQUE_NOTE, with_note]),
+        cfg,
+        role_key="wengao",
+    )
 
     assert bs_out.revise_note == ""
     assert wb_out.to_dict() == bs_out.to_dict()
@@ -837,14 +896,23 @@ def test_diff_fields_and_previous_view_match_and_are_pinned():
       · `diff_fields` 必须只报内容字段、把 `chunks`/`model`/`role` 这类元信息排除在外。
     """
     wb = _wb_summarizer()
-    previous = {**PAYLOAD, "revise_note": "上一版说过什么", "chunks": 1, "model": "a",
-                "role": "wengao", "frames": 0}
+    previous = {
+        **PAYLOAD,
+        "revise_note": "上一版说过什么",
+        "chunks": 1,
+        "model": "a",
+        "role": "wengao",
+        "frames": 0,
+    }
     current = {
         **PAYLOAD,
         "one_line": "完全不同的新结论",
         "key_points": ["第一件", "改过的第二件", "第三件"],
         "revise_note": "这一版的说明",
-        "chunks": 2, "model": "b", "role": "wengao", "frames": 3,
+        "chunks": 2,
+        "model": "b",
+        "role": "wengao",
+        "frames": 3,
     }
 
     view_bs = bs_summarizer.build_previous_view(previous)
@@ -895,17 +963,16 @@ def test_failure_paths_raise_the_same_summarize_error_on_both_sides(reply):
     cfg = make_cfg()
 
     with pytest.raises(bs_summarizer.SummarizeError) as bs_exc:
-        bs_summarizer.summarize(make_bundle(SHORT_BODY), FakeLLM([reply]), cfg,
-                                role_key="standard")
+        bs_summarizer.summarize(make_bundle(SHORT_BODY), FakeLLM([reply]), cfg, role_key="standard")
     with pytest.raises(wb.SummarizeError) as wb_exc:
         wb.summarize(make_bundle(SHORT_BODY), FakeLLM([reply]), cfg, role_key="standard")
 
     assert str(wb_exc.value) == str(bs_exc.value)
 
-    expected = ("模型返回的总结为空，请重试或换个模型" if reply == "{}"
-                else "模型没有返回可解析的 JSON")
-    assert str(bs_exc.value) == expected, (
-        f"bili_scribe 对这个输入的实际说法变了：{bs_exc.value}")
+    expected = (
+        "模型返回的总结为空，请重试或换个模型" if reply == "{}" else "模型没有返回可解析的 JSON"
+    )
+    assert str(bs_exc.value) == expected, f"bili_scribe 对这个输入的实际说法变了：{bs_exc.value}"
 
 
 def test_copy_accepts_standard_while_the_package_refuses_it():
@@ -929,8 +996,7 @@ def test_copy_accepts_standard_while_the_package_refuses_it():
 
     # standard 是 passes=1：一次调用就出结果，两侧都一样。
     bs_llm = FakeLLM([PAYLOAD])
-    out_bs = module.summarize(make_bundle(SHORT_BODY), bs_llm, make_cfg(),
-                              role_key="standard")
+    out_bs = module.summarize(make_bundle(SHORT_BODY), bs_llm, make_cfg(), role_key="standard")
     assert len(bs_llm.requests) == 1
     assert out_bs.role == "standard"
     assert out_bs.summary_md == PAYLOAD["summary_md"]
@@ -948,10 +1014,10 @@ def test_top_level_array_around_an_object_is_unwrapped_by_both_sides():
     cfg = make_cfg()
     wrapped = json.dumps([PAYLOAD], ensure_ascii=False)
 
-    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY), FakeLLM([wrapped]), cfg,
-                                     role_key="standard")
-    wb_out = wb.summarize(make_bundle(SHORT_BODY), FakeLLM([wrapped]), cfg,
-                          role_key="standard")
+    bs_out = bs_summarizer.summarize(
+        make_bundle(SHORT_BODY), FakeLLM([wrapped]), cfg, role_key="standard"
+    )
+    wb_out = wb.summarize(make_bundle(SHORT_BODY), FakeLLM([wrapped]), cfg, role_key="standard")
 
     assert bs_out.one_line == PAYLOAD["one_line"], "bs 实测会接受剥壳后的对象"
     assert wb_out.to_dict() == bs_out.to_dict()
@@ -972,16 +1038,26 @@ def test_the_top_level_not_object_branch_is_unreachable_on_both_sides():
     probe = "模型返回的 JSON 顶层不是对象"
     cfg = make_cfg()
 
-    for reply in ("[{\"a\": 1}, {\"b\": 2}]", "{\"a\":1} {\"b\":2}", "true", "null",
-                  "[1, 2]", "一段没有花括号的散文"):
-        for target, error_type in ((bs_summarizer, bs_summarizer.SummarizeError),
-                                   (module, module.SummarizeError)):
+    for reply in (
+        '[{"a": 1}, {"b": 2}]',
+        '{"a":1} {"b":2}',
+        "true",
+        "null",
+        "[1, 2]",
+        "一段没有花括号的散文",
+    ):
+        for target, error_type in (
+            (bs_summarizer, bs_summarizer.SummarizeError),
+            (module, module.SummarizeError),
+        ):
             with pytest.raises(error_type) as exc:
-                target.summarize(make_bundle(SHORT_BODY), FakeLLM([reply]), cfg,
-                                 role_key="standard")
+                target.summarize(
+                    make_bundle(SHORT_BODY), FakeLLM([reply]), cfg, role_key="standard"
+                )
             assert probe not in str(exc.value), (
                 f"死分支被激活了（输入 {reply!r} → {exc.value}）：_extract_json 被改过，"
-                "需要重新确认两侧是否仍然一致")
+                "需要重新确认两侧是否仍然一致"
+            )
 
 
 def test_extract_json_boundary_is_pinned_on_the_bs_side():
@@ -996,8 +1072,7 @@ def test_extract_json_boundary_is_pinned_on_the_bs_side():
     """
     assert bs_summarizer._extract_json('{"one_line": "x"}') == {"one_line": "x"}
     assert bs_summarizer._extract_json('[{"one_line": "x"}]') == {"one_line": "x"}
-    assert bs_summarizer._extract_json(
-        "  ```\n{\"one_line\": \"x\"}\n```  ") == {"one_line": "x"}
+    assert bs_summarizer._extract_json('  ```\n{"one_line": "x"}\n```  ') == {"one_line": "x"}
 
     for reply in ("散文", "true", "null", "42", "[1, 2]"):
         with pytest.raises(bs_summarizer.SummarizeError) as exc:
@@ -1005,9 +1080,8 @@ def test_extract_json_boundary_is_pinned_on_the_bs_side():
         assert str(exc.value) == "模型没有返回可解析的 JSON", f"{reply!r} 的实际说法变了"
 
     with pytest.raises(bs_summarizer.SummarizeError) as exc:
-        bs_summarizer._extract_json("{\"a\":1} {\"b\":2}")
+        bs_summarizer._extract_json('{"a":1} {"b":2}')
     assert "Extra data" in str(exc.value), f"并排对象的实际说法变了：{exc.value}"
-
 
 
 # ============================================================ G 组 timeline 上限
@@ -1027,15 +1101,16 @@ def test_timeline_is_capped_at_twenty_on_both_sides():
 
     bs_llm = FakeLLM(three_pass_script(payload))
     wb_llm = FakeLLM(three_pass_script(payload))
-    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg,
-                                     role_key="jinglian")
+    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg, role_key="jinglian")
     wb_out = wb.summarize(make_bundle(SHORT_BODY), wb_llm, cfg, role_key="jinglian")
 
     assert len(bs_out.timeline) == TIMELINE_CAP
     assert len(wb_out.timeline) == TIMELINE_CAP
     assert wb_out.timeline == bs_out.timeline
-    assert wb_out.timeline[:2] == [{"t": "00:01", "text": "第 1 条"},
-                                   {"t": "00:02", "text": "第 2 条"}], "截的是尾部，不是头部"
+    assert wb_out.timeline[:2] == [
+        {"t": "00:01", "text": "第 1 条"},
+        {"t": "00:02", "text": "第 2 条"},
+    ], "截的是尾部，不是头部"
 
 
 def test_timeline_is_emptied_when_the_material_has_no_timestamps():
@@ -1049,10 +1124,12 @@ def test_timeline_is_emptied_when_the_material_has_no_timestamps():
     cfg = make_cfg()
     payload = {**PAYLOAD, "timeline": [{"t": "00:01", "text": "编出来的"}]}
 
-    bs_out = bs_summarizer.summarize(make_bundle(SHORT_BODY, source_kind="meta"),
-                                     FakeLLM([payload]), cfg, role_key="standard")
-    wb_out = wb.summarize(make_bundle(SHORT_BODY, source_kind="meta"),
-                          FakeLLM([payload]), cfg, role_key="standard")
+    bs_out = bs_summarizer.summarize(
+        make_bundle(SHORT_BODY, source_kind="meta"), FakeLLM([payload]), cfg, role_key="standard"
+    )
+    wb_out = wb.summarize(
+        make_bundle(SHORT_BODY, source_kind="meta"), FakeLLM([payload]), cfg, role_key="standard"
+    )
 
     assert bs_out.timeline == [] == wb_out.timeline
     assert bs_out.to_dict() == wb_out.to_dict()
@@ -1094,8 +1171,13 @@ def test_loose_mode_timeline_difference_is_the_only_content_delta(loose_env):
     cfg = make_cfg()
     rows = [{"t": f"00:{i:02d}", "text": f"第 {i} 条"} for i in range(1, 26)]
     script = three_pass_script({**PAYLOAD, "timeline": rows})
-    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-               "duration_sec": 600, "desc": "固定简介"}
+    project = {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 600,
+        "desc": "固定简介",
+    }
     segments = [{"start_ms": 0, "text": "开场"}, {"start_ms": 5000, "text": "讲第一件"}]
 
     bundle = adapter.build_bundle(project, segments)
@@ -1103,8 +1185,7 @@ def test_loose_mode_timeline_difference_is_the_only_content_delta(loose_env):
     bs_out = bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
 
     client = FakeLLM(list(script))
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
     wb_summary = result["summary"]
 
     # 差异只有一处：timeline 条数。
@@ -1150,11 +1231,15 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
     from video_workbench.core import summarizer as adapter
 
     cfg = make_cfg()
-    head = ('{"one_line":"三件事","summary_md":"## 开头\\n这里讲到一半')
-    tail = ('被截住了","key_points":["第一件"],"timeline":[],"caution":"",'
-            '"comment_short":"短版"}')
-    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-               "duration_sec": 60, "desc": "固定简介"}
+    head = '{"one_line":"三件事","summary_md":"## 开头\\n这里讲到一半'
+    tail = '被截住了","key_points":["第一件"],"timeline":[],"caution":"","comment_short":"短版"}'
+    project = {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 60,
+        "desc": "固定简介",
+    }
     segments = [{"start_ms": 0, "text": "内容"}]
     bundle = adapter.build_bundle(project, segments)
 
@@ -1165,14 +1250,15 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
     assert len(bs_llm.requests) == 1, "bs 的失败形状变了，需要重新登记差异清单"
 
     # WB：3 次方法论请求 + 1 次续写 = 4。脚本顺序 = 断掉的头 / 接上的尾 / 批判 / 修订。
-    client = FakeLLM([head, tail, CRITIQUE_NOTE,
-                      {**PAYLOAD, "summary_md": "## 开头\n这里讲到一半被截住了"}])
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="jinglian")
+    client = FakeLLM(
+        [head, tail, CRITIQUE_NOTE, {**PAYLOAD, "summary_md": "## 开头\n这里讲到一半被截住了"}]
+    )
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="jinglian")
 
     # 差异 3（额外请求）：多出来的那一次就是「接着写」。
     assert len(client.requests) == 4, (
-        f"修复阶梯的请求数变了（实测 {len(client.requests)}），要重新登记差异清单")
+        f"修复阶梯的请求数变了（实测 {len(client.requests)}），要重新登记差异清单"
+    )
     assert len(client.requests) == len(bs_llm.requests) + 3
 
     # 差异 2（输出预算被抬）：续写那次按 MIN_JSON_TOKENS 要预算，第一次仍按调用方原样。
@@ -1184,7 +1270,8 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
     assert set(result["summary"]) == set(bs_summarizer.Summary().to_dict())
     assert result["summary"]["summary_md"] == "## 开头\n这里讲到一半被截住了"
     assert any("截断" in note for note in result["notes"]), (
-        f"加固必须留下可查的说明，实际 notes={result['notes']}")
+        f"加固必须留下可查的说明，实际 notes={result['notes']}"
+    )
 
 
 # =============== I 组 默认档翻正后的新契约（task-9 的 B1/B3/B4/B5/B6 与 D 的口径）
@@ -1197,6 +1284,7 @@ def test_loose_mode_repair_ladder_costs_extra_requests_and_budget(loose_env):
 #: 证明这个数是从配置流过去的，不是用例里写死的。
 #: 上游 `bili_scribe/infra/llm.py:259` 是 `max_tokens or self.cfg.max_tokens`，
 #: 所以 bs 每次请求实际带的就是 cfg 里那个数；默认档要求两侧同值才算一致。
+
 
 def _repair_budget_cap_from_source() -> int:
     """从产品源码里现读「补救预算的封顶值」，不在用例里再造一个常量。
@@ -1211,12 +1299,15 @@ def _repair_budget_cap_from_source() -> int:
 
     source = ADAPTER_PY.read_text(encoding="utf-8")
     tree = ast.parse(source)
-    fn = next((n for n in tree.body
-               if isinstance(n, ast.FunctionDef) and n.name == "_json_budget"), None)
+    fn = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_json_budget"), None
+    )
     if fn is None:
         raise AssertionError("`_json_budget` 在产品里不见了，封顶值的读法要重新定")
-    ints = {n.value for n in ast.walk(fn) if isinstance(n, ast.Constant) and isinstance(n.value, int)}
-    cap = max(ints - {12288})            # MIN_JSON_TOKENS 是下限，封顶是另一个数
+    ints = {
+        n.value for n in ast.walk(fn) if isinstance(n, ast.Constant) and isinstance(n.value, int)
+    }
+    cap = max(ints - {12288})  # MIN_JSON_TOKENS 是下限，封顶是另一个数
     if cap <= 12288:
         raise AssertionError(f"读到的封顶不像话：{cap}（比下限还小），判据要重新想")
     return cap
@@ -1272,34 +1363,40 @@ def test_the_repair_budget_never_falls_below_the_main_request(loose_env):
     from video_workbench.core import summarizer as adapter
 
     cap = _repair_budget_cap_from_source()
-    base = cap + 4096                     # 严格高于封顶：倒挂那一格的定义
+    base = cap + 4096  # 严格高于封顶：倒挂那一格的定义
     cfg = make_cfg(max_tokens=base)
 
-    head = ('{"one_line":"三件事","summary_md":"## 开头\\n这里讲到一半')
-    tail = ('被截住了","key_points":["第一件"],"timeline":[],"caution":"",'
-            '"comment_short":"短版"}')
-    project = {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-               "duration_sec": 60, "desc": "固定简介"}
+    head = '{"one_line":"三件事","summary_md":"## 开头\\n这里讲到一半'
+    tail = '被截住了","key_points":["第一件"],"timeline":[],"caution":"","comment_short":"短版"}'
+    project = {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 60,
+        "desc": "固定简介",
+    }
     segments = [{"start_ms": 0, "text": "内容"}]
 
-    client = FakeLLM([head, tail, CRITIQUE_NOTE,
-                      {**PAYLOAD, "summary_md": "## 开头\n这里讲到一半被截住了"}])
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="jinglian")
+    client = FakeLLM(
+        [head, tail, CRITIQUE_NOTE, {**PAYLOAD, "summary_md": "## 开头\n这里讲到一半被截住了"}]
+    )
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="jinglian")
     assert result["summary"]["summary_md"].endswith("被截住了"), (
-        "夹具没走到补救步就等于没测：先看这条，别去怀疑判据")
+        "夹具没走到补救步就等于没测：先看这条，别去怀疑判据"
+    )
 
     # 主请求不写这个参数（None ＝「按客户端配置原样」），它的预算就是 base。
-    assert client.requests[0]["max_tokens"] is None, (
-        "主请求的预算写法变了，这条锁的基准线要重新定")
+    assert client.requests[0]["max_tokens"] is None, "主请求的预算写法变了，这条锁的基准线要重新定"
 
     repair = [r["max_tokens"] for r in client.requests[1:] if r["max_tokens"] is not None]
     assert repair, (
         "一条补救请求都没读到 `max_tokens`——夹具空跑，这条锁什么都没守；"
-        "要么阶梯没触发，要么产品改成不写这个参数，两种都得重新登记")
+        "要么阶梯没触发，要么产品改成不写这个参数，两种都得重新登记"
+    )
     below = [n for n in repair if n < base]
     assert not below, (
-        f"补救预算比主请求还小（倒挂回来了）：base={base}、封顶现读={cap}、补救步拿到 {below}")
+        f"补救预算比主请求还小（倒挂回来了）：base={base}、封顶现读={cap}、补救步拿到 {below}"
+    )
 
 
 #: 模型给出超过 bs 硬上限的时间线条数（`_coerce_timeline` 的 `out[:20]` 会咬到）。
@@ -1318,8 +1415,13 @@ WAIT_FOR_TASK11 = (
 
 
 def _dense_project():
-    return {"title": "对账素材", "up_name": "UP对账", "bvid": "BV1paritycheck",
-            "duration_sec": 600, "desc": "固定简介"}
+    return {
+        "title": "对账素材",
+        "up_name": "UP对账",
+        "bvid": "BV1paritycheck",
+        "duration_sec": 600,
+        "desc": "固定简介",
+    }
 
 
 def _dense_segments():
@@ -1350,23 +1452,26 @@ def test_default_tier_keeps_a_timeline_longer_than_the_cap(default_env):
     bs_out = bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
 
     client = FakeLLM(list(script))
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
 
     assert len(bs_out.timeline) == TIMELINE_CAP, (
-        f"bs 侧 20 条硬上限是登记差异的另一半，它变了就得重新登记：{len(bs_out.timeline)}")
+        f"bs 侧 20 条硬上限是登记差异的另一半，它变了就得重新登记：{len(bs_out.timeline)}"
+    )
     assert len(result["summary"]["timeline"]) == OVER_CAP_ROWS, (
         f"{WAIT_FOR_TASK11}\n默认档下 WB 应把模型给的 {OVER_CAP_ROWS} 条都留下，"
-        f"实际只剩 {len(result['summary']['timeline'])} 条")
+        f"实际只剩 {len(result['summary']['timeline'])} 条"
+    )
 
     # 「零额外请求」的唯一证据：请求次数与 calls 都必须和不补①时一样（3 次）。
     # 少这一句，将来有人为了「让①有内容」去多问一轮，上面两条断言照样绿。
     assert len(client.requests) == len(bs_llm.requests) == 3, (
         f"①必须是只读捕获，不许多发请求：WB {len(client.requests)} 次 / bs "
-        f"{len(bs_llm.requests)} 次")
+        f"{len(bs_llm.requests)} 次"
+    )
     assert result["calls"] == 3, f"calls 多出一次就不是零成本了：{result['calls']}"
     assert [r["json_mode"] for r in client.requests] == [True, False, True], (
-        "请求形状也变了，说明捕获插进了方法论序列里")
+        "请求形状也变了，说明捕获插进了方法论序列里"
+    )
 
     # 除登记在册的那一处，其余字段必须与 bs 逐字相同。
     bs_dict = bs_out.to_dict()
@@ -1398,19 +1503,19 @@ def test_default_tier_under_the_cap_is_byte_identical_and_stays_silent(default_e
     bs_out = bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
 
     client = FakeLLM(list(script))
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
 
     assert len(bs_out.timeline) == UNDER_CAP_ROWS, "bs 侧这份不该被 20 条上限咬到"
-    assert json.dumps(result["summary"], ensure_ascii=False, sort_keys=True) == \
-        json.dumps(bs_out.to_dict(), ensure_ascii=False, sort_keys=True), (
-        "默认档下没超上限的产出必须与副本逐字节相同（捕获不许动它）")
+    assert json.dumps(result["summary"], ensure_ascii=False, sort_keys=True) == json.dumps(
+        bs_out.to_dict(), ensure_ascii=False, sort_keys=True
+    ), "默认档下没超上限的产出必须与副本逐字节相同（捕获不许动它）"
     assert len(client.requests) == len(bs_llm.requests) == 3
 
     llm = SummaryLLM(FakeLLM([json.dumps(payload, ensure_ascii=False)]), model="stub-summary")
     llm.chat([{"role": "user", "content": "写一份总结"}], json_mode=True)
     assert list(getattr(llm, "dense_timeline", None) or []) == [], (
-        "没超上限时捕获必须什么都不记；记了就会被当成「被截断」，把一条好路拖进差异里")
+        "没超上限时捕获必须什么都不记；记了就会被当成「被截断」，把一条好路拖进差异里"
+    )
 
 
 def test_default_tier_half_written_timeline_fails_without_an_extra_ask(default_env):
@@ -1436,13 +1541,21 @@ def test_default_tier_half_written_timeline_fails_without_an_extra_ask(default_e
 
     client = FakeLLM([half])
     with pytest.raises(WBError) as exc:
-        adapter.run(_dense_project(), _dense_segments(), client=client, cfg=cfg,
-                    ctx=QuietCtx(), role="wengao")
+        adapter.run(
+            _dense_project(),
+            _dense_segments(),
+            client=client,
+            cfg=cfg,
+            ctx=QuietCtx(),
+            role="wengao",
+        )
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert PARITY_ENV_NAME in str(exc.value.message), (
-        f"半截 JSON 也要把开关念出来：{exc.value.message!r}")
+        f"半截 JSON 也要把开关念出来：{exc.value.message!r}"
+    )
     assert len(client.requests) == 1, (
-        f"默认档多问了 {len(client.requests)} 次——捕获或解析失败路径偷偷补救了")
+        f"默认档多问了 {len(client.requests)} 次——捕获或解析失败路径偷偷补救了"
+    )
 
 
 def test_default_tier_malformed_json_names_the_switch_and_keeps_the_old_prefix(default_env):
@@ -1464,15 +1577,23 @@ def test_default_tier_malformed_json_names_the_switch_and_keeps_the_old_prefix(d
     cfg = make_cfg()
     client = FakeLLM(["这不是 JSON"])
     with pytest.raises(WBError) as exc:
-        adapter.run(_dense_project(), _dense_segments(), client=client, cfg=cfg,
-                    ctx=QuietCtx(), role="wengao")
+        adapter.run(
+            _dense_project(),
+            _dense_segments(),
+            client=client,
+            cfg=cfg,
+            ctx=QuietCtx(),
+            role="wengao",
+        )
 
     message = str(exc.value.message)
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert message.startswith("模型没给出可用的总结 JSON："), (
-        f"前半句是既有用例钉着的，不许改：{message!r}")
+        f"前半句是既有用例钉着的，不许改：{message!r}"
+    )
     assert message.rstrip().endswith(f"{PARITY_ENV_NAME}=0 后重试。"), (
-        f"开关提示必须在末尾，用户才知道下一步动手的是什么：{message!r}")
+        f"开关提示必须在末尾，用户才知道下一步动手的是什么：{message!r}"
+    )
 
 
 def test_loose_tier_failure_does_not_name_the_switch(loose_env):
@@ -1487,11 +1608,18 @@ def test_loose_tier_failure_does_not_name_the_switch(loose_env):
     cfg = make_cfg()
     client = FakeLLM(["这不是 JSON"] * 8)
     with pytest.raises(WBError) as exc:
-        adapter.run(_dense_project(), _dense_segments(), client=client, cfg=cfg,
-                    ctx=QuietCtx(), role="wengao")
+        adapter.run(
+            _dense_project(),
+            _dense_segments(),
+            client=client,
+            cfg=cfg,
+            ctx=QuietCtx(),
+            role="wengao",
+        )
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert PARITY_ENV_NAME not in str(exc.value.message), (
-        f"宽松档不该提对账开关：{exc.value.message!r}")
+        f"宽松档不该提对账开关：{exc.value.message!r}"
+    )
     assert len(client.requests) > 1, "宽松档必须真的走过阶梯，否则这条只是没提开关而已"
 
 
@@ -1562,21 +1690,22 @@ def test_default_tier_every_round_budget_equals_the_configured_value(default_env
         bs_llm = FakeLLM(list(script))
         bs_summarizer.summarize(bundle, bs_llm, cfg, role_key="wengao")
         client = FakeLLM(list(script))
-        adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                    role="wengao")
+        adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
 
         assert cfg.llm.max_tokens == configured, "夹具没把配置值设进去"
         assert bs_llm.requests[0]["max_tokens"] is None, "bs 一直不写这个参数"
         assert client.requests[0]["max_tokens"] == configured, (
-            f"默认档必须按配置原样补上 {configured}，"
-            f"实际 {client.requests[0]['max_tokens']!r}")
+            f"默认档必须按配置原样补上 {configured}，实际 {client.requests[0]['max_tokens']!r}"
+        )
         for index, item in enumerate(_normalized(client.requests, cfg)):
             assert item["max_tokens"] == configured, (
                 f"默认档（cfg={configured}）第 {index + 1} 次的有效预算偏离配置值："
-                f"{item['max_tokens']}（两侧同值才算一致）")
+                f"{item['max_tokens']}（两侧同值才算一致）"
+            )
         for index, item in enumerate(_normalized(bs_llm.requests, cfg)):
             assert item["max_tokens"] == configured, (
-                f"bs 侧第 {index + 1} 次也必须是配置值 {configured}：{item['max_tokens']}")
+                f"bs 侧第 {index + 1} 次也必须是配置值 {configured}：{item['max_tokens']}"
+            )
 
 
 def test_the_normalization_covers_every_listed_field():
@@ -1593,7 +1722,8 @@ def test_the_normalization_covers_every_listed_field():
     rows = _normalized(probe.requests, cfg)
     assert rows, "假 LLM 一次请求都没记下来，这条会变成空断言"
     assert set(rows[0]) == set(EFFECTIVE_FIELDS), (
-        f"归一化字段集合漂了：实得 {sorted(rows[0])}，合同清单 {sorted(EFFECTIVE_FIELDS)}")
+        f"归一化字段集合漂了：实得 {sorted(rows[0])}，合同清单 {sorted(EFFECTIVE_FIELDS)}"
+    )
     # 每一项都得是真的量到了东西，不是恒为 None 的占位。
     assert rows[0]["messages"] and rows[0]["json_mode"] is not None
     assert rows[0]["temperature"] == cfg.llm.temperature
@@ -1615,32 +1745,60 @@ def test_the_parity_scope_is_text_only_and_says_so():
     bs_llm = FakeLLM(three_pass_script())
     bs_summarizer.summarize(make_bundle(SHORT_BODY), bs_llm, cfg, role_key="wengao")
     client = FakeLLM(three_pass_script())
-    adapter.run({"title": "口径素材", "up_name": "UP口径", "bvid": "BV1scopecheck",
-                 "duration_sec": 600, "desc": "固定简介"},
-                [{"start_ms": 0, "text": "开场"}],
-                client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
+    adapter.run(
+        {
+            "title": "口径素材",
+            "up_name": "UP口径",
+            "bvid": "BV1scopecheck",
+            "duration_sec": 600,
+            "desc": "固定简介",
+        },
+        [{"start_ms": 0, "text": "开场"}],
+        client=client,
+        cfg=cfg,
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     # refine 那一轮才是帧的真落点（副本 :479「frameset 只接在最终归约那一次调用上」），
     # 只钉 run 会放过「将来只在 refine 接帧」这条路。
     refine_client = FakeLLM(three_pass_script())
     adapter.refine(
-        {"title": "口径素材", "up_name": "UP口径", "bvid": "BV1scopecheck",
-         "duration_sec": 600, "desc": "固定简介"},
+        {
+            "title": "口径素材",
+            "up_name": "UP口径",
+            "bvid": "BV1scopecheck",
+            "duration_sec": 600,
+            "desc": "固定简介",
+        },
         [{"start_ms": 0, "text": "开场"}],
-        {"headline": "旧标题", "synopsis": "旧梗概", "key_points": ["旧要点"],
-         "highlights": [], "conclusions": [], "faq": [], "timeline": [],
-         "word": 100, "role_key": "wengao", "version_id": 1},
+        {
+            "headline": "旧标题",
+            "synopsis": "旧梗概",
+            "key_points": ["旧要点"],
+            "highlights": [],
+            "conclusions": [],
+            "faq": [],
+            "timeline": [],
+            "word": 100,
+            "role_key": "wengao",
+            "version_id": 1,
+        },
         "把语气改得更口语一点",
-        client=refine_client, cfg=cfg, ctx=QuietCtx(), role="wengao")
+        client=refine_client,
+        cfg=cfg,
+        ctx=QuietCtx(),
+        role="wengao",
+    )
     assert refine_client.requests, "refine 一次请求都没记下来，这一腿会变空断言"
-    for side, llm in (("bs", bs_llm), ("适配层 run", client),
-                      ("适配层 refine", refine_client)):
+    for side, llm in (("bs", bs_llm), ("适配层 run", client), ("适配层 refine", refine_client)):
         assert llm.requests, f"{side} 一次请求都没记下来，这条会变空断言"
         for index, req in enumerate(llm.requests, start=1):
             for offset, message in enumerate(req["messages"], start=1):
                 assert isinstance(message["content"], str), (
                     f"{side} 第 {index} 次请求第 {offset} 条消息带进了非文本内容"
                     f"（{type(message['content']).__name__}）——"
-                    f"{FRAMES_PRECONDITION_NOTE} 这句话当场不再成立，去改口径别改判据")
+                    f"{FRAMES_PRECONDITION_NOTE} 这句话当场不再成立，去改口径别改判据"
+                )
 
 
 def test_the_text_only_guard_reds_when_one_side_attaches_frames():
@@ -1651,25 +1809,36 @@ def test_the_text_only_guard_reds_when_one_side_attaches_frames():
     的请求喂给 `_normalized`，必须抛 AssertionError，且消息里点名画面帧。
     """
     cfg = make_cfg()
-    framed = [{
-        "json_mode": True,
-        "temperature": None,
-        "max_tokens": None,
-        "messages": [
-            {"role": "system", "content": "纯文本 system"},
-            {"role": "user", "content": [
-                {"type": "text", "text": "素材"},
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AA"}},
-            ]},
-        ],
-    }]
+    framed = [
+        {
+            "json_mode": True,
+            "temperature": None,
+            "max_tokens": None,
+            "messages": [
+                {"role": "system", "content": "纯文本 system"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "素材"},
+                        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AA"}},
+                    ],
+                },
+            ],
+        }
+    ]
     with pytest.raises(AssertionError) as caught:
         _normalized(framed, cfg)
     text = str(caught.value)
     assert "画面帧" in text, f"红是红了，但没点名前提：{text[:160]}"
     # 文本形状必须照常通过，否则上面那条正向锁和这条灵敏度是同一句空话。
-    plain = [{"json_mode": True, "temperature": None, "max_tokens": None,
-              "messages": [{"role": "user", "content": "纯文本"}]}]
+    plain = [
+        {
+            "json_mode": True,
+            "temperature": None,
+            "max_tokens": None,
+            "messages": [{"role": "user", "content": "纯文本"}],
+        }
+    ]
     assert _normalized(plain, cfg)[0]["messages"][0]["content"] == "纯文本"
 
 
@@ -1703,16 +1872,20 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
     sourced = tuple(key for key in public if key in ps.MAP)
     unsourced = tuple(key for key in public if key not in ps.MAP)
     assert set(ps.MAP) <= set(public), (
-        f"MAP 绑了不公开的角色 {sorted(set(ps.MAP) - set(public))}：退役的角色不许还占着真源")
+        f"MAP 绑了不公开的角色 {sorted(set(ps.MAP) - set(public))}：退役的角色不许还占着真源"
+    )
     assert not (set(ps.MAP) - bs_keys), (
         f"WB 又出现带真源的自造角色 {sorted(set(ps.MAP) - bs_keys)}：task-31 已合并，"
-        f"重新出现要是有意的决定并同步 P2 那张逐字绑定表")
+        f"重新出现要是有意的决定并同步 P2 那张逐字绑定表"
+    )
     assert set(public) <= bs_keys, (
         f"公开面出现 bs 不认的角色 {sorted(set(public) - bs_keys)}："
-        f"「与 bs 比 system」失去基准，下面那条逐字相等会空转")
+        f"「与 bs 比 system」失去基准，下面那条逐字相等会空转"
+    )
     assert sourced and unsourced, (
         f"有源/无源两段有一段的预期会空转（sourced={sourced}, unsourced={unsourced}）："
-        f"这段比较整体失去意义，必须显式决定而不是留在这里绿着")
+        f"这段比较整体失去意义，必须显式决定而不是留在这里绿着"
+    )
 
     for role_key in public:
         wb_llm = FakeLLM(three_pass_script())
@@ -1727,12 +1900,12 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
             assert txt, f"{role_key} 绑的 {name} 读出来是空串：下面三条会空转"
             # 逐字判据（比长度强）：有源角色的 system **就是**「那篇 txt 全文 + 输出契约」。
             assert wb_system == txt + "\n" + bs_roles.OUTPUT_CONTRACT, (
-                f"{role_key}：WB 的 system 不是「{name} 全文 + 契约」的逐字形状")
-            assert bs_system == (bs_roles.get_role(role_key).system.strip() + "\n"
-                                 + bs_roles.OUTPUT_CONTRACT), (
-                f"{role_key}：bs 侧形状也变了（这条不该动 bs，动了一定是谁单方面改了原件）")
-            assert wb_system != bs_system, (
-                f"{role_key} 绑了 txt 但两侧 system 仍然相同——绑定没生效")
+                f"{role_key}：WB 的 system 不是「{name} 全文 + 契约」的逐字形状"
+            )
+            assert bs_system == (
+                bs_roles.get_role(role_key).system.strip() + "\n" + bs_roles.OUTPUT_CONTRACT
+            ), f"{role_key}：bs 侧形状也变了（这条不该动 bs，动了一定是谁单方面改了原件）"
+            assert wb_system != bs_system, f"{role_key} 绑了 txt 但两侧 system 仍然相同——绑定没生效"
             # 长度方向单独登记：过去「全文必然比压缩版长」被当成 A 的语义代理，
             # task-31 把 `shipin` 合并进 `renhua` 之后这个代理**破了**——
             # `视频总结.txt` 正文 511 字，而 bs 内置的 `renhua` 压缩版正文 1508 字，
@@ -1742,14 +1915,15 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
             if name in SHORTER_THAN_COMPRESSED:
                 assert len(wb_system) < len(bs_system), (
                     f"{name} 已经不再比压缩版短（{len(wb_system)} vs {len(bs_system)}）："
-                    f"请把 {name!r} 从 SHORTER_THAN_COMPRESSED 里删掉")
+                    f"请把 {name!r} 从 SHORTER_THAN_COMPRESSED 里删掉"
+                )
             else:
                 assert len(wb_system) > len(bs_system), (
                     f"{role_key}：txt 全文应当比压缩版长（实测 {len(wb_system)} vs "
-                    f"{len(bs_system)}），现在反了——要么绑定被换、要么有人把 txt 掏空了")
+                    f"{len(bs_system)}），现在反了——要么绑定被换、要么有人把 txt 掏空了"
+                )
         else:
-            assert wb_system == bs_system, (
-                f"无源角色 {role_key} 的 system 被改了——A 不该碰它")
+            assert wb_system == bs_system, f"无源角色 {role_key} 的 system 被改了——A 不该碰它"
 
     video_summary_text = ps.load("视频总结.txt").strip()
     assert video_summary_text, "视频总结.txt 读不到，下面两条断言都会空转"
@@ -1758,22 +1932,22 @@ def test_plan_a_changes_the_system_of_exactly_the_sourced_roles(default_env):
     # `test_summary_prompt_source.py` 的 P2 那张逐字表里，这里只要求「有且只有一个」，
     # 两处各写一遍归属名单就是第二个 owner（本仓库栽过两次）。
     holders = [key for key in public if ps.MAP.get(key) == "视频总结.txt"]
-    assert len(holders) == 1, (
-        f"视频总结.txt 的公开持有者不是恰好一个，实得 {holders}")
+    assert len(holders) == 1, f"视频总结.txt 的公开持有者不是恰好一个，实得 {holders}"
     holder = holders[0]
     holder_llm = FakeLLM(three_pass_script())
     wb.summarize(make_bundle(SHORT_BODY), holder_llm, cfg, role_key=holder)
     holder_system = holder_llm.requests[0]["messages"][0]["content"]
     assert head in holder_system, (
-        f"视频总结.txt 没接进 {holder} 的 system——MAP 里那一项失效了："
-        f"{holder_system[:80]!r}")
+        f"视频总结.txt 没接进 {holder} 的 system——MAP 里那一项失效了：{holder_system[:80]!r}"
+    )
     # 反向：那份内容不许出现在任何**别的**角色里（一条 txt 喂多个角色＝方法论串味）。
     for role_key in [key for key in public if key != holder]:
         other_llm = FakeLLM(three_pass_script())
         wb.summarize(make_bundle(SHORT_BODY), other_llm, cfg, role_key=role_key)
         joined = "\n".join(str(m["content"]) for m in other_llm.requests[0]["messages"])
         assert head not in joined, (
-            f"视频总结.txt 内容串进了 {role_key} 的提示词——一份 txt 喂了多个角色")
+            f"视频总结.txt 内容串进了 {role_key} 的提示词——一份 txt 喂了多个角色"
+        )
 
 
 def test_plan_a_costs_only_the_two_structured_rounds(default_env):
@@ -1802,17 +1976,17 @@ def test_plan_a_costs_only_the_two_structured_rounds(default_env):
 
     map_system = bs_summarizer.MAP_SYSTEM
     for side, llm in (("WB", wb_llm), ("bs", bs_llm)):
-        pre_reads = [r for r in llm.requests
-                     if str(r["messages"][0]["content"]).strip().startswith(
-                         map_system.strip()[:10])]
-        assert len(pre_reads) == EXPECTED_LONG_CHUNKS, (
-            f"{side} 预读次数不对：{len(pre_reads)}")
+        pre_reads = [
+            r
+            for r in llm.requests
+            if str(r["messages"][0]["content"]).strip().startswith(map_system.strip()[:10])
+        ]
+        assert len(pre_reads) == EXPECTED_LONG_CHUNKS, f"{side} 预读次数不对：{len(pre_reads)}"
         for record in pre_reads:
             assert record["messages"][0]["content"] == map_system, (
-                f"{side} 的预读请求带了别的东西——预读不该吃角色提示词")
-    assert wb_llm.requests == bs_llm.requests, (
-        "长素材预读两侧必须完全一致：A 不影响预读那一段")
-
+                f"{side} 的预读请求带了别的东西——预读不该吃角色提示词"
+            )
+    assert wb_llm.requests == bs_llm.requests, "长素材预读两侧必须完全一致：A 不影响预读那一段"
 
 
 def test_loose_tier_first_round_is_left_unwritten(loose_env):
@@ -1830,13 +2004,16 @@ def test_loose_tier_first_round_is_left_unwritten(loose_env):
     # 请求序列才纯是「方法论三步」，第一轮才是干净的观察点（实测三步＝3 次）。
     script = three_pass_script({**PAYLOAD, "timeline": _rows(OVER_CAP_ROWS)})
     client = FakeLLM(list(script))
-    adapter.run(_dense_project(), _dense_segments(), client=client, cfg=cfg,
-                ctx=QuietCtx(), role="wengao")
+    adapter.run(
+        _dense_project(), _dense_segments(), client=client, cfg=cfg, ctx=QuietCtx(), role="wengao"
+    )
     assert len(client.requests) == 3, (
         f"宽松档这份素材应当只走方法论三步，实际 {len(client.requests)} 次——"
-        "多出来的是补密度那一轮，那就不是「第一轮可比」的场景了")
+        "多出来的是补密度那一轮，那就不是「第一轮可比」的场景了"
+    )
     assert client.requests[0]["max_tokens"] is None, (
-        f"宽松档不该改第一轮（那是 ②的活，只在阶梯步生效）：{client.requests[0]!r}")
+        f"宽松档不该改第一轮（那是 ②的活，只在阶梯步生效）：{client.requests[0]!r}"
+    )
 
 
 def test_sparse_timeline_costs_an_extra_request_only_in_the_loose_tier(default_env):
@@ -1860,13 +2037,16 @@ def test_sparse_timeline_costs_an_extra_request_only_in_the_loose_tier(default_e
     adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
     assert len(client.requests) == 3, (
         f"{WAIT_FOR_TASK11}\n默认档多问了 {len(client.requests)} 次——补密那一轮是宽松档的"
-        "老办法，默认档要靠只读捕获，不许加请求")
+        "老办法，默认档要靠只读捕获，不许加请求"
+    )
     assert [r["json_mode"] for r in client.requests] == [True, False, True], (
-        f"默认档请求形状偏离 bs：{[r['json_mode'] for r in client.requests]}")
+        f"默认档请求形状偏离 bs：{[r['json_mode'] for r in client.requests]}"
+    )
 
     bs_llm = FakeLLM(list(sparse))
-    bs_out = bs_summarizer.summarize(adapter.build_bundle(project, segments), bs_llm, cfg,
-                                     role_key="wengao")
+    bs_out = bs_summarizer.summarize(
+        adapter.build_bundle(project, segments), bs_llm, cfg, role_key="wengao"
+    )
     assert len(bs_llm.requests) == 3, "bs 一直是三步，多出来的是 WB 的动作"
     assert len(bs_out.timeline) == 1, "稀疏那份在 bs 侧就是一条，没被补过"
 
@@ -1904,17 +2084,21 @@ def test_dense_rows_left_by_the_cap_override_stay_renderable(default_env):
     assert any(row["text"] for row in bs_out.timeline), "bs 侧的清洗是这条用例的参照系"
 
     client = FakeLLM(list(script))
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
     wb_rows = result["summary"]["timeline"]
     assert len(wb_rows) == OVER_CAP_ROWS, (
-        f"{WAIT_FOR_TASK11}\n先确认①真的留住了 25 条，再谈形状：实际 {len(wb_rows)} 条")
+        f"{WAIT_FOR_TASK11}\n先确认①真的留住了 25 条，再谈形状：实际 {len(wb_rows)} 条"
+    )
 
-    bad = [row for row in wb_rows if not isinstance(row, dict)
-           or set(row) != {"t", "text"} or not row["text"]]
+    bad = [
+        row
+        for row in wb_rows
+        if not isinstance(row, dict) or set(row) != {"t", "text"} or not row["text"]
+    ]
     assert not bad, (
         f"①覆盖过来的条目前端渲染不出来（summary.js:943-944 只读 item.t / item.text）：{bad[:2]}"
-        "……覆盖前必须过 `_clean_dense()` 的别名归一，不必删①、也不必改拍板")
+        "……覆盖前必须过 `_clean_dense()` 的别名归一，不必删①、也不必改拍板"
+    )
     # 别名归一之后文字还得对得上，不能只是键名换了。
     assert [row["text"] for row in wb_rows[:3]] == ["第 1 条", "第 2 条", "第 3 条"], wb_rows[:3]
     assert [row["t"] for row in wb_rows[:3]] == ["00:01", "00:02", "00:03"], wb_rows[:3]
@@ -1934,28 +2118,32 @@ def test_blank_dense_rows_are_dropped_instead_of_padded(default_env):
     cfg = make_cfg()
     rows: list[dict] = []
     for i in range(1, 26):
-        rows.append({"time": f"00:{i:02d}",
-                     "content": "" if i % 3 == 0 else f"第 {i} 条"})   # 每三条空一条
+        rows.append(
+            {"time": f"00:{i:02d}", "content": "" if i % 3 == 0 else f"第 {i} 条"}
+        )  # 每三条空一条
     keep = [row for row in rows if row["content"]]
     assert len(rows) == OVER_CAP_ROWS and len(keep) == 17, len(keep)
 
     script = three_pass_script({**PAYLOAD, "timeline": rows})
     project, segments = _dense_project(), _dense_segments()
     bs_llm = FakeLLM(list(script))
-    bs_out = bs_summarizer.summarize(adapter.build_bundle(project, segments), bs_llm, cfg,
-                                     role_key="wengao")
+    bs_out = bs_summarizer.summarize(
+        adapter.build_bundle(project, segments), bs_llm, cfg, role_key="wengao"
+    )
     client = FakeLLM(list(script))
-    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                         role="wengao")
+    result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
 
     wb_rows = result["summary"]["timeline"]
     assert all(isinstance(row, dict) and row.get("text") for row in wb_rows), (
-        f"时间线里出现了没有内容的条目：{[r for r in wb_rows if not r.get('text')][:2]}")
+        f"时间线里出现了没有内容的条目：{[r for r in wb_rows if not r.get('text')][:2]}"
+    )
     assert len(wb_rows) <= len(keep), (
-        f"覆盖过来的条目比洗得出来的还多（{len(wb_rows)} > {len(keep)}）＝塞了垃圾")
+        f"覆盖过来的条目比洗得出来的还多（{len(wb_rows)} > {len(keep)}）＝塞了垃圾"
+    )
     assert len(wb_rows) == len(bs_out.timeline), (
         f"洗完不比已有的多就该原样返回（副本 20 条上限在这里是 {len(bs_out.timeline)} 条）："
-        f"实际 {len(wb_rows)} 条")
+        f"实际 {len(wb_rows)} 条"
+    )
 
 
 def test_explicit_one_and_unset_are_the_same_tier(default_env, strict_env, monkeypatch):
@@ -1969,8 +2157,9 @@ def test_explicit_one_and_unset_are_the_same_tier(default_env, strict_env, monke
     两个 fixture 叠着用不冲突：`default_env` 先 delenv，`strict_env` 后设 `=1`；
     本用例内部自己再切一次，切换顺序与 fixture 无关。
     """
-    from video_workbench.core import summarizer as adapter
     from wb_parity_tiers import env_name
+
+    from video_workbench.core import summarizer as adapter
 
     cfg = make_cfg()
     script = three_pass_script({**PAYLOAD, "timeline": _rows(OVER_CAP_ROWS)})
@@ -1983,15 +2172,23 @@ def test_explicit_one_and_unset_are_the_same_tier(default_env, strict_env, monke
         else:
             monkeypatch.setenv(env_name(), value)
         client = FakeLLM(list(script))
-        result = adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                             role="wengao")
-        runs.append((json.dumps(result["summary"], ensure_ascii=False, sort_keys=True),
-                     [(r["messages"], r["json_mode"], r["temperature"], r["max_tokens"])
-                      for r in client.requests]))
+        result = adapter.run(
+            project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao"
+        )
+        runs.append(
+            (
+                json.dumps(result["summary"], ensure_ascii=False, sort_keys=True),
+                [
+                    (r["messages"], r["json_mode"], r["temperature"], r["max_tokens"])
+                    for r in client.requests
+                ],
+            )
+        )
 
     assert runs[0] == runs[1], (
         "未设与显式 `=1` 走了两条路：档位不能只看 `_parity_strict()` 的返回值，"
-        "任何按原始字符串分支的地方都会在对账里留后门")
+        "任何按原始字符串分支的地方都会在对账里留后门"
+    )
 
 
 #: 档位取值表：未设与非 OFF 值一律严格，只有这三种写法宽松。
@@ -2038,9 +2235,10 @@ def test_parity_tier_switches_within_one_process(monkeypatch):
     `chat()` 却永远按旧档跑。所以来回切三遍，每遍都**实际跑一次坏 JSON**，
     用请求次数（严格 1 次 / 宽松 >1 次）当可观测证据。
     """
+    from wb_parity_tiers import env_name
+
     from video_workbench.app.errors import WBError
     from video_workbench.core import summarizer as adapter
-    from wb_parity_tiers import env_name
 
     cfg = make_cfg()
     project, segments = _dense_project(), _dense_segments()
@@ -2053,18 +2251,17 @@ def test_parity_tier_switches_within_one_process(monkeypatch):
             monkeypatch.setenv(env_name(), value)
         client = FakeLLM(["这不是 JSON"] * 8)
         with pytest.raises(WBError):
-            adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(),
-                        role="wengao")
+            adapter.run(project, segments, client=client, cfg=cfg, ctx=QuietCtx(), role="wengao")
         seen.append(len(client.requests))
 
     assert seen[0] == seen[2] == seen[4] == 1, f"严格档必须每次都是 1 次请求：{seen}"
-    assert seen[1] > 1 and seen[3] > 1, (
-        f"宽松档必须真的走阶梯，否则这条只在量严格档：{seen}")
+    assert seen[1] > 1 and seen[3] > 1, f"宽松档必须真的走阶梯，否则这条只在量严格档：{seen}"
 
 
 #: ①被档位关掉的旧形状（task-8 之前那段代码）。
 _DENSE_GATE_RE = re.compile(
-    r"if\s+not\s+_parity_strict\(\)\s*:\s*\n\s*summary\s*=\s*_apply_dense\(")
+    r"if\s+not\s+_parity_strict\(\)\s*:\s*\n\s*summary\s*=\s*_apply_dense\("
+)
 
 
 def test_dense_override_is_not_gated_by_the_tier_in_source():
@@ -2075,9 +2272,11 @@ def test_dense_override_is_not_gated_by_the_tier_in_source():
     """
     src = ADAPTER_PY.read_text(encoding="utf-8")
     assert _DENSE_GATE_RE.search(src) is None, (
-        "①又被档位关掉了：拍板是「默认严格但保留①」，`_apply_dense` 必须无条件调用")
+        "①又被档位关掉了：拍板是「默认严格但保留①」，`_apply_dense` 必须无条件调用"
+    )
     assert src.count("summary = _apply_dense(summary, llm)") >= 2, (
-        "run() 与 refine() 两处补密都必须在，少一处就是只修了一半")
+        "run() 与 refine() 两处补密都必须在，少一处就是只修了一半"
+    )
 
 
 def test_dense_gate_detector_recognises_the_old_shape():

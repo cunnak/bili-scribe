@@ -74,9 +74,9 @@ def temp_cfg(tmp_path):
     text = (
         "llm:\n"
         f"  api_key: {json.dumps(SENTINEL)}\n"
-        "  model: \"m\"\n"
-        "  base_url: \"http://127.0.0.1:9/v1\"\n"
-        "  role: \"wengao\"\n"
+        '  model: "m"\n'
+        '  base_url: "http://127.0.0.1:9/v1"\n'
+        '  role: "wengao"\n'
         "storage:\n"
         f"  db_path: {json.dumps((cfg_dir / 'cli.db').as_posix())}\n"
         f"  key_path: {json.dumps((cfg_dir / 'key.bin').as_posix())}\n"
@@ -92,8 +92,13 @@ def _cli(*argv: str) -> subprocess.CompletedProcess:
     env["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run(
         [sys.executable, "-m", "video_workbench.cli", *argv],
-        cwd=str(ROOT), env=env, capture_output=True, encoding="utf-8", errors="replace",
-        timeout=180)
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+    )
 
 
 def _roles_lines(stdout: str) -> list[str]:
@@ -115,12 +120,13 @@ def test_the_three_spellings_all_reach_the_same_role_list(temp_cfg):
     ]
     for proc in runs:
         assert proc.returncode == 0, (
-            f"写法没过：{proc.returncode}\nstdout={proc.stdout[-500:]}\n"
-            f"stderr={proc.stderr[-500:]}")
+            f"写法没过：{proc.returncode}\nstdout={proc.stdout[-500:]}\nstderr={proc.stderr[-500:]}"
+        )
     lines = [_roles_lines(r.stdout) for r in runs]
     assert lines[0], "一条角色行都没打出来，下面的比较会空转"
-    assert lines[0] == lines[1] == lines[2], (
-        "三种写法输出不同：\n" + "\n---\n".join(str(x) for x in lines))
+    assert lines[0] == lines[1] == lines[2], "三种写法输出不同：\n" + "\n---\n".join(
+        str(x) for x in lines
+    )
     assert len(lines[0]) >= 6, f"角色行太少（{len(lines[0])}），不像完整名单"
 
 
@@ -146,9 +152,11 @@ def test_the_roles_header_names_the_default_and_the_retired_ones(temp_cfg):
     for retired in sorted(wb_summary.RETIRED_ROLES):
         label = wb_summary.role_label(retired)
         assert label != retired, (
-            f"{retired} 的停用名回落到裸 key 了：{label}（表头就再也读不出「谁退役了」）")
+            f"{retired} 的停用名回落到裸 key 了：{label}（表头就再也读不出「谁退役了」）"
+        )
         assert label in header[0], (
-            f"退役角色 {retired} 没在表头里被念出来（现读它的停用名是「{label}」）：{header[0]}")
+            f"退役角色 {retired} 没在表头里被念出来（现读它的停用名是「{label}」）：{header[0]}"
+        )
 
 
 def test_the_json_output_is_the_same_payload_the_page_reads(temp_cfg):
@@ -174,8 +182,7 @@ def test_the_json_output_is_the_same_payload_the_page_reads(temp_cfg):
         expected = svc.dispatch("summary.roles", {}, "cli-compare")["data"]
     finally:
         svc.close()
-    assert data == expected, (
-        "CLI 与设置页读到的角色载荷不同 —— 第二个 owner 就是这么长出来的")
+    assert data == expected, "CLI 与设置页读到的角色载荷不同 —— 第二个 owner 就是这么长出来的"
     # 载荷里必须有默认角色，且**不许有退役角色**。原来这条写死 `>= {"wengao","shipin"}`：
     # `shipin` 已按用户决定退役（合并进 `renhua`），写死的名字就成了过期合同值。
     # 换成现读的两半，方向仍然比原来硬：默认角色缺席要说，退役角色混进清单更要说——
@@ -184,9 +191,11 @@ def test_the_json_output_is_the_same_payload_the_page_reads(temp_cfg):
 
     listed = {r["key"] for r in data["roles"]}
     assert ad_summary.DEFAULT_ROLE in listed, (
-        f"默认角色 {ad_summary.DEFAULT_ROLE!r} 不在 --roles 的清单里：用户按默认值找它，找不到")
+        f"默认角色 {ad_summary.DEFAULT_ROLE!r} 不在 --roles 的清单里：用户按默认值找它，找不到"
+    )
     assert not (listed & set(ad_summary.RETIRED_ROLES)), (
-        f"退役角色混进 --roles 清单：{sorted(listed & set(ad_summary.RETIRED_ROLES))}")
+        f"退役角色混进 --roles 清单：{sorted(listed & set(ad_summary.RETIRED_ROLES))}"
+    )
 
 
 def test_a_retired_source_line_says_what_it_actually_uses(temp_cfg):
@@ -203,7 +212,7 @@ def test_a_retired_source_line_says_what_it_actually_uses(temp_cfg):
     lines = {ln.strip().split("｜")[0]: ln for ln in _roles_lines(proc.stdout)}
     assert set(lines) >= set(ps.NO_SOURCE), f"名单里没有该出现的无源角色：{sorted(lines)}"
     for key in ps.NO_SOURCE:
-        if key not in lines:      # 角色可能被合并/退役（task-31 正在动这块），只查在的
+        if key not in lines:  # 角色可能被合并/退役（task-31 正在动这块），只查在的
             continue
         assert "内置压缩版" in lines[key], lines[key]
     for key, fname in ps.MAP.items():
@@ -212,7 +221,8 @@ def test_a_retired_source_line_says_what_it_actually_uses(temp_cfg):
         assert fname in lines[key], f"{key} 那行没提它的真源文件 {fname}：{lines[key]}"
         sha8 = hashlib.sha256((ps.PROMPT_DIR / fname).read_bytes()).hexdigest()[:8]
         assert sha8 in lines[key], (
-            f"{key} 那行没打 sha8（{sha8}）—— 用户没法确认生效的是不是这一份：{lines[key]}")
+            f"{key} 那行没打 sha8（{sha8}）—— 用户没法确认生效的是不是这一份：{lines[key]}"
+        )
 
 
 def test_the_key_never_leaves_the_config_file(temp_cfg):
@@ -229,8 +239,7 @@ def test_the_key_never_leaves_the_config_file(temp_cfg):
     assert "api_key" not in proc.stdout, "stdout 里出现了 api_key 字样（哪怕没带值）"
 
 
-def test_the_command_writes_neither_the_real_homes_nor_the_config(
-        temp_cfg):
+def test_the_command_writes_neither_the_real_homes_nor_the_config(temp_cfg):
     """C4：`--roles` 跑完之后，真实两家原封不动，Temp 配置**一个字节都没被写**。
 
     这是 lead 的 V6 判据的常驻形态。家目录那一半直接钉死；配置这一半以前钉的是
@@ -250,12 +259,12 @@ def test_the_command_writes_neither_the_real_homes_nor_the_config(
     assert not extra, f"真实家目录多出文件：{extra}"
 
     original = temp_cfg.read_bytes()
-    assert temp_cfg.read_bytes() == original, (
-        "只读诊断口重写了用户配置（首次运行就落盘）")
+    assert temp_cfg.read_bytes() == original, "只读诊断口重写了用户配置（首次运行就落盘）"
     proc2 = _cli("--roles", "--config", str(temp_cfg))
     assert proc2.returncode == 0, proc2.stderr[-300:]
     assert temp_cfg.read_bytes() == original, (
-        "同一个配置被第二次运行又改了一遍 —— 诊断口变成了改环境的操作")
+        "同一个配置被第二次运行又改了一遍 —— 诊断口变成了改环境的操作"
+    )
 
 
 def test_a_read_only_route_leaves_no_database_logs_or_sidecar(temp_cfg):
@@ -279,12 +288,12 @@ def test_a_read_only_route_leaves_no_database_logs_or_sidecar(temp_cfg):
     assert temp_cfg.read_bytes() == original, "配置被写过（见上一条的口径）"
     sidecar = cfg_dir / "workbench.json"
     assert not sidecar.exists(), (
-        f"sidecar 落盘了：{sidecar}（配置里只有一个 yaml 应当是唯一事实文件）")
+        f"sidecar 落盘了：{sidecar}（配置里只有一个 yaml 应当是唯一事实文件）"
+    )
     db = cfg_dir / "cli.db"
     assert not db.exists(), f"只读路由建了库：{db}"
     logs = tmp_root / "logs"
-    assert not logs.exists(), (
-        f"只读路由建了日志目录：{logs}（cache_root 同级的 logs 是装配副作用）")
+    assert not logs.exists(), f"只读路由建了日志目录：{logs}（cache_root 同级的 logs 是装配副作用）"
 
 
 def test_a_writing_route_actually_lands_on_the_paths_c5_checks(temp_cfg):
@@ -303,16 +312,18 @@ def test_a_writing_route_actually_lands_on_the_paths_c5_checks(temp_cfg):
     tmp_root = cfg_dir.parent
     proc = _cli("info", "--config", str(temp_cfg))
     assert proc.returncode == 0, proc.stderr[-400:]
-    built = sorted(str(p.relative_to(tmp_root).as_posix()) for p in tmp_root.rglob("*")
-                   if p.is_file())
+    built = sorted(
+        str(p.relative_to(tmp_root).as_posix()) for p in tmp_root.rglob("*") if p.is_file()
+    )
     db = cfg_dir / "cli.db"
     assert db.is_file(), (
         f"C5 检查的库路径 {db.as_posix()} 连 info 都不建 ⇒ 路径写错了、C5 的 "
-        f"not-exists 是空的。本次实际建出：{built}")
+        f"not-exists 是空的。本次实际建出：{built}"
+    )
     logs = tmp_root / "logs"
     assert logs.is_dir(), (
-        f"C5 检查的日志目录 {logs.as_posix()} 连 info 都不建 ⇒ 同上。"
-        f"本次实际建出：{built}")
+        f"C5 检查的日志目录 {logs.as_posix()} 连 info 都不建 ⇒ 同上。本次实际建出：{built}"
+    )
 
 
 def test_conflicting_spelling_errors_instead_of_silently_losing_output(temp_cfg):
@@ -322,12 +333,10 @@ def test_conflicting_spelling_errors_instead_of_silently_losing_output(temp_cfg)
     只写「参数错误」的话，下一个人还是会在同一个地方卡住。
     """
     proc = _cli("info", "--roles", "--config", str(temp_cfg))
-    assert proc.returncode != 0, (
-        f"冲突写法居然成功了，用户拿到的其实是 info：\n{proc.stdout[:400]}")
+    assert proc.returncode != 0, f"冲突写法居然成功了，用户拿到的其实是 info：\n{proc.stdout[:400]}"
     blob = proc.stdout + proc.stderr
     assert "--roles" in blob, blob[-400:]
     assert "roles" in blob and ("子命令" in blob or "别" in blob), blob[-400:]
-
 
     # ======================================================================= D 组
     # task-38：退役角色的**显示名**只有一个 owner（权威层 role_label），CLI 是消费者。
@@ -377,8 +386,7 @@ def _authority_retired_sequence() -> list[tuple[str, str]]:
     return [(key, auth.role_label(key)) for key in sorted(auth.RETIRED_ROLES)]
 
 
-def _run_roles_in_process(temp_cfg, capsys, *, mutate_payload=None,
-                          label_override=None):
+def _run_roles_in_process(temp_cfg, capsys, *, mutate_payload=None, label_override=None):
     """跑一次真 `cmd_roles()`，返回 `(rc, stdout, 补丁生效时取到的载荷)`。
 
     `mutate_payload` 拿真载荷改形状（判据 3 剥 display 用）；`label_override` 直接
@@ -388,7 +396,7 @@ def _run_roles_in_process(temp_cfg, capsys, *, mutate_payload=None,
     from video_workbench import cli as cli_mod
     from video_workbench.core import summary as auth
 
-    real_payload = cli_mod.roles_payload      # 装补丁之前先抓真函数
+    real_payload = cli_mod.roles_payload  # 装补丁之前先抓真函数
     saved_label = auth.role_label
     if label_override is not None:
         auth.role_label = label_override
@@ -399,8 +407,9 @@ def _run_roles_in_process(temp_cfg, capsys, *, mutate_payload=None,
         if mutate_payload is not None:
             mutate_payload(shown)
         cli_mod.roles_payload = lambda cfg: shown
-        argv = argparse.Namespace(config=str(temp_cfg), json=False, quiet=True,
-                                  timeout=0, cmd="roles")
+        argv = argparse.Namespace(
+            config=str(temp_cfg), json=False, quiet=True, timeout=0, cmd="roles"
+        )
         rc = cli_mod.Cli(argv).cmd_roles()
     finally:
         cli_mod.roles_payload = real_payload
@@ -423,7 +432,8 @@ def test_the_roles_header_prints_the_retired_names_in_the_authority_order(temp_c
     assert seq, "权威层现读退役序列是空的 —— 这条会永远为真，先查 owner"
     assert clause == "、".join(display for _key, display in seq), (
         f"CLI 的退役段不是权威层序列：\n  CLI : {clause!r}\n  权威: "
-        f"{'、'.join(d for _k, d in seq)!r}\n完整输出：\n{proc.stdout[:400]}")
+        f"{'、'.join(d for _k, d in seq)!r}\n完整输出：\n{proc.stdout[:400]}"
+    )
     assert "未知角色" not in proc.stdout, proc.stdout[:400]
     # shipin 不在逐字节副本的角色表里（它是 WB 自造又退役的键），显示名取自文件名登记；
     # 它必须是「视频总结（已停用）」而不是裸 key —— 用户认识的只有这几个字。
@@ -450,42 +460,43 @@ def test_the_retired_labels_pair_the_key_list_in_order(temp_cfg):
     seq = _authority_retired_sequence()
     keys = [k for k, _d in seq]
     assert data["retired"] == keys, (
-        f"`retired` 不是 sorted(RETIRED_ROLES)：{data['retired']!r} vs {keys!r}")
+        f"`retired` 不是 sorted(RETIRED_ROLES)：{data['retired']!r} vs {keys!r}"
+    )
     rows = data["retired_labels"]
     assert [r["key"] for r in rows] == keys, (
-        f"两列序列不相等（顺序也是契约）：{[r['key'] for r in rows]!r} vs {keys!r}")
+        f"两列序列不相等（顺序也是契约）：{[r['key'] for r in rows]!r} vs {keys!r}"
+    )
     for row, (key, display) in zip(rows, seq):
         assert row["display"] == display, (
-            f"{key} 的 display 与权威层不一致：{row['display']!r} vs {display!r}")
-        assert row["display"] != key, (
-            f"{key} 的 display 退化成裸 key，判据 1 会跟着空转：{row!r}")
+            f"{key} 的 display 与权威层不一致：{row['display']!r} vs {display!r}"
+        )
+        assert row["display"] != key, f"{key} 的 display 退化成裸 key，判据 1 会跟着空转：{row!r}"
 
 
-def test_a_retired_row_without_display_prints_bare_keys_and_still_exits_zero(
-        temp_cfg, capsys):
+def test_a_retired_row_without_display_prints_bare_keys_and_still_exits_zero(temp_cfg, capsys):
     """判据 3：退役项**缺 `display`** 时 CLI 退回裸 key、不抛 KeyError。
 
     这条以前只是代码里一个 `or key`，没有任何夹具打得到＝死代码；一旦有人把兜底写成
     「拼个（已停用）后缀」或干脆抛错，界面与脚本两条消费路都会当场炸。故意**同进程**跑，
     理由见本节头。断言里同时钉「不许出现停用名」：兜底只能少信息，不能造假信息。
     """
+
     def strip_display(payload):
         rows = payload.get("retired_labels")
         assert rows, "载荷里没有 retired_labels，判据 3 会空转"
         payload["retired_labels"] = [{"key": r["key"]} for r in rows]
 
-    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys,
-                                              mutate_payload=strip_display)
+    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys, mutate_payload=strip_display)
     keys = [k for k, _d in _authority_retired_sequence()]
     clause = _retired_clause(out)
     assert rc == 0, f"缺 display 居然失败了（rc={rc}）：\n{out[:400]}"
     assert clause == "、".join(keys), (
-        f"兜底应当逐字退回裸 key，实得 {clause!r}，期望 {'、'.join(keys)!r}")
+        f"兜底应当逐字退回裸 key，实得 {clause!r}，期望 {'、'.join(keys)!r}"
+    )
     assert "已停用" not in clause, clause
 
 
-def test_the_cli_retired_names_are_taken_from_role_label_not_a_local_table(temp_cfg,
-                                                                          capsys):
+def test_the_cli_retired_names_are_taken_from_role_label_not_a_local_table(temp_cfg, capsys):
     """判据 4（第一半）：换掉权威层 `role_label`，CLI 那句**必须跟着变**。
 
     这是「名字现取、不是本地表」唯一的机械证据：值相等（判据 2 那种比法）把取法退回
@@ -493,12 +504,12 @@ def test_the_cli_retired_names_are_taken_from_role_label_not_a_local_table(temp_
     落点在 `core/summarizer.py:1143`（载荷里的 `display`）。
     """
     sentinel = lambda key: "SENTINEL·" + str(key)  # noqa: E731
-    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys,
-                                              label_override=sentinel)
+    rc, out, _payload = _run_roles_in_process(temp_cfg, capsys, label_override=sentinel)
     keys = [k for k, _d in _authority_retired_sequence()]
     assert rc == 0, out[:400]
     assert _retired_clause(out) == "、".join(sentinel(k) for k in keys), (
-        f"改了权威层 CLI 却不跟着变 ⇒ 它自己存了一份表：{_retired_clause(out)!r}")
+        f"改了权威层 CLI 却不跟着变 ⇒ 它自己存了一份表：{_retired_clause(out)!r}"
+    )
 
 
 def test_the_two_role_notices_are_taken_from_the_same_authority_label():
@@ -524,20 +535,20 @@ def test_the_two_role_notices_are_taken_from_the_same_authority_label():
     auth.role_label = sentinel
     try:
         _key, notice = ad.resolve_role(None, fallback=retired_key)
-        assert sentinel(DEFAULT_ROLE) in notice, (
-            f"回落 notice 没走权威层取名（:145）：{notice!r}")
+        assert sentinel(DEFAULT_ROLE) in notice, f"回落 notice 没走权威层取名（:145）：{notice!r}"
         dirty, message = ad.configured_role_issue(retired_key)
         assert dirty == retired_key, (
-            f"退役值没被认定成脏配置，第二句根本走不到：{(dirty, message)!r}")
-        assert sentinel(DEFAULT_ROLE) in message, (
-            f"设置页那句没走权威层取名（:169）：{message!r}")
+            f"退役值没被认定成脏配置，第二句根本走不到：{(dirty, message)!r}"
+        )
+        assert sentinel(DEFAULT_ROLE) in message, f"设置页那句没走权威层取名（:169）：{message!r}"
     finally:
         auth.role_label = saved
     # 控制腿：还原之后必须回到真名 —— 否则上面那两句可能一直为真（自己考自己）。
     _key2, notice2 = ad.resolve_role(None, fallback=retired_key)
     assert "SENTINEL" not in notice2, f"补丁没还原干净：{notice2!r}"
     assert auth.role_label(DEFAULT_ROLE) in notice2, (
-        f"还原后回落 notice 里没有真名，这条锁本来就没内容：{notice2!r}")
+        f"还原后回落 notice 里没有真名，这条锁本来就没内容：{notice2!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -591,8 +602,11 @@ def _cli_function_lines(name: str) -> tuple:
     src = cli_path.read_text(encoding="utf-8")
     lines = src.splitlines()
     tree = ast.parse(src)
-    wanted = [n for n in ast.walk(tree)
-              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
+    wanted = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
+    ]
     assert len(wanted) == 1, f"`{name}` 在 cli.py 里找到 {len(wanted)} 个，扫描域要重新定义"
     node = wanted[0]
     lo, hi = node.lineno, (node.end_lineno or node.lineno)
@@ -608,7 +622,6 @@ def _cli_function_lines(name: str) -> tuple:
 
     # COMMENT token 的行号：只有「代码部分为空」的整行注释才排除。
     # 写成「这行有 # 就跳过」会把 `x = 1  # 已停用` 整行剥掉——牙齿 v2 实测就是这样空枪的。
-    comment_only = set()
     comment_at = {}
     try:
         for t in tokenize.generate_tokens(io.StringIO(src).readline):
@@ -617,7 +630,7 @@ def _cli_function_lines(name: str) -> tuple:
     except (tokenize.TokenError, IndentationError, SyntaxError) as exc:
         pytest.fail(f"扫描域建不起来（tokenize 过不去）：{exc}——先修解析，再谈禁令")
 
-    block = "\n".join(lines[lo - 1: hi])
+    block = "\n".join(lines[lo - 1 : hi])
     code = []
     for no in range(lo, hi + 1):
         if no in doc_lines:
@@ -626,8 +639,8 @@ def _cli_function_lines(name: str) -> tuple:
         col = comment_at.get(no)
         if col is not None:
             if not text[:col].strip():
-                continue                      # 整行注释：不是代码，放行
-            text = text[:col]                 # 行尾注释：剥掉注释，代码部分照扫
+                continue  # 整行注释：不是代码，放行
+            text = text[:col]  # 行尾注释：剥掉注释，代码部分照扫
         if text.strip():
             code.append((no, text))
     return block, code
@@ -637,9 +650,12 @@ def test_the_cli_carries_no_retired_name_table_in_its_code_lines():
     """判据 ①：`cmd_roles` 的**代码行**里不许出现退役名相关的第二份 owner 字面量。"""
     _block, code = _cli_function_lines("cmd_roles")
     assert code, "扫描域为空——这条判据会变成永绿，先修扫描域"
-    hits = [f"代码行 {no} 出现 {literal!r}（{why}）：{text.strip()[:90]}"
-            for literal, why in _CLI_FORBIDDEN_ON_CODE_LINES
-            for no, text in code if literal in text]
+    hits = [
+        f"代码行 {no} 出现 {literal!r}（{why}）：{text.strip()[:90]}"
+        for literal, why in _CLI_FORBIDDEN_ON_CODE_LINES
+        for no, text in code
+        if literal in text
+    ]
     assert not hits, "\n".join(hits)
 
 
@@ -655,8 +671,8 @@ def test_the_comment_that_explains_why_there_is_no_such_table_is_still_there():
         f"`cmd_roles` 里那段「为什么这里没有退役名单」的解释少了这些短语：{gone}。"
         "只留一条代码行禁令、把解释删掉，下一个人就会顺手把表加回来"
         "（那正是 task-36 之前 CLI 印三个英文 key 的成因）。请把解释补回注释，"
-        "不要改本判据的期望值。")
-
+        "不要改本判据的期望值。"
+    )
 
 
 def test_the_comment_stripper_keeps_the_code_part_of_a_line_with_trailing_comment(tmp_path):
@@ -670,14 +686,19 @@ def test_the_comment_stripper_keeps_the_code_part_of_a_line_with_trailing_commen
     这条不依赖产品当前是否违规：样本行由我自己造，断的是扫描器的行分类。
     """
     sample = tmp_path / "cli-shape.py"
-    sample.write_text("\n".join([
-        "def cmd_roles(self):",
-        '    """文档行：已停用也不算代码。"""',
-        "    shown = [1]  # 已停用：同一行的代码部分必须照扫",
-        "    # 纯注释行：整行跳过",
-        '    return "标准（已停用）"',
-        "",
-    ]), encoding="utf-8")
+    sample.write_text(
+        "\n".join(
+            [
+                "def cmd_roles(self):",
+                '    """文档行：已停用也不算代码。"""',
+                "    shown = [1]  # 已停用：同一行的代码部分必须照扫",
+                "    # 纯注释行：整行跳过",
+                '    return "标准（已停用）"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     prev = os.environ.get("WB_CLI_SOURCE_OVERRIDE", "")
     os.environ["WB_CLI_SOURCE_OVERRIDE"] = str(sample)
     try:
@@ -691,19 +712,22 @@ def test_the_comment_stripper_keeps_the_code_part_of_a_line_with_trailing_commen
     texts = [t.strip() for _no, t in code]
     # 函数体里三行真代码；docstring 与纯注释行都不该在里面。
     assert len(code) == 3, f"代码行应为 3（docstring/纯注释行排除），实得 {len(code)}：{texts}"
-    assert any("shown = [1]" in t for t in texts), \
+    assert any("shown = [1]" in t for t in texts), (
         f"「代码 + 行尾注释」的那半行代码没被扫到——判据 ① 就是空枪：{texts}"
+    )
     assert not any(t.startswith("#") for t in texts), f"纯注释行被当成代码：{texts}"
     # 违规只落在**代码部分真含字面量**的那行（第 5 行那个 return）。
     # 第 3 行不算违规——它的字面量在行尾注释里，口径是「注释可以有、代码行不行」。
     # 这两件事必须分开断：第 3 行「被扫到」是形状，「不被 flag」是口径。
-    flagged = sorted({no for literal, _why in _CLI_FORBIDDEN_ON_CODE_LINES
-                      for no, t in code if literal in t})
+    flagged = sorted(
+        {no for literal, _why in _CLI_FORBIDDEN_ON_CODE_LINES for no, t in code if literal in t}
+    )
     assert flagged == [5], f"字面量违规应且仅应命中代码部分含它的那行，实得 {flagged}"
     shown_lines = [no for no, t in code if "shown = [1]" in t]
     assert shown_lines and set(shown_lines).isdisjoint(flagged), (
         f"第 3 行该被扫到（代码部分）且不该被 flag（字面量在注释里）："
-        f"扫到={shown_lines} 违规={flagged}")
+        f"扫到={shown_lines} 违规={flagged}"
+    )
 
 
 def test_the_source_override_switches_the_file_not_the_verdict():
@@ -729,7 +753,9 @@ def test_the_source_override_switches_the_file_not_the_verdict():
     assert block_via == block_default, "开关换了文件之后，块内容也变了——判据语义被带偏"
     assert [no for no, _ in code_via] == [no for no, _ in code_default], (
         "同一份文件经开关读出的代码行行号与默认路径不一致："
-        f"{[no for no, _ in code_via]} vs {[no for no, _ in code_default]}")
-    assert [t for _, t in code_via] == [t for _, t in code_default], \
+        f"{[no for no, _ in code_via]} vs {[no for no, _ in code_default]}"
+    )
+    assert [t for _, t in code_via] == [t for _, t in code_default], (
         "同一份文件经开关读出的代码行文本与默认路径不一致"
+    )
     assert code_default, "默认扫描域读出 0 行代码（这条会变成空对照）"

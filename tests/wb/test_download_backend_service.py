@@ -96,13 +96,19 @@ def test_backends_follows_configured_default(service):
 
 
 def test_download_start_passes_default_backend(service, recorder):
-    call(service, "download.start", {"url": "https://b23.tv/xx", "items": [{"bvid": "BV1"}], "backend": "bbdown"})
+    call(
+        service,
+        "download.start",
+        {"url": "https://b23.tv/xx", "items": [{"bvid": "BV1"}], "backend": "bbdown"},
+    )
     assert recorder.calls[0][0] == "download.batch"
     assert recorder.calls[0][2]["backend"] == "bbdown"
 
 
 def test_download_start_rejects_unknown_backend(service):
-    error = err(service, "download.start", {"url": "u", "items": [{"bvid": "BV1"}], "backend": "aria2"})
+    error = err(
+        service, "download.start", {"url": "u", "items": [{"bvid": "BV1"}], "backend": "aria2"}
+    )
     assert error["code"] == "VALIDATION"
 
 
@@ -136,13 +142,20 @@ def test_retry_failed_keeps_parent_backend_when_not_given(service, recorder):
 
 def test_retry_failed_rejects_unknown_backend(service):
     job_id = make_batch_job(service)
-    assert err(service, "download.retry_failed", {"id": job_id, "backend": "aria2"})["code"] == "VALIDATION"
+    assert (
+        err(service, "download.retry_failed", {"id": job_id, "backend": "aria2"})["code"]
+        == "VALIDATION"
+    )
 
 
 def test_retry_failed_without_failures_is_conflict(service):
     job_id = "job_batch_ok"
     service.repo.job_create(job_id, "download.batch", None, {"quality": "1080P"})
-    service.repo.job_update(job_id, status="succeeded", result={"total": 1, "items": [{"bvid": "BV1", "status": "succeeded"}]})
+    service.repo.job_update(
+        job_id,
+        status="succeeded",
+        result={"total": 1, "items": [{"bvid": "BV1", "status": "succeeded"}]},
+    )
     assert err(service, "download.retry_failed", {"id": job_id})["code"] == "CONFLICT"
 
 
@@ -161,7 +174,9 @@ def test_worker_forwards_backend_to_downloader(tmp_path):
         target.write_bytes(b"v" * 200_000)
         from video_workbench.core.downloader import DownloadResult
 
-        return DownloadResult(path=target, height=1080, format_id="", quality_requested="1080P", elapsed_s=0.1)
+        return DownloadResult(
+            path=target, height=1080, format_id="", quality_requested="1080P", elapsed_s=0.1
+        )
 
     handler = make_download_handler(
         repo=_Repo(),
@@ -186,7 +201,14 @@ def test_worker_forwards_backend_to_downloader(tmp_path):
         def should_cancel(self):
             return False
 
-    handler(Ctx(), {"item": {"bvid": "BV1xx411c7mD", "title": "某视频", "page": 1}, "backend": "bbdown", "quality": "720P"})
+    handler(
+        Ctx(),
+        {
+            "item": {"bvid": "BV1xx411c7mD", "title": "某视频", "page": 1},
+            "backend": "bbdown",
+            "quality": "720P",
+        },
+    )
     assert seen and seen[0]["backend"] == "bbdown"
     assert seen[0]["bbdown_bin"] == ""
 

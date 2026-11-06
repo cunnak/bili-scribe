@@ -197,7 +197,6 @@ PowerShell：
 from __future__ import annotations
 
 import http.server
-import json
 import os
 import re
 import threading
@@ -208,7 +207,7 @@ import pytest
 pytest.importorskip(
     "playwright.sync_api",
     reason="没装 playwright，界面验收跑不了。修：`.venv/Scripts/python.exe -m pip install "
-           "playwright && .venv/Scripts/python.exe -m playwright install chromium`",
+    "playwright && .venv/Scripts/python.exe -m playwright install chromium`",
 )
 
 from playwright.sync_api import sync_playwright  # noqa: E402
@@ -301,27 +300,29 @@ def test_the_authority_behind_these_expectations():
     from bili_scribe.core import roles as bs_roles
 
     assert DIRTY_VALUE in RETIRED_ROLES, (
-        f"退役名单里没有 {DIRTY_VALUE!r}，脏态用例的前提没了：{sorted(RETIRED_ROLES)}")
+        f"退役名单里没有 {DIRTY_VALUE!r}，脏态用例的前提没了：{sorted(RETIRED_ROLES)}"
+    )
     assert len(ROLE_KEYS) == len(set(ROLE_KEYS)), f"ROLE_KEYS 里有重复：{ROLE_KEYS}"
-    survivors = tuple(role.key for role in bs_roles.ALL_ROLES
-                      if role.key not in set(RETIRED_ROLES))
-    assert ROLE_KEYS[:len(survivors)] == survivors, (
-        f"共有角色那一段漂了：期望 {survivors} 开头，实得 {ROLE_KEYS}")
-    extras = ROLE_KEYS[len(survivors):]
+    survivors = tuple(role.key for role in bs_roles.ALL_ROLES if role.key not in set(RETIRED_ROLES))
+    assert ROLE_KEYS[: len(survivors)] == survivors, (
+        f"共有角色那一段漂了：期望 {survivors} 开头，实得 {ROLE_KEYS}"
+    )
+    extras = ROLE_KEYS[len(survivors) :]
     bs_keys = {role.key for role in bs_roles.ALL_ROLES}
     assert all(key not in bs_keys for key in extras), (
-        f"后段 {extras} 里有 bs 已存在的角色：说明前段被删短了，不是新角色进来了")
+        f"后段 {extras} 里有 bs 已存在的角色：说明前段被删短了，不是新角色进来了"
+    )
     assert set(ROLE_KEYS).isdisjoint(set(RETIRED_ROLES)), (
-        "退役角色还挂在 ROLE_KEYS 上，下拉框会把它渲染成一个可选项")
+        "退役角色还挂在 ROLE_KEYS 上，下拉框会把它渲染成一个可选项"
+    )
 
 
 def test_serves_the_repository_web_dir_by_default():
-        """默认必须跑真实产品树：`WB_WEB_ROOT` 一旦被谁常驻设上，用例就在测一份副本，
-        产品改了也不会红——这条把「测的是仓库里那份」钉死。"""
-        assert WEB_DIR == ROOT / "video_workbench" / "web", (
-            f"被测目录被换走了：{WEB_DIR}")
-        assert (WEB_DIR / "js" / "pages" / "settings.js").is_file(), WEB_DIR
-        assert (WEB_DIR / "css" / "app.css").is_file(), WEB_DIR
+    """默认必须跑真实产品树：`WB_WEB_ROOT` 一旦被谁常驻设上，用例就在测一份副本，
+    产品改了也不会红——这条把「测的是仓库里那份」钉死。"""
+    assert WEB_DIR == ROOT / "video_workbench" / "web", f"被测目录被换走了：{WEB_DIR}"
+    assert (WEB_DIR / "js" / "pages" / "settings.js").is_file(), WEB_DIR
+    assert (WEB_DIR / "css" / "app.css").is_file(), WEB_DIR
 
 
 @pytest.fixture(scope="module")
@@ -395,8 +396,7 @@ def open_settings(browser, web_base_url, stub: dict, viewport: dict | None = Non
     page.on("console", on_console)
     page.on("pageerror", lambda exc: errors.append(f"[pageerror] {exc}"))
     page.goto(base_url(web_base_url), wait_until="load")
-    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'",
-                           timeout=15000)
+    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'", timeout=15000)
     page.evaluate(PATCH_JS, stub)
     page.evaluate('() => window.WB.router.go("settings", {section: "llm"})')
     # 等真实渲染：字段行出现即说明 app.settings.get 与 paint 都走完了。
@@ -414,11 +414,11 @@ def warn_line(page):
 
 
 def role_values(page) -> list[str]:
-    return role_row(page).locator("select option").evaluate_all(
-        "nodes => nodes.map(n => n.value)")
+    return role_row(page).locator("select option").evaluate_all("nodes => nodes.map(n => n.value)")
 
 
 # ============================================================ 折叠组前置（task-20 判据）
+
 
 #: 「上下文与长素材」那个折叠组。全仓只有一个 `details.adv`（`settings.js:1194`），
 #: 但这里仍然按标题筛，而不是裸 `details.adv`：万一以后别的分区也加了折叠组，
@@ -435,7 +435,8 @@ def _box(locator) -> dict:
              top: Math.round(el.getBoundingClientRect().top),
              bottom: Math.round(el.getBoundingClientRect().bottom),
              display: getComputedStyle(el).display,
-           })""")
+           })"""
+    )
 
 
 def require_expanded(page, reason: str):
@@ -451,7 +452,8 @@ def require_expanded(page, reason: str):
         group.locator("summary").click()
         page.wait_for_timeout(120)
     assert group.get_attribute("open") is not None, (
-        f"前置失败：折叠组打不开（{reason}）——后面每条可见性断言都建立在它打开之上")
+        f"前置失败：折叠组打不开（{reason}）——后面每条可见性断言都建立在它打开之上"
+    )
     return group
 
 
@@ -459,8 +461,8 @@ def require_collapsed(page, reason: str):
     """判据写法 2：这条测的就是收起态，那就把「收起」钉成断言，别再拿可见性当证据。"""
     group = adv_group(page)
     assert group.get_attribute("open") is None, (
-        f"前置失败：折叠组本该是收起的（{reason}），现在却被展开了，"
-        "这条测的就不是收起态了")
+        f"前置失败：折叠组本该是收起的（{reason}），现在却被展开了，这条测的就不是收起态了"
+    )
     return group
 
 
@@ -468,7 +470,8 @@ def switch_row(page, label_text: str):
     """折叠组里某一个字段行（按 label 全文找，再上溯到 `.field`）。"""
     label = page.locator("label.field__label").filter(has_text=label_text).first
     return label.locator(
-        "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]")
+        "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]"
+    )
 
 
 #: 两套皮肤。ark 是深色默认，exhibition 是浅色（`app.js:75-98` 皮肤表）。
@@ -493,17 +496,20 @@ def apply_skin(page, skin: str) -> None:
 
 
 @pytest.mark.parametrize("skin", SKINS)
-def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
-        browser, web_base_url, skin):
+def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(browser, web_base_url, skin):
     """脏态：红字可见、文案逐字、danger style_info在、折叠组自动展开、下拉框 7 项无 standard。
 
     双皮肤（task-21）：`--danger` 在 exhibition 是 `#b42318`、ark 是 `#ff6b6b`，
     判据比的是「同一时刻解析出来的 var(--danger)」，所以两套都必须过。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+        },
+    )
     try:
         apply_skin(page, skin)
         line = warn_line(page)
@@ -515,7 +521,8 @@ def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
         group = page.locator("details.adv").filter(has_text="上下文与长素材").first
         assert group.get_attribute("open") is not None, (
             "脏态没有自动展开「上下文与长素材」——这行红字藏在折叠组里，"
-            "不合上就没人在不多点一次的情况下看见它")
+            "不合上就没人在不多点一次的情况下看见它"
+        )
 
         style_info = line.evaluate(
             """el => {
@@ -528,10 +535,12 @@ def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
                  return {color: cs.color, danger: danger,
                          borderLeft: cs.borderLeftWidth, display: cs.display,
                          offset: el.offsetParent !== null};
-               }""")
+               }"""
+        )
         assert style_info["display"] != "none" and style_info["offset"] is True, style_info
         assert style_info["color"] == style_info["danger"], (
-            f"红字不再是主题里的 danger 色：{style_info['color']} vs {style_info['danger']}")
+            f"红字不再是主题里的 danger 色：{style_info['color']} vs {style_info['danger']}"
+        )
         assert style_info["borderLeft"] == "3px", f"左竖条不是 3px：{style_info['borderLeft']}"
 
         # 切分区不该把结论弄丢、也不该重新去后端要一遍：
@@ -541,7 +550,8 @@ def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
         page.click('.settings__nav-item[data-key="llm"]')
         page.wait_for_timeout(250)
         assert page.evaluate("() => window.__rolesStubCalls") == before, (
-            "页内切分区又去后端要了一次结论——这条提示只在进页面时读一次就够")
+            "页内切分区又去后端要了一次结论——这条提示只在进页面时读一次就够"
+        )
         line_after = warn_line(page)
         assert line_after.is_visible(), "切一趟分区，红字就没了"
         assert line_after.inner_text() == HINT, f"切完分区文案变了：{line_after.inner_text()!r}"
@@ -549,14 +559,18 @@ def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
 
         # lead 的权威判据：提示行必须挂在那个折叠组里（挂错地方＝看不见或语义错），
         # 下拉框当前值必须等于配置里的角色（不是被前端偷偷改成默认值）。
-        owner = line.evaluate("el => { const d = el.closest('details'); "
-                              "return d ? d.querySelector('.adv__title').textContent : null; }")
+        owner = line.evaluate(
+            "el => { const d = el.closest('details'); "
+            "return d ? d.querySelector('.adv__title').textContent : null; }"
+        )
         assert owner == "上下文与长素材", f".warn-line 不在「上下文与长素材」组里，而在：{owner!r}"
-        configured = page.evaluate("() => window.WB.rpc('app.settings.get')"
-                                   ".then(s => s.llm && s.llm.role)")
+        configured = page.evaluate(
+            "() => window.WB.rpc('app.settings.get').then(s => s.llm && s.llm.role)"
+        )
         shown = role_row(page).locator("select").input_value()
         assert shown == configured, (
-            f"下拉框显示的角色与配置不一致：界面 {shown!r} vs 配置 {configured!r}")
+            f"下拉框显示的角色与配置不一致：界面 {shown!r} vs 配置 {configured!r}"
+        )
 
         values = role_values(page)
         assert values == list(ROLE_KEYS), f"下拉框选项与 ROLE_KEYS 不一致：{values}"
@@ -574,24 +588,30 @@ def test_dirty_config_shows_the_danger_line_and_auto_expands_the_group(
 
 def test_clean_config_keeps_the_line_hidden_and_the_group_collapsed(browser, web_base_url):
     """净态：`.warn-line` 在 DOM 但不可见、折叠组不被抢着展开，页面不出现「读不到设置」。"""
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": CLEAN_VALUE,
-        "configured_hint": "",
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": CLEAN_VALUE,
+            "configured_hint": "",
+        },
+    )
     try:
         line = warn_line(page)
         assert line.count() == 1, "净态这行节点应该仍然挂在 DOM 里（只藏不删）"
         assert not line.is_visible(), "配置是干净的，红字却显示出来了"
         state = line.evaluate(
             "el => ({display: getComputedStyle(el).display, "
-            "offset: el.offsetParent !== null, text: el.textContent})")
+            "offset: el.offsetParent !== null, text: el.textContent})"
+        )
         assert state["display"] == "none", state
         assert state["offset"] is False, state
         assert state["text"] == "", state
 
         group = page.locator("details.adv").filter(has_text="上下文与长素材").first
         assert group.get_attribute("open") is None, (
-            "干净配置也把折叠组展开了——注释写明不许抢用户的折叠习惯")
+            "干净配置也把折叠组展开了——注释写明不许抢用户的折叠习惯"
+        )
 
         assert page.locator("text=读不到设置").count() == 0, "净态页面上出现了「读不到设置」"
         assert role_values(page) == list(ROLE_KEYS)
@@ -623,13 +643,14 @@ def test_roles_endpoint_failure_does_not_break_the_settings_page(browser, web_ba
         # 这条只管「读不到结论时页面形状不变」。
         line = warn_line(page)
         assert line.count() == 1, (
-            f"reject 时字段行照常渲染，`.warn-line` 节点应该还在（只藏不删），实得 {line.count()} 个")
+            f"reject 时字段行照常渲染，`.warn-line` 节点应该还在（只藏不删），实得 {line.count()} 个"
+        )
         assert line.evaluate("el => el.textContent") == "", (
-            "后端读不到结论，红字却有文案——那是前端在自己编判定")
+            "后端读不到结论，红字却有文案——那是前端在自己编判定"
+        )
         # 收起态前置要钉住：这条断言的是「页面照常可用」，而不是「展开后能看见」
         require_collapsed(page, "reject 读不到结论时不该抢着展开折叠组")
-        assert page.locator("text=读不到设置").count() == 0, (
-            "角色接口失败把整个设置页拖进了空状态")
+        assert page.locator("text=读不到设置").count() == 0, "角色接口失败把整个设置页拖进了空状态"
         assert role_values(page) == list(ROLE_KEYS), "表单没渲染出来，主功能受影响"
         ACCEPT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(ACCEPT_DIR / "wb_settings_role_pw_readfail.png"))
@@ -647,10 +668,14 @@ def test_the_ui_still_reads_the_verdict_from_the_backend_only(browser, web_base_
     这条钉的是「判定归后端一处」：哪天有人在前端补一句 `if (text.includes('standard'))`，
     旧后端只给 hint 时就会挂出一行没有对象的提示，这条会红。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": "",
-        "configured_hint": HINT,     # 只给话，不给脏值
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": "",
+            "configured_hint": HINT,  # 只给话，不给脏值
+        },
+    )
     try:
         line = warn_line(page)
         # 这条测的就是「收起态下红字不该出现」，所以按判据写法 2：钉住收起，再断言不可见。
@@ -678,11 +703,15 @@ def test_config_actually_holding_a_retired_role_still_offers_only_live_roles(bro
     task-14 落地后合同变成「必须等于后端 default」（`settings.js:271-280 roleSelectValue`），
     所以这里收紧成逐值相等——顺带说明那条旧写法为什么当时是**对的**写法。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "settings_role": DIRTY_VALUE,
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "settings_role": DIRTY_VALUE,
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+        },
+    )
     try:
         # 判据写法 1：可见性断言之前，先把折叠组显式打开并断言它打开。
         # 原来这条靠「脏态自动展开」隐式成立——自动展开哪天被改掉，它会红，但红得
@@ -698,11 +727,11 @@ def test_config_actually_holding_a_retired_role_still_offers_only_live_roles(bro
         assert shown != DIRTY_VALUE, "下拉框把退役值当成当前选中项"
         assert shown == DEFAULT_ROLE, (
             f"配置里的脏值不可用时，下拉框应选后端 default（{DEFAULT_ROLE!r}），"
-            f"实得 {shown!r}——退到第一项是 DOM 副作用，不是设计")
+            f"实得 {shown!r}——退到第一项是 DOM 副作用，不是设计"
+        )
         assert errors == [], f"控制台有 error：{errors}"
     finally:
         page.close()
-
 
 
 # ================================================== task-16 补的三道门
@@ -759,8 +788,8 @@ def _settings_js_role_option_keys() -> list[str]:
     anchor = 'path: "llm.role"'
     hits = source.count(anchor)
     assert hits == 1, (
-        f"`{anchor}` 在 settings.js 里出现 {hits} 次，解析锚点不唯一，"
-        "读出来的选项表不可信")
+        f"`{anchor}` 在 settings.js 里出现 {hits} 次，解析锚点不唯一，读出来的选项表不可信"
+    )
     start = source.index("options:", source.index(anchor))
     depth = 0
     end = start
@@ -774,7 +803,7 @@ def _settings_js_role_option_keys() -> list[str]:
                 break
         end += 1
     assert depth == 0, "options 数组括号没配平，解析器读到了错误位置"
-    keys = re.findall(r'\[\s*"([^"]+)"\s*,', source[start:end + 1])
+    keys = re.findall(r'\[\s*"([^"]+)"\s*,', source[start : end + 1])
     assert keys, "解析器在 settings.js 里一个 role 选项都没读到——是解析器坏了，不是产品漂了"
     return keys
 
@@ -788,8 +817,11 @@ def _number_row(page, label_text: str):
     """按 label **全文**相等找到的数字字段行（用 exact 找 label，再上溯到 .field）。"""
     label = page.locator("label.field__label").filter(has_text=label_text).first
     assert label.inner_text().strip() == label_text, (
-        f"「{label_text}」这一行没按预期找到，实得 {label.inner_text()!r}")
-    return label.locator("xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]")
+        f"「{label_text}」这一行没按预期找到，实得 {label.inner_text()!r}"
+    )
+    return label.locator(
+        "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]"
+    )
 
 
 def test_the_option_table_in_settings_js_is_still_a_copy_of_the_backend_list():
@@ -813,11 +845,13 @@ def test_the_option_table_in_settings_js_is_still_a_copy_of_the_backend_list():
         f"  前端: {keys}\n"
         f"  后端: {list(ROLE_KEYS)}\n"
         "要么两边一起改，要么把这张表改成后端注入——但后者会撞 reject 那条需求，"
-        "所以先照两边一起改办")
+        "所以先照两边一起改办"
+    )
 
 
 def test_an_empty_backend_default_falls_back_to_the_first_option_and_that_is_a_declared_boundary(
-        browser, web_base_url):
+    browser, web_base_url
+):
     """门 2：后端 `default` 为空时下拉框退到第一项——**已声明的已知边界，不是理想行为**。
 
     vendor 交回的说法是「`default` 读不到时 `roleSelectValue` 退回配置值本身（不选任何
@@ -831,28 +865,36 @@ def test_an_empty_backend_default_falls_back_to_the_first_option_and_that_is_a_d
     这条会红，那时才是做产品决策的时刻。真要改成「明确不选」需要加一个占位 option，
     属产品决策，不在此用例范围。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "settings_role": DIRTY_VALUE,
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-        "default": "",          # 假想边界：后端没给结论
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "settings_role": DIRTY_VALUE,
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+            "default": "",  # 假想边界：后端没给结论
+        },
+    )
     try:
         # 判据写法 1：下面既读红字可见性、又要 select 可交互，前置必须自己造。
         require_expanded(page, "空 default 这条要读红字文案与 select 状态")
         select = role_row(page).locator("select")
         state = select.evaluate(
             "el => ({index: el.selectedIndex, value: el.value, "
-            "options: [...el.options].map(o => o.value)})")
+            "options: [...el.options].map(o => o.value)})"
+        )
         # 下面三条各自独立成立，不写成 `A or B`——那种析取在 index 恒为 0 的现实下
         # 会永远为真，等于没断言（我在这个仓库上已经犯过一次）。
         assert state["index"] == 0, (
             f"空 default 时 DOM 应当退到第一项（selectedIndex==0），实得 {state}——"
-            "如果这条红了，说明产品改成别的行为（比如加了占位项），需要重新定规格")
+            "如果这条红了，说明产品改成别的行为（比如加了占位项），需要重新定规格"
+        )
         assert state["options"] == list(ROLE_KEYS), (
-            f"选项表本身被 default 影响到了：{state['options']}")
+            f"选项表本身被 default 影响到了：{state['options']}"
+        )
         assert state["value"] == ROLE_KEYS[0], (
-            f"第一项应当是 {ROLE_KEYS[0]!r}，实得 {state['value']!r}")
+            f"第一项应当是 {ROLE_KEYS[0]!r}，实得 {state['value']!r}"
+        )
         # 至少文字说明还在：下拉框亮着用户没选过的角色时，红字是唯一的解释来源。
         line = warn_line(page)
         assert line.is_visible(), "空 default 时红字不见了——用户将毫无线索"
@@ -875,11 +917,15 @@ def test_saving_an_unrelated_change_does_not_write_the_role_at_all(browser, web_
     字段，否则「payload 里没有 llm.role」会因为「压根没保存」而空转。
     """
     before_files = _config_fingerprints()
-    page, errors = open_settings(browser, web_base_url, {
-        "settings_role": DIRTY_VALUE,
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "settings_role": DIRTY_VALUE,
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+        },
+    )
     try:
         # 判据写法 1：「温度」这一栏在折叠组**里面**，`_number_row` 用 inner_text 比对标签，
         # 收起态下 inner_text 是空串（隐藏子树），fill 也要求可交互——所以这里必须先把组
@@ -891,7 +937,8 @@ def test_saving_an_unrelated_change_does_not_write_the_role_at_all(browser, web_
         save = _bar_button(page, "保存")
         expect_enabled = page.locator(".settings__bar .muted").first
         assert "待保存" in expect_enabled.inner_text(), (
-            f"改了温度却没进脏表：{expect_enabled.inner_text()!r}")
+            f"改了温度却没进脏表：{expect_enabled.inner_text()!r}"
+        )
         assert not save.is_disabled(), "改了字段但保存按钮还是灰的"
         save.click()
         page.wait_for_function("() => window.__rpcSends.length > 0", timeout=10000)
@@ -900,12 +947,14 @@ def test_saving_an_unrelated_change_does_not_write_the_role_at_all(browser, web_
         assert len(sends) == 1, f"应当恰好发出一次 app.settings.put，实得 {len(sends)} 次"
         values = (sends[0] or {}).get("values") or {}
         assert values.get("llm", {}).get("temperature") == 0.33, (
-            f"payload 里没带上我改的温度，这条断言会空转：{values}")
+            f"payload 里没带上我改的温度，这条断言会空转：{values}"
+        )
         assert "role" not in (values.get("llm") or {}), (
-            f"只改了温度，落盘却动了角色：{values}——"
-            "脏配置会被顺手改掉，用户选都没选过它")
+            f"只改了温度，落盘却动了角色：{values}——脏配置会被顺手改掉，用户选都没选过它"
+        )
         assert _config_fingerprints() == before_files, (
-            "界面用例写了真实配置文件——离线 mock 不该有落盘副作用")
+            "界面用例写了真实配置文件——离线 mock 不该有落盘副作用"
+        )
         assert errors == [], f"控制台有 error：{errors}"
     finally:
         page.close()
@@ -924,11 +973,15 @@ def test_confirming_the_displayed_default_and_saving_writes_that_default(browser
     owner，测试也不该有。
     """
     before_files = _config_fingerprints()
-    page, errors = open_settings(browser, web_base_url, {
-        "settings_role": DIRTY_VALUE,
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-    })
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "settings_role": DIRTY_VALUE,
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+        },
+    )
     try:
         # 判据写法 1：`select_option` 要做可交互性检查，收起态（真隐藏）下会直接超时，
         # 所以这条的前置也得自己造出来并断言住。
@@ -936,11 +989,13 @@ def test_confirming_the_displayed_default_and_saving_writes_that_default(browser
         select = role_row(page).locator("select")
         shown = select.input_value()
         assert shown == DEFAULT_ROLE, (
-            f"前置不成立：显示的不是后端 default（{DEFAULT_ROLE!r}），实得 {shown!r}")
+            f"前置不成立：显示的不是后端 default（{DEFAULT_ROLE!r}），实得 {shown!r}"
+        )
         assert shown != ROLE_KEYS[0], (
-            "前置不成立：显示值就是第一项，那这条测不出「顺手保存改成第一项」这个坑")
+            "前置不成立：显示值就是第一项，那这条测不出「顺手保存改成第一项」这个坑"
+        )
 
-        select.select_option(value=DEFAULT_ROLE)   # 用户顺手确认一下显示的默认角色
+        select.select_option(value=DEFAULT_ROLE)  # 用户顺手确认一下显示的默认角色
         save = _bar_button(page, "保存")
         assert not save.is_disabled(), "选中显示值后保存按钮仍灰着"
         save.click()
@@ -951,8 +1006,12 @@ def test_confirming_the_displayed_default_and_saving_writes_that_default(browser
         values = (sends[0] or {}).get("values") or {}
         written = (values.get("llm") or {}).get("role")
         assert written == DEFAULT_ROLE, (
-            f"确认后保存的角色应为后端 default {DEFAULT_ROLE!r}，实得 {written!r}")
+            f"确认后保存的角色应为后端 default {DEFAULT_ROLE!r}，实得 {written!r}"
+        )
         assert written != DIRTY_VALUE, "落盘把已停用的退役角色又写回去了"
+        assert _config_fingerprints() == before_files, (
+            "界面用例写了真实配置文件——离线 mock 不该有落盘副作用"
+        )
         assert errors == [], f"控制台有 error：{errors}"
     finally:
         page.close()
@@ -969,7 +1028,8 @@ def _page_band(page) -> tuple[int, int]:
              const r = p.getBoundingClientRect();
              return {top: Math.round(r.top), bottom: Math.round(r.bottom),
                      scrollHeight: p.scrollHeight, clientHeight: p.clientHeight};
-           }""")
+           }"""
+    )
     return band
 
 
@@ -987,30 +1047,39 @@ def test_collapsed_group_is_really_hidden_not_just_painted(browser, web_base_url
     「被绘制」时返回 True——所以旧断言既不依赖它、也没守住它。能区分的只有几何 + display
     这一对，`is_visible()`/`inner_text()` 都不行（见文件头判据段）。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": CLEAN_VALUE,
-        "settings_role": CLEAN_VALUE,
-    }, viewport=DEAD_ZONE_VIEWPORT)
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": CLEAN_VALUE,
+            "settings_role": CLEAN_VALUE,
+        },
+        viewport=DEAD_ZONE_VIEWPORT,
+    )
     try:
         apply_skin(page, skin)
         require_collapsed(page, "N1 测的就是收起态")
         body = _box(page.locator("details.adv .adv__body").first)
         assert body["display"] == "none", (
             f"收起态内容盒的 computed display 必须是 none，实得 {body['display']!r}——"
-            "只要它不是 none，内容就会被绘制出来却不计入滚动高度")
+            "只要它不是 none，内容就会被绘制出来却不计入滚动高度"
+        )
         assert body["height"] == 0, (
-            f"收起态内容盒必须有 0 高度（旧 CSS 是 1357），实得 {body['height']}")
+            f"收起态内容盒必须有 0 高度（旧 CSS 是 1357），实得 {body['height']}"
+        )
         # 组内「附加提示词」那一行（A 新加的开关，797px 下点不到的就是它）
         row = switch_row(page, "附加提示词")
         row_box = _box(row.first)
         assert row_box["height"] == 0, (
             f"收起态里「附加提示词」那一行仍有 {row_box['height']}px 高的盒子"
-            "（旧 CSS 实测 65）——它被绘制了，但落在 .page 可滚范围之外")
+            "（旧 CSS 实测 65）——它被绘制了，但落在 .page 可滚范围之外"
+        )
         # 反向对照：内容不许「画在滚得到的范围之外」。这条把上面两个数与滚动容器绑起来，
         # 谁将来给 .adv__body 加 height:0 但 overflow:visible 之类的写法，这条会红。
         band = _page_band(page)
         assert body["bottom"] <= band["bottom"] + 1 or body["height"] == 0, (
-            f"内容盒底边 {body['bottom']} 超出 .page 可视带 {band}，且高度不为 0 ⇒ 死区")
+            f"内容盒底边 {body['bottom']} 超出 .page 可视带 {band}，且高度不为 0 ⇒ 死区"
+        )
         assert errors == [], f"控制台有 error：{errors}"
         page.screenshot(path=str(ACCEPT_DIR / "wb_settings_role_t20_collapsed.png"))
     finally:
@@ -1030,16 +1099,23 @@ def test_expanded_group_reaches_the_switch_and_the_line_by_scrolling(browser, we
     **没有 input**，所以状态只能读 `aria-checked`——用 `input.is_checked()` 会超时，
     那是探针判据错，不是产品点不到（vendor 踩过）。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-        "settings_role": DIRTY_VALUE,
-    }, viewport=DEAD_ZONE_VIEWPORT)
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+            "settings_role": DIRTY_VALUE,
+        },
+        viewport=DEAD_ZONE_VIEWPORT,
+    )
     try:
         apply_skin(page, skin)
         require_expanded(page, "N2 测展开态可达性")
-        targets = [("红字", warn_line(page).first),
-                   ("附加提示词那一行", switch_row(page, "附加提示词").first)]
+        targets = [
+            ("红字", warn_line(page).first),
+            ("附加提示词那一行", switch_row(page, "附加提示词").first),
+        ]
         for label, target in targets:
             target.scroll_into_view_if_needed()
             # **同一次快照**里取行、内容盒、滚动容器三个 rect：上一条犯的错是先量内容盒、
@@ -1060,47 +1136,62 @@ def test_expanded_group_reaches_the_switch_and_the_line_by_scrolling(browser, we
                              bodyMaxHeight: cs.maxHeight, bodyOverflow: cs.overflow,
                              pageTop: Math.round(pr.top), pageBottom: Math.round(pr.bottom),
                              scrollHeight: p.scrollHeight, clientHeight: p.clientHeight};
-                   }""")
+                   }"""
+            )
             assert g["height"] > 0, f"{label} 展开态下高度为 0，等于没渲染"
             assert g["top"] >= g["pageTop"] - 1 and g["bottom"] <= g["pageBottom"] + 1, (
                 f"{label} 滚完之后仍不在 .page 可视带内：{g}"
-                f"（scrollHeight={g['scrollHeight']} clientHeight={g['clientHeight']}）")
+                f"（scrollHeight={g['scrollHeight']} clientHeight={g['clientHeight']}）"
+            )
             # 内容盒本身要有实际高度，且行必须落在盒内：牙齿变体二实测教训——只查行的 rect
             # 会被 `max-height:0;overflow:hidden` 糊过去（被裁剪的子元素 rect 照旧有高度、
             # 照旧落在 .page 带内，连 click() 都能过），补上这一对比才抓得住「被裁掉」。
             assert g["bodyHeight"] > 0, (
                 f"展开态内容盒高度为 {g['bodyHeight']}（maxHeight={g['bodyMaxHeight']} "
-                f"overflow={g['bodyOverflow']}）——组里所有字段都被裁掉了")
+                f"overflow={g['bodyOverflow']}）——组里所有字段都被裁掉了"
+            )
             assert g["top"] >= g["bodyTop"] - 1 and g["bottom"] <= g["bodyBottom"] + 1, (
                 f"{label} 的 rect 超出了内容盒 [{g['bodyTop']}, {g['bodyBottom']}]："
                 f"行在 {g['top']}–{g['bottom']}，说明它被祖先裁剪掉了，"
-                "视觉上不存在（rect 有高度不等于被画出来）")
+                "视觉上不存在（rect 有高度不等于被画出来）"
+            )
         # 真点一下之前，先做**命中测试**：元素中心点必须真的落在这个按钮（或它自己的内部件）上。
         # 为什么不能只靠 rect 落在可视带内 + `click()`：牙齿变体二实测证明——给
         # `.adv[open] .adv__body` 加 `max-height:0;overflow:hidden` 时，子元素 rect 照旧有高度、
         # 照旧落在 `.page` 带内，连 `click()` 都能过（Playwright 的可点击判定不含裁剪检查），
         # 但视觉上整组被裁掉了。那是一种「绿着但什么都没守」的写法，必须用 elementFromPoint
         # 把它抓住（task-19 预备时我用同样的探针在收起态抓到了 HEADER.topbar）。
-        hit = switch_row(page, "附加提示词").locator("button.switch").first.evaluate(
-            """el => {
+        hit = (
+            switch_row(page, "附加提示词")
+            .locator("button.switch")
+            .first.evaluate(
+                """el => {
                  const r = el.getBoundingClientRect();
                  const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
                  return {tag: h && h.tagName, cls: h && String(h.className).slice(0, 40),
                          painted: !!h && (h === el || el.contains(h)),
                          clipped: getComputedStyle(el.parentElement || el).overflow};
-               }""")
+               }"""
+            )
+        )
         assert hit["painted"], (
             f"「附加提示词」开关中心点命中的是 {hit['tag']}.{hit['cls']}，不是它自己——"
-            f"它被祖先（overflow={hit['clipped']}）裁剪或遮挡，用户点不到")
+            f"它被祖先（overflow={hit['clipped']}）裁剪或遮挡，用户点不到"
+        )
 
         # 可达性的终判：点得动，并且状态真的翻了
         switch = switch_row(page, "附加提示词").locator("button.switch").first
         before = switch.get_attribute("aria-checked")
         switch.click()
         page.wait_for_timeout(200)
-        after = switch_row(page, "附加提示词").locator("button.switch").first.get_attribute("aria-checked")
+        after = (
+            switch_row(page, "附加提示词")
+            .locator("button.switch")
+            .first.get_attribute("aria-checked")
+        )
         assert after != before, (
-            f"点了开关状态没翻（aria-checked {before} → {after}）——按钮不可达或没接上")
+            f"点了开关状态没翻（aria-checked {before} → {after}）——按钮不可达或没接上"
+        )
         assert after in ("true", "false"), f"aria-checked 不是布尔字面量：{after!r}"
         assert errors == [], f"控制台有 error：{errors}"
         page.screenshot(path=str(ACCEPT_DIR / "wb_settings_role_t20_expanded.png"))
@@ -1120,10 +1211,15 @@ def test_expanded_group_keeps_the_source_line_inside_its_width(browser, web_base
     只能在展开态钉：实测净态两行 help 都被折叠掉（`helpVisible=[]`），脏态才有 `[[0,1]]`；
     在收起态钉它就是判据写法 3（禁止的那种）。
     """
-    page, errors = open_settings(browser, web_base_url, {
-        "configured_unrecognized": DIRTY_VALUE,
-        "configured_hint": HINT,
-    }, viewport=DEAD_ZONE_VIEWPORT)
+    page, errors = open_settings(
+        browser,
+        web_base_url,
+        {
+            "configured_unrecognized": DIRTY_VALUE,
+            "configured_hint": HINT,
+        },
+        viewport=DEAD_ZONE_VIEWPORT,
+    )
     try:
         apply_skin(page, skin)
         require_expanded(page, "来源说明只在展开态可见")
@@ -1133,10 +1229,12 @@ def test_expanded_group_keeps_the_source_line_inside_its_width(browser, web_base
         for i in range(count):
             box = rows.nth(i).evaluate(
                 "el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, "
-                "text: el.textContent.slice(0, 40)})")
+                "text: el.textContent.slice(0, 40)})"
+            )
             assert box["scrollWidth"] <= box["clientWidth"], (
                 f"第 {i} 行来源说明横向溢出：scrollWidth={box['scrollWidth']} > "
-                f"clientWidth={box['clientWidth']}，内容 {box['text']!r}")
+                f"clientWidth={box['clientWidth']}，内容 {box['text']!r}"
+            )
         assert errors == [], f"控制台有 error：{errors}"
     finally:
         page.close()

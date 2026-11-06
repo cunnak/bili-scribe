@@ -39,10 +39,14 @@ from pathlib import Path
 import pytest
 
 from video_workbench.app.errors import WBError
-from video_workbench.app.service import WorkbenchService
 from video_workbench.app.events import EventBus
 from video_workbench.app.jobs import (
-    ERROR_DETAIL_JOINER, ERROR_MESSAGE_MAX_CHARS, JobManager, error_message_for_row)
+    ERROR_DETAIL_JOINER,
+    ERROR_MESSAGE_MAX_CHARS,
+    JobManager,
+    error_message_for_row,
+)
+from video_workbench.app.service import WorkbenchService
 from video_workbench.infra.db import open_and_migrate
 from video_workbench.infra.repo import Repo
 
@@ -95,8 +99,7 @@ def _run_failing(manager, error: WBError) -> dict:
 
 def test_a_failure_with_detail_lands_the_detail_in_the_error_message_column(manager):
     """`detail` 必须进 `error_message`——它是唯一能自修的那句。"""
-    row = _run_failing(
-        manager, WBError("LLM_EMPTY", LLM_EMPTY_MESSAGE, LLM_EMPTY_DETAIL))
+    row = _run_failing(manager, WBError("LLM_EMPTY", LLM_EMPTY_MESSAGE, LLM_EMPTY_DETAIL))
     assert row["status"] == "failed", row
     # 码不能因为拼文案而变——`_llm_code` 的白名单与重试逻辑都按码走。
     assert row["error_code"] == "LLM_EMPTY", row
@@ -104,7 +107,8 @@ def test_a_failure_with_detail_lands_the_detail_in_the_error_message_column(mana
     assert LLM_EMPTY_MESSAGE in stored, stored
     assert LLM_EMPTY_DETAIL in stored, (
         "detail 被丢掉了：用户在界面上只会看到「模型这次只输出了思考过程」这半句，"
-        f"拿不到 `finish_reason=length` 那个可自修的原文。实得 {stored!r}")
+        f"拿不到 `finish_reason=length` 那个可自修的原文。实得 {stored!r}"
+    )
 
 
 def test_a_failure_without_detail_stays_exactly_the_message(manager):
@@ -129,7 +133,11 @@ def test_the_joiner_is_a_single_owner_in_the_backend():
     # 多行的 detail（INTERNAL 那条是 traceback.format_exc()）只留最后一行——
     # 全文明细在 `result_json` 的 log 与日志文件里，主文案不许撑成一屏。
     tail = error_message_for_row(
-        {"message": "内部错误", "detail": "Traceback (most recent call last):\n  File x\nTypeError: 炸了"})
+        {
+            "message": "内部错误",
+            "detail": "Traceback (most recent call last):\n  File x\nTypeError: 炸了",
+        }
+    )
     assert tail == "内部错误 —— TypeError: 炸了", tail
     long = error_message_for_row({"message": "短", "detail": "啊" * 2000})
     assert len(long) <= 600, len(long)
@@ -160,7 +168,8 @@ def _poll_failure_branch(source: str) -> str:
     start = source.find(marker)
     assert start >= 0, (
         "找不到 pollJob 的失败分支（那段文案或判断被改名了？）——这条锁现在空转，"
-        "请改成新形状，别让它绿着骗人")
+        "请改成新形状，别让它绿着骗人"
+    )
     depth = 0
     for idx in range(source.index("{", start), len(source)):
         ch = source[idx]
@@ -169,7 +178,7 @@ def _poll_failure_branch(source: str) -> str:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return source[start:idx + 1]
+                return source[start : idx + 1]
     pytest.fail("失败分支的花括号没闭合，提取器要重写")
 
 
@@ -188,24 +197,24 @@ def test_the_summary_page_reads_only_keys_that_exist_on_the_job_row(tmp_path):
     `error` 不是列 ⇒ 还原成旧写法必红；反过来，加一列（比如将来真做 `error_detail`）
     也不会让这条误红，因为列集合是现读的。
     """
-    branch = _poll_failure_branch(
-        (_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+    branch = _poll_failure_branch((_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
     keys = set(re.findall(r"\bjob\.([a-z_][a-z0-9_]*)", branch))
     assert keys, f"失败分支里一个 job.<键> 都没读到，这条空转了：{branch!r}"
     columns = _job_row_columns(tmp_path)
     unknown = sorted(keys - columns)
     assert unknown == [], (
         f"总结页在读不存在于 wb_job 的键 {unknown}——界面上它会恒 undefined，"
-        f"失败原因被丢掉，只剩写死的「生成失败」。真列集合：{sorted(columns)}")
+        f"失败原因被丢掉，只剩写死的「生成失败」。真列集合：{sorted(columns)}"
+    )
 
 
 def test_the_summary_page_actually_uses_the_message_column():
     """控制腿：上一条不许是靠「分支里根本没有 job. 引用」蒙绿的。"""
-    branch = _poll_failure_branch(
-        (_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+    branch = _poll_failure_branch((_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
     assert "job.error_message" in branch, (
         "失败分支不再读 error_message —— 要么换了键（那上一条得跟着重设计），"
-        f"要么整句被删。实读分支：\n{branch}")
+        f"要么整句被删。实读分支：\n{branch}"
+    )
 
 
 def test_the_page_does_not_rebuild_the_sentence_the_backend_already_joined(tmp_path):
@@ -213,11 +222,11 @@ def test_the_page_does_not_rebuild_the_sentence_the_backend_already_joined(tmp_p
 
     两处各拼一次 = 同一个事实两句话，将来后端改分隔符，界面就出现「甲 —— 乙 —— 乙」。
     """
-    source = _strip_js_comments(
-        (_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+    source = _strip_js_comments((_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
     assert "detail" not in source.lower(), (
         "summary.js 开始自己处理 detail 了——拼接规则的唯一出处是 "
-        "app/jobs.py 的 error_message_for_row，第二处 owner 会让两边措辞漂开")
+        "app/jobs.py 的 error_message_for_row，第二处 owner 会让两边措辞漂开"
+    )
 
 
 def test_the_scan_domain_switch_changes_the_file_not_the_verdict(monkeypatch, tmp_path):
@@ -229,16 +238,15 @@ def test_the_scan_domain_switch_changes_the_file_not_the_verdict(monkeypatch, tm
     """
     monkeypatch.setenv("WB_WEB_JS_DIR", str(WEB_JS_DEFAULT))
     assert _js_dir() == WEB_JS_DEFAULT
-    branch = _poll_failure_branch(
-        (_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+    branch = _poll_failure_branch((_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
     columns = _job_row_columns(tmp_path)
     assert set(re.findall(r"\bjob\.([a-z_][a-z0-9_]*)", branch)) - columns == set()
     assert "job.error_message" in branch
     # 指到一份不存在的目录时，必须**炸**而不是静默通过。
     monkeypatch.setenv("WB_WEB_JS_DIR", str(tmp_path / "no-such-js"))
     with pytest.raises((FileNotFoundError, AssertionError)):
-        _poll_failure_branch(
-            (_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+        _poll_failure_branch((_js_dir() / "pages" / "summary.js").read_text(encoding="utf-8"))
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # task-68（B 方案）：提示条 =「主文案一句 + 真展开」，窄窗不许横向撑破。
@@ -264,7 +272,8 @@ def test_the_scan_domain_switch_changes_the_file_not_the_verdict(monkeypatch, tm
 # 整文件禁令会把别人的正常写法判成违规。
 # ═══════════════════════════════════════════════════════════════════════
 
-from test_settings_role_warning_ui import browser, web_base_url  # noqa: E402  既有夹具
+from test_settings_role_warning_ui import browser as browser  # noqa: E402,F401  既有夹具
+from test_settings_role_warning_ui import web_base_url as web_base_url  # noqa: E402,F401
 
 #: 提示条正文与展开开关的节点 id（逐字来自 `summary.js` 的 setErrorBar）。
 #: A 组用它取扫描域，B 组用它查 DOM —— 同一条字符串只写一次。
@@ -279,7 +288,7 @@ LABEL_OPEN = "展开"
 LABEL_CLOSE = "收起"
 
 #: 两个 paint 路径共用的渲染口（`summary.js:1204` / `:1249` 各一次）。
-TOGGLE_CALL_SITES = "setErrorBar(document.getElementById(\"summary-error\"))"
+TOGGLE_CALL_SITES = 'setErrorBar(document.getElementById("summary-error"))'
 
 #: 四条判据的短名，渲染面与牙齿共用一份，别在两处各写一遍。
 CHECKS = ("node_inside_parent", "no_clipped_content", "page_no_h_scroll", "no_sibling_overlap")
@@ -297,7 +306,7 @@ def _css_rule(selector: str) -> str:
     assert start >= 0, f"summary.css 里找不到 {selector} —— 实现不在了"
     brace = css.index("{", start)
     end = css.index("}", brace)
-    return css[start:end + 1]
+    return css[start : end + 1]
 
 
 def _js_source() -> str:
@@ -321,8 +330,9 @@ def _strip_body() -> str:
 
 def _node_line(marker: str, what: str) -> str:
     """取**唯一**一行建节点源码：命中数不是 1 就红，别静默读错行。"""
-    lines = [line.strip() for line in _strip_js_comments(_js_source()).splitlines()
-             if marker in line]
+    lines = [
+        line.strip() for line in _strip_js_comments(_js_source()).splitlines() if marker in line
+    ]
     assert len(lines) == 1, f"{what} 应当只有 1 行，实测 {len(lines)} 行：{lines}"
     return lines[0]
 
@@ -346,27 +356,36 @@ def _column(message: str, detail: str = "") -> str:
 
 # 撑破容器的东西是端点原话里那两串**不可断 ASCII**（invalid_request_error /
 # messages[12].content），不是中文长度。上一轮实测：节点 275px 而父 .sum-bar 只有 92px。
-_UNBREAKABLE_HEAD = ('模型返回的 JSON 无法解析，原始响应体片段：{"error":'
-                     '{"type":"invalid_request_error","message":"')
+_UNBREAKABLE_HEAD = (
+    '模型返回的 JSON 无法解析，原始响应体片段：{"error":{"type":"invalid_request_error","message":"'
+)
 _UNBREAKABLE_MID = "请检查 model、messages 条数、以及一段被截断的上下文"
 _UNBREAKABLE_TAIL = '","param":"messages[12].content"}}'
 #: 端点 403 的真实响应体一行（上一轮现场抄来的形状，里面有那两串不可断 ASCII）。
-CF_BODY = ('{"error":{"type":"invalid_request_error","message":"'
-           + _UNBREAKABLE_MID + '","param":"messages[12].content"}}')
+CF_BODY = (
+    '{"error":{"type":"invalid_request_error","message":"'
+    + _UNBREAKABLE_MID
+    + '","param":"messages[12].content"}}'
+)
 _UNBREAKABLE = _UNBREAKABLE_HEAD + _UNBREAKABLE_MID + _UNBREAKABLE_TAIL
 
 #: 短列：一行放得下（`detail` 为空 ⇒ 后端逐字返回 message，不拼分隔符）。
 COLUMN_SHORT = _column("连不上那个地址，检查网络或 base_url。")
 #: 真 403 那一形：message + 「 —— 」+ 端点响应体一行。
-COLUMN_403 = error_message_for_row({"code": "LLM_FORBIDDEN",
-                                    "message": "模型这次请求被端点拒了（403）。",
-                                    "detail": CF_BODY})
+COLUMN_403 = error_message_for_row(
+    {"code": "LLM_FORBIDDEN", "message": "模型这次请求被端点拒了（403）。", "detail": CF_BODY}
+)
 #: 封顶列：正好 600（`ERROR_MESSAGE_MAX_CHARS` 现读 = 600）。
 _CAPPED_MESSAGE = _UNBREAKABLE_HEAD + _UNBREAKABLE_MID * 8 + _UNBREAKABLE_TAIL
-COLUMN_CAPPED = _column(_CAPPED_MESSAGE,
-                        detail="Traceback (most recent call last):" + "\n"
-                               + "  假的一行栈" + "\n"
-                               + "ValueError: " + _CAPPED_MESSAGE)
+COLUMN_CAPPED = _column(
+    _CAPPED_MESSAGE,
+    detail="Traceback (most recent call last):"
+    + "\n"
+    + "  假的一行栈"
+    + "\n"
+    + "ValueError: "
+    + _CAPPED_MESSAGE,
+)
 
 # 三档视口：360/375/440 是合同点名的三档，高度只影响截图取景。
 _VIEWPORTS = [(360, 740), (375, 812), (440, 800)]
@@ -379,11 +398,17 @@ _CELL_IDS = [f"{vw}-{shape}" for (vw, _vh, shape) in _CELLS]
 _VP_IDS = [f"{vw}-{vh}" for (vw, vh) in _VIEWPORTS]
 
 
-\
 #: 只有这七个方法走真后端，其余留在 mock（最小干预，同
 #: `test_summary_real_backend_ui.py` 的 BRIDGE_JS 口径）。
-REAL_METHODS = ["collection.list", "job.get", "library.list", "summary.get",
-                "summary.models", "summary.roles", "summary.start"]
+REAL_METHODS = [
+    "collection.list",
+    "job.get",
+    "library.list",
+    "summary.get",
+    "summary.models",
+    "summary.roles",
+    "summary.start",
+]
 
 #: 夹具的落点。只写这一棵 Temp 树；真实 `~/.bili-scribe` 与 `~/.video-workbench`
 #: 一字不动（AGENTS 第四节第 3 条的前后 sha 核对交给独立探针跑）。
@@ -391,8 +416,11 @@ SVC_HOME = Path(tempfile.gettempdir()) / "wb_t68_strip_fixture"
 
 #: 端点 403 的响应体那一形，逐字抄自上一轮现场探针
 #: `C:/Users/b1596/AppData/Local/Temp/wb_narrow/t66_round7.py` 的 CF_BODY。
-_CF_BODY = ('{"error":{"type":"invalid_request_error","message":'
-            + _UNBREAKABLE_MID + ',"param":"messages[12].content"}}')
+_CF_BODY = (
+    '{"error":{"type":"invalid_request_error","message":'
+    + _UNBREAKABLE_MID
+    + ',"param":"messages[12].content"}}'
+)
 #: 一条 INTERNAL 形状：message 里塞满不可断 ASCII，交给后端截到封顶值。
 _BIG = _UNBREAKABLE_HEAD + _UNBREAKABLE_MID * 8 + _UNBREAKABLE_TAIL
 
@@ -410,13 +438,18 @@ def _chat_huge(self, *args, **kwargs):
 def _chat_empty_detail(self, *args, **kwargs):
     """短列那一形：产品的 NETWORK 文案 + 空 detail ⇒ 后端逐字返回 message，不拼分隔符。"""
     from video_workbench.infra.llm import ChatError
+
     raise ChatError("NETWORK", "连不上大模型服务", "")
 
 
 #: 形状 → 要换掉的 chat。net62 不换：真打 `http://127.0.0.1:9/v1` 被本地拒连，
 #: 那一列完全由产品的错误管道与拼接 owner 产出（上一轮实测 len=62）。
-SHAPE_PATCH = {"net62": None, "cf403": _chat_forbidden,
-               "cbig600": _chat_huge, "short8": _chat_empty_detail}
+SHAPE_PATCH = {
+    "net62": None,
+    "cf403": _chat_forbidden,
+    "cbig600": _chat_huge,
+    "short8": _chat_empty_detail,
+}
 
 
 def _write_cfg(home: Path, base_url: str) -> Path:
@@ -449,19 +482,23 @@ def _seed_project(svc, title: str, home: Path) -> str:
     root.mkdir(parents=True)
     made = svc.repo.project_create(title=title, bvid="", root_dir=str(root))
     pid = made if isinstance(made, str) else (made or {}).get("id", "")
-    segs = [{"t": float(i * 8), "duration": 8.0, "text": f"第 {i} 句：用来把失败路径跑到。"}
-            for i in range(1, 25)]
+    segs = [
+        {"t": float(i * 8), "duration": 8.0, "text": f"第 {i} 句：用来把失败路径跑到。"}
+        for i in range(1, 25)
+    ]
     svc.repo.transcript_upsert(pid, segments=segs)
-    (root / "transcript.json").write_text(json.dumps({"segments": segs}, ensure_ascii=False),
-                                          encoding="utf-8")
+    (root / "transcript.json").write_text(
+        json.dumps({"segments": segs}, ensure_ascii=False), encoding="utf-8"
+    )
     return pid
 
 
 def _failed_column(svc, pid: str) -> str:
     """从**真库**里读那一列（产品拼接 owner 的产物），不是我自己算的字符串。"""
     for _ in range(900):
-        rows = [r for r in svc.repo.job_list(limit=50, project_id=pid)
-                if r.get("status") == "failed"]
+        rows = [
+            r for r in svc.repo.job_list(limit=50, project_id=pid) if r.get("status") == "failed"
+        ]
         if rows:
             return str(rows[0].get("error_message") or "")
         time.sleep(0.05)
@@ -510,10 +547,15 @@ def strip_driver(browser, web_base_url, monkeypatch):
         opened.append(page)
         problems = []
         page.on("pageerror", lambda exc: problems.append(str(exc)))
-        page.on("console", lambda msg: problems.append(msg.text)
-                if msg.type == "error" and "favicon" not in (msg.text or "") else None)
-        page.expose_binding("__wbRpc",
-                            lambda source, payload: _logged_dispatch(payload))
+        page.on(
+            "console",
+            lambda msg: (
+                problems.append(msg.text)
+                if msg.type == "error" and "favicon" not in (msg.text or "")
+                else None
+            ),
+        )
+        page.expose_binding("__wbRpc", lambda source, payload: _logged_dispatch(payload))
         bridge_calls = []
 
         def _logged_dispatch(payload):
@@ -523,12 +565,14 @@ def strip_driver(browser, web_base_url, monkeypatch):
         page.goto(base, wait_until="domcontentloaded")
         skip = page.locator("#onb-skip")
         if skip.count() and skip.first.is_visible():
-            skip.first.click()                      # 产品自己的关法，不用 JS 硬移除节点
+            skip.first.click()  # 产品自己的关法，不用 JS 硬移除节点
         page.wait_for_function(
             "() => !document.getElementById('onb-overlay') || "
             "getComputedStyle(document.getElementById('onb-overlay')).display === 'none'",
-            timeout=15000)
-        page.evaluate("""(methods) => {
+            timeout=15000,
+        )
+        page.evaluate(
+            """(methods) => {
                           const real = new Set(methods);
                           const legacy = WB.rpc;
                           WB.rpc = function (name, params, opts) {
@@ -541,21 +585,26 @@ def strip_driver(browser, web_base_url, monkeypatch):
                                 throw new Error(err.message || ('后端调用失败: ' + name));
                               });
                           };
-                        }""", REAL_METHODS)
+                        }""",
+            REAL_METHODS,
+        )
         page.evaluate("() => window.WB.router.go('summary')")
         page.wait_for_selector(f"#{BAR_ID}", state="attached", timeout=15000)
         page.wait_for_function(
             "(pid) => { const sel = document.getElementById('sum-project');"
             " return !!sel && Array.from(sel.options).some(o => o.value === pid); }",
-            arg=pid, timeout=15000)
-        page.select_option("#sum-project", pid)      # 真下拉，不是硬塞 state.projectId
-        page.click("#sum-start")                     # 真按钮：产品的 start() 全链路
+            arg=pid,
+            timeout=15000,
+        )
+        page.select_option("#sum-project", pid)  # 真下拉，不是硬塞 state.projectId
+        page.click("#sum-start")  # 真按钮：产品的 start() 全链路
         page.wait_for_selector(f"#{BAR_ID}", state="visible", timeout=30000)
         page.wait_for_selector(f"#{BODY_ID}", state="attached", timeout=15000)
         assert "summary.start" in bridge_calls, (
             "真 summary.start 没发出去 ⇒ 这条提示栏不是失败列。产品 start() 在 "
             "target.has_transcript === false 时直接落界面提示并 return，"
-            "要修的是夹具（字幕得真写到盘上），不是拿别的句子当失败列量几何。")
+            "要修的是夹具（字幕得真写到盘上），不是拿别的句子当失败列量几何。"
+        )
         column = _failed_column(svc, pid)
         assert problems == [], f"页面自己报了错：{problems}"
         page.wait_for_function(
@@ -598,7 +647,8 @@ def _baseline_doc(page) -> int:
              window.__t68BaselineDoc = w;
              return w;
            }""",
-        BAR_ID)
+        BAR_ID,
+    )
 
 
 def _geometry(page):
@@ -652,7 +702,8 @@ def _geometry(page):
                }),
              };
            }""",
-        [BAR_ID, BODY_ID, list(CHECKS)])
+        [BAR_ID, BODY_ID, list(CHECKS)],
+    )
 
 
 def _toggle(page):
@@ -688,7 +739,8 @@ def _toggle(page):
                title: more.getAttribute("title"),
              };
            }""",
-        [MORE_ID, BAR_ID])
+        [MORE_ID, BAR_ID],
+    )
 
 
 def _shown_text(page) -> str:
@@ -728,8 +780,12 @@ def test_the_collapsed_strip_is_clamped_to_one_line_by_css():
     否则收起态没人负责，600 字一屏全是红。
     """
     rule = _css_rule(".sum-bar .callout__body.is-clamped")
-    for decl in ("display: -webkit-box", "-webkit-line-clamp: 1",
-                 "-webkit-box-orient: vertical", "overflow: hidden"):
+    for decl in (
+        "display: -webkit-box",
+        "-webkit-line-clamp: 1",
+        "-webkit-box-orient: vertical",
+        "overflow: hidden",
+    ):
         assert decl in rule, f"{decl} 不在收起态那段里：\n{rule}"
     assert "is-clamped" in _body_node_line(), _body_node_line()
     strip = _strip_body()
@@ -761,7 +817,7 @@ def test_the_strip_carries_the_whole_column_and_opens_it_verbatim():
     """
     body = _body_node_line()
     assert "text: text }" in body, f"正文没拿整列：{body}"
-    assert "ui.h(\"div\"" in body, f"正文节点不是块级：{body}"
+    assert 'ui.h("div"' in body, f"正文节点不是块级：{body}"
     strip = _strip_body()
     for cutter in (".split(", ".slice(", ".substring("):
         assert cutter not in strip, f"前端在切那一列（{cutter}）= 第二个拼接/截断 owner"
@@ -791,17 +847,18 @@ def test_the_toggle_is_a_real_button_and_nothing_uses_a_title_tooltip():
     assert "aria-expanded" in strip, "开关没有 aria-expanded，展开态无从判定"
     for line in strip.splitlines():
         assert "title:" not in line, f"提示条那一段出现悬浮写法：{line}"
-    assert _js_source().count(TOGGLE_CALL_SITES) >= 2, \
+    assert _js_source().count(TOGGLE_CALL_SITES) >= 2, (
         "两个 paint 路径必须都走同一个渲染口，否则收起/展开只修一半"
+    )
 
 
-\
 # ── B 组：几何（chromium，被测目录走既有开关 WB_WEB_ROOT）─────────────────
 
 #: 截图目录。`build/` 在 `.gitignore` 里，先例同 `test_settings_role_warning_ui.py`
 #: 的 `ACCEPT_DIR = ROOT/"build"/"accept"`。要换地方用 T68_SHOT_DIR，不改代码。
-SHOT_DIR = Path(os.environ.get("T68_SHOT_DIR")
-                or (ROOT / "build" / "accept" / "wb_summary_error_t68"))
+SHOT_DIR = Path(
+    os.environ.get("T68_SHOT_DIR") or (ROOT / "build" / "accept" / "wb_summary_error_t68")
+)
 
 
 def _shot(page, name: str, element: str = "") -> str:
@@ -825,13 +882,11 @@ def _shot(page, name: str, element: str = "") -> str:
 
 def _lengths(page, column: str) -> None:
     """把「哪一格是哪一形、那一形多长」打进 stdout —— 交付表里的数就来自这里。"""
-    print(f"[t68] {page.viewport_size['width']}px 列长={len(column)} "
-          f"码点前 12={column[:12]!r}")
+    print(f"[t68] {page.viewport_size['width']}px 列长={len(column)} 码点前 12={column[:12]!r}")
 
 
 @pytest.mark.parametrize("vw,vh,shape", _CELLS, ids=_CELL_IDS)
-def test_the_strip_stays_inside_its_parent_with_no_clipped_content(strip_driver,
-                                                                   vw, vh, shape):
+def test_the_strip_stays_inside_its_parent_with_no_clipped_content(strip_driver, vw, vh, shape):
     """三档视口 × 三个真失败形状，收起态与展开态各交四个数（九宫格 18 组读数）。
 
     四条判据：① 正文盒 rect.right ≤ 父（`.sum-bar`）rect.right；② 正文盒
@@ -883,13 +938,15 @@ def test_the_toggle_is_reachable_and_reveals_the_whole_column(strip_driver, vw, 
     """
     page, column = strip_driver((vw, vh), "cbig600")
     _lengths(page, column)
-    assert len(column) == ERROR_MESSAGE_MAX_CHARS, \
+    assert len(column) == ERROR_MESSAGE_MAX_CHARS, (
         f"这一格的列应当正好封顶 {ERROR_MESSAGE_MAX_CHARS}，实测 {len(column)}"
+    )
     _baseline_doc(page)
     closed = _geometry(page)
     assert closed["fails"] == [], closed
-    assert closed["nodeHeight"] < 120, \
+    assert closed["nodeHeight"] < 120, (
         f"收起态应当只有一行，实测 {closed['nodeHeight']}px（line-clamp 没生效）"
+    )
     toggle = _toggle(page)
     assert not toggle.get("missing") and not toggle.get("hidden"), toggle
     assert toggle["tag"] == "button", toggle
@@ -897,8 +954,9 @@ def test_the_toggle_is_reachable_and_reveals_the_whole_column(strip_driver, vw, 
     assert toggle["label"] == LABEL_OPEN, toggle
     assert toggle["expanded"] == "false", toggle
     assert toggle["height"] > 0, f"开关内容盒高 = 0：{toggle}"
-    assert toggle["barTop"] <= toggle["top"] and toggle["bottom"] <= toggle["barBottom"] + 0.5, \
+    assert toggle["barTop"] <= toggle["top"] and toggle["bottom"] <= toggle["barBottom"] + 0.5, (
         f"开关不在提示条盒内：{toggle}"
+    )
     assert toggle["hitSelf"], f"elementFromPoint 没命中开关本身：{toggle}"
 
     page.click(f"#{MORE_ID}")
@@ -930,7 +988,8 @@ def _clip_truth(page):
     是对的。本函数与产品自己的 `scrollHeight > clientHeight` 是两条不同的腿：
     它动 class，产品动的是自己那次读取，两边同时成立才算数。
     """
-    return page.evaluate("""(arg) => {
+    return page.evaluate(
+        """(arg) => {
       const body = document.getElementById(arg.bodyId);
       const more = document.getElementById(arg.moreId);
       if (!body) { return {missing: true}; }
@@ -942,7 +1001,9 @@ def _clip_truth(page):
               reallyClipped: freeH > clampedH + 1,
               toggleShown: !!more && getComputedStyle(more).display !== 'none',
               bodyWidth: Math.round(body.getBoundingClientRect().width)};
-    }""", {"bodyId": BODY_ID, "moreId": MORE_ID})
+    }""",
+        {"bodyId": BODY_ID, "moreId": MORE_ID},
+    )
 
 
 def test_a_one_line_message_does_not_offer_a_toggle(strip_driver):
@@ -1007,13 +1068,15 @@ _GEOM_TEST = "test_the_strip_stays_inside_its_parent_with_no_clipped_content"
 _REACH_TEST = "test_the_toggle_is_reachable_and_reveals_the_whole_column"
 
 
-TEETH_EXPR = ("not a_failure_with_detail_lands and not a_failure_without_detail_stays"
-              " and not joiner_is_a_single_owner and not reads_only_keys_that_exist"
-              " and not actually_uses_the_message_column"
-              " and not does_not_rebuild_the_sentence"
-              " and not scan_domain_switch_changes and not burn_when"
-              # 控制组只在外层跑一次：让它在牙齿子进程里被选中就是无限递归。
-              " and not untouched_copy")
+TEETH_EXPR = (
+    "not a_failure_with_detail_lands and not a_failure_without_detail_stays"
+    " and not joiner_is_a_single_owner and not reads_only_keys_that_exist"
+    " and not actually_uses_the_message_column"
+    " and not does_not_rebuild_the_sentence"
+    " and not scan_domain_switch_changes and not burn_when"
+    # 控制组只在外层跑一次：让它在牙齿子进程里被选中就是无限递归。
+    " and not untouched_copy"
+)
 
 #: 每个变体的期望红名单，逐字抄自现跑读数（`Temp/wb_t68/calib4_all.txt`，
 #: 2026-11-05 20:39 起那一段；夹具改成每格独立 `mkdtemp` home 之后重测）。
@@ -1033,20 +1096,24 @@ TEETH_EXPECT = {
     # 窄档 8 字列不再被裁（实测 clampedH 39 == freeH 39）⇒ 「开关出现条件 =
     # 真被裁」的对照红。calib4 那轮还多红三档可达格，是夹具标题把整页推出
     # 视口造成的假红；短标题 + nodeInViewport 之后 calib5 实测只剩这 2 条。
-    "clamp2": {"test_a_one_line_message_does_not_offer_a_toggle",
-               "test_the_collapsed_strip_is_clamped_to_one_line_by_css"},
+    "clamp2": {
+        "test_a_one_line_message_does_not_offer_a_toggle",
+        "test_the_collapsed_strip_is_clamped_to_one_line_by_css",
+    },
     # overflow-wrap: anywhere -> normal：不可断 ASCII 串重新撑破父矩形。
     # 静态横向锁 + 三档 × 三列九个几何格 + 三档可达格（实测 13 条）。
     "anywhere": {"test_the_strip_keeps_the_unbreakable_tokens_wrappable"}
-                | {f"{_GEOM_TEST}[{i}]" for i in _CELL_IDS}
-                | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
+    | {f"{_GEOM_TEST}[{i}]" for i in _CELL_IDS}
+    | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
     # 前端 text.split(" ")[0]：正文不再携带整列 = 自己造第二份截断规则。
     # 静态两条 + 夹具的对齐等待（body.textContent === 库里那一列）等不到
     # ⇒ 九个几何格与三个可达格一起红（实测 14 条，这一支最慢：每格等 30s）。
-    "split": {"test_the_collapsed_strip_is_clamped_to_one_line_by_css",
-              "test_the_strip_carries_the_whole_column_and_opens_it_verbatim"}
-             | {f"{_GEOM_TEST}[{i}]" for i in _CELL_IDS}
-             | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
+    "split": {
+        "test_the_collapsed_strip_is_clamped_to_one_line_by_css",
+        "test_the_strip_carries_the_whole_column_and_opens_it_verbatim",
+    }
+    | {f"{_GEOM_TEST}[{i}]" for i in _CELL_IDS}
+    | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
     # 提示条节点 div -> span：行内节点挂不住内滚 body 与开关。
     # 静态块容器那条。calib4 那轮的三档可达格红同样是标题造成的假红，
     # calib5 实测只剩 1 条 —— 行内节点在短标题下还点得着，
@@ -1055,7 +1122,7 @@ TEETH_EXPECT = {
     # 开关挂 title=：悬浮写法在 WebView2 里等于没有，用户点不到也看不见。
     # 静态禁令 + 三档可达格（实测 4 条）。
     "title": {"test_the_toggle_is_a_real_button_and_nothing_uses_a_title_tooltip"}
-             | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
+    | {f"{_REACH_TEST}[{i}]" for i in _VP_IDS},
 }
 
 
@@ -1070,8 +1137,12 @@ def _teeth_copy() -> Path:
     """
     TEETH_ROOT.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix=SENTINEL, dir=str(TEETH_ROOT)))
-    shutil.copytree(str(_js_dir().parent), str(work), dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        str(_js_dir().parent),
+        str(work),
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     return work
 
 
@@ -1097,13 +1168,30 @@ def _run_suite(work: Path, expr: str):
     env["WB_WEB_ROOT"] = str(work)
     env["T68_TEETH_CHILD"] = "1"
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", __file__, "-q", "-rf", "-p", "no:randomly",
-         "--tb=line", "-k", expr],
-        cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=900,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            __file__,
+            "-q",
+            "-rf",
+            "-p",
+            "no:randomly",
+            "--tb=line",
+            "-k",
+            expr,
+        ],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=900,
         # 这台机器的控制台编码是 GBK：不带 encoding 时子进程 stdout 会在读取线程里
         # 抛 UnicodeDecodeError，proc.stdout 直接变 None（实测 TypeError: expected
         # string or bytes-like object, got 'NoneType'）。取证管道断了不等于判据没牙。
-        encoding="utf-8", errors="replace")
+        encoding="utf-8",
+        errors="replace",
+    )
     failed = set(re.findall(r"^FAILED \S+::(\S+)", proc.stdout, flags=re.M))
     return failed, proc.stdout + proc.stderr, proc.returncode
 
@@ -1126,10 +1214,11 @@ def test_the_untouched_copy_itself_runs_the_teeth_scope_green():
         failed, dump, rc = _run_suite(work, TEETH_EXPR)
     finally:
         shutil.rmtree(str(work), ignore_errors=True)
-    assert rc == 0, (f"干净副本就 rc={rc}（期望 0）⇒ 红是副本/环境带来的，"
-                     f"五变体那份名单全部不可信：\n{dump[-1500:]}")
-    assert not failed, (f"干净副本红了 {len(failed)} 条：{sorted(failed)}"
-                        f"\n{dump[-1500:]}")
+    assert rc == 0, (
+        f"干净副本就 rc={rc}（期望 0）⇒ 红是副本/环境带来的，"
+        f"五变体那份名单全部不可信：\n{dump[-1500:]}"
+    )
+    assert not failed, f"干净副本红了 {len(failed)} 条：{sorted(failed)}\n{dump[-1500:]}"
 
 
 @pytest.mark.parametrize("variant", sorted(TEETH_EXPECT))
@@ -1146,27 +1235,39 @@ def test_the_strip_checks_burn_when_the_fix_is_removed(variant):
     work = _teeth_copy()
     try:
         if variant == "clamp2":
-            _patch_file(work, "css/summary.css", "-webkit-line-clamp: 1;",
-                        "-webkit-line-clamp: 2;")
+            _patch_file(work, "css/summary.css", "-webkit-line-clamp: 1;", "-webkit-line-clamp: 2;")
         elif variant == "anywhere":
-            _patch_file(work, "css/summary.css", "overflow-wrap: anywhere;",
-                        "overflow-wrap: normal;")
+            _patch_file(
+                work, "css/summary.css", "overflow-wrap: anywhere;", "overflow-wrap: normal;"
+            )
         elif variant == "split":
-            _patch_file(work, "js/pages/summary.js",
-                        'id: "summary-error-body", text: text',
-                        'id: "summary-error-body", text: text.split(" ")[0]')
+            _patch_file(
+                work,
+                "js/pages/summary.js",
+                'id: "summary-error-body", text: text',
+                'id: "summary-error-body", text: text.split(" ")[0]',
+            )
         elif variant == "inline":
-            _patch_file(work, "js/pages/summary.js",
-                        'ui.h("div", { class: "callout callout--warn", id: "summary-error"',
-                        'ui.h("span", { class: "callout callout--warn", id: "summary-error"')
+            _patch_file(
+                work,
+                "js/pages/summary.js",
+                'ui.h("div", { class: "callout callout--warn", id: "summary-error"',
+                'ui.h("span", { class: "callout callout--warn", id: "summary-error"',
+            )
         elif variant == "title":
-            _patch_file(work, "js/pages/summary.js", 'class: "callout__more"',
-                        'class: "callout__more", title: text')
+            _patch_file(
+                work,
+                "js/pages/summary.js",
+                'class: "callout__more"',
+                'class: "callout__more", title: text',
+            )
         else:
             pytest.fail(f"未知变体 {variant}")
         failed, dump, rc = _run_suite(work, TEETH_EXPR)
         if rc not in (0, 1):
-            pytest.fail(f"子进程退出码 {rc} 不在 (0,1) —— 收集/内部错，不能读成「没红」：\n{dump[-1500:]}")
+            pytest.fail(
+                f"子进程退出码 {rc} 不在 (0,1) —— 收集/内部错，不能读成「没红」：\n{dump[-1500:]}"
+            )
         hit_resident = [name for name in RESIDENT_TESTS if name in failed]
         assert not hit_resident, f"常驻用例被牙齿打红了：{hit_resident}\n{dump[-1200:]}"
         assert failed, f"{variant}：一个都没红 = 判据没牙（或补丁没打到东西）\n{dump[-1500:]}"

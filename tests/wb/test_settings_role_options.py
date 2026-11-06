@@ -53,18 +53,22 @@ import importlib
 import json
 import re
 
-import pytest
-
-from video_workbench.core import prompt_source as ps
+from test_summary_real_backend_ui import (
+    browser as browser,  # pytest fixture（透传给 real_page）
+)
 
 # 桥、fixture 与「看得见」的定义都从真后端那份复用：两处对同一件事只许有一套读法。
 from test_summary_real_backend_ui import (  # noqa: F401
-    real_page,          # pytest fixture：真 service + 已走进 设置→模型 的页面
-    browser,            # pytest fixture（透传给 real_page）
-    real_service,       # pytest fixture（透传给 real_page）
-    web_base_url,       # pytest fixture（透传给 real_page）
+    real_page as real_page,  # pytest fixture：真 service + 已走进 设置→模型 的页面
 )
-from test_settings_role_warning_ui import require_expanded  # noqa: E402
+from test_summary_real_backend_ui import (
+    real_service as real_service,  # pytest fixture（透传给 real_page）
+)
+from test_summary_real_backend_ui import (
+    web_base_url as web_base_url,  # pytest fixture（透传给 real_page）
+)
+
+from video_workbench.core import prompt_source as ps
 
 NL = chr(10)
 RETIRED_VALUE = "standard"
@@ -75,12 +79,13 @@ def _pkg():
 
 
 def _role_select(page):
-    return page.locator('.field', has_text="默认角色").locator("select").first
+    return page.locator(".field", has_text="默认角色").locator("select").first
 
 
 def _option_keys(page) -> list[str]:
-    return [k for k in _role_select(page).locator("option").evaluate_all(
-        "els => els.map(e => e.value)")]
+    return [
+        k for k in _role_select(page).locator("option").evaluate_all("els => els.map(e => e.value)")
+    ]
 
 
 def _reopen_settings(page, backend):
@@ -111,9 +116,13 @@ def _refusing_factory(backend):
 
     def refusing(method, params=None):
         if method == "summary.roles":
-            return {"ok": False, "request_id": None,
-                    "error": {"code": "TEST", "message": "这条用例故意让后端不答"}}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": {"code": "TEST", "message": "这条用例故意让后端不答"},
+            }
         return original(method, params)
+
     return original, refusing
 
 
@@ -146,8 +155,8 @@ def test_the_role_options_follow_the_backend_when_it_answers(real_page):
         if method == "summary.roles" and envelope.get("ok"):
             rows = envelope["data"]["roles"]
             envelope["data"]["roles"] = [
-                dict(row, key=key, name=key, passes=1)
-                for key, row in zip(injected, rows)]
+                dict(row, key=key, name=key, passes=1) for key, row in zip(injected, rows)
+            ]
         return envelope
 
     backend.dispatch = patched
@@ -155,15 +164,19 @@ def test_the_role_options_follow_the_backend_when_it_answers(real_page):
         delta = _reopen_settings(page, backend)
         assert delta > 0, (
             "改完桥之后页面一次都没重新读 summary.roles —— 下面的比较是在拿旧渲染结果"
-            "或 mock 名单说话，没有意义")
+            "或 mock 名单说话，没有意义"
+        )
         keys = _option_keys(page)
         assert keys == injected, (
             f"后端可用时下拉框没有逐位照抄后端的名单（得到 {keys}，注入的是 {injected}）——"
-            "兜底表混进了正常渲染路径，或者顺序被本地重排了")
-        labels = _role_select(page).locator("option").evaluate_all(
-            "els => els.map(e => e.textContent)")
+            "兜底表混进了正常渲染路径，或者顺序被本地重排了"
+        )
+        labels = (
+            _role_select(page).locator("option").evaluate_all("els => els.map(e => e.textContent)")
+        )
         assert all(label.endswith("（单轮）") for label in labels), (
-            f"注入项 passes=1，标签却没按后端给的轮数打：{labels}")
+            f"注入项 passes=1，标签却没按后端给的轮数打：{labels}"
+        )
     finally:
         backend.dispatch = original
     assert errors == [], f"控制台有 error：{errors}"
@@ -193,16 +206,18 @@ def test_the_fallback_table_keeps_the_page_usable_when_the_backend_refuses(real_
         keys = _option_keys(page)
         assert keys, (
             "后端 reject 后角色下拉框一个选项都没有：兜底表被删了 —— "
-            "这正是原口径（删掉字面量表）会造成的后果")
+            "这正是原口径（删掉字面量表）会造成的后果"
+        )
         live = set(_pkg().ROLE_KEYS)
-        assert set(keys) <= live, (
-            f"兜底表里有后端不存在角色：{set(keys) - live} —— 选了也发不出去")
+        assert set(keys) <= live, f"兜底表里有后端不存在角色：{set(keys) - live} —— 选了也发不出去"
         assert not page.get_by_text("读不到设置").count(), (
-            "只挂了一个方法，整页不许塌（summary.roles 的失败不能升级成页面级错误）")
+            "只挂了一个方法，整页不许塌（summary.roles 的失败不能升级成页面级错误）"
+        )
         selected = _role_select(page).evaluate("el => el.value")
         assert selected in keys, (
             f"reject 时选中值 {selected!r} 不在选项里（DOM 会静默退到第一项，"
-            f"用户顺手一保存就被改了配置）；配置原文：{configured[:120]}")
+            f"用户顺手一保存就被改了配置）；配置原文：{configured[:120]}"
+        )
     finally:
         backend.dispatch = original
     assert errors == [], f"控制台有 error：{errors}"
@@ -220,6 +235,7 @@ def _fallback_table_keys() -> list[str]:
     不拿整个文件里所有 `["x","y"]` 形状去猜 —— 那样任何一个 select 加选项都会误报。
     """
     import test_settings_role_warning_ui as si
+
     source = (si.WEB_DIR / "js" / "pages" / "settings.js").read_text(encoding="utf-8")
     at = source.index('path: "llm.role"')
     nxt = source.index('path: "', at + 1)
@@ -243,9 +259,10 @@ def test_the_static_fallback_is_an_ordered_subset_without_retired_keys():
     for key in table:
         assert key in live, f"兜底表里的 {key!r} 不在后端 ROLE_KEYS：选了发不出去"
     assert table == [k for k in live if k in set(table)], (
-        f"兜底表相对顺序与后端不一致：前端 {table} vs 后端 "
-        f"{[k for k in live if k in set(table)]}")
+        f"兜底表相对顺序与后端不一致：前端 {table} vs 后端 {[k for k in live if k in set(table)]}"
+    )
     assert RETIRED_VALUE not in table, (
-        f"兜底表里还留着已退役的 {RETIRED_VALUE}：reject 路径会把用户送回去")
+        f"兜底表里还留着已退役的 {RETIRED_VALUE}：reject 路径会把用户送回去"
+    )
     # 附加提示词的角色名单也来自同一处：这张表不许把 extra 文件当角色列进来。
     assert ps.EXTRA_FILE not in table, "兜底表把附加提示词文件当成角色了"

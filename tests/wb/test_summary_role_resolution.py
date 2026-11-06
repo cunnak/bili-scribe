@@ -68,7 +68,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from test_summary import FakeCtx, StubClient, configure, err, make_project, rpc
 
 SERVICE_PY = Path(__file__).resolve().parents[2] / "video_workbench" / "app" / "service.py"
@@ -92,8 +91,15 @@ CONTRACT_GUARD = (
 
 def _stub_payload(**over) -> dict:
     """三轮回角色需要 3 次回复；这里给一次就够的单轮回色，避免脚本用完。"""
-    base = {"one_line": "一句话", "summary_md": "## 正文", "key_points": ["要点"],
-            "timeline": [], "caution": "", "comment_short": "短评", "revise_note": ""}
+    base = {
+        "one_line": "一句话",
+        "summary_md": "## 正文",
+        "key_points": ["要点"],
+        "timeline": [],
+        "caution": "",
+        "comment_short": "短评",
+        "revise_note": "",
+    }
     return {**base, **over}
 
 
@@ -113,9 +119,12 @@ def _submitted_payload(service, monkeypatch, params: dict) -> dict:
     """调 `summary.start` 并把投给 job 的 payload 截下来（不起线程）。"""
     seen: dict = {}
     monkeypatch.setattr(
-        service.jobs, "submit",
+        service.jobs,
+        "submit",
         lambda job_type, project_id=None, payload=None: (
-            seen.update(payload or {}) or {"id": "job_s"}))
+            seen.update(payload or {}) or {"id": "job_s"}
+        ),
+    )
     data = rpc(service, "summary.start", params)
     return {**seen, "_return": data}
 
@@ -141,7 +150,8 @@ def test_clean_config_submits_the_default_role_without_a_notice(service, tmp_pat
     assert result["role"] == DEFAULT_KEY
     joined = "\n".join(ctx.logs)
     assert "已停用" not in joined, (
-        f"没人提交过退役角色，日志里不该出现退役说明，实际 logs={ctx.logs}")
+        f"没人提交过退役角色，日志里不该出现退役说明，实际 logs={ctx.logs}"
+    )
 
 
 # ==================================== 合同第 3 行：fallback 里的退役值 → 回落 + 说明
@@ -160,11 +170,13 @@ def test_retired_value_in_config_falls_back_at_the_service_entry(service, tmp_pa
 
     assert submitted.get("role") == DEFAULT_KEY, (
         f"{CONTRACT_GUARD}\n配置里的 {RETIRED!r} 属于 fallback，退役值应回落成 "
-        f"{DEFAULT_KEY!r}，实际投出去的是 {submitted.get('role')!r}")
+        f"{DEFAULT_KEY!r}，实际投出去的是 {submitted.get('role')!r}"
+    )
 
 
-def test_retired_value_in_config_still_produces_a_summary_and_logs_why(service, tmp_path,
-                                                                      monkeypatch):
+def test_retired_value_in_config_still_produces_a_summary_and_logs_why(
+    service, tmp_path, monkeypatch
+):
     """同一条回落必须在**任务侧**也成立，并把原因写进用户看得见的任务日志。
 
     分两层断言，因为这两层今天各断一次：
@@ -183,7 +195,8 @@ def test_retired_value_in_config_still_produces_a_summary_and_logs_why(service, 
     result = service._summary_job(ctx, {"project_id": project["id"], "kind": "fresh"})
 
     assert result["role"] == DEFAULT_KEY, (
-        f"{CONTRACT_GUARD}\n作业侧也没回落，实际 role={result['role']!r}")
+        f"{CONTRACT_GUARD}\n作业侧也没回落，实际 role={result['role']!r}"
+    )
     stored = service.repo.summary_latest(project["id"])
     assert stored["role"] == DEFAULT_KEY, f"入库行的 role 要跟着实际用的角色走：{stored}"
 
@@ -200,24 +213,27 @@ def test_replayed_job_role_is_a_fallback_not_an_explicit_choice(service, tmp_pat
     老任务。那句 role 不是这次有人选的，拿它拒绝用户等于用历史数据惩罚现在的人。
     """
     project = make_project(service, tmp_path)
-    _use_dirty_role(service, monkeypatch, "")      # 配置是干净的，脏值只来自已落库 payload
+    _use_dirty_role(service, monkeypatch, "")  # 配置是干净的，脏值只来自已落库 payload
     ctx = FakeCtx()
 
-    result = service._summary_job(ctx, {"project_id": project["id"], "kind": "fresh",
-                                        "role": RETIRED})
+    result = service._summary_job(
+        ctx, {"project_id": project["id"], "kind": "fresh", "role": RETIRED}
+    )
 
     assert result["role"] == DEFAULT_KEY, (
         f"{CONTRACT_GUARD}\n从已落库 payload 读出的 {RETIRED!r} 按合同属于 fallback，"
         f"应回落成 {DEFAULT_KEY!r}，实际 role={result['role']!r}。"
-        "若 vendor 取另一种读法，请改 task-6 的描述而不是改这条用例。")
+        "若 vendor 取另一种读法，请改 task-6 的描述而不是改这条用例。"
+    )
     assert "已停用" in "\n".join(ctx.logs), f"日志要交代原因，实际 logs={ctx.logs}"
 
 
 # ================================== 合同第 4 行：explicit 的退役值 → 硬拒 + 权威文案
 
 
-def test_explicit_retired_role_is_rejected_with_the_authority_wording(service, tmp_path,
-                                                                     monkeypatch):
+def test_explicit_retired_role_is_rejected_with_the_authority_wording(
+    service, tmp_path, monkeypatch
+):
     """显式提交 `role="standard"` → `VALIDATION`，且文案必须是权威层原话。
 
     两个断言各有分工，缺一个就漏一半：
@@ -232,13 +248,13 @@ def test_explicit_retired_role_is_rejected_with_the_authority_wording(service, t
     project = make_project(service, tmp_path)
     _use_dirty_role(service, monkeypatch, "")
 
-    error = err(service, "summary.start",
-                {"project_id": project["id"], "role": RETIRED})
+    error = err(service, "summary.start", {"project_id": project["id"], "role": RETIRED})
 
     assert error["code"] == "VALIDATION"
     assert error["message"] == AUTHORITY_WORDING, (
         f"{CONTRACT_GUARD}\n显式提交的退役值要由 resolve_role 抛权威层原话，"
-        f"实际文案是 {error['message']!r}（service 自己拼的那句没有信息量）。")
+        f"实际文案是 {error['message']!r}（service 自己拼的那句没有信息量）。"
+    )
 
 
 def test_explicit_retired_role_is_rejected_by_the_adapter_too(service, tmp_path, monkeypatch):
@@ -253,8 +269,14 @@ def test_explicit_retired_role_is_rejected_by_the_adapter_too(service, tmp_path,
 
     client = _use_dirty_role(service, monkeypatch, "")
     with pytest.raises(WBError) as exc:
-        summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "内容"}],
-                       client=client, cfg=service.cfg, ctx=FakeCtx(), role=RETIRED)
+        summarizer.run(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "内容"}],
+            client=client,
+            cfg=service.cfg,
+            ctx=FakeCtx(),
+            role=RETIRED,
+        )
     assert exc.value.code == "VALIDATION"
     assert str(exc.value.message) == AUTHORITY_WORDING
 
@@ -278,9 +300,11 @@ def test_unknown_value_in_config_is_still_rejected(service, tmp_path, monkeypatc
     error = err(service, "summary.start", {"project_id": project["id"]})
 
     assert error["code"] == "VALIDATION", (
-        f"配置里的未知角色名不能被静默修正成 {DEFAULT_KEY}，实际 error={error}")
+        f"配置里的未知角色名不能被静默修正成 {DEFAULT_KEY}，实际 error={error}"
+    )
     assert "ghost" in error["message"], (
-        f"报错必须把那个脏值本身念出来，否则用户找不到是哪一行配置错了：{error['message']!r}")
+        f"报错必须把那个脏值本身念出来，否则用户找不到是哪一行配置错了：{error['message']!r}"
+    )
 
 
 # ============================== 合同第 3 行：resolve_role 本体的四行语义（直接单元）
@@ -313,7 +337,8 @@ def test_resolve_role_matches_the_contract_table(explicit, fallback, expected):
     if expected == "FALLBACK":
         assert key == DEFAULT_KEY
         assert isinstance(notice, str) and notice.strip(), (
-            "回落到默认角色必须带回一句给人看的说明，否则日志里只能看到角色被换了")
+            "回落到默认角色必须带回一句给人看的说明，否则日志里只能看到角色被换了"
+        )
         assert "停用" in notice or "默认角色" in notice, f"说明要交代原因，实际 {notice!r}"
         return
 
@@ -333,12 +358,18 @@ def test_resolve_role_rejects_unknown_and_explicit_retired():
     if resolve is None:
         pytest.fail(f"{CONTRACT_GUARD}\n`resolve_role` 还不存在。")
 
-    for explicit, fallback in ((RETIRED, ""), (RETIRED, DEFAULT_KEY),
-                               ("ghost", ""), ("", "ghost"), ("ghost", RETIRED)):
+    for explicit, fallback in (
+        (RETIRED, ""),
+        (RETIRED, DEFAULT_KEY),
+        ("ghost", ""),
+        ("", "ghost"),
+        ("ghost", RETIRED),
+    ):
         with pytest.raises(WBError) as exc:
             resolve(explicit, fallback)
         assert exc.value.code == "VALIDATION", (
-            f"explicit={explicit!r} fallback={fallback!r} 的错误码不对：{exc.value.code}")
+            f"explicit={explicit!r} fallback={fallback!r} 的错误码不对：{exc.value.code}"
+        )
 
     # 反例的反面：唯一允许回落的那种组合。
     key, notice = resolve("", RETIRED)
@@ -361,9 +392,11 @@ def test_roles_rpc_default_is_selectable_even_with_a_dirty_config(service, tmp_p
     from video_workbench.core.summary import RETIRED_ROLES, ROLE_KEYS
 
     assert data["default"] not in RETIRED_ROLES, (
-        f"{CONTRACT_GUARD}\n脏配置下 default 吐出了退役角色 {data['default']!r}")
+        f"{CONTRACT_GUARD}\n脏配置下 default 吐出了退役角色 {data['default']!r}"
+    )
     assert data["default"] in ROLE_KEYS, (
-        f"default 必须在可用清单里，否则前端一进来就选中一个不可用的项：{data['default']!r}")
+        f"default 必须在可用清单里，否则前端一进来就选中一个不可用的项：{data['default']!r}"
+    )
     assert data["default"] == DEFAULT_KEY
 
 
@@ -379,7 +412,7 @@ CHAIN_RE = re.compile(r"self\.cfg\.llm\.role\s+or\s+summarizer\.DEFAULT_ROLE", r
 
 
 def _chain_hits(src: str) -> list[int]:
-    return [src[:m.start()].count("\n") + 1 for m in CHAIN_RE.finditer(src)]
+    return [src[: m.start()].count("\n") + 1 for m in CHAIN_RE.finditer(src)]
 
 
 def test_service_no_longer_hand_copies_the_role_chain():
@@ -395,8 +428,7 @@ def test_service_no_longer_hand_copies_the_role_chain():
     """
     src = SERVICE_PY.read_text(encoding="utf-8")
     hits = _chain_hits(src)
-    assert not hits, (
-        f"{CONTRACT_GUARD}\nservice.py 里还剩 {len(hits)} 处手抄的取值顺序：{hits}")
+    assert not hits, f"{CONTRACT_GUARD}\nservice.py 里还剩 {len(hits)} 处手抄的取值顺序：{hits}"
 
 
 #: task-6 落地**前**这六行的原样抄录（grep 于 13:29，:2612 那处占两行）。
@@ -405,10 +437,10 @@ def test_service_no_longer_hand_copies_the_role_chain():
 #: 把历史原文钉在这里，检测器就得对每一个曾经存在的实例认出来。
 PRE_FIX_LINES = (
     '            "default": (self.cfg.llm.role or summarizer.DEFAULT_ROLE),',
-    '        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()',
+    "        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()",
     '        picked = (role or base.get("role") or self.cfg.llm.role\n'
-    '                  or summarizer.DEFAULT_ROLE)',
-    '        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()',
+    "                  or summarizer.DEFAULT_ROLE)",
+    "        picked = (role or self.cfg.llm.role or summarizer.DEFAULT_ROLE).strip()",
     '        role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)',
     '        role = str(payload.get("role") or self.cfg.llm.role or summarizer.DEFAULT_ROLE)',
 )
@@ -429,10 +461,11 @@ def test_chain_detector_recognises_every_historical_instance():
     """
     for index, text in enumerate(PRE_FIX_LINES):
         assert len(_chain_hits(text)) == 1, (
-            f"检测器漏认了 task-6 前的第 {index + 1} 处手抄形状：{text!r}")
+            f"检测器漏认了 task-6 前的第 {index + 1} 处手抄形状：{text!r}"
+        )
 
     compliant = [
-        'key, notice = summarizer.resolve_role(role, self.cfg.llm.role)',
+        "key, notice = summarizer.resolve_role(role, self.cfg.llm.role)",
         '"default": summarizer.resolve_role(None, self.cfg.llm.role)[0],',
         'role = str(payload.get("role") or summarizer.resolve_role(\n'
         '    "", str(payload.get("role") or "") or self.cfg.llm.role)[0])',
@@ -442,7 +475,8 @@ def test_chain_detector_recognises_every_historical_instance():
 
     assert not _chain_hits(SERVICE_PY.read_text(encoding="utf-8")), (
         f"{CONTRACT_GUARD}\n上一条已经守住了这件事，这里重复一次是为了：当正则被改坏时，"
-        "本文件不会出现「检测器失效但用例通过」的组合。")
+        "本文件不会出现「检测器失效但用例通过」的组合。"
+    )
 
 
 def test_role_authority_lives_in_the_adapter_and_service_calls_it():
@@ -463,7 +497,8 @@ def test_role_authority_lives_in_the_adapter_and_service_calls_it():
     assert src.count("resolve_role(") >= 1, (
         f"{CONTRACT_GUARD}\nservice.py 一次都没调用 resolve_role，"
         "说明六处还各自在决定优先级（与形状检查互为正反：那条要求手抄消失，"
-        "这条要求真有人接手）")
+        "这条要求真有人接手）"
+    )
 
 
 def test_legacy_summary_row_does_not_block_a_refine(service, tmp_path, monkeypatch):
@@ -479,23 +514,41 @@ def test_legacy_summary_row_does_not_block_a_refine(service, tmp_path, monkeypat
     project = make_project(service, tmp_path)
     _use_dirty_role(service, monkeypatch, "")
     saved = service.repo.summary_insert(
-        project["id"], content={"one_line": "旧版", "summary_md": "旧版正文"},
-        content_md="旧版正文", role=RETIRED, model="stub-summary", usage={}, status="ready")
+        project["id"],
+        content={"one_line": "旧版", "summary_md": "旧版正文"},
+        content_md="旧版正文",
+        role=RETIRED,
+        model="stub-summary",
+        usage={},
+        status="ready",
+    )
 
     submitted = _submitted_payload(
-        service, monkeypatch,
-        {"project_id": project["id"], "requirement": "再短一点", "summary_id": saved["id"]})
+        service,
+        monkeypatch,
+        {"project_id": project["id"], "requirement": "再短一点", "summary_id": saved["id"]},
+    )
 
     assert submitted.get("role") == DEFAULT_KEY, (
         f"{CONTRACT_GUARD}\n历史行里的 {RETIRED!r} 按合同属于 fallback，应回落成 "
-        f"{DEFAULT_KEY!r}，实际投出 {submitted.get('role')!r}")
+        f"{DEFAULT_KEY!r}，实际投出 {submitted.get('role')!r}"
+    )
 
-    error = err(service, "summary.refine",
-                {"project_id": project["id"], "requirement": "再短一点",
-                 "summary_id": saved["id"], "role": RETIRED})
+    error = err(
+        service,
+        "summary.refine",
+        {
+            "project_id": project["id"],
+            "requirement": "再短一点",
+            "summary_id": saved["id"],
+            "role": RETIRED,
+        },
+    )
     assert error["code"] == "VALIDATION"
     assert error["message"] == AUTHORITY_WORDING, (
-        f"改稿入口的文案也要走权威层，不许与生成入口各说各话：{error['message']!r}")
+        f"改稿入口的文案也要走权威层，不许与生成入口各说各话：{error['message']!r}"
+    )
+
 
 def test_resolve_role_never_returns_a_role_outside_the_public_list():
     """反向证据（task-46 第 2 件事）：`resolve_role` 的返回值**恒在 `ROLE_KEYS` 内**。
@@ -518,9 +571,11 @@ def test_resolve_role_never_returns_a_role_outside_the_public_list():
     if resolve is None:
         pytest.fail(f"{CONTRACT_GUARD}\n`resolve_role` 还不存在。")
 
-    grid = [(e, f) for e in [None, "", "   ", *LIVE_PUBLIC, *sorted(LIVE_RETIRED),
-                             "ghost", " wengao "]
-            for f in [None, "", "   ", *sorted(LIVE_RETIRED), "ghost"]]
+    grid = [
+        (e, f)
+        for e in [None, "", "   ", *LIVE_PUBLIC, *sorted(LIVE_RETIRED), "ghost", " wengao "]
+        for f in [None, "", "   ", *sorted(LIVE_RETIRED), "ghost"]
+    ]
     assert len(grid) >= 40, f"入参空间只有 {len(grid)} 格，不足以当反向证据"
 
     offenders, raised = [], 0
@@ -535,10 +590,12 @@ def test_resolve_role_never_returns_a_role_outside_the_public_list():
 
     assert not offenders, (
         "这些入参让 `resolve_role` 返回了公开名单之外的角色——「适配层永远不会把退役键"
-        "交给副本」这条前提就此失效：\n  " + "\n  ".join(offenders))
+        "交给副本」这条前提就此失效：\n  " + "\n  ".join(offenders)
+    )
     assert raised, (
         f"{len(grid)} 格入参一次都没抛——夹具多半没把退役/未知值喂进去。"
-        "显式提交退役键必须硬拒（A 支），一条不抛就是入参形状错了")
+        "显式提交退役键必须硬拒（A 支），一条不抛就是入参形状错了"
+    )
 
 
 def test_a_public_key_survives_resolve_role_as_itself():

@@ -92,7 +92,10 @@ def test_settings_put_persists_and_reports_restart(service):
 
 
 def test_settings_put_rejects_unknown_key(service):
-    _err(service.dispatch("app.settings.put", {"values": {"ui": {"skni": "exhibition"}}}), "VALIDATION")
+    _err(
+        service.dispatch("app.settings.put", {"values": {"ui": {"skni": "exhibition"}}}),
+        "VALIDATION",
+    )
 
 
 def test_skin_set_changes_state(service):

@@ -78,7 +78,10 @@ def test_summarized_without_summary_file_rolls_back(service, tmp_path):
     # 库里有总结行，但 summary.md 不在（写一半被杀）
     service.repo.summary_insert(
         # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
-        project["id"], content={"one_line": "一句话"}, content_md="# 一句话", role="standard"
+        project["id"],
+        content={"one_line": "一句话"},
+        content_md="# 一句话",
+        role="standard",
     )
 
     stats = recovery.recover(service.repo)
@@ -93,7 +96,10 @@ def test_summarized_with_file_kept(service, tmp_path):
     project = make_project(service.repo, tmp_path, stage="summarized")
     service.repo.summary_insert(
         # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
-        project["id"], content={"one_line": "一句话"}, content_md="# 一句话", role="standard"
+        project["id"],
+        content={"one_line": "一句话"},
+        content_md="# 一句话",
+        role="standard",
     )
     md = touch(Path(project["root_dir"]) / "summary.md")
     service.repo.asset_upsert(project["id"], "summary", str(md))

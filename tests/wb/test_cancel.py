@@ -46,6 +46,7 @@ def _alive(pid: int) -> bool:
 
 # ------------------------------------------------------------------ FFmpeg.run
 
+
 def test_run_returns_stdout(tmp_path):
     ff = FFmpeg(timeout=10)
     out = ff.run([sys.executable, "-c", "print('hello')"])
@@ -71,8 +72,11 @@ def test_run_cancel_kills_process_tree(tmp_path):
 
     t0 = time.monotonic()
     with pytest.raises(WBError) as caught:
-        ff.run(_sleep_script(tmp_path), should_cancel=should_cancel,
-               on_proc=lambda proc: started.append(proc.pid))
+        ff.run(
+            _sleep_script(tmp_path),
+            should_cancel=should_cancel,
+            on_proc=lambda proc: started.append(proc.pid),
+        )
     elapsed = time.monotonic() - t0
 
     assert caught.value.code == "CANCELED"
@@ -93,6 +97,7 @@ def test_run_timeout_kills_and_reports(tmp_path):
 
 
 # ------------------------------------------------------------------ JobManager
+
 
 @pytest.fixture()
 def manager(tmp_path):

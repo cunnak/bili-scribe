@@ -8,6 +8,7 @@
 说明不是「模型不会写 JSON」，是这一份输出（一万六千字正文 + 全量时间线）
 单次 completion 装不下。拆成两次问，每次都在预算内。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,10 +20,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import pytest  # noqa: E402
+from wb_parity_tiers import loose_env as loose_env  # noqa: F401,E402  档位 fixture 由 pytest 注入
 
 from video_workbench.app.errors import WBError  # noqa: E402
 from video_workbench.core.summarizer import SummaryLLM  # noqa: E402
-from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 BODY = {
     "one_line": "一句话结论",
@@ -69,12 +70,16 @@ def make_llm(replies):
 # 档位=宽松(`WB_SUMMARY_PARITY_STRICT=0`)：③修复→续写→拆分→重问整条阶梯只在宽松档走；默认严格档一次即失败（parity I 组另钉那边）。
 def test_split_after_truncation_and_failed_retry(loose_env):
     # 截断 → 续写没救回来 → 直接分批（不再先花一次重问，v7 现场那样重问会同样截断）
-    llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
-                            json.dumps(TIMELINE, ensure_ascii=False)])
-    notes: list[str] = []
-    text = llm.chat(
-        [{"role": "user", "content": "生成总结"}], json_mode=True, sink=notes.append
+    llm, client = make_llm(
+        [
+            TRUNCATED,
+            "",
+            json.dumps(BODY, ensure_ascii=False),
+            json.dumps(TIMELINE, ensure_ascii=False),
+        ]
     )
+    notes: list[str] = []
+    text = llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True, sink=notes.append)
     data = json.loads(text)
     assert data["one_line"] == "一句话结论"
     assert [row["t"] for row in data["timeline"]] == ["00:12", "1:34:34"]
@@ -85,47 +90,56 @@ def test_split_after_truncation_and_failed_retry(loose_env):
     assert "只输出时间线" in client.calls[3]["messages"][-1]["content"]
 
 
-
 # 档位=宽松：拆分是③的一环，②预算抬升也只在宽松档生效。
 def test_split_body_step_gets_bigger_budget(loose_env):
     from video_workbench.core.summarizer import MIN_JSON_TOKENS
 
-    llm, client = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
-                            json.dumps(TIMELINE, ensure_ascii=False)])
-    llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True, max_tokens=4096,
-             sink=lambda _text: None)
+    llm, client = make_llm(
+        [
+            TRUNCATED,
+            "",
+            json.dumps(BODY, ensure_ascii=False),
+            json.dumps(TIMELINE, ensure_ascii=False),
+        ]
+    )
+    llm.chat(
+        [{"role": "user", "content": "生成总结"}],
+        json_mode=True,
+        max_tokens=4096,
+        sink=lambda _text: None,
+    )
     assert client.calls[2]["max_tokens"] >= MIN_JSON_TOKENS
     assert client.calls[3]["max_tokens"] >= 4096
-
 
 
 # 档位=宽松：钉「拆分失败后如何收尾」，严格档根本进不到拆分。
 def test_split_gives_up_when_body_step_is_garbage(loose_env):
     llm, _ = make_llm([TRUNCATED, "", "还是不行", "我也不知道", "也不知道"])
     with pytest.raises(WBError) as err:
-        llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True,
-                 sink=lambda _text: None)
+        llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True, sink=lambda _text: None)
     assert err.value.code == "LLM_BAD_RESPONSE"
 
 
 # 档位=宽松：部分成功保留正文，属③阶梯内部行为。
 def test_split_keeps_body_when_timeline_step_fails(loose_env):
-    llm, _ = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False),
-                       "时间线我给不出来"])
-    text = llm.chat([{"role": "user", "content": "生成总结"}], json_mode=True,
-                    sink=lambda _text: None)
+    llm, _ = make_llm([TRUNCATED, "", json.dumps(BODY, ensure_ascii=False), "时间线我给不出来"])
+    text = llm.chat(
+        [{"role": "user", "content": "生成总结"}], json_mode=True, sink=lambda _text: None
+    )
     data = json.loads(text)
     assert data["summary_md"].startswith("第一段")
     # 时间线那一步没结果：键还在、值为空——正文照旧交付，不连坐。
     assert data["timeline"] == []
 
 
-
 # 档位=宽松：这条走 chat()，严格档下 chat 直接短路、什么都不做，它会在「什么都没发生」上白白变绿——钉到加固真的会跑的档位才有牙。
 def test_dense_timeline_is_left_alone(loose_env):
     """时间线本来就够密，就不要再花一次调用去补。"""
-    dense = {"timeline": [{"t": "%02d:%02d" % (i // 2, (i % 2) * 30), "text": "第%d段" % i}
-                          for i in range(40)]}
+    dense = {
+        "timeline": [
+            {"t": "%02d:%02d" % (i // 2, (i % 2) * 30), "text": "第%d段" % i} for i in range(40)
+        ]
+    }
     llm, client = make_llm([json.dumps({**BODY, **dense}, ensure_ascii=False)])
     pump = [{"role": "user", "content": "字幕 [00:00] 开头 [120:00] 结尾"}]
     text = llm.chat(pump, json_mode=True, sink=lambda _t: None)
@@ -139,8 +153,9 @@ def test_sparse_timeline_is_topped_up(loose_env):
     """两小时视频只给 20 条时间线时，单独补一轮到目标条数。"""
     sparse = {"timeline": [{"t": "1:%02d" % i, "text": "第%d段" % i} for i in range(20)]}
     fuller = {"timeline": [{"t": "%02d:%02d" % (i, 0), "text": "补第%d段" % i} for i in range(55)]}
-    llm, client = make_llm([json.dumps({**BODY, **sparse}, ensure_ascii=False),
-                            json.dumps(fuller, ensure_ascii=False)])
+    llm, client = make_llm(
+        [json.dumps({**BODY, **sparse}, ensure_ascii=False), json.dumps(fuller, ensure_ascii=False)]
+    )
     pump = [{"role": "user", "content": "字幕 [00:00] 开头 [119:30] 结尾"}]
     text = llm.chat(pump, json_mode=True, sink=lambda _t: None)
     rows = json.loads(text)["timeline"]
@@ -193,8 +208,9 @@ def test_sparse_timeline_is_topped_up_with_index_in_prompt():
     llm = SummaryLLM(ScriptClient([json.dumps(TIMELINE)]), model="stub-model")
     llm.duration_ms = 7_200_000
     llm.timeline_index = "00:00:00 开场\n01:59:00 收尾"
-    fixed = json.dumps({"one_line": "一", "summary_md": "正文",
-                        "timeline": [{"t": "02:49", "text": "开场"}]})
+    fixed = json.dumps(
+        {"one_line": "一", "summary_md": "正文", "timeline": [{"t": "02:49", "text": "开场"}]}
+    )
     llm._finalize(fixed, _sparse([]), lambda _m: None, None, 4096)
     sent = json.dumps(llm.client.calls[0]["messages"], ensure_ascii=False)
     assert "全片的时间轴索引" in sent and "01:59:00" in sent

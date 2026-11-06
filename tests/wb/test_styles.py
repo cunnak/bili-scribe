@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from video_workbench.core import styles, subtitles
+from video_workbench.core import styles
 
 
 def call(svc, method: str, params: dict | None = None):
@@ -49,8 +49,9 @@ def test_builtin_presets_have_both_modes():
 
 
 def test_normalize_fills_defaults_and_drops_unknown_keys():
-    conf = styles.normalize({"id": "x", "name": "X", "primary": {"size": 60, "bogus": 1},
-                             "nope": True})
+    conf = styles.normalize(
+        {"id": "x", "name": "X", "primary": {"size": 60, "bogus": 1}, "nope": True}
+    )
     assert conf["primary"]["size"] == 60
     assert "bogus" not in conf["primary"]
     assert "nope" not in conf
@@ -59,9 +60,17 @@ def test_normalize_fills_defaults_and_drops_unknown_keys():
 
 def test_normalize_base_reads_legacy_flat_row():
     """老库里 default 是平铺的（font_size/primary_color），不能因为改结构就丢值。"""
-    row = {"id": "old", "name": "旧", "mode": "ass",
-           "config": {"font": "SimHei", "font_size": 66, "primary_color": "#FF0000",
-                      "outline_width": 4}}
+    row = {
+        "id": "old",
+        "name": "旧",
+        "mode": "ass",
+        "config": {
+            "font": "SimHei",
+            "font_size": 66,
+            "primary_color": "#FF0000",
+            "outline_width": 4,
+        },
+    }
     conf = styles.normalize_base(row)
     assert conf["id"] == "old"
     assert conf["primary"]["size"] == 66
@@ -73,8 +82,9 @@ def test_normalize_base_reads_legacy_flat_row():
 
 
 def test_validate_lists_all_problems_at_once():
-    bad = styles.normalize({"primary": {"size": 200, "outline_width": 40},
-                            "secondary": {"size": 200}})
+    bad = styles.normalize(
+        {"primary": {"size": 200, "outline_width": 40}, "secondary": {"size": 200}}
+    )
     with pytest.raises(Exception) as exc:
         styles.validate(bad)
     message = str(getattr(exc.value, "message", exc.value))
@@ -92,10 +102,14 @@ def test_validate_rejects_unknown_mode_and_layout():
 
 
 def test_validate_warns_when_bar_too_wide():
-    wide = styles.normalize({"mode": "rounded",
-                             "preview": {"text_length": "long"},
-                             "rounded": {"size": 60, "padding_h": 40}},
-                            base=styles.rounded_preset())
+    wide = styles.normalize(
+        {
+            "mode": "rounded",
+            "preview": {"text_length": "long"},
+            "rounded": {"size": 60, "padding_h": 40},
+        },
+        base=styles.rounded_preset(),
+    )
     _style, warnings = styles.validate(wide)
     assert warnings, "长文本 + 大字号应该给出顶边警告"
     assert "超过" in warnings[0]
@@ -114,29 +128,28 @@ def test_ass_style_scales_with_height():
     conf720 = styles.to_ass_style(styles.default_preset(), height=720)
     conf1080 = styles.to_ass_style(styles.default_preset(), height=1080)
     assert conf720["size"] == 48
-    assert conf1080["size"] == 72            # 1.5 倍
+    assert conf1080["size"] == 72  # 1.5 倍
     assert conf1080["outline"] > conf720["outline"]
 
 
 def test_ass_text_carries_style_numbers():
-    ass = styles.preview_ass(styles.default_preset(), height=720,
-                             texts=["测试一句"])
-    line = next(l for l in ass.splitlines() if l.startswith("Style:"))
+    ass = styles.preview_ass(styles.default_preset(), height=720, texts=["测试一句"])
+    line = next(raw for raw in ass.splitlines() if raw.startswith("Style:"))
     parts = [p.strip() for p in line.split(",")]
     assert parts[1] == "Microsoft YaHei"
-    assert parts[2] == "48"            # Fontsize
-    assert parts[15] == "1"            # BorderStyle=1 描边
-    assert parts[3] == "&H00FFFFFF"    # 白色（BGR）
+    assert parts[2] == "48"  # Fontsize
+    assert parts[15] == "1"  # BorderStyle=1 描边
+    assert parts[3] == "&H00FFFFFF"  # 白色（BGR）
     assert "测试一句" in ass
 
 
 def test_rounded_style_uses_box_and_alpha():
     ass = styles.preview_ass(styles.rounded_preset(), height=720, texts=["圆角条"])
-    line = next(l for l in ass.splitlines() if l.startswith("Style:"))
+    line = next(raw for raw in ass.splitlines() if raw.startswith("Style:"))
     parts = [p.strip() for p in line.split(",")]
-    assert parts[15] == "3"                 # BorderStyle=3 → 实心框
-    assert parts[6].startswith("&H99")      # 60% 不透明 → alpha 0x99
-    assert parts[17] == "0"                 # 阴影关掉，否则框外一圈黑边
+    assert parts[15] == "3"  # BorderStyle=3 → 实心框
+    assert parts[6].startswith("&H99")  # 60% 不透明 → alpha 0x99
+    assert parts[17] == "0"  # 阴影关掉，否则框外一圈黑边
 
 
 def test_canvas_follows_orientation():
@@ -174,11 +187,14 @@ def test_style_get_unknown_is_not_found(service):
 
 
 def test_style_save_creates_row_and_file(service):
-    data = ok(service, "style.save", {
-        "name": "我的样式",
-        "config": {"primary": {"size": 60, "color": "#FFEE00"},
-                   "secondary": {"size": 40}},
-    })
+    data = ok(
+        service,
+        "style.save",
+        {
+            "name": "我的样式",
+            "config": {"primary": {"size": 60, "color": "#FFEE00"}, "secondary": {"size": 40}},
+        },
+    )
     style_id = data["style"]["id"]
     assert style_id.startswith("sty")
     assert data["style"]["primary"]["size"] == 60
@@ -191,8 +207,11 @@ def test_style_save_creates_row_and_file(service):
 
 
 def test_style_save_refuses_builtin(service):
-    error = err(service, "style.save", {"id": "default", "name": "改内置",
-                                        "config": {"primary": {"size": 60}}})
+    error = err(
+        service,
+        "style.save",
+        {"id": "default", "name": "改内置", "config": {"primary": {"size": 60}}},
+    )
     assert error["code"] == "CONFLICT"
 
 
@@ -204,8 +223,9 @@ def test_style_save_validates(service):
 def test_style_update_keeps_id(service):
     created = ok(service, "style.save", {"name": "甲", "config": {}})
     style_id = created["style"]["id"]
-    updated = ok(service, "style.save", {"id": style_id, "name": "甲2",
-                                        "config": {"primary": {"size": 52}}})
+    updated = ok(
+        service, "style.save", {"id": style_id, "name": "甲2", "config": {"primary": {"size": 52}}}
+    )
     assert updated["style"]["id"] == style_id
     assert updated["style"]["name"] == "甲2"
     assert updated["style"]["primary"]["size"] == 52
@@ -227,8 +247,10 @@ def test_style_save_keeps_names_unique(service):
 
 def test_style_import_with_same_name_is_renamed(service, tmp_path):
     source = tmp_path / "dup.json"
-    source.write_text(json.dumps({"name": "同一份", "primary": {"size": 60},
-                                  "secondary": {"size": 40}}), encoding="utf-8")
+    source.write_text(
+        json.dumps({"name": "同一份", "primary": {"size": 60}, "secondary": {"size": 40}}),
+        encoding="utf-8",
+    )
     one = ok(service, "style.import", {"path": str(source)})
     two = ok(service, "style.import", {"path": str(source)})
     assert one["style"]["id"] != two["style"]["id"]
@@ -250,12 +272,21 @@ def test_style_delete_refuses_builtin(service):
 
 def test_style_import_creates_new_id(service, tmp_path):
     source = tmp_path / "my.json"
-    source.write_text(json.dumps({
-        "id": "default", "name": "导入的", "mode": "ass",
-        "primary": {"size": 58}, "secondary": {"size": 40},
-    }, ensure_ascii=False), encoding="utf-8")
+    source.write_text(
+        json.dumps(
+            {
+                "id": "default",
+                "name": "导入的",
+                "mode": "ass",
+                "primary": {"size": 58},
+                "secondary": {"size": 40},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     data = ok(service, "style.import", {"path": str(source)})
-    assert data["style"]["id"] != "default"   # 不覆盖内置
+    assert data["style"]["id"] != "default"  # 不覆盖内置
     assert data["style"]["name"] == "导入的"
     assert data["style"]["primary"]["size"] == 58
 
@@ -264,7 +295,9 @@ def test_style_import_bad_json(service, tmp_path):
     source = tmp_path / "bad.json"
     source.write_text("{oops", encoding="utf-8")
     assert err(service, "style.import", {"path": str(source)})["code"] == "VALIDATION"
-    assert err(service, "style.import", {"path": str(tmp_path / "none.json")})["code"] == "NOT_FOUND"
+    assert (
+        err(service, "style.import", {"path": str(tmp_path / "none.json")})["code"] == "NOT_FOUND"
+    )
 
 
 def test_style_export_writes_json(service, tmp_path):
@@ -278,8 +311,10 @@ def test_style_export_writes_json(service, tmp_path):
 
 
 def test_style_export_outside_roots_is_rejected(service):
-    assert err(service, "style.export", {"id": "default", "path": "C:/Windows/evil.json"})["code"] \
+    assert (
+        err(service, "style.export", {"id": "default", "path": "C:/Windows/evil.json"})["code"]
         == "VALIDATION"
+    )
 
 
 def test_style_fonts_lists_something_or_says_why(service):
@@ -298,10 +333,12 @@ def test_style_render_makes_png(service):
     assert png.is_file() and png.stat().st_size > 0
     assert (data["width"], data["height"]) == (1280, 720)
     ass = Path(data["ass"]).read_text(encoding="utf-8")
-    style_line = next(l for l in ass.splitlines() if l.startswith("Style:"))
-    assert style_line.split(",")[15].strip() == "3"   # 圆角预设走 BorderStyle=3
+    style_line = next(raw for raw in ass.splitlines() if raw.startswith("Style:"))
+    assert style_line.split(",")[15].strip() == "3"  # 圆角预设走 BorderStyle=3
     assert "渲染测试" in ass
 
 
 def test_style_render_rejects_bad_config(service):
-    assert err(service, "style.render", {"config": {"primary": {"size": 1}}})["code"] == "VALIDATION"
+    assert (
+        err(service, "style.render", {"config": {"primary": {"size": 1}}})["code"] == "VALIDATION"
+    )

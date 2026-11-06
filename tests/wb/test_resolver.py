@@ -23,7 +23,6 @@ from video_workbench.core.resolver import (
     identify,
 )
 
-
 # --------------------------------------------------------------------- 假网关
 
 
@@ -52,7 +51,9 @@ class FakeClient:
         return True
 
 
-def make_resolver(responses: dict[str, object], *, expand_to: str = "", cache: TtlCache | None = None):
+def make_resolver(
+    responses: dict[str, object], *, expand_to: str = "", cache: TtlCache | None = None
+):
     client = FakeClient(responses, expand_to=expand_to)
     # 注意用 is not None：TtlCache 定义了 __len__，空缓存在布尔语境里是 False，
     # 写成 `cache or TtlCache()` 会把注入的缓存悄悄换掉（这条注释是被这个坑咬过写的）。
@@ -97,10 +98,22 @@ COLLECTION_VIEW = {
         "sections": [
             {
                 "episodes": [
-                    {"bvid": "BV1aa411c7mF", "aid": 170003, "cid": 21, "title": "1", "duration": 500,
-                     "arc": {"title": "第一集 结构", "pic": "", "duration": 500, "aid": 170003}},
-                    {"bvid": "BV1bb411c7mG", "aid": 170004, "cid": 22, "title": "2", "duration": 700,
-                     "arc": {"title": "第二集 通道", "pic": "", "duration": 700, "aid": 170004}},
+                    {
+                        "bvid": "BV1aa411c7mF",
+                        "aid": 170003,
+                        "cid": 21,
+                        "title": "1",
+                        "duration": 500,
+                        "arc": {"title": "第一集 结构", "pic": "", "duration": 500, "aid": 170003},
+                    },
+                    {
+                        "bvid": "BV1bb411c7mG",
+                        "aid": 170004,
+                        "cid": 22,
+                        "title": "2",
+                        "duration": 700,
+                        "arc": {"title": "第二集 通道", "pic": "", "duration": 700, "aid": 170004},
+                    },
                 ]
             }
         ],
@@ -113,8 +126,24 @@ SEASON_DATA = {
     "cover": "https://i0.hdslb.com/bangumi.jpg",
     "up_info": {"uname": "番剧出品方"},
     "episodes": [
-        {"id": 1001, "bvid": "BV1ep411c7m1", "aid": 2001, "cid": 3001, "title": "第1话", "long_title": "起风了", "duration": 1440},
-        {"id": 1002, "bvid": "BV1ep411c7m2", "aid": 2002, "cid": 3002, "title": "第2话", "long_title": "下雨了", "duration": 1440},
+        {
+            "id": 1001,
+            "bvid": "BV1ep411c7m1",
+            "aid": 2001,
+            "cid": 3001,
+            "title": "第1话",
+            "long_title": "起风了",
+            "duration": 1440,
+        },
+        {
+            "id": 1002,
+            "bvid": "BV1ep411c7m2",
+            "aid": 2002,
+            "cid": 3002,
+            "title": "第2话",
+            "long_title": "下雨了",
+            "duration": 1440,
+        },
     ],
 }
 
@@ -127,7 +156,10 @@ SEASON_DATA = {
     [
         ("BV1xx411c7mD", ("bv", "BV1xx411c7mD", 1)),
         ("bv1xx411c7mD", ("bv", "BV1xx411c7mD", 1)),
-        ("https://www.bilibili.com/video/BV1xx411c7mD/?p=3&spm_id_from=x", ("bv", "BV1xx411c7mD", 3)),
+        (
+            "https://www.bilibili.com/video/BV1xx411c7mD/?p=3&spm_id_from=x",
+            ("bv", "BV1xx411c7mD", 3),
+        ),
         ("av170001", ("av", "170001", 1)),
         ("https://www.bilibili.com/video/av170001", ("av", "170001", 1)),
         ("ep1001", ("ep", "1001", 1)),
@@ -194,19 +226,19 @@ def test_multi_page_items_carry_own_page_count(tmp_path):
     out = res.resolve("BV1yy411c7mE")
     assert [it.page_count for it in out.items] == [3, 3, 3]
     from video_workbench.core.layout import _segments
-    paths = [
-        "/".join(_segments("UP", it.title, "", it.page_no, it.part_title))
-        for it in out.items]
-    assert paths == ["UP/三十分钟讲透注意力机制/P01_注意力是什么",
-                     "UP/三十分钟讲透注意力机制/P02_自注意力的矩阵形状",
-                     "UP/三十分钟讲透注意力机制/P03_多头到底多在哪"]
+
+    paths = ["/".join(_segments("UP", it.title, "", it.page_no, it.part_title)) for it in out.items]
+    assert paths == [
+        "UP/三十分钟讲透注意力机制/P01_注意力是什么",
+        "UP/三十分钟讲透注意力机制/P02_自注意力的矩阵形状",
+        "UP/三十分钟讲透注意力机制/P03_多头到底多在哪",
+    ]
     res2, _, _ = make_resolver({VIDEO_VIEW: COLLECTION_VIEW})
     coll = res2.resolve("BV1aa411c7mF")
     assert [
         "/".join(_segments("UP", it.title, coll.collection_title, None, it.part_title))
-        for it in coll.items] == [
-        "UP/从零手搓一个视频工作台/第一集 结构",
-        "UP/从零手搓一个视频工作台/第二集 通道"]
+        for it in coll.items
+    ] == ["UP/从零手搓一个视频工作台/第一集 结构", "UP/从零手搓一个视频工作台/第二集 通道"]
 
 
 def test_collection_returns_all_episodes():
@@ -297,6 +329,13 @@ def test_payload_shape_is_json_ready():
     payload = res.resolve("BV1aa411c7mF").to_payload()
     assert payload["count"] == 2
     assert set(payload["items"][0]) == {
-        "bvid", "aid", "cid", "page", "title", "part_title", "page_count",
-        "duration_ms", "cover",
+        "bvid",
+        "aid",
+        "cid",
+        "page",
+        "title",
+        "part_title",
+        "page_count",
+        "duration_ms",
+        "cover",
     }

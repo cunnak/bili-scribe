@@ -8,13 +8,12 @@
      ``infra/ffmpeg.py`` 的 ``subtitle_filter`` 之后统一交给一个 ``video.export`` 任务，
      RPC 这层只看得到提交的 payload。
 """
+
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from video_workbench.core.subtitles import format_ass, normalize
-from video_workbench.core.transcriber import format_srt
 
 SEGS = [
     {"start_ms": 0, "end_ms": 2000, "text": "第一句"},
@@ -27,16 +26,22 @@ def make_project(service, tmp_path: Path) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
     items = normalize(SEGS)
-    project = service.repo.project_create(title="标题", up_name="UP",
-                                          root_dir=str(root), stage="transcribed")
-    service.repo.transcript_upsert(project["id"], segments=items, language="zh",
-                                   model="tiny", srt_path=str(root / "transcript.srt"))
+    project = service.repo.project_create(
+        title="标题", up_name="UP", root_dir=str(root), stage="transcribed"
+    )
+    service.repo.transcript_upsert(
+        project["id"],
+        segments=items,
+        language="zh",
+        model="tiny",
+        srt_path=str(root / "transcript.srt"),
+    )
     return project
 
 
 def add_source(service, project: dict, tmp_path: Path) -> Path:
     src = tmp_path / "media" / "UP" / "标题" / "source.mp4"
-    src.write_bytes(b"x" * 1024)      # 只为让「源文件在」成立，不真跑 ffmpeg
+    src.write_bytes(b"x" * 1024)  # 只为让「源文件在」成立，不真跑 ffmpeg
     service.repo.asset_upsert(project["id"], "source", str(src), size=1024)
     return src
 
@@ -48,15 +53,16 @@ def rpc(service, method, params=None):
 
 
 def style_field(text: str, index: int) -> int:
-    line = next(l for l in text.splitlines() if l.startswith("Style:"))
+    line = next(raw for raw in text.splitlines() if raw.startswith("Style:"))
     return int(line.split(",")[index])
 
 
 # ------------------------------------------------------------------ 文本格式
 def test_export_writes_srt_vtt_ass(service, tmp_path):
     project = make_project(service, tmp_path)
-    data = rpc(service, "subtitle.export",
-               {"project_id": project["id"], "formats": ["srt", "vtt", "ass"]})
+    data = rpc(
+        service, "subtitle.export", {"project_id": project["id"], "formats": ["srt", "vtt", "ass"]}
+    )
     by_fmt = {f["format"]: Path(f["path"]) for f in data["files"]}
     assert set(by_fmt) == {"srt", "vtt", "ass"}, sorted(by_fmt)
     assert by_fmt["srt"].read_text(encoding="utf-8").count("-->") == 3
@@ -69,8 +75,7 @@ def test_export_writes_srt_vtt_ass(service, tmp_path):
 
 def test_mode_none_does_not_create_a_job(service, tmp_path):
     project = make_project(service, tmp_path)
-    data = rpc(service, "subtitle.export",
-               {"project_id": project["id"], "formats": ["srt"]})
+    data = rpc(service, "subtitle.export", {"project_id": project["id"], "formats": ["srt"]})
     assert data["mode"] == "none" and data["job_id"] == ""
 
 
@@ -79,8 +84,11 @@ def test_ass_font_scales_with_height(service, tmp_path):
     assert style_field(format_ass(normalize(SEGS), height=720), 2) == 54
     assert style_field(format_ass(normalize(SEGS), height=1080), 2) == 81
     project = make_project(service, tmp_path)
-    data = rpc(service, "subtitle.export",
-               {"project_id": project["id"], "formats": ["ass"], "height": 1080})
+    data = rpc(
+        service,
+        "subtitle.export",
+        {"project_id": project["id"], "formats": ["ass"], "height": 1080},
+    )
     text = Path(data["files"][0]["path"]).read_text(encoding="utf-8")
     assert style_field(text, 2) == 81
     assert data["height"] == 1080
@@ -90,22 +98,28 @@ def test_export_always_produces_ass_for_embed(service, tmp_path):
     """软/硬字幕必须有 ASS 源；只勾 srt 时后端会补一份 ass，不让人对着黑屏猜。"""
     project = make_project(service, tmp_path)
     add_source(service, project, tmp_path)
-    data = rpc(service, "subtitle.export",
-               {"project_id": project["id"], "formats": ["srt"], "mode": "soft"})
+    data = rpc(
+        service,
+        "subtitle.export",
+        {"project_id": project["id"], "formats": ["srt"], "mode": "soft"},
+    )
     assert {f["format"] for f in data["files"]} == {"srt", "ass"}, data["files"]
 
 
 def test_export_without_transcript_is_conflict(service, tmp_path):
-    project = service.repo.project_create(title="空", root_dir=str(tmp_path / "none"),
-                                          stage="downloaded")
-    out = service.router.dispatch("subtitle.export",
-                                  {"project_id": project["id"], "formats": ["srt"]}, "test")
+    project = service.repo.project_create(
+        title="空", root_dir=str(tmp_path / "none"), stage="downloaded"
+    )
+    out = service.router.dispatch(
+        "subtitle.export", {"project_id": project["id"], "formats": ["srt"]}, "test"
+    )
     assert out["ok"] is False and out["error"]["code"] == "CONFLICT", out
 
 
 def test_export_unknown_project_is_not_found(service):
-    out = service.router.dispatch("subtitle.export",
-                                  {"project_id": "pj_不存在", "formats": ["srt"]}, "test")
+    out = service.router.dispatch(
+        "subtitle.export", {"project_id": "pj_不存在", "formats": ["srt"]}, "test"
+    )
     assert out["ok"] is False and out["error"]["code"] == "NOT_FOUND", out
 
 
@@ -117,12 +131,16 @@ def test_export_needs_a_form(service):
 # -------------------------------------------------------------------- 内嵌
 def test_soft_subtitle_submits_mov_text_job(service, tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr(service.jobs, "submit",
-                        lambda *a, **k: seen.update(args=a) or {"id": "job_soft"})
+    monkeypatch.setattr(
+        service.jobs, "submit", lambda *a, **k: seen.update(args=a) or {"id": "job_soft"}
+    )
     project = make_project(service, tmp_path)
     src = add_source(service, project, tmp_path)
-    data = rpc(service, "subtitle.export",
-               {"project_id": project["id"], "formats": ["ass"], "mode": "soft"})
+    data = rpc(
+        service,
+        "subtitle.export",
+        {"project_id": project["id"], "formats": ["ass"], "mode": "soft"},
+    )
     assert data["job"]["id"] == "job_soft"
     job_type, project_arg, payload = seen["args"][:3]
     assert job_type == "video.export" and project_arg == project["id"]
@@ -134,12 +152,16 @@ def test_soft_subtitle_submits_mov_text_job(service, tmp_path, monkeypatch):
 
 def test_hard_subtitle_submits_same_job_with_hard_mode(service, tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr(service.jobs, "submit",
-                        lambda *a, **k: seen.update(args=a) or {"id": "job_hard"})
+    monkeypatch.setattr(
+        service.jobs, "submit", lambda *a, **k: seen.update(args=a) or {"id": "job_hard"}
+    )
     project = make_project(service, tmp_path)
     add_source(service, project, tmp_path)
-    rpc(service, "subtitle.export",
-        {"project_id": project["id"], "formats": ["ass"], "mode": "hard"})
+    rpc(
+        service,
+        "subtitle.export",
+        {"project_id": project["id"], "formats": ["ass"], "mode": "hard"},
+    )
     payload = seen["args"][2]
     assert payload["mode"] == "hard", payload
     # 硬字幕的滤镜选型归 subtitle_filter（.ass→ass=，其余→subtitles=），这层只交文件
@@ -148,8 +170,8 @@ def test_hard_subtitle_submits_same_job_with_hard_mode(service, tmp_path, monkey
 
 def test_embed_without_source_video_is_not_found(service, tmp_path):
     project = make_project(service, tmp_path)
-    out = service.router.dispatch("subtitle.export",
-                                  {"project_id": project["id"], "formats": ["ass"],
-                                   "mode": "soft"}, "test")
+    out = service.router.dispatch(
+        "subtitle.export", {"project_id": project["id"], "formats": ["ass"], "mode": "soft"}, "test"
+    )
     assert out["ok"] is False and out["error"]["code"] == "NOT_FOUND", out
     assert "源视频" in out["error"]["message"], out["error"]

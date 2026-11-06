@@ -10,11 +10,11 @@ PROJ = Path(__file__).resolve().parents[2]
 if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
 
-import pytest
+import pytest  # noqa: E402
 
-from video_workbench.app.errors import WBError
-from video_workbench.core import merger
-from video_workbench.infra.ffmpeg import MediaInfo
+from video_workbench.app.errors import WBError  # noqa: E402
+from video_workbench.core import merger  # noqa: E402
+from video_workbench.infra.ffmpeg import MediaInfo  # noqa: E402
 
 
 class FakeFFmpeg:
@@ -156,8 +156,12 @@ def test_estimate_quick_is_sum_of_parts_and_precise_is_smaller(files):
 
 def test_estimate_precise_scales_with_target_pixels(files):
     result = merger.preflight(FakeFFmpeg(), files[:2])
-    big = merger.estimate({**result, "target": {**result["target"], "width": 3840, "height": 2160}}, "precise")
-    small = merger.estimate({**result, "target": {**result["target"], "width": 1280, "height": 720}}, "precise")
+    big = merger.estimate(
+        {**result, "target": {**result["target"], "width": 3840, "height": 2160}}, "precise"
+    )
+    small = merger.estimate(
+        {**result, "target": {**result["target"], "width": 1280, "height": 720}}, "precise"
+    )
     assert big["size_bytes"] > small["size_bytes"]
 
 

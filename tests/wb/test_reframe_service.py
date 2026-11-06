@@ -86,8 +86,19 @@ def wait_job(service, job_id, timeout=8.0):
 def fake_detect(calls, *, subjects=2, enhance_default=True):
     """造一份"两个主体 + 一处切换"的检测结果，形状与真检测一致。"""
 
-    def _detect(source, *, start_ms, end_ms, models_root, interval_ms=500, proxy="",
-                log=None, enhance=True, sampler=None, subject=""):
+    def _detect(
+        source,
+        *,
+        start_ms,
+        end_ms,
+        models_root,
+        interval_ms=500,
+        proxy="",
+        log=None,
+        enhance=True,
+        sampler=None,
+        subject="",
+    ):
         calls.append({"enhance": enhance, "subject": subject, "source": str(source)})
         if not enhance:
             return {
@@ -99,10 +110,28 @@ def fake_detect(calls, *, subjects=2, enhance_default=True):
                 "enhance": False,
             }
         rows = [
-            {"id": "sub_a", "label": "左边那位", "track": [{"t_ms": 0, "x": 0.3}], "frames": 6,
-             "hits": 6, "avg_x": 0.3, "area": 0.02, "box": [100.0, 100.0, 200.0, 200.0], "score": 78},
-            {"id": "sub_b", "label": "右边那位", "track": [{"t_ms": 0, "x": 0.8}], "frames": 3,
-             "hits": 3, "avg_x": 0.8, "area": 0.02, "box": [900.0, 100.0, 200.0, 200.0], "score": 41},
+            {
+                "id": "sub_a",
+                "label": "左边那位",
+                "track": [{"t_ms": 0, "x": 0.3}],
+                "frames": 6,
+                "hits": 6,
+                "avg_x": 0.3,
+                "area": 0.02,
+                "box": [100.0, 100.0, 200.0, 200.0],
+                "score": 78,
+            },
+            {
+                "id": "sub_b",
+                "label": "右边那位",
+                "track": [{"t_ms": 0, "x": 0.8}],
+                "frames": 3,
+                "hits": 3,
+                "avg_x": 0.8,
+                "area": 0.02,
+                "box": [900.0, 100.0, 200.0, 200.0],
+                "score": 41,
+            },
         ][:subjects]
         chosen = subject or rows[0]["id"]
         return {
@@ -144,7 +173,9 @@ def test_analyze_writes_subject_sidecar(service, tmp_path, monkeypatch):
     assert result["enhance"] is True
     assert calls and calls[0]["enhance"] is True
 
-    state = json.loads((Path(project["root_dir"]) / "focus.subjects.json").read_text(encoding="utf-8"))
+    state = json.loads(
+        (Path(project["root_dir"]) / "focus.subjects.json").read_text(encoding="utf-8")
+    )
     assert [row["id"] for row in state["subjects"]] == ["sub_a", "sub_b"]
     assert state["cuts"] == [2000]
     assert state["frame_width"] == 1920
@@ -194,14 +225,18 @@ def test_switch_subject_unknown_id_is_not_found(service, tmp_path, monkeypatch):
     project = make_project(service)
     add_source(service, project["id"], tmp_path)
     analyze(service, project["id"])
-    assert err(service, "clip.focus.subject",
-               {"project_id": project["id"], "subject": "sub_z"}) == "NOT_FOUND"
+    assert (
+        err(service, "clip.focus.subject", {"project_id": project["id"], "subject": "sub_z"})
+        == "NOT_FOUND"
+    )
 
 
 def test_switch_subject_without_analysis_conflicts(service):
     project = make_project(service)
-    assert err(service, "clip.focus.subject",
-               {"project_id": project["id"], "subject": "sub_a"}) == "CONFLICT"
+    assert (
+        err(service, "clip.focus.subject", {"project_id": project["id"], "subject": "sub_a"})
+        == "CONFLICT"
+    )
 
 
 def test_analyze_with_enhance_false_skips_subjects(service, tmp_path, monkeypatch):
@@ -221,8 +256,10 @@ def test_analyze_with_enhance_false_skips_subjects(service, tmp_path, monkeypatc
     assert meta["subject"] == ""
     # 关掉增强也要留下可用的轨迹：跟随本身不能因为它变空
     assert meta["focus"]
-    assert err(service, "clip.focus.subject",
-               {"project_id": project["id"], "subject": "sub_a"}) == "CONFLICT"
+    assert (
+        err(service, "clip.focus.subject", {"project_id": project["id"], "subject": "sub_a"})
+        == "CONFLICT"
+    )
 
 
 def test_config_default_turns_enhance_on(service, tmp_path, monkeypatch):
@@ -246,8 +283,11 @@ def test_manual_points_keep_cuts(service, tmp_path, monkeypatch):
     add_source(service, project["id"], tmp_path)
     analyze(service, project["id"])
 
-    call(service, "clip.focus.save",
-         {"project_id": project["id"], "focus": [{"t_ms": 1000, "x": 0.6}]})
+    call(
+        service,
+        "clip.focus.save",
+        {"project_id": project["id"], "focus": [{"t_ms": 1000, "x": 0.6}]},
+    )
     meta = json.loads((Path(project["root_dir"]) / "focus.json").read_text(encoding="utf-8"))
     assert meta["cuts"] == [2000], "存手工点不能把切点弄丢，否则导出会在切点插值"
     assert meta["subject"] == "sub_a"

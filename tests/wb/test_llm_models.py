@@ -13,8 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from video_workbench.infra.llm import ChatClient, ChatError, normalize_models, _urllib_get
-
+from video_workbench.infra.llm import ChatClient, ChatError, normalize_models
 
 # ---------------------------------------------------------------- 归一化
 
@@ -73,7 +72,12 @@ class FakeGetter:
 
 
 def client_with(getter, **kw):
-    params = {"base_url": "https://api.deepseek.com/v1", "api_key": "sk-x", "model": "", "getter": getter}
+    params = {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "sk-x",
+        "model": "",
+        "getter": getter,
+    }
     params.update(kw)
     return ChatClient(**params)
 
@@ -215,7 +219,9 @@ def test_rpc_llm_models_auth_error_is_llm_error(service, monkeypatch):
 
 def test_rpc_llm_models_not_configured_keeps_its_code(service, monkeypatch):
     """界面靠这个码显示「先填地址和密钥」，折成 LLM_ERROR 就丢了提示。"""
-    stub = StubModelsClient(error=ChatError("LLM_NOT_CONFIGURED", "服务商还没有配置完整", "缺：api_key"))
+    stub = StubModelsClient(
+        error=ChatError("LLM_NOT_CONFIGURED", "服务商还没有配置完整", "缺：api_key")
+    )
     monkeypatch.setattr(service, "_llm_client", lambda task="": stub)
     out = service.dispatch("llm.models", {})
     assert out["ok"] is False
@@ -282,6 +288,7 @@ def test_rpc_llm_models_unknown_provider_does_not_fall_back(service, monkeypatch
     assert out["error"]["code"] == "LLM_NOT_CONFIGURED"
     assert "magpie" in out["error"]["message"]
     assert called == [], "指名不存在的服务商时不该发出任何请求"
+
 
 def test_llm_models_uses_unsaved_values(service, monkeypatch) -> None:
     """设置页会先敲地址/密钥再点「获取可用模型」——那会儿还没保存。
@@ -361,6 +368,7 @@ def test_llm_test_uses_unsaved_values(service, monkeypatch) -> None:
     assert seen["key"] == "sk-typed"
     assert service.cfg.llm.providers[0].api_key == before
 
+
 def test_request_carries_user_agent() -> None:
     """不能让 urllib 的默认 UA 出去：那会被 Cloudflare 的 1010 直接 403。
 
@@ -438,6 +446,7 @@ def test_forbidden_is_not_auth_error() -> None:
 
 # ── 本机网关：两处「看起来连了、其实打错了地方」────────────────────────────
 
+
 def test_loopback_request_ignores_env_proxy(monkeypatch):
     """本机地址不许走代理。
 
@@ -496,26 +505,28 @@ def test_unsaved_base_url_overrides_active_card(tmp_path):
     db = str(tmp_path / "wb.db")
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        NL.join([
-            "llm:",
-            "  base_url: https://api.deepseek.com/v1",
-            "  api_key: sk-old",
-            "  model: deepseek-chat",
-            "  providers:",
-            "    - id: deepseek",
-            "      name: DeepSeek",
-            "      protocol: openai",
-            "      base_url: https://api.deepseek.com/v1",
-            "      api_key: sk-old",
-            "      models: [deepseek-chat]",
-            "  active_provider: deepseek",
-            "storage:",
-            "  db_path: " + db,
-            "  media_root: " + media,
-            "  cache_root: " + cache,
-            "  models_root: " + models,
-            "",
-        ]),
+        NL.join(
+            [
+                "llm:",
+                "  base_url: https://api.deepseek.com/v1",
+                "  api_key: sk-old",
+                "  model: deepseek-chat",
+                "  providers:",
+                "    - id: deepseek",
+                "      name: DeepSeek",
+                "      protocol: openai",
+                "      base_url: https://api.deepseek.com/v1",
+                "      api_key: sk-old",
+                "      models: [deepseek-chat]",
+                "  active_provider: deepseek",
+                "storage:",
+                "  db_path: " + db,
+                "  media_root: " + media,
+                "  cache_root: " + cache,
+                "  models_root: " + models,
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
     service = WorkbenchService(config_path=cfg)

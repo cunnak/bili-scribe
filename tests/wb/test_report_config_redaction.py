@@ -59,7 +59,9 @@ def proj(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("module_name,prefix", CASES)
-def test_make_cfg_writes_no_credential(module_name: str, prefix: str, proj: Path, monkeypatch) -> None:
+def test_make_cfg_writes_no_credential(
+    module_name: str, prefix: str, proj: Path, monkeypatch
+) -> None:
     """三个截图脚本生成的配置里不许带着 key 落进受版本控制的目录。"""
     mod = importlib.import_module(module_name)
     monkeypatch.setattr(mod, "PROJ", proj)
@@ -68,8 +70,9 @@ def test_make_cfg_writes_no_credential(module_name: str, prefix: str, proj: Path
 
     text = out_path.read_text(encoding="utf-8")
     assert SENTINEL not in text, f"{module_name}.make_cfg() 把凭证写进了 {out_path.name}"
-    assert re.search(r'^  api_key:\s*""', text, re.M), \
+    assert re.search(r'^  api_key:\s*""', text, re.M), (
         f"{module_name}.make_cfg() 没有把 api_key 抹成空串，而是整行丢了或改了别处"
+    )
     # 抹除不能把配置写坏：得仍是合法 YAML，且脚本原本要改的两处仍然生效。
     data = yaml.safe_load(text)
     assert data["llm"]["api_key"] == ""
@@ -79,10 +82,11 @@ def test_make_cfg_writes_no_credential(module_name: str, prefix: str, proj: Path
 
 
 @pytest.mark.parametrize("module_name,prefix", CASES)
-def test_make_cfg_still_handles_ui_skin_line(module_name: str, prefix: str, proj: Path, monkeypatch) -> None:
+def test_make_cfg_still_handles_ui_skin_line(
+    module_name: str, prefix: str, proj: Path, monkeypatch
+) -> None:
     """带 ui.skin 的真配置走完抹除后，皮肤替换不能失效（脚本靠它截两套皮）。"""
-    (proj / "config.yaml").write_text(
-        FAKE_CONFIG + '\nui:\n  skin: ark\n', encoding="utf-8")
+    (proj / "config.yaml").write_text(FAKE_CONFIG + "\nui:\n  skin: ark\n", encoding="utf-8")
     mod = importlib.import_module(module_name)
     monkeypatch.setattr(mod, "PROJ", proj)
 

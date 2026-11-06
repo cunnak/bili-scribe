@@ -105,7 +105,9 @@ def _closing(logged: dict) -> list[str]:
 # ---------------------------------------------------------------- 默认关
 
 
-def test_the_switch_is_off_by_default_and_a_failure_writes_nothing(logged: dict, monkeypatch) -> None:
+def test_the_switch_is_off_by_default_and_a_failure_writes_nothing(
+    logged: dict, monkeypatch
+) -> None:
     """**默认关**：不设环境变量时，失败任务一行都不写。
 
     这条就是「摘掉开关判断（无条件写）」那颗牙齿咬的对象。
@@ -129,7 +131,14 @@ def test_the_switch_accepts_only_1_true_on_and_ignores_junk(logged: dict, monkey
 
     这条防的是把「设过没有」当成「开没开」：`WB_JOB_FAILURE_LOG=0` 必须是关。
     """
-    for value, expect_on in (("1", True), ("TRUE", True), (" on ", True), ("0", False), ("false", False), ("", False)):
+    for value, expect_on in (
+        ("1", True),
+        ("TRUE", True),
+        (" on ", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+    ):
         monkeypatch.setenv(SWITCH, value)
         from video_workbench.app.jobs import failure_log_enabled
 
@@ -184,7 +193,9 @@ def test_a_multi_line_traceback_detail_still_lands_as_one_physical_line(
     body = _lines(logged)
     # traceback 的中间那些行不许单独成行：整段只该有那一条收尾
     assert not [ln for ln in body if ln.lstrip().startswith('File "')], "traceback 中间行单独落盘了"
-    assert not [ln for ln in body if ln.startswith("Traceback (most recent call")], "原始 traceback 头落盘了"
+    assert not [ln for ln in body if ln.startswith("Traceback (most recent call")], (
+        "原始 traceback 头落盘了"
+    )
 
 
 def test_a_success_writes_nothing_even_with_the_switch_on(logged: dict, monkeypatch) -> None:

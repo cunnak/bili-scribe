@@ -78,8 +78,7 @@ def test_lines_text_keeps_timecodes():
 
 def test_lines_text_samples_long_transcripts():
     many = [
-        {"start_ms": i * 1_000, "end_ms": i * 1_000 + 900, "text": f"第{i}句"}
-        for i in range(2_000)
+        {"start_ms": i * 1_000, "end_ms": i * 1_000 + 900, "text": f"第{i}句"} for i in range(2_000)
     ]
     body = clipper.lines_text(many, limit=100)
     assert body.count("\n") == 99
@@ -149,8 +148,14 @@ def test_normalize_drops_broken_candidates():
 
 def test_normalize_filters_kind_but_keeps_type_cap():
     rows = [
-        {"kind": "highlight", "start_hint_ms": i * 20_000, "end_hint_ms": i * 20_000 + 20_000,
-         "score": 80, "title": f"第{i}个", "reason": "有结论"}
+        {
+            "kind": "highlight",
+            "start_hint_ms": i * 20_000,
+            "end_hint_ms": i * 20_000 + 20_000,
+            "score": 80,
+            "title": f"第{i}个",
+            "reason": "有结论",
+        }
         for i in range(12)
     ]
     packed = clipper.normalize(rows, duration_ms=600_000, kinds=("highlight",), count=12)
@@ -162,10 +167,22 @@ def test_normalize_sorts_by_score_after_heat():
     heat = {i * 5_000: 1 for i in range(200)}
     heat[10_000] = 40  # 10–15s 最热
     rows = [
-        {"kind": "highlight", "start_hint_ms": 100_000, "end_hint_ms": 120_000,
-         "score": 58, "title": "冷区", "reason": "有结论"},
-        {"kind": "highlight", "start_hint_ms": 10_000, "end_hint_ms": 30_000,
-         "score": 55, "title": "热区", "reason": "有结论"},
+        {
+            "kind": "highlight",
+            "start_hint_ms": 100_000,
+            "end_hint_ms": 120_000,
+            "score": 58,
+            "title": "冷区",
+            "reason": "有结论",
+        },
+        {
+            "kind": "highlight",
+            "start_hint_ms": 10_000,
+            "end_hint_ms": 30_000,
+            "score": 55,
+            "title": "热区",
+            "reason": "有结论",
+        },
     ]
     packed = clipper.normalize(rows, duration_ms=200_000, heat=heat)
     top = packed["candidates"][0]
@@ -176,8 +193,16 @@ def test_normalize_sorts_by_score_after_heat():
 def test_heat_bonus_is_capped_and_penalised():
     heat = {i * 5_000: 100 for i in range(6)}
     packed = clipper.normalize(
-        [{"kind": "highlight", "start_hint_ms": 0, "end_hint_ms": 30_000, "score": 95,
-          "title": "满热度", "reason": "有理由"}],
+        [
+            {
+                "kind": "highlight",
+                "start_hint_ms": 0,
+                "end_hint_ms": 30_000,
+                "score": 95,
+                "title": "满热度",
+                "reason": "有理由",
+            }
+        ],
         duration_ms=60_000,
         heat=heat,
     )
@@ -198,8 +223,16 @@ def test_heat_bonus_is_capped_and_penalised():
 
 def test_missing_text_is_penalised():
     plain = clipper.normalize(
-        [{"kind": "highlight", "start_hint_ms": 0, "end_hint_ms": 30_000, "score": 80,
-          "title": "有标题", "reason": "有理由"}],
+        [
+            {
+                "kind": "highlight",
+                "start_hint_ms": 0,
+                "end_hint_ms": 30_000,
+                "score": 80,
+                "title": "有标题",
+                "reason": "有理由",
+            }
+        ],
         duration_ms=60_000,
     )["candidates"][0]
     empty = clipper.normalize(
@@ -269,7 +302,11 @@ def test_generate_returns_llm_candidates_with_heat():
 def test_generate_retries_then_falls_back_to_rules():
     client = StubClient(["我不想按格式回话", "还是不想"])
     out = clipper.generate(
-        SEGMENTS, client=client, duration_ms=30_000, kinds=("highlight",), count=2,
+        SEGMENTS,
+        client=client,
+        duration_ms=30_000,
+        kinds=("highlight",),
+        count=2,
         on_progress=lambda msg: None,
     )
     assert out["source"] == "rule"
@@ -286,8 +323,13 @@ def test_generate_falls_back_when_client_raises():
         def chat(self, messages, **kwargs):
             raise RuntimeError("network down")
 
-    out = clipper.generate(SEGMENTS, client=Boom(), duration_ms=30_000,
-                           kinds=("highlight",), on_progress=lambda msg: None)
+    out = clipper.generate(
+        SEGMENTS,
+        client=Boom(),
+        duration_ms=30_000,
+        kinds=("highlight",),
+        on_progress=lambda msg: None,
+    )
     assert out["source"] == "rule"
     assert any("network down" in note or "模型请求失败" in note for note in out["notes"])
 

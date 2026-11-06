@@ -66,9 +66,7 @@ def test_the_product_code_has_summary_llm_construction_sites_at_all():
 def test_every_summary_llm_construction_in_product_code_passes_cfg():
     """产品码里每个构造点都必须传 cfg：不传 ⇒ 坏 JSON 的补救预算恒等于写死的下限。"""
     missing = [
-        f"{file}:{line}"
-        for file, line, has_cfg in _construction_sites(_scan_root())
-        if not has_cfg
+        f"{file}:{line}" for file, line, has_cfg in _construction_sites(_scan_root()) if not has_cfg
     ]
     assert not missing, (
         "这些 ``SummaryLLM(`` 构造点没有传 cfg，走的是「补救预算与配置无关」的老行为："
@@ -84,7 +82,11 @@ def test_the_collection_overview_path_is_one_of_the_covered_sites():
     这条判据会先响，而不是静默少锁一条路径。"""
     sites = {file: (line, has_cfg) for file, line, has_cfg in _construction_sites(_scan_root())}
     overview = next(
-        (value for file, value in sites.items() if file.endswith(os.path.join("core", "overview.py"))),
+        (
+            value
+            for file, value in sites.items()
+            if file.endswith(os.path.join("core", "overview.py"))
+        ),
         None,
     )
     assert overview is not None, (

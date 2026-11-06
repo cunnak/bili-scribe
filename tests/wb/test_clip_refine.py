@@ -15,7 +15,6 @@ import pytest
 from video_workbench.app.errors import WBError
 from video_workbench.core import clip_refine as cr
 
-
 SEGS = [
     {"start_ms": 0, "end_ms": 3000, "text": "第一句开场"},
     {"start_ms": 3000, "end_ms": 7000, "text": "第二句讲机制"},
@@ -107,7 +106,9 @@ def test_frame_offsets_avoid_both_ends():
 
 
 def test_frame_offsets_survives_zero_length_window():
-    assert cr.frame_offsets(5000, 5000, 2) == [5000, 5000] or len(cr.frame_offsets(5000, 5000, 2)) == 2
+    assert (
+        cr.frame_offsets(5000, 5000, 2) == [5000, 5000] or len(cr.frame_offsets(5000, 5000, 2)) == 2
+    )
 
 
 def test_window_text_keeps_partial_overlap():
@@ -136,7 +137,9 @@ def test_build_messages_puts_text_first_then_images():
 
 
 def test_parse_reply_accepts_fenced_json():
-    got = cr.parse_reply('```json\n{"score": 88, "title": "这条能单独发", "reason": "话讲完了"}\n```')
+    got = cr.parse_reply(
+        '```json\n{"score": 88, "title": "这条能单独发", "reason": "话讲完了"}\n```'
+    )
     assert got == {"score": 88, "title": "这条能单独发", "reason": "话讲完了"}
 
 
@@ -236,8 +239,11 @@ def test_refine_retries_without_temperature(tmp_path):
 
 
 def test_refine_reports_bad_json_per_candidate(tmp_path):
-    out = _refine([_cand(), _cand(start=8000, end=15000)], client=FakeClient("我觉得还行"),
-                  work_dir=str(tmp_path))
+    out = _refine(
+        [_cand(), _cand(start=8000, end=15000)],
+        client=FakeClient("我觉得还行"),
+        work_dir=str(tmp_path),
+    )
     assert out["failed"] == 2
     assert out["refined"] == 0
     assert len(out["notes"]) >= 2

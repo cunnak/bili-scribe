@@ -66,19 +66,25 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from video_workbench.core import summarizer as ad
-from video_workbench.core.summary import role_label
-from video_workbench.core.summary import DEFAULT_ROLE, RETIRED_ROLES, ROLE_KEYS
-from video_workbench.core.summary import UnknownRole, get_role
-
-from test_summary import GOOD, FakeCtx, StubClient, _cfg  # 同目录、无 __init__.py
 from playwright._impl._errors import Error as PlaywrightError  # noqa: E402
-
-from test_summary_real_backend_ui import (  # noqa: F401  两个 fixture 由 pytest 注入
-    browser,
-    web_base_url,
-)
+from test_summary import GOOD, FakeCtx, StubClient, _cfg  # 同目录、无 __init__.py
 from test_summary_parity import SHORT_BODY  # noqa: F401  造历史行时复用同一份正文形状
+from test_summary_real_backend_ui import (  # noqa: F401  两个 fixture 由 pytest 注入
+    browser as browser,
+)
+from test_summary_real_backend_ui import (
+    web_base_url as web_base_url,
+)
+
+from video_workbench.core import summarizer as ad
+from video_workbench.core.summary import (
+    DEFAULT_ROLE,
+    RETIRED_ROLES,
+    ROLE_KEYS,
+    UnknownRole,
+    get_role,
+    role_label,
+)
 
 #: 身份信息（**有意为之的决定**，不是从产品读出来的）：把这一行改成从
 #: `RETIRED_ROLES` 现读，就等于让产品自己给自己出证明——退役少登记一个键，
@@ -113,18 +119,20 @@ def test_the_retired_set_is_exactly_the_three_registered_keys():
     """
     assert set(RETIRED_ROLES) == EXPECTED_RETIRED, (
         f"退役集合与登记不符：现读 {sorted(RETIRED_ROLES)}，登记 {sorted(EXPECTED_RETIRED)}。"
-        f"改它必须是有意的：更新 EXPECTED_RETIRED 并在交付里点名。")
+        f"改它必须是有意的：更新 EXPECTED_RETIRED 并在交付里点名。"
+    )
     assert set(ad.RETIRED_ROLES) == set(RETIRED_ROLES), (
-        f"适配层的退役名单与权威层分叉：{sorted(ad.RETIRED_ROLES)}")
+        f"适配层的退役名单与权威层分叉：{sorted(ad.RETIRED_ROLES)}"
+    )
     for key in EXPECTED_RETIRED:
         assert key not in ROLE_KEYS, f"{key} 已退役却还在公开面：用户选了就拿不到总结"
 
 
 def test_the_roles_rpc_carries_the_same_retired_list_the_authority_keeps(tmp_path):
     """`summary.roles` 的 `retired` 字段就是权威层那份，页面不许自己攒名单。"""
-    from video_workbench.app.service import WorkbenchService
-
     from test_summary_real_backend_ui import _temp_config
+
+    from video_workbench.app.service import WorkbenchService
 
     cfg_path = _temp_config(tmp_path)
     service = WorkbenchService(config_path=str(cfg_path))
@@ -133,10 +141,12 @@ def test_the_roles_rpc_carries_the_same_retired_list_the_authority_keeps(tmp_pat
     finally:
         service.close()
     assert sorted(data["retired"]) == sorted(EXPECTED_RETIRED), (
-        f"RPC 的退役名单与登记不同：{data['retired']}")
+        f"RPC 的退役名单与登记不同：{data['retired']}"
+    )
     listed = [item["key"] for item in data["roles"]]
     assert not (set(listed) & EXPECTED_RETIRED), (
-        f"RPC 清单里出现退役键：{sorted(set(listed) & EXPECTED_RETIRED)}")
+        f"RPC 清单里出现退役键：{sorted(set(listed) & EXPECTED_RETIRED)}"
+    )
 
 
 # ------------------------------------------------------------- 2. 展示口径（人话）
@@ -179,17 +189,20 @@ def test_export_marks_a_retired_history_role_by_its_stored_key():
     for key in ("xueshu", "shipin", "standard"):
         body = _md(key)
         assert f"角色：{key}（已停用）" in body, (
-            f"退役键 {key} 的导出那行不对：{[l for l in body.splitlines() if '角色' in l]}")
+            f"退役键 {key} 的导出那行不对：{[line for line in body.splitlines() if '角色' in line]}"
+        )
         assert "（未知角色）" not in body, f"{key}：退役键被说成未知角色"
         assert role_label(key) not in body, (
-            f"{key}：导出被改成说人话了——出处那一行必须按存进库的 key 对回那一行")
+            f"{key}：导出被改成说人话了——出处那一行必须按存进库的 key 对回那一行"
+        )
 
 
 def test_export_marks_an_unknown_role_separately_from_a_retired_one():
     """未知键的导出必须是 `（未知角色）`，不许与「已停用」共用一个兜底。"""
     body = _md(UNKNOWN_KEY)
     assert f"角色：{UNKNOWN_KEY}（未知角色）" in body, (
-        f"未知键那行不对：{[l for l in body.splitlines() if '角色' in l]}")
+        f"未知键那行不对：{[line for line in body.splitlines() if '角色' in line]}"
+    )
     assert "已停用" not in body, "两类被并成一类：退役要说「换角色」，未知要说「改配置」"
 
 
@@ -198,7 +211,7 @@ def test_export_of_a_live_role_stays_the_bare_key():
     for key in ROLE_KEYS:
         body = _md(key)
         assert f"角色：{key}" in body, f"{key}：现役角色的导出少了那一行"
-        line = next(l for l in body.splitlines() if l.startswith("角色："))
+        line = next(raw for raw in body.splitlines() if raw.startswith("角色："))
         assert "（" not in line, f"{key}：现役角色被标注了：{line!r}"
 
 
@@ -232,8 +245,7 @@ def test_a_retired_role_coming_from_the_config_falls_back_and_says_so(key):
     """
     got, notice = ad.resolve_role(None, key)
     assert got == DEFAULT_ROLE, f"{key}：兜底没回落默认角色，实得 {got}"
-    assert "已停用" in notice and "默认角色" in notice, (
-        f"{key}：回落了却没说原因：{notice!r}")
+    assert "已停用" in notice and "默认角色" in notice, f"{key}：回落了却没说原因：{notice!r}"
 
 
 def test_the_generation_run_with_a_dirty_config_role_succeeds_and_logs_the_switch():
@@ -244,16 +256,12 @@ def test_the_generation_run_with_a_dirty_config_role_succeeds_and_logs_the_switc
     """
     cfg = _cfg()
     cfg.llm.role = "standard"
-    segments = [{"start_ms": index * 2000, "text": f"第 {index} 句字幕内容"}
-                for index in range(40)]
+    segments = [{"start_ms": index * 2000, "text": f"第 {index} 句字幕内容"} for index in range(40)]
     client = StubClient([json.dumps(GOOD)] * 3)
     ctx = FakeCtx()
-    result = ad.run({"title": "t", "url": ""}, segments,
-                    client=client, cfg=cfg, ctx=ctx)
-    assert result["role"] == DEFAULT_ROLE, (
-        f"脏配置角色没被回落成默认：{result['role']}")
-    assert any("已停用" in line for line in ctx.logs), (
-        f"生成过程没把回落原因写进日志：{ctx.logs}")
+    result = ad.run({"title": "t", "url": ""}, segments, client=client, cfg=cfg, ctx=ctx)
+    assert result["role"] == DEFAULT_ROLE, f"脏配置角色没被回落成默认：{result['role']}"
+    assert any("已停用" in line for line in ctx.logs), f"生成过程没把回落原因写进日志：{ctx.logs}"
 
 
 def test_an_unknown_role_from_the_config_still_blocks_the_run():
@@ -263,7 +271,8 @@ def test_an_unknown_role_from_the_config_still_blocks_the_run():
     with pytest.raises(WBError) as exc:
         ad.resolve_role(None, UNKNOWN_KEY)
     assert exc.value.code == "VALIDATION", (
-        f"未知键的错误码不对：{exc.value.code} / {exc.value.message}")
+        f"未知键的错误码不对：{exc.value.code} / {exc.value.message}"
+    )
 
 
 # ------------------------------------------------------------- 5. 界面口径（真页面）
@@ -291,8 +300,14 @@ def _open_summary_page(browser, web_base: str, service):
     page = browser.new_page(viewport={"width": 1440, "height": 960})
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
-    page.on("console", lambda msg: errors.append(f"console: {msg.text}")
-            if msg.type == "error" and "favicon" not in (msg.text or "") else None)
+    page.on(
+        "console",
+        lambda msg: (
+            errors.append(f"console: {msg.text}")
+            if msg.type == "error" and "favicon" not in (msg.text or "")
+            else None
+        ),
+    )
 
     def _bridge(source, payload):
         method = payload.get("method") or ""
@@ -300,18 +315,23 @@ def _open_summary_page(browser, web_base: str, service):
         try:
             return service.dispatch(method, payload.get("params") or {})
         except Exception as exc:  # noqa: BLE001 - 桥不能把页面拖死，错误照产品的信封回
-            return {"ok": False, "request_id": None,
-                    "error": {"message": f"{type(exc).__name__}: {exc}"}}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": {"message": f"{type(exc).__name__}: {exc}"},
+            }
 
     page.expose_binding("__wbRpc", _bridge)
     page.goto(f"{origin}/index.html?mock=1", wait_until="load")
     page.wait_for_function("() => window.WB && window.WB.rpc && window.WB.router", timeout=15000)
-    page.evaluate(BRIDGE_JS, {"methods": ["library.list", "summary.get",
-                                          "summary.models", "summary.roles"]})
+    page.evaluate(
+        BRIDGE_JS, {"methods": ["library.list", "summary.get", "summary.models", "summary.roles"]}
+    )
     page.evaluate("() => window.WB.router.go('summary')")
     # 等证据来自桥的真调用：mock 也有一条角色清单，读了 mock 就等于没测。
     page.wait_for_function(
-        "() => (window.__realCalls || []).indexOf('summary.get') >= 0", timeout=20000)
+        "() => (window.__realCalls || []).indexOf('summary.get') >= 0", timeout=20000
+    )
     page.wait_for_selector("#sum-chips", timeout=20000)
     return page, errors
 
@@ -324,9 +344,9 @@ def _page_with_one_role(tmp_path, browser, web_base_url, role_value):
     只造一条：页面上的提示（`roleNotice`）说的是**当前那一版**的角色，
     多条会让「当前版」取决于插入顺序，判据就不是我说的那个东西了。
     """
-    from video_workbench.app.service import WorkbenchService
-
     from test_summary_real_backend_ui import _Service, _temp_config
+
+    from video_workbench.app.service import WorkbenchService
 
     cfg_path = _temp_config(tmp_path)
     svc = WorkbenchService(config_path=str(cfg_path))
@@ -334,8 +354,13 @@ def _page_with_one_role(tmp_path, browser, web_base_url, role_value):
     root = tmp_path / "media" / "retired-row"
     root.mkdir(parents=True)
     project = svc.repo.project_create(title="退役行样本", root_dir=str(root))
-    svc.repo.summary_insert(project["id"], content={**GOOD, "role": role_value},
-                            content_md="正文", role=role_value, model="stub-summary")
+    svc.repo.summary_insert(
+        project["id"],
+        content={**GOOD, "role": role_value},
+        content_md="正文",
+        role=role_value,
+        model="stub-summary",
+    )
     page, errors = _open_summary_page(browser, web_base_url, handle)
     return page, errors, handle
 
@@ -356,11 +381,13 @@ def _assert_notice_chip_visible(page) -> None:
     from playwright.sync_api import expect
 
     expect(page.locator("#sum-chips span", has_text="上一版的角色").first).to_be_visible(
-        timeout=10000)
+        timeout=10000
+    )
 
 
 def test_the_page_says_a_retired_history_role_is_stopped_and_what_it_switched_to(
-        tmp_path, browser, web_base_url):
+    tmp_path, browser, web_base_url
+):
     """历史行存着退役键时，界面必须说人话并且**保留那个 key**。
 
     落点是 `summary.js:661-666`：`#sum-chips` 里那颗「注意」chip，正文来自 `adoptRole`
@@ -374,9 +401,9 @@ def test_the_page_says_a_retired_history_role_is_stopped_and_what_it_switched_to
         chips = page.locator("#sum-chips").inner_text()
         assert "已停用" in chips, f"界面没说「已停用」：{chips!r}"
         assert "「xueshu」" in chips, (
-            f"界面把退役键藏起来了——用户得知道是哪一版的角色不能原样重做：{chips!r}")
-        assert f"「{_fallback_role_name(handle)}」" in chips, (
-            f"界面没说清改用哪个角色：{chips!r}")
+            f"界面把退役键藏起来了——用户得知道是哪一版的角色不能原样重做：{chips!r}"
+        )
+        assert f"「{_fallback_role_name(handle)}」" in chips, f"界面没说清改用哪个角色：{chips!r}"
         assert "未知角色" not in chips, f"退役键被说成未知键：{chips!r}"
         _assert_notice_chip_visible(page)
         assert errors == [], f"页面报错：{errors[:6]}"
@@ -384,8 +411,9 @@ def test_the_page_says_a_retired_history_role_is_stopped_and_what_it_switched_to
         page.close()
 
 
-def test_the_page_keeps_an_unknown_history_role_a_different_message(tmp_path, browser,
-                                                                   web_base_url):
+def test_the_page_keeps_an_unknown_history_role_a_different_message(
+    tmp_path, browser, web_base_url
+):
     """未知键的历史行不许也说「已停用」：它从没存在过，用户要做的是改配置。
 
     这条与上一条是同一族的两侧——只写任一条，实现都可以用一个 `else` 把两类并成一类。
@@ -395,8 +423,7 @@ def test_the_page_keeps_an_unknown_history_role_a_different_message(tmp_path, br
         chips = page.locator("#sum-chips").inner_text()
         assert UNKNOWN_KEY in chips, f"界面把未知键藏了：{chips!r}"
         assert "已停用" not in chips, f"未知键被说成已停用：{chips!r}"
-        assert "不在角色列表" in chips or "不认识" in chips, (
-            f"界面没说清这是不认识的键：{chips!r}")
+        assert "不在角色列表" in chips or "不认识" in chips, f"界面没说清这是不认识的键：{chips!r}"
         _assert_notice_chip_visible(page)
         assert errors == [], f"页面报错：{errors[:6]}"
     finally:
@@ -419,7 +446,8 @@ def test_a_live_history_role_produces_no_switch_notice(tmp_path, browser, web_ba
         chips = page.locator("#sum-chips").inner_text()
         assert "上一版的角色" not in chips, f"现役角色被提示成不可用：{chips!r}"
         assert page.locator("#sum-chips span", has_text="上一版的角色").count() == 0, (
-            "「注意」那颗 chip 还在 DOM 里，只是文字空了——那是半条实现")
+            "「注意」那颗 chip 还在 DOM 里，只是文字空了——那是半条实现"
+        )
         rows = handle.call("summary.roles", {})["roles"]
         own = next(row["name"] for row in rows if row["key"] == "renhua")
         assert own in chips, f"界面上看不到这一版自己的角色名 {own!r}：{chips!r}"
@@ -448,22 +476,24 @@ def test_the_page_does_not_read_the_label_rows_the_cli_consumes():
     # 逻辑不许吃、载荷必须有，两条合起来才是完整合同——只留前一条等于把后半删了。
     logic = [f for f in sorted(js_dir.rglob("*.js")) if f.name != "mock.js"]
     assert logic, f"没找到任何页面 js，这条空转了：{js_dir}"
-    hits = [(f.relative_to(js_dir), ln)
-            for f in logic
-            for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
-            if "retired_labels" in line]
+    hits = [
+        (f.relative_to(js_dir), ln)
+        for f in logic
+        for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+        if "retired_labels" in line
+    ]
     assert hits == [], (
-        "页面逻辑开始吃 retired_labels —— 那是 CLI 的字段，"
-        f"换成对象数组会让 indexOf 恒 -1：{hits}")
+        f"页面逻辑开始吃 retired_labels —— 那是 CLI 的字段，换成对象数组会让 indexOf 恒 -1：{hits}"
+    )
     # 控制腿：前端必须**还在**吃裸 key 那份，否则上一条的「0 命中」可能只是因为
     # 整个退役显示被人删了。
     page = (js_dir / "pages" / "summary.js").read_text(encoding="utf-8")
     assert "data.retired" in page, (
-        "summary.js 不再读 `retired` —— 退役显示整块没了，这条锁要重新设计")
+        "summary.js 不再读 `retired` —— 退役显示整块没了，这条锁要重新设计"
+    )
 
 
-def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base_url,
-                                                                tmp_path):
+def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base_url, tmp_path):
     """判据 5（task-41）：演示态载荷的**键集合**必须等于真服务那一份，两边都现读。
 
     为什么必须有这条：缺键与空值在界面上表现**完全一样**——`summary.js:234` 是
@@ -481,10 +511,10 @@ def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base
     """
     from urllib.parse import urlsplit
 
+    from test_summary_real_backend_ui import _temp_config
+
     from video_workbench.app.service import roles_payload
     from video_workbench.config import WorkbenchConfig
-
-    from test_summary_real_backend_ui import _temp_config
 
     cfg_path = _temp_config(tmp_path)
     real_keys = set(roles_payload(WorkbenchConfig.load(str(cfg_path))))
@@ -497,14 +527,11 @@ def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base
     mock_keys = None
     rpc_failure = None
     try:
-        page.goto(f"{parts.scheme}://{parts.netloc}/index.html?mock=1",
-                  wait_until="load")
+        page.goto(f"{parts.scheme}://{parts.netloc}/index.html?mock=1", wait_until="load")
         # 两条谓词分开等：`WB.rpc` 存在是脚本加载完了，`WB.isMock()` 为真才是演示态。
         # 演示态没起来却拿真后端载荷比键，两边同源，这条就成了假绿。
-        page.wait_for_function(
-            "() => !!(window.WB && typeof WB.rpc === 'function')", timeout=15000)
-        page.wait_for_function(
-            "() => !!(window.WB && WB.isMock && WB.isMock())", timeout=15000)
+        page.wait_for_function("() => !!(window.WB && typeof WB.rpc === 'function')", timeout=15000)
+        page.wait_for_function("() => !!(window.WB && WB.isMock && WB.isMock())", timeout=15000)
         # `WB.rpc` **成功就返回 data**（`rpc.js:102` 注释与 `:112 return res.data`），
         # 失败抛 `RpcError`。前一版我按「它回信封」写判据，是把 `WB.raw` 的语义安到了
         # `WB.rpc` 上——那样 Object.keys(信封) 得到 ok/data/request_id，恒不等于真键集合，
@@ -520,7 +547,8 @@ def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base
 
     assert rpc_failure is None, (
         f"演示态取 `summary.roles` 没成功（{rpc_failure}）；页内错误：{page_errors}。"
-        "页面没起来 ≠ 载荷形状不符，别把这一支读成判据红。")
+        "页面没起来 ≠ 载荷形状不符，别把这一支读成判据红。"
+    )
     assert not page_errors, f"取完键页面仍报错，读数不可信：{page_errors}"
     assert mock_keys is not None, "上面两个断言与这条不可能同时不成立——走到这就是夹具坏了"
     assert set(mock_keys), "演示态载荷是空对象：集合相等会变成『空 == 空』的假绿"
@@ -529,7 +557,8 @@ def test_the_mock_payload_has_every_key_the_real_service_sends(browser, web_base
     assert not missing and not extra, (
         f"演示态载荷形状与真服务不一致：mock 缺 {missing}，多 {extra}。"
         "缺键与空值在界面上表现完全一样（`summary.js:234` 那句 `|| []`），所以演示态"
-        "会永远走兜底支且不报错——这条就是拦这个的。")
+        "会永远走兜底支且不报错——这条就是拦这个的。"
+    )
 
 
 def test_the_real_database_row_for_standard_is_still_readable():
@@ -543,13 +572,13 @@ def test_the_real_database_row_for_standard_is_still_readable():
     before = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     conn = sqlite3.connect(f"file:{REAL_DB.as_posix()}?mode=ro", uri=True)
     try:
-        rows = conn.execute(
-            "select role, count(*) from summary_version group by role").fetchall()
+        rows = conn.execute("select role, count(*) from summary_version group by role").fetchall()
     finally:
         conn.close()
     counts = dict(rows)
     assert counts.get("standard", 0) >= 1, (
-        f"真库里没有 standard 的历史行，这条的对照意义没了：{counts}")
+        f"真库里没有 standard 的历史行，这条的对照意义没了：{counts}"
+    )
     after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     assert after == before, "只读连接改了真库指纹——立刻停手查是谁写的"
 
@@ -578,7 +607,8 @@ def test_the_real_retired_row_still_exports_by_its_stored_key():
     try:
         cols = [r[1] for r in conn.execute("pragma table_info(summary_version)")]
         row = conn.execute(
-            "select * from summary_version where role = 'standard' limit 1").fetchone()
+            "select * from summary_version where role = 'standard' limit 1"
+        ).fetchone()
     finally:
         conn.close()
     if row is None:
@@ -587,7 +617,8 @@ def test_the_real_retired_row_still_exports_by_its_stored_key():
     body = json.loads(str(data["summary_json"]))
     assert body.get("role") == data["role"] == "standard", (
         f"列与 JSON 的角色不一致，「按 key 对回那一行」成了看运气："
-        f"列={data['role']!r} JSON={body.get('role')!r}")
+        f"列={data['role']!r} JSON={body.get('role')!r}"
+    )
 
     text = ad.to_markdown(body)
     line = next((ln for ln in text.splitlines() if ln.startswith("角色：")), "")
@@ -596,7 +627,8 @@ def test_the_real_retired_row_still_exports_by_its_stored_key():
     assert "未知角色" not in line, f"真库退役行被并报成未知：{line!r}"
     # 导出是**出处**，人话归界面：这里出现 role_label() 的输出就是把两栏合成一栏了。
     assert "标准（已停用）" not in text, (
-        "导出开始念人话名了 —— 按存库 key 对回那一行是导出的定义，不是显示偏好")
+        "导出开始念人话名了 —— 按存库 key 对回那一行是导出的定义，不是显示偏好"
+    )
 
     after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     assert after == before, "只读连接改了真库指纹 —— 立刻停手查是谁写的"
@@ -614,13 +646,15 @@ def test_the_real_database_only_holds_standard_among_retired_keys():
     before = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     conn = sqlite3.connect(f"file:{REAL_DB.as_posix()}?mode=ro", uri=True)
     try:
-        counts = dict(conn.execute(
-            "select role, count(*) from summary_version group by role").fetchall())
+        counts = dict(
+            conn.execute("select role, count(*) from summary_version group by role").fetchall()
+        )
     finally:
         conn.close()
     retired_in_db = sorted(set(counts) & EXPECTED_RETIRED)
     assert retired_in_db == ["standard"], (
-        f"真库的退役 key 不再只有 standard：{counts} —— 上一条的取材范围要跟着扩")
+        f"真库的退役 key 不再只有 standard：{counts} —— 上一条的取材范围要跟着扩"
+    )
     after = hashlib.sha256(REAL_DB.read_bytes()).hexdigest()
     assert after == before, "只读连接改了真库指纹 —— 立刻停手查是谁写的"
 
@@ -644,9 +678,9 @@ def _rpc_roles_envelope(tmp_path) -> dict:
 
     teardown 必 `close()`：`WorkbenchService.__init__` 会建库建 logs，泄漏会污染 Temp。
     """
-    from video_workbench.app.service import WorkbenchService
-
     from test_summary_real_backend_ui import _temp_config
+
+    from video_workbench.app.service import WorkbenchService
 
     service = WorkbenchService(config_path=str(_temp_config(tmp_path)))
     try:
@@ -664,11 +698,11 @@ def test_the_roles_rpc_still_serves_retired_keys_when_a_row_has_no_display(tmp_p
     keys = sorted(EXPECTED_RETIRED)
     normal = _rpc_roles_envelope(tmp_path)
     assert normal["ok"] is True, f"控制腿：正常 RPC 就失败了 {normal.get('error')}"
-    assert [r["key"] for r in normal["data"]["retired_labels"]] == \
-        normal["data"]["retired"] == keys, (
-        "控制腿不成立：正常载荷两栏就不同源同序，下面那条对照没有意义")
+    assert (
+        [r["key"] for r in normal["data"]["retired_labels"]] == normal["data"]["retired"] == keys
+    ), "控制腿不成立：正常载荷两栏就不同源同序，下面那条对照没有意义"
 
-    original = ad.retired_row_labels          # `ad` 就是 core.summarizer（文件 :69 现读别名）
+    original = ad.retired_row_labels  # `ad` 就是 core.summarizer（文件 :69 现读别名）
     ad.retired_row_labels = lambda: [{"key": k} for k in keys]
     try:
         envelope = _rpc_roles_envelope(tmp_path)
@@ -680,22 +714,24 @@ def test_the_roles_rpc_still_serves_retired_keys_when_a_row_has_no_display(tmp_p
     #     必须三把不少，前端 `summary.js:234` 的 indexOf 才有得查；
     #   B 支（将来若改成逐键兜底）＝不许把整条打死，活角色清单 `roles` 必须仍在。
     # 两支任一成立即通过；两条都不成立＝界面塌了，那才是这条要拦的。
-    retired_intact = (envelope["ok"] is True
-                      and envelope["data"].get("retired") == keys)
+    retired_intact = envelope["ok"] is True and envelope["data"].get("retired") == keys
     roles_intact = bool((envelope.get("data") or {}).get("roles"))
     assert retired_intact or roles_intact, (
         f"界面依赖塌了：既没有完整的退役名单（A 支），也没有活角色清单（B 支）。"
-        f"实得 ok={envelope['ok']} error={envelope.get('error')}")
+        f"实得 ok={envelope['ok']} error={envelope.get('error')}"
+    )
     # 下面这行不是上面那行的重复，是**变更探测器**：它钉「今天走的是 A 支」。哪天有人
     # 把兜底改成逐键降级（B 支），这条必须红，要求把上面 A 支那一段的具体断言（少一列
     # display 的形态）搬到 B 支重写——而不是让合同悄悄变成「两种都行、什么都不检查」。
     assert retired_intact, (
         "当前分支已从 A（少一列、整条照旧）变成 B（整条失败但 roles 还在）——"
-        "请同步改写上面那段断言，并保留『不许打死接口』这条不变量")
+        "请同步改写上面那段断言，并保留『不许打死接口』这条不变量"
+    )
     data = envelope["data"]
     assert [r.get("display") for r in data["retired_labels"]] == [None] * len(keys), (
         "兜底腿自己把 display 补出来了 —— 这一条只测「缺字段不许打死接口」，"
-        "补谁的名字是另一个决定，不许顺手猜")
+        "补谁的名字是另一个决定，不许顺手猜"
+    )
 
 
 def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tmp_path):
@@ -738,7 +774,8 @@ def test_one_unprintable_retired_key_currently_takes_the_whole_role_list_down(tm
 
     assert envelope["ok"] is False, (
         "单点故障已被修掉：坏一个键不再打死整张名单 —— 现在就把这条改成期望 ok=True，"
-        "并加一条「其余键的 display 仍要正常」的断言")
+        "并加一条「其余键的 display 仍要正常」的断言"
+    )
     error = envelope.get("error") or {}
     assert error.get("code") == "INTERNAL", f"错误码不是现状登记的 INTERNAL：{error}"
 
@@ -773,9 +810,13 @@ def test_the_error_envelope_currently_names_no_broken_role_key(tmp_path):
     message = str((envelope.get("error") or {}).get("message", ""))
     assert "xueshu" not in message, (
         "错误信封已经开始带键名了（现状：只有异常原文）。这是好消息——请把这条改成"
-        f"『message 必须含坏掉的键名』，并删掉上面那段现状说明。实得 message={message!r}")
+        f"『message 必须含坏掉的键名』，并删掉上面那段现状说明。实得 message={message!r}"
+    )
     assert "这一个键念不出来" in message, (
-        f"错误信封连异常原文都不回了，界面将完全没有线索：{message!r}")
+        f"错误信封连异常原文都不回了，界面将完全没有线索：{message!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # task-41 判据 1：把 docstring 那句「任何输入都不抛」从注释变成机械证据
 #
@@ -792,9 +833,30 @@ def test_the_error_envelope_currently_names_no_broken_role_key(tmp_path):
 
 # 契约的措辞是「任何输入」，所以用例集合要是它的像：类型形状 × 键空间两条轴都铺到。
 _SHAPE_PROBE = (
-    None, "", "   ", "\t\n", 123, 0, -1, 3.5, True, False, b"x",
-    [], ["x"], {}, {"key": "x"}, (1,), frozenset({"x"}), set(),
-    object(), Ellipsis, NotImplemented, range(2), (lambda: None), Exception("boom"),
+    None,
+    "",
+    "   ",
+    "\t\n",
+    123,
+    0,
+    -1,
+    3.5,
+    True,
+    False,
+    b"x",
+    [],
+    ["x"],
+    {},
+    {"key": "x"},
+    (1,),
+    frozenset({"x"}),
+    set(),
+    object(),
+    Ellipsis,
+    NotImplemented,
+    range(2),
+    (lambda: None),
+    Exception("boom"),
 )
 # `NotImplemented` 与 `Ellipsis` 现在都在这一组里：task-43 把判空从真值判断改成
 # `"" if key is None else str(key).strip()` 之后，builtin 哨兵和 `123`、`b'x'`、
@@ -804,8 +866,13 @@ _SHAPE_PROBE = (
 # 会先去空白再查表，那两个会正常解析成退役标签（是宽容，不是 bug）。# 也**不能**写 "wengao"：那是现役键，会被正常解析成角色名，
 # 拿它当未知键就会得到一条假红（第一版我就踩在这里）。
 _UNKNOWN_STRINGS = (
-    "zzz-not-a-role", "Standard", "STANDARD", "standard2",
-    "标准", "已停用", "（已停用）",
+    "zzz-not-a-role",
+    "Standard",
+    "STANDARD",
+    "standard2",
+    "标准",
+    "已停用",
+    "（已停用）",
 )
 
 
@@ -829,7 +896,8 @@ def _live_base_name(key: str) -> str:
     extra = getattr(_authority_layer(), "_RETIRED_EXTRA_NAMES", {})
     assert key in extra, (
         f"{key!r} 是退役键，但副本表里没有它、权威层也没补登名字——"
-        "那它的显示名是从哪来的？请把这条改成读新的真源位置")
+        "那它的显示名是从哪来的？请把这条改成读新的真源位置"
+    )
     return extra[key]
 
 
@@ -842,8 +910,9 @@ def _live_retired_suffix() -> str:
         assert label != key, f"退役键 {key!r} 的标签退化成裸 key，界面等于没说话"
         assert label.startswith(base), (
             f"退役标签 {label!r} 不是以现读基名 {base!r} 开头——格式变了，"
-            "这条判据的减法前提不成立，请改成新格式再判")
-        suffixes.add(label[len(base):])
+            "这条判据的减法前提不成立，请改成新格式再判"
+        )
+        suffixes.add(label[len(base) :])
     assert len(suffixes) == 1, f"三把退役键的后缀不一致：{sorted(suffixes)}"
     suffix = suffixes.pop()
     assert suffix, "退役标签没有任何后缀，那「已停用」这件事在界面上就消失了"
@@ -857,14 +926,15 @@ def test_role_label_never_raises_and_always_returns_a_string():
         tag = f"{type(value).__name__}({value!r})"[:60]
         try:
             out = role_label(value)
-        except Exception as exc:                       # noqa: BLE001 - 契约面就是要抓任何异常
+        except Exception as exc:  # noqa: BLE001 - 契约面就是要抓任何异常
             offenders.append(f"{tag} → 抛 {type(exc).__name__}: {exc}")
             continue
         if not isinstance(out, str):
             offenders.append(f"{tag} → 返回 {type(out).__name__}，不是 str")
     assert len(_SHAPE_PROBE) >= 20, (
         f"形状集合只剩 {len(_SHAPE_PROBE)} 项了；契约写的是「任何输入」，"
-        "用例集合缩到个位数就等于没测")
+        "用例集合缩到个位数就等于没测"
+    )
     assert not offenders, "「任何输入都不抛」被这些形状破了：\n  " + "\n  ".join(offenders)
 
 
@@ -877,7 +947,8 @@ def test_blank_inputs_get_an_empty_label_not_an_invented_name():
     """
     for value in (None, "", "   ", "\t\n"):
         assert role_label(value) == "", (
-            f"输入 {value!r} 拿到了 {role_label(value)!r}：空值不该有名字")
+            f"输入 {value!r} 拿到了 {role_label(value)!r}：空值不该有名字"
+        )
 
 
 def test_retired_labels_share_one_suffix_built_on_the_live_base_name():
@@ -885,11 +956,11 @@ def test_retired_labels_share_one_suffix_built_on_the_live_base_name():
     suffix = _live_retired_suffix()
     for key in ROLE_KEYS:
         label = role_label(key)
-        assert not label.endswith(suffix), (
-            f"现役角色 {key!r} 被打上退役后缀了：{label!r}")
+        assert not label.endswith(suffix), f"现役角色 {key!r} 被打上退役后缀了：{label!r}"
         assert label == _live_base_name(key), (
             f"现役角色 {key!r} 的标签 {label!r} 不等于现读基名 "
-            f"{_live_base_name(key)!r}——展示层开始加戏了")
+            f"{_live_base_name(key)!r}——展示层开始加戏了"
+        )
 
 
 def test_unknown_inputs_never_claim_a_retired_role_or_say_nothing():
@@ -899,8 +970,16 @@ def test_unknown_inputs_never_claim_a_retired_role_or_say_nothing():
     # `未知角色（已停用）` 会以该后缀结尾，那是正确行为，不是冒充（第一版红在这里）。
     retired_labels = {role_label(key) for key in sorted(RETIRED_ROLES)}
     silent, mislabeled = [], []
-    for value in list(_UNKNOWN_STRINGS) + [123, 3.5, b"x", ["x"], {"key": "x"},
-                                           frozenset({"x"}), object(), Ellipsis]:
+    for value in list(_UNKNOWN_STRINGS) + [
+        123,
+        3.5,
+        b"x",
+        ["x"],
+        {"key": "x"},
+        frozenset({"x"}),
+        object(),
+        Ellipsis,
+    ]:
         label = role_label(value)
         if label in retired_labels:
             mislabeled.append(f"{value!r} → {label!r}（正好撞上真退役键的标签）")
@@ -909,7 +988,6 @@ def test_unknown_inputs_never_claim_a_retired_role_or_say_nothing():
     assert retired_labels, "退役标签集合为空，这条就没有对照物了"
     assert not mislabeled, "这些输入被冒充成退役角色了：\n  " + "\n  ".join(mislabeled)
     assert not silent, "这些未知键的标签没带回原键名：\n  " + "\n  ".join(silent)
-
 
 
 class _HostileBool:
@@ -936,14 +1014,14 @@ _TRUTHINESS_HAZARDS = (
 )
 _REPR_HAZARD = ("__repr__ 抛错的对象", _HostileRepr())
 # falsy 的非字符串：今天全部回 ''，靠的正是 `if not key`。
-_FALSY_NON_STRINGS = (0, False, range(0), 0.0, -0.0, 0j, b"", (), frozenset(),
-                      {}.keys())
+_FALSY_NON_STRINGS = (0, False, range(0), 0.0, -0.0, 0j, b"", (), frozenset(), {}.keys())
 
 
 def _live_role_labels() -> set:
     """全部真角色的现读标签（公开 + 退役），用来判「解析成功了」。不写中文名。"""
     return {role_label(key) for key in ROLE_KEYS} | {
-        role_label(key) for key in sorted(RETIRED_ROLES)}
+        role_label(key) for key in sorted(RETIRED_ROLES)
+    }
 
 
 class _StrShadow:
@@ -962,7 +1040,6 @@ class _StrShadow:
 
     def __repr__(self):
         return f"<StrShadow {self._key}>"
-
 
 
 def test_builtin_sentinels_take_the_unknown_key_path_like_anything_else():
@@ -988,8 +1065,7 @@ def test_builtin_sentinels_take_the_unknown_key_path_like_anything_else():
         assert rendered in label, f"标签没把原值带回给用户：{label!r}"
         assert label not in live, f"哨兵 {rendered!r} 被解析成真角色：{label!r}"
         shells.add(label.replace(rendered, "\x00", 1))
-    assert len(shells) == 1, (
-        f"这些非字符串的标签外壳分裂成多份（特例被加回来了）：{sorted(shells)}")
+    assert len(shells) == 1, f"这些非字符串的标签外壳分裂成多份（特例被加回来了）：{sorted(shells)}"
 
 
 def test_truthiness_sensitive_inputs_land_on_the_unknown_key_path():
@@ -1005,7 +1081,7 @@ def test_truthiness_sensitive_inputs_land_on_the_unknown_key_path():
     for tag, value in _TRUTHINESS_HAZARDS:
         try:
             out = role_label(value)
-        except Exception as exc:                            # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             offenders.append(f"{tag} → 抛 {type(exc).__name__}: {exc}")
             continue
         if not isinstance(out, str) or not out:
@@ -1014,7 +1090,8 @@ def test_truthiness_sensitive_inputs_land_on_the_unknown_key_path():
             offenders.append(f"{tag} → {out!r}（被解析成真角色）")
     assert not offenders, (
         "真值敏感输入又开始抛、或又被当成空值/真角色了。"
-        "判空大概退回真值判断：\n  " + "\n  ".join(offenders))
+        "判空大概退回真值判断：\n  " + "\n  ".join(offenders)
+    )
 
 
 def test_only_none_and_blank_input_collapse_to_an_empty_label():
@@ -1033,14 +1110,16 @@ def test_only_none_and_blank_input_collapse_to_an_empty_label():
         label = role_label(value)
         rendered = str(value).strip()
         if not rendered:
-            continue                     # 自身就是空形态的（b''/()）交给空值支判
+            continue  # 自身就是空形态的（b''/()）交给空值支判
         if label == "" or rendered not in label:
             offenders.append(f"{type(value).__name__}({value!r}) → {label!r}")
     assert len(_FALSY_NON_STRINGS) >= 8, (
-        f"falsy 形状集合只剩 {len(_FALSY_NON_STRINGS)} 项，钉不住整类")
+        f"falsy 形状集合只剩 {len(_FALSY_NON_STRINGS)} 项，钉不住整类"
+    )
     assert not offenders, (
         "这些 falsy 输入被当成空值吞掉了（界面留白，看不出配置里存了个怪东西）：\n  "
-        + "\n  ".join(offenders))
+        + "\n  ".join(offenders)
+    )
 
 
 def test_a_non_string_is_currently_looked_up_by_its_str_form():
@@ -1061,19 +1140,19 @@ def test_a_non_string_is_currently_looked_up_by_its_str_form():
     live = _live_role_labels()
     assert live, "现读标签集合为空，这条没有对照物"
 
-    retired = sorted(RETIRED_ROLES)[0]        # 现读一把退役键，不写死名字
+    retired = sorted(RETIRED_ROLES)[0]  # 现读一把退役键，不写死名字
     shadow = _StrShadow(retired)
     assert str(shadow) == retired, "夹具造错：__str__ 没返回键名"
     assert role_label(shadow) == role_label(retired), (
-        "标签这一支已经不按 str() 查表了——请把这条翻成"
-        "「非字符串必须走未知键路径」的正向断言")
+        "标签这一支已经不按 str() 查表了——请把这条翻成「非字符串必须走未知键路径」的正向断言"
+    )
 
     public = sorted(ROLE_KEYS)[0]
     got = get_role(_StrShadow(public))
-    assert got.key == public, (
-        "get_role 开始拒绝非字符串了——这条该翻成「必须抛 UnknownRole」")
+    assert got.key == public, "get_role 开始拒绝非字符串了——这条该翻成「必须抛 UnknownRole」"
     assert role_label(b"wengao") not in live, (
-        "bytes 的 str() 形态不等于键名，不该解析成角色（对照腿：防整类被吞成空值）")
+        "bytes 的 str() 形态不等于键名，不该解析成角色（对照腿：防整类被吞成空值）"
+    )
 
 
 def test_an_input_with_a_broken_repr_currently_raises():
@@ -1089,7 +1168,10 @@ def test_an_input_with_a_broken_repr_currently_raises():
     with pytest.raises(RuntimeError) as exc:
         role_label(value)
     assert "repr" in str(exc.value), (
-        f"{tag} 抛了，但不是 repr 那条路径（{exc.value}）——成因变了，请重读")
+        f"{tag} 抛了，但不是 repr 那条路径（{exc.value}）——成因变了，请重读"
+    )
+
+
 class _HostileStr:
     """`__str__` 自己抛异常的对象：`str(key)` 这一步就炸，轮不到后面的查表。
 
@@ -1131,7 +1213,8 @@ def test_a_broken_input_currently_falls_back_to_a_retired_key_in_the_copy_path()
     fallback_key = authority._raw_get_role(missing).key
     assert fallback_key in RETIRED_ROLES, (
         f"副本的未知键回落目标是 {fallback_key!r}，它已经不在退役名单里了——"
-        "回落目标换了/退役名单变了，请重读这条判据再决定叙述")
+        "回落目标换了/退役名单变了，请重读这条判据再决定叙述"
+    )
 
     with pytest.raises(UnknownRole):
         authority.get_role(Ellipsis)
@@ -1140,9 +1223,11 @@ def test_a_broken_input_currently_falls_back_to_a_retired_key_in_the_copy_path()
     assert got.key == fallback_key, (
         f"`_bound_get_role(Ellipsis)` 不再静默回落到 {fallback_key!r}（实得 "
         f"{got.key!r}）——副本语义已被改动或用户已拍板，请把这条翻成"
-        "「坏输入必须抛 UnknownRole」")
+        "「坏输入必须抛 UnknownRole」"
+    )
     assert got.key not in ROLE_KEYS, (
-        "回落目标居然是现役键，那这条探测器就没有意义了：请重读退役名单")
+        "回落目标居然是现役键，那这条探测器就没有意义了：请重读退役名单"
+    )
 
 
 def test_the_adapter_never_hands_the_copy_a_retired_key():
@@ -1164,9 +1249,10 @@ def test_the_adapter_never_hands_the_copy_a_retired_key():
     """
     import json
 
+    from test_summary import GOOD, FakeCtx, StubClient, _cfg
+
     import video_workbench.core.summarizer as adapter
     import video_workbench.core.summary.roles as copy_roles
-    from test_summary import GOOD, FakeCtx, StubClient, _cfg
 
     seen: list = []
     original = copy_roles.get_role
@@ -1176,10 +1262,11 @@ def test_the_adapter_never_hands_the_copy_a_retired_key():
         return original(key)
 
     cfg = _cfg()
-    cfg.llm.role = sorted(RETIRED_ROLES)[0]          # 现读一把退役键当配置值
+    cfg.llm.role = sorted(RETIRED_ROLES)[0]  # 现读一把退役键当配置值
     assert cfg.llm.role in RETIRED_ROLES, "夹具失效：配置里没带上退役值"
     assert cfg.llm.role not in ROLE_KEYS, (
-        "夹具失效：那把键同时是现役键，这条就证不了「配置带着脏值」")
+        "夹具失效：那把键同时是现役键，这条就证不了「配置带着脏值」"
+    )
 
     copy_roles.get_role = spy
     try:
@@ -1191,18 +1278,20 @@ def test_the_adapter_never_hands_the_copy_a_retired_key():
             ctx=FakeCtx(),
         )
     finally:
-        copy_roles.get_role = original                # 还原，别污染其它用例
+        copy_roles.get_role = original  # 还原，别污染其它用例
 
     assert seen, "副本的取角色入口一次都没被调用——这条成了空枪，请重读接线"
     assert all(str(k or "").strip() for k in seen), (
         f"副本收到空角色键（{seen!r}）：`role_key or llm_cfg.role` 那条真值判断"
-        "会被配置里的退役值接住，退役方法论将静默生效")
+        "会被配置里的退役值接住，退役方法论将静默生效"
+    )
     bad = [k for k in seen if k in RETIRED_ROLES]
     assert not bad, (
-        f"副本收到退役键 {bad}：配置里的 {cfg.llm.role!r} 被直接传下去了，"
-        "适配层的清洗没起作用")
+        f"副本收到退役键 {bad}：配置里的 {cfg.llm.role!r} 被直接传下去了，适配层的清洗没起作用"
+    )
     assert result["role"] == DEFAULT_ROLE, (
-        f"配置是退役值时，适配层应回落到 {DEFAULT_ROLE!r}，实得 {result['role']!r}")
+        f"配置是退役值时，适配层应回落到 {DEFAULT_ROLE!r}，实得 {result['role']!r}"
+    )
 
 
 def test_an_input_whose_dunder_str_raises_currently_breaks_the_never_raises_contract():
@@ -1220,6 +1309,8 @@ def test_an_input_whose_dunder_str_raises_currently_breaks_the_never_raises_cont
     """
     with pytest.raises(RuntimeError):
         role_label(_HostileStr())
+
+
 def test_the_copy_lookup_still_matches_bili_scribe_for_a_padded_key():
     """副本入口的查表必须与 bili-scribe 逐字同形：带空白的键照旧回落，不许被去过空白查中。
 
@@ -1235,20 +1326,24 @@ def test_the_copy_lookup_still_matches_bili_scribe_for_a_padded_key():
     import bili_scribe.core.roles as bs_roles
 
     authority = _authority_module()
-    padded = f" {sorted(ROLE_KEYS)[0]} "            # 现读：现役键两侧各加一个空格
+    padded = f" {sorted(ROLE_KEYS)[0]} "  # 现读：现役键两侧各加一个空格
     assert padded not in ROLE_KEYS and padded.strip() in ROLE_KEYS, (
-        "夹具造错：`padded` 必须是不在名单里、去掉空白才在名单里的键形状")
+        "夹具造错：`padded` 必须是不在名单里、去掉空白才在名单里的键形状"
+    )
 
-    bs_key = bs_roles.get_role(padded).key           # bs 原件怎么处理这个输入
+    bs_key = bs_roles.get_role(padded).key  # bs 原件怎么处理这个输入
     copy_key = authority._bound_get_role(padded).key  # 副本入口（总结主路径实际走的）
     assert copy_key == bs_key, (
         f"副本入口对 {padded!r} 的处理与 bili-scribe 不一致：WB 给 {copy_key!r}、"
         f"bs 给 {bs_key!r}。多半是有人把 `_raw_get_role(key)` 改成了交 `text`——"
-        "那是主动偏离 bs 的查表语义，需要用户拍板，不是实现层的自由")
+        "那是主动偏离 bs 的查表语义，需要用户拍板，不是实现层的自由"
+    )
     assert bs_key not in ROLE_KEYS, (
-        f"bs 原件居然查中了 {bs_key!r}，那这条对照失去意义，请重读原件的查表形状再改写")
+        f"bs 原件居然查中了 {bs_key!r}，那这条对照失去意义，请重读原件的查表形状再改写"
+    )
 
     cleaned = authority.get_role(padded).key
     assert cleaned == padded.strip(), (
         f"权威层不再清洗脏配置了（实得 {cleaned!r}）——用户在配置里多敲一个空格"
-        "就会拿到回落，这条底线要单独保住")
+        "就会拿到回落，这条底线要单独保住"
+    )

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -22,11 +21,16 @@ from video_workbench.core.probe import (
 )
 from video_workbench.infra.ffmpeg import FFmpeg, best_thumb_time, find_binary, parse_probe
 
-
 SAMPLE = {
     "streams": [
-        {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
-         "r_frame_rate": "30000/1001", "duration": "600.5"},
+        {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30000/1001",
+            "duration": "600.5",
+        },
         {"codec_type": "audio", "codec_name": "aac"},
     ],
     "format": {"duration": "600.5"},
@@ -44,7 +48,9 @@ def test_parse_probe_flattens_streams():
 
 
 def test_parse_probe_handles_audio_only():
-    info = parse_probe({"streams": [{"codec_type": "audio", "codec_name": "mp3"}], "format": {"duration": "3"}})
+    info = parse_probe(
+        {"streams": [{"codec_type": "audio", "codec_name": "mp3"}], "format": {"duration": "3"}}
+    )
     assert info.has_video is False and info.has_audio is True
     assert info.duration_ms == 3000
 
@@ -76,7 +82,9 @@ def test_thumbnail_command_puts_seek_before_input(tmp_path, monkeypatch):
     ff = FFmpeg(prefer_dir=None)
     monkeypatch.setattr(FFmpeg, "available", property(lambda self: True))
     monkeypatch.setattr(FFmpeg, "require", lambda self: ("ffmpeg", "ffprobe"))
-    monkeypatch.setattr(FFmpeg, "run", lambda self, args, timeout=None: calls.append(list(args)) or "")
+    monkeypatch.setattr(
+        FFmpeg, "run", lambda self, args, timeout=None: calls.append(list(args)) or ""
+    )
 
     src = tmp_path / "in.mp4"
     src.write_bytes(b"x")
@@ -84,7 +92,13 @@ def test_thumbnail_command_puts_seek_before_input(tmp_path, monkeypatch):
     # thumbnail() 会检查产物是否落盘，所以假 run 得顺手把文件"写"出来
     real_run = FFmpeg.run
     monkeypatch.setattr(
-        FFmpeg, "run", lambda self, args, timeout=None: (calls.append(list(args)), Path(args[-1]).write_bytes(b"jpg"), "")[2]
+        FFmpeg,
+        "run",
+        lambda self, args, timeout=None: (
+            calls.append(list(args)),
+            Path(args[-1]).write_bytes(b"jpg"),
+            "",
+        )[2],
     )
     ff.thumbnail(src, dest, at=2.5, width=320)
     monkeypatch.setattr(FFmpeg, "run", real_run)
@@ -109,7 +123,9 @@ def test_extract_audio_uses_whisper_defaults(tmp_path, monkeypatch):
     ff = FFmpeg()
     monkeypatch.setattr(FFmpeg, "available", property(lambda self: True))
     monkeypatch.setattr(FFmpeg, "require", lambda self: ("ffmpeg", "ffprobe"))
-    monkeypatch.setattr(FFmpeg, "run", lambda self, args, timeout=None: calls.append(list(args)) or "")
+    monkeypatch.setattr(
+        FFmpeg, "run", lambda self, args, timeout=None: calls.append(list(args)) or ""
+    )
     out = ff.extract_audio(tmp_path / "in.mp4", tmp_path / "audio.wav")
     args = calls[0]
     assert args[args.index("-ar") + 1] == "16000"

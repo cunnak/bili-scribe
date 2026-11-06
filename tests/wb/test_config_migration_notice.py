@@ -56,8 +56,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -71,8 +69,9 @@ SENTINEL_KEY = "sk-MIGRATION-NOTICE-LEAKTEST-DO-NOT-PRINT"
 EVIL_KEY = "<img src=x onerror=alert(1)>"
 
 # 跨文件复用 fixture：同目录、无 __init__.py，靠 conftest 的 sys.path 直接引名字。
-from test_config_home_split import homes  # noqa: E402  fixture：新旧两家都在 Temp
-from test_settings_role_warning_ui import browser, web_base_url  # noqa: E402
+from test_config_home_split import homes as homes  # noqa: E402  fixture：新旧两家都在 Temp
+from test_settings_role_warning_ui import browser as browser  # noqa: E402,F401
+from test_settings_role_warning_ui import web_base_url as web_base_url  # noqa: E402,F401
 
 # ---------------------------------------------------------------- 工具
 
@@ -89,8 +88,13 @@ def _fore(path: Path) -> list[str]:
     return sorted(str(k) for k in foreign_keys(raw))
 
 
-def _legacy_yaml(homes_dir: Path, *, dirty: bool, extra_lines: tuple[str, ...] = (),
-                 cache_root: str | None = None) -> Path:
+def _legacy_yaml(
+    homes_dir: Path,
+    *,
+    dirty: bool,
+    extra_lines: tuple[str, ...] = (),
+    cache_root: str | None = None,
+) -> Path:
     """造一份旧家 `config.yaml`，段顺序照 bili 的模板写。
 
     `dirty=True` 时放进三个 bili 不认识的键，**三种形状各一个**：
@@ -105,13 +109,13 @@ def _legacy_yaml(homes_dir: Path, *, dirty: bool, extra_lines: tuple[str, ...] =
     lines = [
         "llm:",
         f"  api_key: {json.dumps(SENTINEL_KEY)}",
-        "  model: \"m\"",
-        "  base_url: \"http://127.0.0.1:9/v1\"",
-        "  role: \"standard\"",
+        '  model: "m"',
+        '  base_url: "http://127.0.0.1:9/v1"',
+        '  role: "standard"',
         "  max_tokens: 4096",
     ]
     if dirty:
-        lines += ["  tasks:", "    summary: \"旧版本才有的键\""]
+        lines += ["  tasks:", '    summary: "旧版本才有的键"']
     lines += ["ui:", "  skin: ark"]
     if dirty:
         lines += ["  rail_collapsed: true"]
@@ -177,13 +181,17 @@ def test_a_dirty_legacy_home_leaves_a_notice_with_the_computed_key_names(homes):
     expected = _fore(homes["legacy_config"])
     assert expected, "夹具没把旧家弄脏：正对照失效，下面比什么都证明不了"
     assert "download" in expected and "llm.tasks" in expected and "ui.rail_collapsed" in expected, (
-        f"三种形状应当都被认出来，现读到 {expected}")
+        f"三种形状应当都被认出来，现读到 {expected}"
+    )
 
     cfg = _load_default()
     notice = _notice_of(cfg)
-    assert isinstance(notice, dict), f"搬了家、旧家脏，却没记提示：cfg.migrated_from={cfg.migrated_from!r}"
+    assert isinstance(notice, dict), (
+        f"搬了家、旧家脏，却没记提示：cfg.migrated_from={cfg.migrated_from!r}"
+    )
     assert notice["keys"] == expected, (
-        f"记下来的键名集合与 foreign_keys() 现读结果不同：{notice['keys']} vs {expected}")
+        f"记下来的键名集合与 foreign_keys() 现读结果不同：{notice['keys']} vs {expected}"
+    )
     assert notice["from"] == str(homes["legacy_config"]), notice
     assert notice["to"] == str(cfg.source_path), notice
     assert notice["dismissed"] is False, notice
@@ -233,13 +241,11 @@ def test_an_explicit_config_path_invents_no_notice(homes):
     _legacy_yaml(homes["legacy"], dirty=True)
     assert _fore(homes["legacy_config"]), "旧家必须有未知键，否则这条不测任何东西"
     explicit = homes["new"] / "elsewhere.yaml"
-    explicit.write_text(
-        homes["legacy_config"].read_text(encoding="utf-8"), encoding="utf-8")
+    explicit.write_text(homes["legacy_config"].read_text(encoding="utf-8"), encoding="utf-8")
     from video_workbench import config as wb
 
     cfg = wb.WorkbenchConfig.load(explicit)
-    assert _notice_of(cfg) is None, (
-        "显式 --config 也发明了一条提示：那份旧家跟这次启动没关系")
+    assert _notice_of(cfg) is None, "显式 --config 也发明了一条提示：那份旧家跟这次启动没关系"
 
 
 def test_a_broken_or_absent_legacy_home_never_breaks_an_installed_machine(homes):
@@ -260,8 +266,9 @@ def test_a_broken_or_absent_legacy_home_never_breaks_an_installed_machine(homes)
 
     # ② 坏 YAML
     _legacy_yaml(homes["legacy"], dirty=True)
-    homes["legacy_config"].write_text("llm:\n  api_key: \"x\"\n : 冒号前面什么都没有\n",
-                                      encoding="utf-8")
+    homes["legacy_config"].write_text(
+        'llm:\n  api_key: "x"\n : 冒号前面什么都没有\n', encoding="utf-8"
+    )
     assert wb._legacy_foreign_keys() == [], "旧家 YAML 坏了不该影响 WB 启动"
     assert _notice_of(_load_default()) is None, "旧家读不出东西时不该猜一份键名清单"
 
@@ -287,8 +294,9 @@ def test_a_broken_legacy_home_stops_the_first_migration_loudly(homes):
     from video_workbench.app.errors import WBError
 
     _legacy_yaml(homes["legacy"], dirty=True)
-    homes["legacy_config"].write_text("llm:\n  api_key: \"x\"\n : 冒号前面什么都没有\n",
-                                       encoding="utf-8")
+    homes["legacy_config"].write_text(
+        'llm:\n  api_key: "x"\n : 冒号前面什么都没有\n', encoding="utf-8"
+    )
     assert not homes["new_config"].exists(), "前置：新家必须还没落文件，走的才是搬家那支"
     with pytest.raises(WBError) as exc:
         wb.WorkbenchConfig.load()
@@ -296,9 +304,11 @@ def test_a_broken_legacy_home_stops_the_first_migration_loudly(homes):
     assert "VALIDATION" in text, text
     assert "缩进" in text or "YAML" in text, f"报错没告诉用户怎么修：{text}"
     assert str(homes["legacy_config"]) in text or "config.yaml" in text, (
-        f"报错没指出是哪个文件：{text}")
+        f"报错没指出是哪个文件：{text}"
+    )
     assert not homes["new_config"].exists(), (
-        "读不懂旧家却已经把默认值写成新家了：用户下次启动就再也找不到原文件")
+        "读不懂旧家却已经把默认值写成新家了：用户下次启动就再也找不到原文件"
+    )
 
 
 # ------------------------------------------------------------------ M3
@@ -338,7 +348,7 @@ def test_bili_scribe_can_still_read_the_migrated_config(homes):
     text = homes["new_config"].read_text(encoding="utf-8")
     import bili_scribe.config as bili_cfg
 
-    bili_cfg.AppConfig.load(homes["new_config"])     # 不抛 = 用户那边的 bili 还起得来
+    bili_cfg.AppConfig.load(homes["new_config"])  # 不抛 = 用户那边的 bili 还起得来
 
     poisoned = text.replace("ui:\n", "ui:\n  migration_notice: {keys: []}\n", 1)
     assert "migration_notice" in poisoned, "夹具的对照写法没生效"
@@ -381,7 +391,7 @@ def test_an_unrelated_save_before_confirmation_keeps_the_notice(homes):
     cfg = _load_default()
     assert _notice_of(cfg), "前置：刚搬完家应当有提示"
 
-    cfg.apply({"ui": {"skin": "exhibition"}})   # 改的是完全无关的字段
+    cfg.apply({"ui": {"skin": "exhibition"}})  # 改的是完全无关的字段
     cfg.save()
     assert _notice_of(_load_default()), "一次无关保存就把还没看过的提示冲没了"
 
@@ -427,7 +437,8 @@ def test_the_dismissal_survives_an_unrelated_save(homes):
     after.save()
     notice = _notice_of(_load_default())
     assert notice and notice["dismissed"] is True, (
-        "无关保存把 dismissed 抹掉了：用户改个皮肤就被重新弹一次")
+        "无关保存把 dismissed 抹掉了：用户改个皮肤就被重新弹一次"
+    )
 
 
 # ------------------------------------------------------------------ M6
@@ -453,10 +464,9 @@ def test_no_value_of_a_foreign_key_reaches_the_notice_logs_or_screen(homes):
     from video_workbench import config as wb
     from video_workbench.app.service import WorkbenchService
 
-    svc = WorkbenchService(config_path=None)      # 由服务完成第一次 load + 打那两句
+    svc = WorkbenchService(config_path=None)  # 由服务完成第一次 load + 打那两句
     try:
-        payload = json.dumps(svc.dispatch("app.migration_notice", {}, "t30-6"),
-                             ensure_ascii=False)
+        payload = json.dumps(svc.dispatch("app.migration_notice", {}, "t30-6"), ensure_ascii=False)
         assert SENTINEL_KEY not in payload, f"RPC 载荷里带了旧家的密钥值：{payload[:200]}"
         # 界面读的就是这份载荷；载荷干净 + 弹窗只排 `text:`，屏幕上就不可能有值。
         assert "api_key" not in payload, f"提示里出现了 llm.api_key 这个键名：{payload[:200]}"
@@ -468,15 +478,20 @@ def test_no_value_of_a_foreign_key_reaches_the_notice_logs_or_screen(homes):
     assert notice, "前置：提示必须还在（确认之前）"
     assert SENTINEL_KEY not in json.dumps(notice, ensure_ascii=False)
     assert SENTINEL_KEY in homes["new_config"].read_text(encoding="utf-8"), (
-        "搬家把用户自己的 api_key 弄丢了 —— 提示只该不带别人的**值**，配置必须照搬")
+        "搬家把用户自己的 api_key 弄丢了 —— 提示只该不带别人的**值**，配置必须照搬"
+    )
     assert SENTINEL_KEY in homes["new_ext"].read_text(encoding="utf-8"), (
-        "sidecar 丢了用户自己的密钥 —— 搬家该搬的值没搬过去")
+        "sidecar 丢了用户自己的密钥 —— 搬家该搬的值没搬过去"
+    )
 
     logs = sorted((cache.parent / "logs").glob("*.log"))
     assert logs, f"日志没落到 Temp（夹具的 cache_root 没生效？）：{cache.parent}"
-    lines = [ln for log in logs for ln in
-             log.read_text(encoding="utf-8", errors="replace").splitlines()
-             if "搬到新家" in ln or "不认识的键" in ln]
+    lines = [
+        ln
+        for log in logs
+        for ln in log.read_text(encoding="utf-8", errors="replace").splitlines()
+        if "搬到新家" in ln or "不认识的键" in ln
+    ]
     assert lines, "那两句搬家日志没落盘：M6 的日志腿无事可查（它同时是 M7 的锚点）"
     for line in lines:
         assert SENTINEL_KEY not in line, f"日志里印出了密钥值：{line}"
@@ -495,7 +510,8 @@ def test_the_legacy_files_are_read_but_never_written(homes):
     """
     _legacy_yaml(homes["legacy"], dirty=True)
     (homes["legacy"] / "workbench.json").write_text(
-        json.dumps({"llm": {"providers": []}}), encoding="utf-8")
+        json.dumps({"llm": {"providers": []}}), encoding="utf-8"
+    )
     before = {p: _sha(p) for p in (homes["legacy_config"], homes["legacy_ext"])}
 
     cfg = _load_default()
@@ -512,7 +528,9 @@ def test_the_legacy_files_are_read_but_never_written(homes):
     _load_default()
 
     after = {p: _sha(p) for p in before}
-    assert after == before, f"写到别人家去了：{ {k: (before[k], after[k]) for k in before if before[k] != after[k]} }"
+    assert after == before, (
+        f"写到别人家去了：{ {k: (before[k], after[k]) for k in before if before[k] != after[k]} }"
+    )
 
 
 def test_the_notice_text_says_what_the_code_actually_did(homes):
@@ -525,7 +543,7 @@ def test_the_notice_text_says_what_the_code_actually_did(homes):
     """
     text = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
     start = text.index("function maybeMigrationNotice")
-    body = text[start:start + 3000]
+    body = text[start : start + 3000]
     for phrase in ("我没有改动", "不认识的", "WB 不会替你删", "只列键名"):
         assert phrase in body, f"弹窗文案丢了「{phrase}」这一段，用户就只剩一句没信息量的提示"
     for lie in ("已清理", "已修复", "已同步", "自动帮你", "已帮你删"):
@@ -562,7 +580,8 @@ def _plain_url(web_base_url: str) -> str:
 
     parts = urlsplit(web_base_url)
     assert parts.query and "mock=1" in parts.query, (
-        f"夹具的 URL 形状变了，先看清楚再改这里：{web_base_url}")
+        f"夹具的 URL 形状变了，先看清楚再改这里：{web_base_url}"
+    )
     origin = f"{parts.scheme}://{parts.netloc}"
     return f"{origin}/index.html"
 
@@ -579,12 +598,12 @@ def desktop_page(homes, browser, web_base_url):
     pytest.importorskip(
         "playwright.sync_api",
         reason="界面验收没跑（不是通过，是没跑）：装一下 `pip install playwright==1.64.1` "
-               "并确认盘上有 ms-playwright/chromium-1248",
+        "并确认盘上有 ms-playwright/chromium-1248",
     )
     from video_workbench.app.service import WorkbenchService
 
     # 恶意键名只有 M10 那条需要；它同时检验「弹窗清单里多一个怪键名」不影响别的判定。
-    _legacy_yaml(homes["legacy"], dirty=True, extra_lines=(f"\"{EVIL_KEY}\": 1",))
+    _legacy_yaml(homes["legacy"], dirty=True, extra_lines=(f'"{EVIL_KEY}": 1',))
     errors: list[str] = []
     dialogs: list[str] = []
     calls: list[str] = []
@@ -593,14 +612,20 @@ def desktop_page(homes, browser, web_base_url):
     _mark_onboarded()
     svc = WorkbenchService(config_path=None)
 
-    def _bridge(source, method, params, request_id):      # noqa: ARG001
+    def _bridge(source, method, params, request_id):  # noqa: ARG001
         calls.append(str(method))
         return svc.dispatch(method, params or {}, request_id or "t30")
 
     page = browser.new_page(viewport={"width": 1384, "height": 797})
     # favicon 那条 404 是静态服务器的噪音，不是页面的错；其它 error 一律算失败。
-    page.on("console", lambda m: errors.append(f"console:{m.type}:{m.text}")
-            if m.type == "error" and "favicon" not in (m.text or "") else None)
+    page.on(
+        "console",
+        lambda m: (
+            errors.append(f"console:{m.type}:{m.text}")
+            if m.type == "error" and "favicon" not in (m.text or "")
+            else None
+        ),
+    )
     page.on("pageerror", lambda e: errors.append(f"pageerror:{e}"))
     page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
     page.expose_binding("__wbRpc", _bridge)
@@ -608,11 +633,14 @@ def desktop_page(homes, browser, web_base_url):
     url = _plain_url(web_base_url)
     try:
         page.goto(url, wait_until="load")
-        page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'",
-                               timeout=15000)
-        _wait_until(lambda: "app.migration_notice" in calls,
-                    f"boot 没打 app.migration_notice（桥/演示态不对？）URL={url} calls={calls}",
-                    page)
+        page.wait_for_function(
+            "() => window.WB && typeof window.WB.rpc === 'function'", timeout=15000
+        )
+        _wait_until(
+            lambda: "app.migration_notice" in calls,
+            f"boot 没打 app.migration_notice（桥/演示态不对？）URL={url} calls={calls}",
+            page,
+        )
         yield page, errors, svc, homes, dialogs, calls
     finally:
         page.close()
@@ -665,10 +693,12 @@ def test_the_boot_shows_the_notice_once_and_never_again(desktop_page):
     assert notice["keys"] == _fore(hm["legacy_config"]), "确认把事实也删了"
 
     page.reload(wait_until="load")
-    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'",
-                           timeout=15000)
-    _wait_until(lambda: "app.migration_notice" in _calls or _notice_panel(page).count(),
-                "重载后 boot 什么都没打，下面的「不再弹」是空话", page)
+    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'", timeout=15000)
+    _wait_until(
+        lambda: "app.migration_notice" in _calls or _notice_panel(page).count(),
+        "重载后 boot 什么都没打，下面的「不再弹」是空话",
+        page,
+    )
     assert _notice_panel(page).count() == 0, "重载之后又弹了一次"
     assert errors == [], f"控制台有 error：{errors}"
 
@@ -694,8 +724,9 @@ def test_every_close_path_records_the_dismissal(desktop_page, way):
         page.locator(".modal__x").click()
 
     _wait_until(lambda: _notice_panel(page).count() == 0, f"{way} 关不掉弹窗", page)
-    _wait_until(lambda: "app.migration_notice.dismiss" in calls,
-                f"{way} 这条路径根本没通知后端", page)
+    _wait_until(
+        lambda: "app.migration_notice.dismiss" in calls, f"{way} 这条路径根本没通知后端", page
+    )
     notice = json.loads(hm["new_ext"].read_text(encoding="utf-8"))["ui"]["migration_notice"]
     assert notice["dismissed"] is True, f"{way} 没把确认记进后端：{notice}"
 
@@ -705,10 +736,12 @@ def test_every_close_path_records_the_dismissal(desktop_page, way):
     # 于是「没打接口」看起来像产品漏调用，其实是我自己没导航成功。
     calls.clear()
     page.reload(wait_until="load")
-    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'",
-                           timeout=15000)
-    _wait_until(lambda: "app.migration_notice" in calls,
-                f"{way} 之后重载没打接口，第三件事没测到：calls={calls}", page)
+    page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'", timeout=15000)
+    _wait_until(
+        lambda: "app.migration_notice" in calls,
+        f"{way} 之后重载没打接口，第三件事没测到：calls={calls}",
+        page,
+    )
     assert _notice_panel(page).count() == 0, f"{way} 之后重载又弹了"
     assert errors == [], f"{way}：控制台有 error：{errors}"
 
@@ -722,7 +755,9 @@ def test_a_key_name_that_looks_like_markup_is_rendered_as_text(desktop_page):
     拼业务数据」—— 源码级那条在下面，页面级这条才是用户的安全边界。
     """
     page, errors, _svc, hm, dialogs, _calls = desktop_page
-    assert EVIL_KEY in _fore(hm["legacy_config"]), f"夹具没造出这个键名：{_fore(hm['legacy_config'])}"
+    assert EVIL_KEY in _fore(hm["legacy_config"]), (
+        f"夹具没造出这个键名：{_fore(hm['legacy_config'])}"
+    )
     modal = _notice_panel(page)
     assert modal.count() == 1, "带恶意键名的旧家应当照样弹一次事实"
     text = modal.inner_text()
@@ -740,12 +775,11 @@ def test_the_retired_control_never_enters_the_markup_builder():
     """
     text = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
     start = text.index("function maybeMigrationNotice")
-    body = text[start:start + 3000]
+    body = text[start : start + 3000]
     assert "innerHTML" not in body, "搬家提示的文案改成 innerHTML 拼了：键名是用户写的字符串"
 
 
-def test_demo_mode_page_shows_no_modal_even_with_a_dirty_legacy_home(
-        homes, browser, web_base_url):
+def test_demo_mode_page_shows_no_modal_even_with_a_dirty_legacy_home(homes, browser, web_base_url):
     """M8 的页面腿：演示态（`?mock=1`）绝不弹这条 —— 演示机没有真旧家。
 
     这条必须真开一次浏览器：只看源码里 `WB.isMock()` 那行，测不到「启动路径上还有
@@ -756,21 +790,22 @@ def test_demo_mode_page_shows_no_modal_even_with_a_dirty_legacy_home(
     pytest.importorskip(
         "playwright.sync_api",
         reason="界面验收没跑（不是通过，是没跑）：装一下 `pip install playwright==1.64.1` "
-               "并确认盘上有 ms-playwright/chromium-1248",
+        "并确认盘上有 ms-playwright/chromium-1248",
     )
-    _legacy_yaml(homes["legacy"], dirty=True, extra_lines=(f"\"{EVIL_KEY}\": 1",))
+    _legacy_yaml(homes["legacy"], dirty=True, extra_lines=(f'"{EVIL_KEY}": 1',))
     assert _fore(homes["legacy_config"]), "夹具没造出脏旧家，这条不测任何东西"
     page = browser.new_page(viewport={"width": 1384, "height": 797})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(f"pageerror:{e}"))
     try:
         page.goto(web_base_url, wait_until="load")
-        page.wait_for_function("() => window.WB && typeof window.WB.rpc === 'function'",
-                               timeout=15000)
+        page.wait_for_function(
+            "() => window.WB && typeof window.WB.rpc === 'function'", timeout=15000
+        )
         assert page.evaluate("() => WB.isMock()"), "夹具没把页面带进演示态，这条不测任何东西"
         page.evaluate("() => window.WB.router.go('settings', {section: 'llm'})")
         page.wait_for_selector("label.field__label", timeout=15000)
-        page.wait_for_timeout(600)                # 让 boot 末尾那条 .catch 链跑完
+        page.wait_for_timeout(600)  # 让 boot 末尾那条 .catch 链跑完
         assert _notice_panel(page).count() == 0, "演示态弹了搬家提示"
     finally:
         page.close()
@@ -789,10 +824,11 @@ def test_the_mock_carries_an_empty_shape_and_never_a_fabricated_notice():
     """
     app_text = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
     start = app_text.index("function maybeMigrationNotice")
-    assert "WB.isMock()" in app_text[start:start + 320], "演示态那行判断没了"
+    assert "WB.isMock()" in app_text[start : start + 320], "演示态那行判断没了"
     mock_text = (WEB_DIR / "js" / "mock.js").read_text(encoding="utf-8")
     at = mock_text.index('"app.migration_notice"')
-    window = mock_text[at:at + 260]
+    window = mock_text[at : at + 260]
     assert "notice: null" in window, (
-        f"mock 对 app.migration_notice 不再给空形状，而是在编搬家记录：{window[:200]}")
+        f"mock 对 app.migration_notice 不再给空形状，而是在编搬家记录：{window[:200]}"
+    )
     assert "keys" not in window, f"mock 里编造了一份搬家键名清单：{window[:200]}"

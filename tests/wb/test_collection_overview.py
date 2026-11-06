@@ -19,7 +19,6 @@ import pytest
 from video_workbench.app.errors import WBError
 from video_workbench.core import overview as ov
 
-
 GOOD = {
     "theme": "用三集把「怎么做研究」拆成可以照做的手册",
     "conclusions": [
@@ -96,8 +95,10 @@ def err(service, method, params=None):
 def child(project, one_line="一句话", points=None):
     return {
         "project": project,
-        "summary": {"version": 1, "content": {"one_line": one_line,
-                                             "key_points": points or ["要点一", "要点二"]}},
+        "summary": {
+            "version": 1,
+            "content": {"one_line": one_line, "key_points": points or ["要点一", "要点二"]},
+        },
     }
 
 
@@ -108,8 +109,11 @@ def make_children(service, tmp_path: Path, count=3, *, collection="研究方法"
         root.mkdir(parents=True, exist_ok=True)
         project = service.repo.project_create(
             title=f"第{index + 1}集：反例" if index == 0 else f"第{index + 1}集：变量",
-            up_name="UP", root_dir=str(root), stage="summarized",
-            collection_title=collection, bvid=f"BV{index}",
+            up_name="UP",
+            root_dir=str(root),
+            stage="summarized",
+            collection_title=collection,
+            bvid=f"BV{index}",
         )
         if with_summary:
             service.repo.summary_insert(
@@ -142,16 +146,20 @@ def test_items_keep_at_most_four_points():
 
 def test_prompt_fills_every_placeholder():
     template = ov.load_prompt()
-    text = ov.build_prompt("合集名", ov.collection_items([child({"title": "第一集"}),
-                                                         child({"title": "第二集"})]))
+    text = ov.build_prompt(
+        "合集名",
+        ov.collection_items([child({"title": "第一集"}), child({"title": "第二集"})]),
+        template=template,
+    )
     assert "$collection_title" not in text and "$count" not in text and "$items" not in text
     assert "合集名" in text and "第一集" in text and "第二集" in text
 
 
 def test_long_material_falls_back_to_tight_mode(monkeypatch):
     monkeypatch.setattr(ov, "MAX_CHARS", 200)
-    items = ov.collection_items([child({"title": f"第{i}集"}, points=[f"要点{j}" for j in range(4)])
-                                 for i in range(5)])
+    items = ov.collection_items(
+        [child({"title": f"第{i}集"}, points=[f"要点{j}" for j in range(4)]) for i in range(5)]
+    )
     text = ov.build_prompt("合集", items)
     # 压缩模式下每条只留两条要点："要点2" 不该出现
     assert "要点2" not in text
@@ -186,10 +194,12 @@ def test_conclusions_as_string_is_tolerated():
 
 
 def test_timeline_entries_that_match_nothing_are_dropped():
-    items = ov.collection_items([
-        child({"title": "第一集：反例", "source_url": "https://b23.tv/a"}),
-        child({"title": "第二集：变量"}),
-    ])
+    items = ov.collection_items(
+        [
+            child({"title": "第一集：反例", "source_url": "https://b23.tv/a"}),
+            child({"title": "第二集：变量"}),
+        ]
+    )
     payload = dict(GOOD)
     payload["timeline"] = [
         {"title": "第一集：反例", "one_line": "讲了反例", "url": "模型乱编的链接"},
@@ -215,15 +225,18 @@ def test_title_is_restored_to_project_spelling():
 
 def test_run_refuses_collection_with_one_item():
     with pytest.raises(WBError) as exc:
-        ov.run("单集", [child({"title": "唯一一集"})], client=StubClient([]),
-               ctx=FakeCtx())
+        ov.run("单集", [child({"title": "唯一一集"})], client=StubClient([]), ctx=FakeCtx())
     assert exc.value.code == "CONFLICT"
 
 
 def test_run_refuses_when_a_child_has_no_summary():
     with pytest.raises(WBError) as exc:
-        ov.run("合集", [child({"title": "有"}), child({"title": "没有"}, one_line="")],
-               client=StubClient([]), ctx=FakeCtx())
+        ov.run(
+            "合集",
+            [child({"title": "有"}), child({"title": "没有"}, one_line="")],
+            client=StubClient([]),
+            ctx=FakeCtx(),
+        )
     assert exc.value.code == "CONFLICT"
     assert "缺总结" in exc.value.detail
 
@@ -231,8 +244,13 @@ def test_run_refuses_when_a_child_has_no_summary():
 def test_run_sends_one_request_and_returns_structure():
     client = StubClient([json.dumps(GOOD, ensure_ascii=False)])
     ctx = FakeCtx()
-    result = ov.run("合集", [child({"title": "第一集：反例"}), child({"title": "第二集：变量"})],
-                    client=client, ctx=ctx, role="wengao")
+    result = ov.run(
+        "合集",
+        [child({"title": "第一集：反例"}), child({"title": "第二集：变量"})],
+        client=client,
+        ctx=ctx,
+        role="wengao",
+    )
     assert result["calls"] == 1
     assert result["content"]["theme"] == GOOD["theme"]
     assert result["content"]["item_count"] == 2
@@ -252,8 +270,12 @@ def test_run_stores_notes_inside_content():
         {"title": "完全不存在的一集", "one_line": "b", "url": ""},
     ]
     client = StubClient([json.dumps(wild, ensure_ascii=False)])
-    result = ov.run("合集", [child({"title": "第一集"}), child({"title": "第二集"})],
-                    client=client, ctx=FakeCtx())
+    result = ov.run(
+        "合集",
+        [child({"title": "第一集"}), child({"title": "第二集"})],
+        client=client,
+        ctx=FakeCtx(),
+    )
     notes = result["content"]["notes"]
     assert notes, "notes 没进 content"
     assert any("对不上" in line for line in notes), notes
@@ -272,15 +294,28 @@ def test_run_does_not_use_role_three_pass_prompts():
     three_pass = [key for key in pkg.ROLE_KEYS if pkg.get_role(key).passes >= 3]
     assert three_pass, "公开面里没有 passes>=3 的角色：这条失去主语，先决定它该测什么"
     client = StubClient([json.dumps(GOOD, ensure_ascii=False)])
-    ov.run("合集", [child({"title": "一"}), child({"title": "二"})],
-           client=client, ctx=FakeCtx(), role=three_pass[0])
+    ov.run(
+        "合集",
+        [child({"title": "一"}), child({"title": "二"})],
+        client=client,
+        ctx=FakeCtx(),
+        role=three_pass[0],
+    )
     assert len(client.calls) == 1, (
-        f"{three_pass[0]}（passes>=3）的三轮回套进合集总览了：多发 {len(client.calls) - 1} 次请求")
+        f"{three_pass[0]}（passes>=3）的三轮回套进合集总览了：多发 {len(client.calls) - 1} 次请求"
+    )
 
 
 def test_markdown_has_disclaimer():
-    body = ov.to_markdown({"collection_title": "合集", "theme": "主题",
-                           "conclusions": ["结论"], "item_count": 3, "model": "m"})
+    body = ov.to_markdown(
+        {
+            "collection_title": "合集",
+            "theme": "主题",
+            "conclusions": ["结论"],
+            "item_count": 3,
+            "model": "m",
+        }
+    )
     assert "AI 依据各集总结生成" in body
 
 
@@ -368,16 +403,18 @@ def test_overview_get_accepts_title_or_id(service, tmp_path, monkeypatch):
 def test_overview_failure_leaves_no_row(service, tmp_path, monkeypatch):
     make_children(service, tmp_path, count=3)
     # 阶梯：主请求 → 分批正文 → 分批时间线 → 重问，全都不是 JSON 才判死
-    client = StubClient(["我不按格式回话", "分批正文也不行", "分批时间线也不行",
-                         "我还是不按格式回话"])
+    client = StubClient(
+        ["我不按格式回话", "分批正文也不行", "分批时间线也不行", "我还是不按格式回话"]
+    )
     service.cfg.override_llm(base_url=client.base_url, api_key="sk-test", model="stub-model")
     service.cfg.llm.model = client.model
     monkeypatch.setattr(service, "_llm_client", lambda task="summary": client)
     with pytest.raises(WBError) as exc:
         service._collection_job(FakeCtx(), {"collection": "研究方法"})
     assert exc.value.code == "LLM_BAD_RESPONSE"
-    assert service.repo.collection_summary_latest(
-        service.repo.collection_id_for("研究方法")) is None
+    assert (
+        service.repo.collection_summary_latest(service.repo.collection_id_for("研究方法")) is None
+    )
 
 
 def test_overview_start_returns_job(service, tmp_path, monkeypatch):

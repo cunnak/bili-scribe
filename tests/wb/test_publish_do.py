@@ -20,8 +20,8 @@ from bili_scribe.infra.endpoints import NOTE_ADD, NOTE_DEL
 from video_workbench.app.errors import WBError
 from video_workbench.core import publisher as pub
 
-
 # --------------------------------------------------------------------- 替身
+
 
 class FakeClient:
     """只实现 post_form：记下每次请求，按脚本决定成功还是抛 BiliError。"""
@@ -94,6 +94,7 @@ def ok(service, method, params):
 
 # ------------------------------------------------------------------ 错误翻译
 
+
 @pytest.mark.parametrize(
     "code,expect",
     [
@@ -116,6 +117,7 @@ def test_note_error_text_keeps_unknown_codes_and_says_retry():
 
 
 # ------------------------------------------------------------------ post_note
+
 
 def test_post_note_builds_bilibili_payload():
     client = FakeClient()
@@ -162,6 +164,7 @@ def test_post_note_does_not_retry_captcha():
 
 
 # ------------------------------------------------------------------- 发布门禁
+
 
 def test_publish_blocked_when_not_confirmed(service):
     _, note = make_note(service)
@@ -232,6 +235,7 @@ def test_publish_requires_login(service):
 
 # --------------------------------------------------------------------- 撤回
 
+
 def test_withdraw_sends_note_del_and_marks_row(service):
     _, note = make_note(service)
     use_client(service, FakeClient(note_id="777"))
@@ -273,6 +277,7 @@ def test_withdraw_failure_keeps_published_status(service):
 
 
 # --------------------------------------------------------------- 门禁会随确认变
+
 
 def test_get_with_confirmed_turns_content_gate_green(service):
     _, note = make_note(service)

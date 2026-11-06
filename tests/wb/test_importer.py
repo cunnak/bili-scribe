@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from video_workbench.app.errors import WBError
-from video_workbench.core import importer
 from video_workbench.core.importer import import_videos, resolve_inputs, scan_folder
 
 
@@ -56,7 +55,11 @@ def test_resolve_inputs_dedupes(tmp_path):
 def test_import_creates_project_and_asset(service, tmp_path):
     video = touch(tmp_path / "素材" / "第01讲.mp4")
     result = import_videos(
-        [video], media_root=tmp_path / "media", repo=service.repo, prober=lambda _p: Info(), make_thumbs=False
+        [video],
+        media_root=tmp_path / "media",
+        repo=service.repo,
+        prober=lambda _p: Info(),
+        make_thumbs=False,
     )
     assert result["total"] == 1 and len(result["imported"]) == 1
     project = service.repo.project_get(result["imported"][0]["project_id"])
@@ -72,8 +75,12 @@ def test_import_creates_project_and_asset(service, tmp_path):
 
 def test_import_recognises_sibling_subtitle(service, tmp_path):
     video = touch(tmp_path / "第02讲.mp4")
-    (tmp_path / "第02讲.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\n你好\n", encoding="utf-8")
-    result = import_videos([video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False)
+    (tmp_path / "第02讲.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n你好\n", encoding="utf-8"
+    )
+    result = import_videos(
+        [video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False
+    )
     project = service.repo.project_get(result["imported"][0]["project_id"])
     assert project["stage"] == "subtitle", "有字幕就不该再排转录"
     kinds = {a["kind"] for a in service.repo.asset_list(project["id"])}
@@ -82,8 +89,12 @@ def test_import_recognises_sibling_subtitle(service, tmp_path):
 
 def test_import_twice_is_idempotent(service, tmp_path):
     video = touch(tmp_path / "第03讲.mp4")
-    first = import_videos([video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False)
-    second = import_videos([video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False)
+    first = import_videos(
+        [video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False
+    )
+    second = import_videos(
+        [video], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False
+    )
     assert len(first["imported"]) == 1
     assert second["imported"] == []
     assert second["skipped"] and second["skipped"][0]["reason"] == "已导入"
@@ -101,7 +112,9 @@ def test_bad_file_does_not_break_batch(service, tmp_path, monkeypatch):
         return real_upsert(project_id, kind, path, **fields)
 
     monkeypatch.setattr(service.repo, "asset_upsert", flaky)
-    result = import_videos([good, bad], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False)
+    result = import_videos(
+        [good, bad], media_root=tmp_path / "media", repo=service.repo, make_thumbs=False
+    )
     assert len(result["imported"]) == 1
     assert len(result["failed"]) == 1 and result["failed"][0]["code"] == "INTERNAL"
 
@@ -137,7 +150,10 @@ def test_thumbnail_success_is_recorded(service, tmp_path):
         return marker
 
     result = import_videos(
-        [video], media_root=tmp_path / "media", repo=service.repo, thumbs=fake_thumb, make_thumbs=True
+        [video],
+        media_root=tmp_path / "media",
+        repo=service.repo,
+        thumbs=fake_thumb,
+        make_thumbs=True,
     )
     assert result["imported"][0]["thumb"] == str(marker)
-

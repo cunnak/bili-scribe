@@ -16,8 +16,15 @@ from pathlib import Path
 from video_workbench.core import nle
 
 
-def make_project(service, tmp_path: Path, *, with_source=True, with_subtitle=False,
-                 with_candidate=True, with_copy=False) -> dict:
+def make_project(
+    service,
+    tmp_path: Path,
+    *,
+    with_source=True,
+    with_subtitle=False,
+    with_candidate=True,
+    with_copy=False,
+) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
     project = service.repo.project_create(
@@ -53,14 +60,22 @@ def make_project(service, tmp_path: Path, *, with_source=True, with_subtitle=Fal
     candidate = {}
     if with_candidate:
         candidate = service.repo.candidate_insert(
-            project["id"], kind="highlight", start_ms=12_400, end_ms=34_800,
-            score=86, title="先证伪直觉", source="ai",
+            project["id"],
+            kind="highlight",
+            start_ms=12_400,
+            end_ms=34_800,
+            score=86,
+            title="先证伪直觉",
+            source="ai",
         )
         if with_copy:
             service.repo.candidate_update(
                 candidate["id"],
-                copy={"title": "先证伪直觉", "description": "三分钟讲清一件事",
-                      "tags": ["方法论", "认知"]},
+                copy={
+                    "title": "先证伪直觉",
+                    "description": "三分钟讲清一件事",
+                    "tags": ["方法论", "认知"],
+                },
             )
             candidate = service.repo.candidate_get(candidate["id"]) or candidate
     return {"project": project, "root": root, "candidate": candidate}
@@ -125,7 +140,8 @@ def wait_job(service, job_id, timeout=8.0):
 
 def deliver(service, project_id, candidate_id, **params):
     out = call(
-        service, "clip.deliver",
+        service,
+        "clip.deliver",
         {"project_id": project_id, "candidate_id": candidate_id, **params},
     )
     job = wait_job(service, out["job"]["id"])
@@ -134,9 +150,12 @@ def deliver(service, project_id, candidate_id, **params):
 
 def test_nle_info_lists_three_channels(service, monkeypatch):
     monkeypatch.setattr(
-        nle, "detect_apps",
-        lambda home=None: {"jianying": {"found": True, "root": "C:/d"},
-                           "resolve": {"found": False, "root": ""}},
+        nle,
+        "detect_apps",
+        lambda home=None: {
+            "jianying": {"found": True, "root": "C:/d"},
+            "resolve": {"found": False, "root": ""},
+        },
     )
     data = call(service, "nle.info")
     keys = [item["key"] for item in data["channels"]]
@@ -161,7 +180,8 @@ def test_deliver_rejects_candidate_of_another_project(service, tmp_path):
         title="别的", source_kind="local", root_dir=str(tmp_path / "other")
     )
     error = err(
-        service, "clip.deliver",
+        service,
+        "clip.deliver",
         {"project_id": other["id"], "candidate_id": made["candidate"]["id"]},
     )
     assert error["code"] == "VALIDATION"
@@ -170,9 +190,13 @@ def test_deliver_rejects_candidate_of_another_project(service, tmp_path):
 def test_deliver_rejects_unknown_channel(service, tmp_path):
     made = make_project(service, tmp_path)
     error = err(
-        service, "clip.deliver",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "channel": "premiere"},
+        service,
+        "clip.deliver",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "channel": "premiere",
+        },
     )
     assert error["code"] == "VALIDATION"
 
@@ -217,9 +241,7 @@ def test_jianying_places_draft_when_asked_and_detected(service, tmp_path, monkey
     box = tmp_path / "draftbox"
     box.mkdir()
     monkeypatch.setattr(nle, "find_jianying_root", lambda home=None: box)
-    _out, job = deliver(
-        service, made["project"]["id"], made["candidate"]["id"], place_in_app=True
-    )
+    _out, job = deliver(service, made["project"]["id"], made["candidate"]["id"], place_in_app=True)
     result = job["result"]
     assert result["placed_in_app"] is True
     assert Path(result["path"]).parent == box
@@ -230,9 +252,7 @@ def test_jianying_falls_back_when_draftbox_missing(service, tmp_path, monkeypatc
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch)
     monkeypatch.setattr(nle, "find_jianying_root", lambda home=None: None)
-    _out, job = deliver(
-        service, made["project"]["id"], made["candidate"]["id"], place_in_app=True
-    )
+    _out, job = deliver(service, made["project"]["id"], made["candidate"]["id"], place_in_app=True)
     result = job["result"]
     assert result["placed_in_app"] is False
     assert Path(result["path"]).parent == made["root"] / "export" / "jianying"
@@ -279,7 +299,9 @@ def test_bundle_prefers_exported_clip(service, tmp_path, monkeypatch):
     clip.write_bytes(b"y" * 4096)
     job_id = service.repo.new_job_id() if hasattr(service.repo, "new_job_id") else "job_exp_1"
     service.repo.job_create(
-        job_id, "clip.export", made["project"]["id"],
+        job_id,
+        "clip.export",
+        made["project"]["id"],
         {"candidate_id": made["candidate"]["id"], "mode": "precise"},
     )
     service.repo.job_update(
@@ -296,7 +318,8 @@ def test_deliver_without_source_is_conflict(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path, with_source=False)
     use_ffmpeg(service, monkeypatch)
     out = call(
-        service, "clip.deliver",
+        service,
+        "clip.deliver",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job = wait_job(service, out["job"]["id"])

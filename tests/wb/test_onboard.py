@@ -14,9 +14,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from video_workbench.config import read_ext, write_ext
@@ -26,8 +23,9 @@ from video_workbench.core import onboard
 class FakeCfg:
     """够 `report()` 用的最小配置：只带它真读的字段。"""
 
-    def __init__(self, *, api_key="", model="deepseek-chat", ffmpeg_dir="", models_root=None,
-                 onboarded=False):
+    def __init__(
+        self, *, api_key="", model="deepseek-chat", ffmpeg_dir="", models_root=None, onboarded=False
+    ):
         self.llm = type("Llm", (), {"api_key": api_key, "model": model})()
         self.storage = type("Storage", (), {"models_root": str(models_root or "")})()
         self.download = type("Dl", (), {"ffmpeg_dir": ffmpeg_dir})()
@@ -60,8 +58,11 @@ def clean_env(monkeypatch):
     """把"跟机器有关"的三项钉死，避免开发机装了 ffmpeg 就红。"""
     monkeypatch.setattr(onboard, "webview2_version", lambda: "120.0.2210.144")
     monkeypatch.setattr(onboard, "ffmpeg_path", lambda cfg: r"C:\ffmpeg\bin\ffmpeg.exe")
-    monkeypatch.setattr(onboard, "model_state",
-                        lambda cfg: {"name": "large-v3-turbo", "downloaded": True, "bytes": 1717986918})
+    monkeypatch.setattr(
+        onboard,
+        "model_state",
+        lambda cfg: {"name": "large-v3-turbo", "downloaded": True, "bytes": 1717986918},
+    )
     monkeypatch.setattr(onboard, "cached_models", lambda cfg: [], raising=False)
 
 
@@ -70,13 +71,17 @@ def _ids(report):
 
 
 def test_report_has_five_steps_in_fixed_order(clean_env):
-    report = onboard.report(cfg=FakeCfg(api_key="sk-x"), gateway=FakeGateway(logged_in=True, who="小村"))
+    report = onboard.report(
+        cfg=FakeCfg(api_key="sk-x"), gateway=FakeGateway(logged_in=True, who="小村")
+    )
     assert _ids(report) == ["webview2", "ffmpeg", "model", "bili", "llm"]
     assert report["total"] == 5
 
 
 def test_all_ready_when_everything_present(clean_env):
-    report = onboard.report(cfg=FakeCfg(api_key="sk-x"), gateway=FakeGateway(logged_in=True, who="小村"))
+    report = onboard.report(
+        cfg=FakeCfg(api_key="sk-x"), gateway=FakeGateway(logged_in=True, who="小村")
+    )
     assert report["ok_count"] == 5
     assert report["ready"] is True
     assert report["blocking"] == []
@@ -87,8 +92,11 @@ def test_all_ready_when_everything_present(clean_env):
 
 def test_model_missing_is_todo_with_download_action(clean_env, monkeypatch):
     """模型没下 = todo（能一键解决），且 action 指向真实的下载 RPC。"""
-    monkeypatch.setattr(onboard, "model_state",
-                        lambda cfg: {"name": "large-v3-turbo", "downloaded": False, "bytes": 0})
+    monkeypatch.setattr(
+        onboard,
+        "model_state",
+        lambda cfg: {"name": "large-v3-turbo", "downloaded": False, "bytes": 0},
+    )
     report = onboard.report(cfg=FakeCfg(api_key="sk-x"), gateway=FakeGateway(logged_in=True))
     step = {s["id"]: s for s in report["steps"]}["model"]
     assert step["status"] == "todo"

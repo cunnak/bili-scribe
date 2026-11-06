@@ -21,7 +21,9 @@ def _wait(service, job_id: str, statuses: set[str], timeout: float = 15.0) -> di
         if row["status"] in statuses:
             return row
         time.sleep(0.05)
-    raise AssertionError(f"任务 {job_id} 在 {timeout}s 内没有进入 {statuses}，最后状态 {row.get('status')}")
+    raise AssertionError(
+        f"任务 {job_id} 在 {timeout}s 内没有进入 {statuses}，最后状态 {row.get('status')}"
+    )
 
 
 def test_demo_job_runs_to_success(service):

@@ -171,7 +171,10 @@ def test_update_align_rejects_unknown_mode(service):
     row = _project(service)
     cand = _candidate(service, row["id"])
     assert call.__name__  # 保持 linter 安静
-    assert err(service, "clip.update", {"id": cand["id"], "start_ms": 10_000, "align": "sample"}) == "VALIDATION"
+    assert (
+        err(service, "clip.update", {"id": cand["id"], "start_ms": 10_000, "align": "sample"})
+        == "VALIDATION"
+    )
 
 
 def test_update_align_then_clamp_to_duration(service):
@@ -212,11 +215,14 @@ def test_create_align_frame(service):
 
 def test_create_align_rejects_unknown_mode(service):
     row = _project(service)
-    assert err(
-        service,
-        "clip.create",
-        {"project_id": row["id"], "start_ms": 0, "end_ms": 5_000, "align": "vad"},
-    ) == "VALIDATION"
+    assert (
+        err(
+            service,
+            "clip.create",
+            {"project_id": row["id"], "start_ms": 0, "end_ms": 5_000, "align": "vad"},
+        )
+        == "VALIDATION"
+    )
 
 
 # --------------------------------------------------------------------- 锁定与手动切片
@@ -263,11 +269,14 @@ def test_manual_clip_short_is_rejected_after_align(service):
     """对齐后不足 0.4 秒要报错，不能靠对齐把非法区间变成合法。"""
     row = _project(service)
     _fps(service, 25.0)
-    assert err(
-        service,
-        "clip.create",
-        {"project_id": row["id"], "start_ms": 8_013, "end_ms": 8_100, "align": "frame"},
-    ) == "VALIDATION"
+    assert (
+        err(
+            service,
+            "clip.create",
+            {"project_id": row["id"], "start_ms": 8_013, "end_ms": 8_100, "align": "frame"},
+        )
+        == "VALIDATION"
+    )
 
 
 def test_edit_marks_notes_but_align_alone_does_not(service):

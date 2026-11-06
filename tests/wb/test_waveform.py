@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import array
 import json
-import sys
 from pathlib import Path
-
-import pytest
 
 from video_workbench.core import waveform
 

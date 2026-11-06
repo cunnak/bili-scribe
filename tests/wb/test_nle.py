@@ -167,9 +167,7 @@ def test_otio_timeline_shape():
 
 
 def test_write_otio(tmp_path: Path):
-    doc = nle.otio_document(
-        name="a", video_path="C:/m/s.mp4", start_ms=0, end_ms=1000
-    )
+    doc = nle.otio_document(name="a", video_path="C:/m/s.mp4", start_ms=0, end_ms=1000)
     out = nle.write_otio(tmp_path / "a.otio", doc)
     data = json.loads(Path(out["path"]).read_text(encoding="utf-8"))
     assert data["OTIO_SCHEMA"] == "Timeline.1"

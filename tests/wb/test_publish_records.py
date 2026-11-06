@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from video_workbench.core import publisher as core
-from video_workbench.infra.repo import Repo
 
 
 def iso(minutes_ago: float = 0) -> str:
@@ -73,9 +72,7 @@ def test_records_order_by_last_action(service):
     """撤回过的要按撤回时间排，否则上周发、今天撤的那条会沉下去。"""
     project_id = make_project(repo)
     old = seed(repo, project_id, status="published", title="上周发的")
-    repo._exec(
-        "UPDATE wb_publish_note SET published_at=? WHERE id=?", (iso(60 * 24), old)
-    )
+    repo._exec("UPDATE wb_publish_note SET published_at=? WHERE id=?", (iso(60 * 24), old))
     fresh = seed(repo, project_id, status="withdrawn", title="刚撤的")
     repo._exec(
         "UPDATE wb_publish_note SET published_at=?, withdrawn_at=? WHERE id=?",

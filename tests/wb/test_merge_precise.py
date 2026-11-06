@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import time
@@ -17,11 +16,11 @@ PROJ = Path(__file__).resolve().parents[2]
 if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
 
-import pytest
+import pytest  # noqa: E402
 
-from video_workbench.app.errors import WBError
-from video_workbench.core import merger
-from video_workbench.infra.ffmpeg import MediaInfo
+from video_workbench.app.errors import WBError  # noqa: E402
+from video_workbench.core import merger  # noqa: E402
+from video_workbench.infra.ffmpeg import MediaInfo  # noqa: E402
 
 
 class FakeFFmpeg:
@@ -331,11 +330,16 @@ def test_temp_dir_is_cleaned_after_job(service, tmp_path, monkeypatch):
 def test_multiple_outputs_do_not_collide(service, tmp_path, monkeypatch):
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
-    first = rpc(service, "merge.start", {"paths": paths, "mode": "precise", "out_dir": str(tmp_path)})
+    first = rpc(
+        service, "merge.start", {"paths": paths, "mode": "precise", "out_dir": str(tmp_path)}
+    )
     wait_job(service, first["data"]["job"]["id"])
-    second = rpc(service, "merge.start", {"paths": paths, "mode": "precise", "out_dir": str(tmp_path)})
+    second = rpc(
+        service, "merge.start", {"paths": paths, "mode": "precise", "out_dir": str(tmp_path)}
+    )
     wait_job(service, second["data"]["job"]["id"])
     assert first["data"]["name"] != second["data"]["name"]
+
 
 # ------------------------------------------------------------------ 取消路径（真实进程）
 
@@ -389,8 +393,8 @@ def test_kill_tree_needs_pid_not_popen():
 
 def test_stale_tmp_dirs_are_swept_on_start(tmp_path):
     """崩过一次之后 cache/tmp 里会攒下 job_xxx：开机时清掉，不留假现场。"""
-    from video_workbench.config import WorkbenchConfig
     from video_workbench.app.service import WorkbenchService
+    from video_workbench.config import WorkbenchConfig
 
     cache = tmp_path / "cache"
     stale = cache / "tmp" / "job_deadbeef"

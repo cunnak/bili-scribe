@@ -16,8 +16,8 @@ from video_workbench.app.service import WorkbenchService
 from video_workbench.core import exporter
 from video_workbench.core.subtitles import normalize
 
-
 # ---------------------------------------------------------------- 纯函数
+
 
 def test_filename_keeps_readable_parts_and_timestamps():
     name = exporter.clip_filename(
@@ -62,9 +62,7 @@ def test_long_titles_are_trimmed():
 
 
 def test_build_args_precise_reencodes_with_crf18():
-    args = exporter.build_args(
-        "ffmpeg", src="s.mp4", dest="d.mp4", start_ms=12_400, end_ms=34_800
-    )
+    args = exporter.build_args("ffmpeg", src="s.mp4", dest="d.mp4", start_ms=12_400, end_ms=34_800)
     assert args[:1] == ["ffmpeg"]
     # -ss 必须在 -i 之前，否则精确定位要解码到切点，慢得多
     assert args.index("-ss") < args.index("-i")
@@ -96,8 +94,13 @@ def test_build_args_hard_subtitle_picks_filter_by_extension():
     断言的正是那个错行为——换任何机器都跑不通，只是在自证通过。
     """
     args = exporter.build_args(
-        "ffmpeg", src="s.mp4", dest="d.mp4", start_ms=0, end_ms=5_000,
-        subtitle="new.srt", subtitle_mode="hard",
+        "ffmpeg",
+        src="s.mp4",
+        dest="d.mp4",
+        start_ms=0,
+        end_ms=5_000,
+        subtitle="new.srt",
+        subtitle_mode="hard",
     )
     vf = args[args.index("-vf") + 1]
     assert vf.startswith("subtitles=")
@@ -109,8 +112,13 @@ def test_build_args_hard_subtitle_keeps_ass_filter_for_ass(tmp_path):
     ass = tmp_path / "subtitle.ass"
     ass.write_text("[Script Info]\n", encoding="utf-8")
     args = exporter.build_args(
-        "ffmpeg", src="s.mp4", dest="d.mp4", start_ms=0, end_ms=5_000,
-        subtitle=str(ass), subtitle_mode="hard",
+        "ffmpeg",
+        src="s.mp4",
+        dest="d.mp4",
+        start_ms=0,
+        end_ms=5_000,
+        subtitle=str(ass),
+        subtitle_mode="hard",
     )
     vf = args[args.index("-vf") + 1]
     # ASS 走 ass=（样式可控），并且冒号要转义，否则被当参数分隔符
@@ -119,8 +127,13 @@ def test_build_args_hard_subtitle_keeps_ass_filter_for_ass(tmp_path):
 
 def test_build_args_soft_subtitle_maps_second_input():
     args = exporter.build_args(
-        "ffmpeg", src="s.mp4", dest="d.mp4", start_ms=0, end_ms=5_000,
-        subtitle="new.srt", subtitle_mode="soft",
+        "ffmpeg",
+        src="s.mp4",
+        dest="d.mp4",
+        start_ms=0,
+        end_ms=5_000,
+        subtitle="new.srt",
+        subtitle_mode="soft",
     )
     assert args.count("-i") == 2
     assert args[args.index("-map") + 1] == "0:v:0"
@@ -139,9 +152,7 @@ def test_build_args_rejects_unknown_modes():
 
 def test_build_args_requires_subtitle_file_when_mode_set():
     with pytest.raises(ValueError):
-        exporter.build_args(
-            "ffmpeg", src="a", dest="b", start_ms=0, end_ms=1, subtitle_mode="soft"
-        )
+        exporter.build_args("ffmpeg", src="a", dest="b", start_ms=0, end_ms=1, subtitle_mode="soft")
 
 
 def test_span_is_at_least_one_millisecond():
@@ -167,6 +178,7 @@ def test_offset_note_says_what_happened():
 
 
 # ---------------------------------------------------------------- 服务层
+
 
 class FakeFFmpeg:
     """假 ffmpeg：记录调用，写出一个固定大小的文件。"""
@@ -225,8 +237,9 @@ def wait_job(service, job_id, timeout=10.0):
     return service.jobs.get(job_id)
 
 
-def make_project(service, tmp_path: Path, *, with_source=True, with_subtitle=False,
-                 with_candidate=True) -> dict:
+def make_project(
+    service, tmp_path: Path, *, with_source=True, with_subtitle=False, with_candidate=True
+) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
     project = service.repo.project_create(
@@ -242,24 +255,34 @@ def make_project(service, tmp_path: Path, *, with_source=True, with_subtitle=Fal
         ]
     )
     service.repo.transcript_upsert(
-        project["id"], segments=segments, language="zh", model="tiny",
+        project["id"],
+        segments=segments,
+        language="zh",
+        model="tiny",
         srt_path=str(root / "transcript.srt"),
     )
     if with_source:
         source = root / "source.mp4"
         source.write_bytes(b"x" * 2048)
-        service.repo.asset_upsert(project["id"], "source", str(source), bytes=2048,
-                                  duration_ms=60_000)
+        service.repo.asset_upsert(
+            project["id"], "source", str(source), bytes=2048, duration_ms=60_000
+        )
     if with_subtitle:
         sub = root / "subtitle.zh.srt"
         sub.write_text("1\n00:00:00,000 --> 00:00:02,000\n今天讲三件事\n", encoding="utf-8")
-        service.repo.asset_upsert(project["id"], "subtitle", str(sub), bytes=sub.stat().st_size,
-                                  language="zh")
+        service.repo.asset_upsert(
+            project["id"], "subtitle", str(sub), bytes=sub.stat().st_size, language="zh"
+        )
     candidate = {}
     if with_candidate:
         candidate = service.repo.candidate_insert(
-            project["id"], kind="highlight", start_ms=12_400, end_ms=34_800,
-            score=86, title="先证伪直觉", source="ai",
+            project["id"],
+            kind="highlight",
+            start_ms=12_400,
+            end_ms=34_800,
+            score=86,
+            title="先证伪直觉",
+            source="ai",
         )
     return {"project": project, "root": root, "candidate": candidate}
 
@@ -278,9 +301,13 @@ def test_export_rejects_unknown_mode(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     error = err(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "mode": "turbo"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "mode": "turbo",
+        },
     )
     assert error["code"] == "VALIDATION"
 
@@ -290,16 +317,26 @@ def test_export_accepts_9x16_and_checks_vertical_mode(service, tmp_path, monkeyp
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     out = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "aspect": "9x16", "vertical_mode": "blur"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "aspect": "9x16",
+            "vertical_mode": "blur",
+        },
     )
     assert out["job"]["payload"]["aspect"] == "9x16"
     assert out["job"]["payload"]["vertical_mode"] == "blur"
     error = err(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "aspect": "9x16", "vertical_mode": "swirl"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "aspect": "9x16",
+            "vertical_mode": "swirl",
+        },
     )
     assert error["code"] == "VALIDATION"
 
@@ -309,15 +346,24 @@ def test_export_rejects_unknown_aspect(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     out = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "aspect": "9:16", "vertical_mode": "blur"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "aspect": "9:16",
+            "vertical_mode": "blur",
+        },
     )
     assert out["job"]["payload"]["aspect"] == "9x16"
     error = err(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "aspect": "4:3"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "aspect": "4:3",
+        },
     )
     assert error["code"] == "VALIDATION"
     assert "9x16" in error["message"] and "9:16" in error["message"]
@@ -336,7 +382,8 @@ def test_export_without_source_is_conflict(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path, with_source=False)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     error = err(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     assert error["code"] == "CONFLICT"
@@ -353,9 +400,9 @@ def test_export_without_subtitle_file_is_conflict(service, tmp_path, monkeypatch
     service.repo.transcript_clear(pid)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     error = err(
-        service, "clip.export",
-        {"project_id": pid, "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "hard"},
+        service,
+        "clip.export",
+        {"project_id": pid, "candidate_id": made["candidate"]["id"], "subtitle_mode": "hard"},
     )
     assert error["code"] == "CONFLICT"
 
@@ -366,9 +413,9 @@ def test_export_hard_generates_ass_from_transcript(service, tmp_path, monkeypatc
     pid = made["project"]["id"]
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     out = rpc(
-        service, "clip.export",
-        {"project_id": pid, "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "hard"},
+        service,
+        "clip.export",
+        {"project_id": pid, "candidate_id": made["candidate"]["id"], "subtitle_mode": "hard"},
     )
     payload = out["job"]["payload"]
     assert payload["subtitle"].lower().endswith(".ass"), payload["subtitle"]
@@ -382,9 +429,8 @@ def test_export_hard_generates_ass_from_transcript(service, tmp_path, monkeypatc
         return int(h) * 3_600_000 + int(m) * 60_000 + int(s) * 1_000 + int(cs) * 10
 
     # ASS 的事件行是 `Dialogue: 0,<start>,<end>,Style,...`，没有 Start:/End: 标签
-    events = re.findall(
-        r"Dialogue:\s*\d+,(\d+:\d+:\d+\.\d\d),(\d+:\d+:\d+\.\d\d)", body)
-    assert len(events) == 2, body          # 窗口外那条不该进来
+    events = re.findall(r"Dialogue:\s*\d+,(\d+:\d+:\d+\.\d\d),(\d+:\d+:\d+\.\d\d)", body)
+    assert len(events) == 2, body  # 窗口外那条不该进来
     assert [to_ms(a) for a, _ in events] == [0, 7_600], events
     assert [to_ms(b) for _, b in events] == [1_600, 9_600], events
 
@@ -395,9 +441,9 @@ def test_export_soft_writes_srt_from_transcript(service, tmp_path, monkeypatch):
     pid = made["project"]["id"]
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     out = rpc(
-        service, "clip.export",
-        {"project_id": pid, "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "soft"},
+        service,
+        "clip.export",
+        {"project_id": pid, "candidate_id": made["candidate"]["id"], "subtitle_mode": "soft"},
     )
     subtitle = out["job"]["payload"]["subtitle"]
     assert subtitle.endswith(".srt"), subtitle
@@ -415,9 +461,9 @@ def test_export_soft_without_any_subtitle_is_conflict(service, tmp_path, monkeyp
     service.repo.transcript_clear(pid)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     error = err(
-        service, "clip.export",
-        {"project_id": pid, "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "soft"},
+        service,
+        "clip.export",
+        {"project_id": pid, "candidate_id": made["candidate"]["id"], "subtitle_mode": "soft"},
     )
     assert error["code"] == "CONFLICT"
     assert "软字幕" in error["message"]
@@ -430,9 +476,9 @@ def test_export_hard_falls_back_to_srt_when_no_transcript(service, tmp_path, mon
     service.repo.transcript_clear(pid)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     out = rpc(
-        service, "clip.export",
-        {"project_id": pid, "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "hard"},
+        service,
+        "clip.export",
+        {"project_id": pid, "candidate_id": made["candidate"]["id"], "subtitle_mode": "hard"},
     )
     assert out["job"]["payload"]["subtitle"].lower().endswith(".srt")
 
@@ -441,7 +487,8 @@ def test_export_precise_writes_file_and_asset(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     fake = use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     data = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job = wait_job(service, data["job"]["id"])
@@ -461,9 +508,13 @@ def test_export_fast_reports_offset(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg(out_duration_ms=21_900))
     data = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "mode": "fast"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "mode": "fast",
+        },
     )
     job = wait_job(service, data["job"]["id"])
     assert job["status"] == "succeeded", job
@@ -478,7 +529,8 @@ def test_export_precise_has_no_offset_note(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg(out_duration_ms=22_380))
     data = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job = wait_job(service, data["job"]["id"])
@@ -491,9 +543,13 @@ def test_export_soft_passes_subtitle_path(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path, with_subtitle=True)
     fake = use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     data = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "subtitle_mode": "soft"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "subtitle_mode": "soft",
+        },
     )
     job = wait_job(service, data["job"]["id"])
     assert job["status"] == "succeeded", job
@@ -506,7 +562,8 @@ def test_export_failure_keeps_job_failed(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg(fail=True))
     data = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job = wait_job(service, data["job"]["id"])
@@ -518,9 +575,13 @@ def test_exports_lists_queue_with_states(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg(out_duration_ms=21_900))
     good = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "mode": "fast"},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "mode": "fast",
+        },
     )
     wait_job(service, good["job"]["id"])
     rows = rpc(service, "clip.exports", {"project_id": made["project"]["id"]})["exports"]
@@ -537,7 +598,8 @@ def test_exports_flags_missing_file(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     data = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job = wait_job(service, data["job"]["id"])
@@ -575,9 +637,14 @@ def test_three_modes_write_three_files(service, tmp_path, monkeypatch):
     paths = set()
     for mode, sub in (("precise", "none"), ("fast", "none"), ("precise", "hard")):
         data = rpc(
-            service, "clip.export",
-            {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-             "mode": mode, "subtitle_mode": sub},
+            service,
+            "clip.export",
+            {
+                "project_id": made["project"]["id"],
+                "candidate_id": made["candidate"]["id"],
+                "mode": mode,
+                "subtitle_mode": sub,
+            },
         )
         job = wait_job(service, data["job"]["id"])
         assert job["status"] == "succeeded", job
@@ -590,12 +657,14 @@ def test_repeat_export_does_not_overwrite(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     first = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job1 = wait_job(service, first["job"]["id"])
     second = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     job2 = wait_job(service, second["job"]["id"])
@@ -608,12 +677,18 @@ def test_manual_candidate_exports_like_ai_one(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path, with_candidate=False)
     fake = use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     created = rpc(
-        service, "clip.create",
-        {"project_id": made["project"]["id"], "start_ms": 6_000, "end_ms": 26_040,
-         "title": "手动切片"},
+        service,
+        "clip.create",
+        {
+            "project_id": made["project"]["id"],
+            "start_ms": 6_000,
+            "end_ms": 26_040,
+            "title": "手动切片",
+        },
     )
     data = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": created["candidate"]["id"]},
     )
     job = wait_job(service, data["job"]["id"])
@@ -624,13 +699,18 @@ def test_manual_candidate_exports_like_ai_one(service, tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- P6-03 音轨
 
+
 def test_export_rejects_missing_bgm(service, tmp_path, monkeypatch):
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     error = err(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "bgm": str(tmp_path / "没有这个文件.mp3")},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "bgm": str(tmp_path / "没有这个文件.mp3"),
+        },
     )
     assert error["code"] == "NOT_FOUND"
     assert "背景音乐" in error["message"]
@@ -642,9 +722,16 @@ def test_export_passes_bgm_volume_and_fade_to_job(service, tmp_path, monkeypatch
     bgm = tmp_path / "bgm.mp3"
     bgm.write_bytes(b"fake audio")
     out = rpc(
-        service, "clip.export",
-        {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"],
-         "bgm": str(bgm), "bgm_volume": 40, "bgm_duck": False, "fade_ms": 200},
+        service,
+        "clip.export",
+        {
+            "project_id": made["project"]["id"],
+            "candidate_id": made["candidate"]["id"],
+            "bgm": str(bgm),
+            "bgm_volume": 40,
+            "bgm_duck": False,
+            "fade_ms": 200,
+        },
     )
     payload = out["job"]["payload"]
     assert payload["bgm"] == str(bgm.resolve())
@@ -657,7 +744,8 @@ def test_export_fade_defaults_to_config_and_never_exceeds_span(service, tmp_path
     made = make_project(service, tmp_path)
     use_ffmpeg(service, monkeypatch, FakeFFmpeg())
     first = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     # 配置默认 0（不淡），老片子导出的结果不该被静默改掉
@@ -666,7 +754,8 @@ def test_export_fade_defaults_to_config_and_never_exceeds_span(service, tmp_path
 
     service.cfg.clip.fade_ms = 900
     second = rpc(
-        service, "clip.export",
+        service,
+        "clip.export",
         {"project_id": made["project"]["id"], "candidate_id": made["candidate"]["id"]},
     )
     # 候选 12.4s–34.8s = 22.4s，上限 3000 与 30% 都不会砍到 900
@@ -675,8 +764,13 @@ def test_export_fade_defaults_to_config_and_never_exceeds_span(service, tmp_path
 
 def test_export_signature_counts_bgm_and_fade():
     """换配乐/改淡入淡出 = 另一版片子，不能被 skip_exported 当"已经导过"。"""
-    base = {"candidate_id": "c1", "mode": "precise", "subtitle_mode": "none",
-            "aspect": "16x9", "vertical_mode": "center"}
+    base = {
+        "candidate_id": "c1",
+        "mode": "precise",
+        "subtitle_mode": "none",
+        "aspect": "16x9",
+        "vertical_mode": "center",
+    }
     plain = WorkbenchService._export_signature({"payload": dict(base)})
     with_bgm = WorkbenchService._export_signature(
         {"payload": {**base, "bgm": "D:/a.mp3", "fade_ms": 200}}

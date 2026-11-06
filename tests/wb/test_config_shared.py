@@ -213,7 +213,9 @@ def test_legacy_yaml_is_read_but_never_rewritten(tmp_path):
     # 4) 脏键仍然烫到 bili——清理归它自己，WB 不替它改
     with pytest.raises(ValueError) as exc:
         bc.AppConfig.load(target)
-    assert "未知配置项" in str(exc.value), f"bili 的报错形状变了，先看是不是换了校验方式：{exc.value}"
+    assert "未知配置项" in str(exc.value), (
+        f"bili 的报错形状变了，先看是不是换了校验方式：{exc.value}"
+    )
 
 
 def test_migration_keeps_providers(tmp_path, monkeypatch):
@@ -271,7 +273,9 @@ def test_migration_keeps_providers(tmp_path, monkeypatch):
 
     # 旧家是 bili-scribe 的文件：读可以，写不行，连 .bak 都不许留
     assert legacy_yaml.read_bytes() == legacy_before, "搬家不许写旧家一个字节"
-    assert sorted(p.name for p in old_home.iterdir()) == ["config.yaml"], "旧家不许多出 .bak/sidecar"
+    assert sorted(p.name for p in old_home.iterdir()) == ["config.yaml"], (
+        "旧家不许多出 .bak/sidecar"
+    )
 
 
 def test_sidecar_survives_missing(tmp_path):

@@ -83,17 +83,26 @@ def configure(service, monkeypatch, client):
 def make_project(service, tmp_path: Path, *, texts=None) -> dict:
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
-    project = service.repo.project_create(title="标题", up_name="UP", root_dir=str(root),
-                                          stage="transcribed")
-    items = normalize([
-        {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
-        for i, t in enumerate(texts or ["今天讲三件事", "然后第一件事", "第二件事"])
-    ])
+    project = service.repo.project_create(
+        title="标题", up_name="UP", root_dir=str(root), stage="transcribed"
+    )
+    items = normalize(
+        [
+            {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
+            for i, t in enumerate(texts or ["今天讲三件事", "然后第一件事", "第二件事"])
+        ]
+    )
     (root / "transcript.json").write_text(
         json.dumps({"segments": items, "language": "zh", "model": "tiny"}, ensure_ascii=False),
-        encoding="utf-8")
-    service.repo.transcript_upsert(project["id"], segments=items, language="zh", model="tiny",
-                                   srt_path=str(root / "transcript.srt"))
+        encoding="utf-8",
+    )
+    service.repo.transcript_upsert(
+        project["id"],
+        segments=items,
+        language="zh",
+        model="tiny",
+        srt_path=str(root / "transcript.srt"),
+    )
     return project
 
 
@@ -123,7 +132,7 @@ def test_translate_unknown_project_is_not_found(service, monkeypatch):
 
 
 def test_translate_resolves_auto_at_submit_time(service, tmp_path, monkeypatch):
-    project = make_project(service, tmp_path)          # 源是中文
+    project = make_project(service, tmp_path)  # 源是中文
     configure(service, monkeypatch, StubClient([]))
     seen: dict = {}
 
@@ -135,7 +144,7 @@ def test_translate_resolves_auto_at_submit_time(service, tmp_path, monkeypatch):
     data = rpc(service, "subtitle.translate", {"project_id": project["id"], "target": "auto"})
     assert data["source"] == "zh" and data["target"] == "en"
     assert seen["type"] == "subtitle.translate"
-    assert seen["payload"]["target"] == "en"          # 任务里不再猜语言
+    assert seen["payload"]["target"] == "en"  # 任务里不再猜语言
 
 
 def test_translate_rejects_unknown_target(service, tmp_path, monkeypatch):
@@ -149,8 +158,11 @@ def test_translate_clamps_batch_size(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
     seen: dict = {}
-    monkeypatch.setattr(service.jobs, "submit",
-                        lambda t, p=None, payload=None: seen.update(payload or {}) or {"id": "j"})
+    monkeypatch.setattr(
+        service.jobs,
+        "submit",
+        lambda t, p=None, payload=None: seen.update(payload or {}) or {"id": "j"},
+    )
     rpc(service, "subtitle.translate", {"project_id": project["id"], "batch_size": 9999})
     assert seen["batch_size"] == 50
 
@@ -161,11 +173,21 @@ def test_translate_clamps_batch_size(service, tmp_path, monkeypatch):
 def test_handler_writes_draft_only_and_leaves_transcript_untouched(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     before = original_texts(service, project["id"])
-    client = configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "Three things today."},
-                    {"id": "s2", "text": "First one."},
-                    {"id": "s3", "text": "Second one."}]),
-    ]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "Three things today."},
+                        {"id": "s2", "text": "First one."},
+                        {"id": "s3", "text": "Second one."},
+                    ]
+                ),
+            ]
+        ),
+    )
     result = service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
     assert result["translated"] == 3 and result["failed"] == []
     # 原始字幕没被覆盖
@@ -173,12 +195,16 @@ def test_handler_writes_draft_only_and_leaves_transcript_untouched(service, tmp_
     row = service.repo.subtitle_get(project["id"], kind="translation", language="en")
     assert row and row["status"] == "draft"
     assert [s["translated_text"] for s in row["segments"]] == [
-        "Three things today.", "First one.", "Second one."]
+        "Three things today.",
+        "First one.",
+        "Second one.",
+    ]
 
 
 def test_handler_all_batches_failed_raises_and_keeps_db(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     from video_workbench.infra.llm import ChatError
+
     configure(service, monkeypatch, StubClient([ChatError("LLM_ERROR", "超时")]))
     with pytest.raises(Exception) as exc:
         service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
@@ -194,20 +220,38 @@ def test_handler_failed_retry_keeps_confirmed_draft(service, tmp_path, monkeypat
     draft——用户看到的是"重试了一下，确认状态没了"。
     """
     from video_workbench.infra.llm import ChatError
+
     project = make_project(service, tmp_path)
-    client = configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "one."}, {"id": "s2", "text": "two."},
-                    {"id": "s3", "text": "three."}]),
-    ]))
+    client = configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "one."},
+                        {"id": "s2", "text": "two."},
+                        {"id": "s3", "text": "three."},
+                    ]
+                ),
+            ]
+        ),
+    )
     service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
-    service.repo.subtitle_upsert(project["id"], kind="translation", language="en",
-                                 segments=service.repo.subtitle_get(
-                                     project["id"], kind="translation", language="en")["segments"],
-                                 status="confirmed")
+    service.repo.subtitle_upsert(
+        project["id"],
+        kind="translation",
+        language="en",
+        segments=service.repo.subtitle_get(project["id"], kind="translation", language="en")[
+            "segments"
+        ],
+        status="confirmed",
+    )
     client.replies = [ChatError("LLM_BAD_RESPONSE", "模型乱写", "不是 JSON")]
     with pytest.raises(Exception) as exc:
-        service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en",
-                                          "segment_ids": ["s1", "s2"]})
+        service._translate_job(
+            FakeCtx(), {"project_id": project["id"], "target": "en", "segment_ids": ["s1", "s2"]}
+        )
     assert "所有批次都失败" in str(exc.value)
     row = service.repo.subtitle_get(project["id"], kind="translation", language="en")
     assert row["status"] == "confirmed", "失败的重试把确认状态冲掉了"
@@ -216,15 +260,27 @@ def test_handler_failed_retry_keeps_confirmed_draft(service, tmp_path, monkeypat
 
 def test_handler_reuses_previous_draft_for_retry(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    client = configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "one."}, {"id": "s2", "text": "two."},
-                    {"id": "s3", "text": "three."}]),
-    ]))
+    client = configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "one."},
+                        {"id": "s2", "text": "two."},
+                        {"id": "s3", "text": "three."},
+                    ]
+                ),
+            ]
+        ),
+    )
     service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
     # 只重试第二条：前一条的旧译文必须保住
     client.replies = [json.dumps([{"id": "s2", "text": "two, again."}])]
     result = service._translate_job(
-        FakeCtx(), {"project_id": project["id"], "target": "en", "segment_ids": ["s2"]})
+        FakeCtx(), {"project_id": project["id"], "target": "en", "segment_ids": ["s2"]}
+    )
     got = {s["id"]: s["translated_text"] for s in result["segments"]}
     assert got["s1"] == "one." and got["s2"] == "two, again." and got["s3"] == "three."
 
@@ -235,13 +291,20 @@ def test_handler_applies_glossary_to_leaked_source_terms(service, tmp_path, monk
     # 模型换成别的写法（AI chip）就管不了——那是 prompt 的活，不是字符串替换的活。
     project = make_project(service, tmp_path, texts=["AI 芯片很贵", "第二件事", "第三件事"])
     service.cfg.subtitle.translate.glossary = ["AI 芯片=accelerator"]
-    configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "AI 芯片 is expensive"}]),
-        json.dumps([{"id": "s2", "text": "second"}]),
-        json.dumps([{"id": "s3", "text": "third"}]),
-    ]))
-    result = service._translate_job(FakeCtx(),
-                                    {"project_id": project["id"], "target": "en", "batch_size": 1})
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps([{"id": "s1", "text": "AI 芯片 is expensive"}]),
+                json.dumps([{"id": "s2", "text": "second"}]),
+                json.dumps([{"id": "s3", "text": "third"}]),
+            ]
+        ),
+    )
+    result = service._translate_job(
+        FakeCtx(), {"project_id": project["id"], "target": "en", "batch_size": 1}
+    )
     first = next(s for s in result["segments"] if s["id"] == "s1")
     assert first["translated_text"] == "accelerator is expensive"
 
@@ -251,10 +314,21 @@ def test_handler_applies_glossary_to_leaked_source_terms(service, tmp_path, monk
 
 def test_translation_readback(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "one"}, {"id": "s2", "text": "two"},
-                    {"id": "s3", "text": "three"}]),
-    ]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "one"},
+                        {"id": "s2", "text": "two"},
+                        {"id": "s3", "text": "three"},
+                    ]
+                ),
+            ]
+        ),
+    )
     assert rpc(service, "subtitle.translation", {"project_id": project["id"]})["found"] is False
     service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
     data = rpc(service, "subtitle.translation", {"project_id": project["id"], "target": "en"})
@@ -264,13 +338,27 @@ def test_translation_readback(service, tmp_path, monkeypatch):
 
 def test_apply_writes_two_files_and_registers_assets(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "one"}, {"id": "s2", "text": "two"},
-                    {"id": "s3", "text": "three"}]),
-    ]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "one"},
+                        {"id": "s2", "text": "two"},
+                        {"id": "s3", "text": "three"},
+                    ]
+                ),
+            ]
+        ),
+    )
     service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
-    data = rpc(service, "subtitle.translation.apply",
-               {"project_id": project["id"], "target": "en", "layout": "original_top"})
+    data = rpc(
+        service,
+        "subtitle.translation.apply",
+        {"project_id": project["id"], "target": "en", "layout": "original_top"},
+    )
     root = Path(project["root_dir"])
     srt = root / "subtitle.en.srt"
     ass = root / "subtitle.bilingual.ass"
@@ -286,13 +374,27 @@ def test_apply_writes_two_files_and_registers_assets(service, tmp_path, monkeypa
 
 def test_apply_only_accepts_selected_segments(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    configure(service, monkeypatch, StubClient([
-        json.dumps([{"id": "s1", "text": "one"}, {"id": "s2", "text": "two"},
-                    {"id": "s3", "text": "three"}]),
-    ]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(
+                    [
+                        {"id": "s1", "text": "one"},
+                        {"id": "s2", "text": "two"},
+                        {"id": "s3", "text": "three"},
+                    ]
+                ),
+            ]
+        ),
+    )
     service._translate_job(FakeCtx(), {"project_id": project["id"], "target": "en"})
-    rpc(service, "subtitle.translation.apply",
-        {"project_id": project["id"], "target": "en", "accepted_ids": ["s1"]})
+    rpc(
+        service,
+        "subtitle.translation.apply",
+        {"project_id": project["id"], "target": "en", "accepted_ids": ["s1"]},
+    )
     srt = (Path(project["root_dir"]) / "subtitle.en.srt").read_text(encoding="utf-8")
     # 未接受的段退回原文，不出现空字幕块
     assert "one" in srt and "然后第一件事" in srt and "第二件事" in srt
@@ -301,7 +403,9 @@ def test_apply_only_accepts_selected_segments(service, tmp_path, monkeypatch):
 def test_apply_without_draft_is_not_found(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     configure(service, monkeypatch, StubClient([]))
-    error = err(service, "subtitle.translation.apply", {"project_id": project["id"], "target": "en"})
+    error = err(
+        service, "subtitle.translation.apply", {"project_id": project["id"], "target": "en"}
+    )
     assert error["code"] == "NOT_FOUND"
 
 
@@ -316,6 +420,7 @@ def test_glossary_put_rejects_bad_lines(service):
 
 def test_glossary_put_persists(service, cfg_path):
     import yaml
+
     data = rpc(service, "glossary.put", {"entries": ["AI=人工智能", "token=词元"]})
     assert data["count"] == 2
     # subtitle 整段是 Workbench 独有，落 sidecar；共享 yaml 里不该出现

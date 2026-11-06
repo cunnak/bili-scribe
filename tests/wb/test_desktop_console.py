@@ -3,6 +3,7 @@
 窗口那件事没法在 CI 里数窗口数量，这里只钉住「补丁真的把 CREATE_NO_WINDOW 加上了」——
 真正的确认只能靠人看一眼（下载时不该再闪终端）。
 """
+
 from __future__ import annotations
 
 import subprocess

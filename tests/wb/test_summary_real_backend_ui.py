@@ -64,15 +64,11 @@ import pytest
 sync_api = pytest.importorskip(
     "playwright.sync_api",
     reason="没装 playwright，真后端界面用例没跑（不是通过）。修复："
-           ".venv/Scripts/python.exe -m pip install playwright==1.64.1 "
-           "&& .venv/Scripts/python.exe -m playwright install chromium",
+    ".venv/Scripts/python.exe -m pip install playwright==1.64.1 "
+    "&& .venv/Scripts/python.exe -m playwright install chromium",
 )
 from playwright.sync_api import Error as PlaywrightError  # noqa: E402
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # noqa: E402
-
-from video_workbench.app.service import WorkbenchService  # noqa: E402
-from video_workbench.core import prompt_source as ps  # noqa: E402
-from video_workbench.core import summarizer as ad  # noqa: E402
 
 # 皮肤切换、折叠组定位、几何测量这些判据与 helper 都从 mock 那批复用，
 # 两处对「看得见」的定义必须只有一份（否则两边各写一套、各错各的）。
@@ -81,24 +77,30 @@ from test_settings_role_warning_ui import (  # noqa: E402
     SKINS,
     adv_group,
     apply_skin,
-    browser,             # noqa: F401  （pytest fixture）
-    open_settings,       # noqa: F401  （mock 版入口，本文件不用，只借 helper）
-    require_expanded,    # 读折叠组里的文字之前必须先展开（收起态 inner_text 恒空）
+    open_settings,  # noqa: F401  （mock 版入口，本文件不用，只借 helper）
+    require_expanded,  # 读折叠组里的文字之前必须先展开（收起态 inner_text 恒空）
     role_row,
     warn_line,
-    web_base_url,   # noqa: F401  （pytest fixture：静态服务真实 web 目录）
 )
+from test_settings_role_warning_ui import browser as browser  # noqa: E402,F401  （pytest fixture）
+from test_settings_role_warning_ui import web_base_url as web_base_url  # noqa: E402,F401  （pytest fixture：静态服务真实 web 目录）
+
+from video_workbench.app.service import WorkbenchService  # noqa: E402
+from video_workbench.core import prompt_source as ps  # noqa: E402
+from video_workbench.core import summarizer as ad  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = ROOT / "video_workbench" / "web"
 
 #: 只有这四个方法接到真后端，其余留 mock（理由见文件头「页面这一侧怎么接」）。
-REAL_METHODS = frozenset({
-    "summary.roles",
-    "summary.prompt.list",
-    "app.settings.get",
-    "app.settings.put",
-})
+REAL_METHODS = frozenset(
+    {
+        "summary.roles",
+        "summary.prompt.list",
+        "app.settings.get",
+        "app.settings.put",
+    }
+)
 
 #: 注入到页面里的包装：`WB.rpc` → 外置桥函数 `window.__wbRpc`。返回 `res["data"]`，
 #: 与前端 `rpc.js:108` 取的那一层一致。
@@ -142,7 +144,8 @@ def _source_help(page):
     helps = role_row(page).locator(".field__help")
     assert helps.count() == 2, (
         f"`llm.role` 那行的 .field__help 数量变了（现在 {helps.count()} 个），"
-        "真源清单的位置需要重新核对，别继续用 .last 猜")
+        "真源清单的位置需要重新核对，别继续用 .last 猜"
+    )
     return helps.last
 
 
@@ -210,8 +213,14 @@ def _open_real(browser_ctx_factory, web_base: str, service: _Service):
     page = browser_ctx_factory.new_page(viewport={"width": 1440, "height": 960})
     errors: list[str] = []
     page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
-    page.on("console", lambda msg: errors.append(f"console: {msg.text}")
-            if msg.type == "error" and "favicon" not in (msg.text or "") else None)
+    page.on(
+        "console",
+        lambda msg: (
+            errors.append(f"console: {msg.text}")
+            if msg.type == "error" and "favicon" not in (msg.text or "")
+            else None
+        ),
+    )
 
     def _bridge(source, payload):
         method = payload.get("method") or ""
@@ -219,8 +228,11 @@ def _open_real(browser_ctx_factory, web_base: str, service: _Service):
         try:
             return service.dispatch(method, payload.get("params") or {})
         except Exception as exc:  # noqa: BLE001 - 桥不能把页面拖死，错误照产品的信封回
-            return {"ok": False, "request_id": None,
-                    "error": {"message": f"{type(exc).__name__}: {exc}"}}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": {"message": f"{type(exc).__name__}: {exc}"},
+            }
 
     page.expose_binding("__wbRpc", _bridge)
     page.goto(f"{web_base}/index.html?mock=1", wait_until="load")
@@ -234,7 +246,9 @@ def _open_real(browser_ctx_factory, web_base: str, service: _Service):
         # 还是运输被拒（CSP / CORS 那两次就是靠这里攒下的报错定位的）。
         raise AssertionError(
             f"设置页没渲染出字段：{exc}\n页面期间收集到的错误：\n"
-            + "\n".join(errors[:12]) + "\n桥收到的方法：" + repr(service.bridge_calls[:12])
+            + "\n".join(errors[:12])
+            + "\n桥收到的方法："
+            + repr(service.bridge_calls[:12])
         ) from None
     return page, errors
 
@@ -271,14 +285,16 @@ def test_the_source_line_shows_what_the_backend_computed(real_page):
     # 后端返回的绑定集合必须**正好等于** MAP：多一个说明有人绕过 MAP 接了文件，
     # 少一个说明 MAP 里那一项在清单层丢了（设置页就不会显示它）。
     assert set(rows) == set(ps.MAP), (
-        f"后端认的绑定角色集合与 MAP 不一致：清单 {sorted(rows)} vs MAP {sorted(ps.MAP)}")
+        f"后端认的绑定角色集合与 MAP 不一致：清单 {sorted(rows)} vs MAP {sorted(ps.MAP)}"
+    )
 
     require_expanded(page, "真源清单在折叠组里，收起态读到的 inner_text 是空串")
     help_text = _source_help(page).inner_text()
     for key, row in rows.items():
         expected = f"{key} ← {row['name']} · {row['bytes']} B · {row['sha256'][:8]}"
         assert expected in help_text, (
-            f"来源清单里没有后端的这一行 {expected!r}；页面显示的是：{help_text!r}")
+            f"来源清单里没有后端的这一行 {expected!r}；页面显示的是：{help_text!r}"
+        )
     # 无源角色必须说人话，不许留空
     for key in ps.NO_SOURCE:
         assert f"{key} ←" in help_text, f"无源角色 {key} 在清单里消失了：{help_text!r}"
@@ -318,9 +334,11 @@ def test_a_poisoned_backend_sha_shows_up_in_the_page(real_page):
         require_expanded(page, "真源清单在折叠组里，收起态读到的 inner_text 是空串")
         help_text = _source_help(page).inner_text()
         assert "deadbeef" in help_text, (
-            f"后端 sha 改了、页面却还是旧值——前端不是读者：{help_text!r}")
+            f"后端 sha 改了、页面却还是旧值——前端不是读者：{help_text!r}"
+        )
         assert "wengao ← 文稿编辑.txt · %d B · deadbeef" % wengao["prompt_bytes"] in help_text, (
-            f"字节数没跟着动：{help_text!r}")
+            f"字节数没跟着动：{help_text!r}"
+        )
         assert errors == [], f"控制台有 error：{errors}"
     finally:
         row.clear()
@@ -360,7 +378,8 @@ def test_every_prompt_file_the_backend_lists_has_exactly_one_owner(real_page):
         extra = bool(row.get("is_extra"))
         assert bound or extra or name in unbound_names, (
             f"{name} 既没绑给角色、也不是附加提示词、又不在未绑清单里——"
-            f"用户改它不会有任何效果，界面也没地方说明它")
+            f"用户改它不会有任何效果，界面也没地方说明它"
+        )
         assert not (bound and extra), f"{name} 同时是某角色的真源和附加提示词：会双份进请求"
         # `in_map` 的语义以**生产者**为准（`prompt_source.py:219`）：
         # `"in_map": name in bound_by or name == EXTRA_FILE` —— 附加提示词也算「在映射里」，
@@ -371,10 +390,12 @@ def test_every_prompt_file_the_backend_lists_has_exactly_one_owner(real_page):
         assert row["in_map"] is expected_in_map, (
             f"{name} 的 in_map={row['in_map']} 与生产者语义不符"
             f"（绑给角色：{bool(row.get('bound_role'))}；是附加提示词：{extra}；"
-            f"EXTRA_FILE={ps.EXTRA_FILE!r}）")
+            f"EXTRA_FILE={ps.EXTRA_FILE!r}）"
+        )
         if bound:
             assert ps.MAP.get(row["bound_role"]) == name, (
-                f"{name} 被算成 {row['bound_role']} 的真源，MAP 里那角色绑的是别篇")
+                f"{name} 被算成 {row['bound_role']} 的真源，MAP 里那角色绑的是别篇"
+            )
 
     require_expanded(page, "真源清单在折叠组里，收起态读到的 inner_text 是空串")
     help_text = _source_help(page).inner_text()
@@ -383,7 +404,8 @@ def test_every_prompt_file_the_backend_lists_has_exactly_one_owner(real_page):
     # `describeRoleSources()` 就会把那行写成「无 txt 真源」，这里立刻红。
     for name in set(ps.MAP.values()):
         assert f"← {name}" in help_text, (
-            f"页面上看不到 {name} 的真源行（MAP 说它有人认领）：{help_text!r}")
+            f"页面上看不到 {name} 的真源行（MAP 说它有人认领）：{help_text!r}"
+        )
     # 反向那一半：只有真的在 `UNBOUND` 里的文件才许被写成「没绑定」。
     # `UNBOUND` 现在是空的（task-24 把最后一篇绑给了 shipin），所以这一半平时沉默，
     # 但**不是恒真**：谁把有主的文件塞进未绑文案，它马上红。
@@ -392,7 +414,8 @@ def test_every_prompt_file_the_backend_lists_has_exactly_one_owner(real_page):
         if f"{row['name']} 没绑定" in help_text:
             assert row["name"] in unbound_names, (
                 f"页面把 {row['name']} 说成没绑定，后端却认它有归属 —— "
-                "用户改了它以为不生效，其实生效：{!r}".format(help_text))
+                "用户改了它以为不生效，其实生效：{!r}".format(help_text)
+            )
     assert errors == [], f"控制台有 error：{errors}"
     page.screenshot(path=str(ACCEPT_DIR / "wb_settings_role_t25_owners.png"))
 
@@ -408,19 +431,20 @@ def test_the_switch_initial_state_comes_from_the_backend(real_page):
     page, errors, backend, _ = real_page
     value = backend.call("app.settings.get")["llm"]["extra_prompt"]
     assert value is False, f"本用例的前置：配置应当是关，实得 {value!r}"
-    switch = page.locator("details.adv button.switch").filter(
-        has=page.locator("text=附加提示词")).first
+    switch = (
+        page.locator("details.adv button.switch").filter(has=page.locator("text=附加提示词")).first
+    )
     if switch.count() == 0:
         switch = page.locator("button.switch").first
     state = switch.get_attribute("aria-checked")
     assert state == ("true" if value else "false"), (
         f"开关初始态与后端不一致：后端 {value}，aria-checked={state!r}——"
-        "页面自己决定默认值 = 用户看到的和存的不是一回事")
+        "页面自己决定默认值 = 用户看到的和存的不是一回事"
+    )
     assert errors == [], f"控制台有 error：{errors}"
 
 
-def test_clicking_and_saving_flips_the_backend_value_and_the_effective_system(
-        real_page):
+def test_clicking_and_saving_flips_the_backend_value_and_the_effective_system(real_page):
     """判据 3：点开关并保存 → Temp 配置真的翻转，且**生效的 system 长度随之变**。
 
     三段都要，少一段就是假绿：
@@ -437,7 +461,9 @@ def test_clicking_and_saving_flips_the_backend_value_and_the_effective_system(
     # 等「元素可见」直到超时——报错长得像「开关点不动」，实际是没展开。task-20 的判据在这里同样成立。
     require_expanded(page, "附加提示词开关在折叠组里，收起态点不到")
     row = page.locator("label.field__label").filter(has_text="附加提示词").first
-    field = row.locator("xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]")
+    field = row.locator(
+        "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' field ')][1]"
+    )
     switch = field.locator("button.switch").first
     switch.click()
     assert switch.get_attribute("aria-checked") == "true", "点完开关 aria-checked 没翻"
@@ -455,11 +481,11 @@ def test_clicking_and_saving_flips_the_backend_value_and_the_effective_system(
     base = ps.load(ps.MAP["wengao"]).strip()
     off_len = len(ps.system_for("wengao", base, with_extra=False))
     on_len = len(ps.system_for("wengao", base, with_extra=True))
-    assert on_len > off_len, (
-        f"开关打开后 system 长度反而没变：{off_len} → {on_len}")
+    assert on_len > off_len, f"开关打开后 system 长度反而没变：{off_len} → {on_len}"
     assert on_len - off_len == len(ps.extra_text().strip()) + 1, (
         f"多出来的不是整份附加提示词：差 {on_len - off_len}，"
-        f"extra 正文 {len(ps.extra_text().strip())} 字")
+        f"extra 正文 {len(ps.extra_text().strip())} 字"
+    )
     assert errors == [], f"控制台有 error：{errors}"
     page.screenshot(path=str(ACCEPT_DIR / "wb_settings_role_t21_switch_saved.png"))
 
@@ -490,7 +516,8 @@ def _value_in_files(config_dir: Path):
 
 @pytest.mark.parametrize("skin", SKINS)
 def test_the_danger_line_is_readable_on_both_skins_with_a_real_backend(
-        browser, web_base_url, real_service, skin):
+    browser, web_base_url, real_service, skin
+):
     """双皮肤 × 真后端：脏值那行红字在 ark 与 exhibition 都必须看得见、滚得到。
 
     后端给的 hint/脏值这次是**真的** `configured_unrecognized`——配置里写 standard。
@@ -512,9 +539,11 @@ def test_the_danger_line_is_readable_on_both_skins_with_a_real_backend(
         assert info["configured_unrecognized"] == "standard", info["configured_unrecognized"]
         line = warn_line(page)
         assert line.count() == 1 and line.is_visible(), (
-            f"{skin} 皮肤下脏值红字没挂出来或看不见：{info['configured_unrecognized']!r}")
+            f"{skin} 皮肤下脏值红字没挂出来或看不见：{info['configured_unrecognized']!r}"
+        )
         assert line.inner_text() == info["configured_hint"], (
-            f"页面文案不是后端那句原话：{line.inner_text()!r} vs {info['configured_hint']!r}")
+            f"页面文案不是后端那句原话：{line.inner_text()!r} vs {info['configured_hint']!r}"
+        )
         group = adv_group(page)
         assert group.get_attribute("open") is not None, f"{skin} 下折叠组没自动展开"
         style = line.evaluate(
@@ -526,11 +555,11 @@ def test_the_danger_line_is_readable_on_both_skins_with_a_real_backend(
                  const danger = getComputedStyle(probe).color;
                  probe.remove();
                  return {color: cs.color, danger: danger, border: cs.borderLeftWidth};
-               }""")
+               }"""
+        )
         assert style["color"] == style["danger"], (skin, style)
         assert style["border"] == "3px", (skin, style)
-        options = role_row(page).locator("option").evaluate_all(
-            "els => els.map(e => e.value)")
+        options = role_row(page).locator("option").evaluate_all("els => els.map(e => e.value)")
         assert "standard" not in options, options
         assert errors == [], f"控制台有 error：{errors}"
         page.screenshot(path=str(ACCEPT_DIR / f"wb_settings_role_t21_dirty_{skin}.png"))
@@ -549,8 +578,11 @@ def test_the_product_page_forbids_its_own_http_calls(real_page):
     declared = (WEB_DIR / "index.html").read_text(encoding="utf-8")
     assert "connect-src 'none'" in declared, "产品页面的 connect-src 不再是 none——出站口被开了"
     in_dom = page.evaluate(
-        "() => [...document.querySelectorAll('meta[http-equiv]')].map(m => m.getAttribute('content') || '').join('|')")
-    assert "connect-src 'none'" in in_dom, "浏览器里读到的 CSP 与盘上不一致（有人注入了别的 meta？）"
+        "() => [...document.querySelectorAll('meta[http-equiv]')].map(m => m.getAttribute('content') || '').join('|')"
+    )
+    assert "connect-src 'none'" in in_dom, (
+        "浏览器里读到的 CSP 与盘上不一致（有人注入了别的 meta？）"
+    )
 
 
 def test_the_real_user_database_and_config_stay_untouched(real_page):
@@ -582,13 +614,13 @@ def test_the_real_user_database_and_config_stay_untouched(real_page):
     page.wait_for_timeout(150)
 
     after = {_stat_of(p): p for p in watched if p.exists()}
-    assert set(after) == set(before), (
-        f"观测集合变了：{sorted(set(after) ^ set(before))}")
+    assert set(after) == set(before), f"观测集合变了：{sorted(set(after) ^ set(before))}"
     for stat, path in before.items():
         assert stat in after, f"{path} 的 sha/mtime/size 变了——真后端用例写到用户文件了"
     # 服务装配用的配置必须在系统 Temp 下面，而不是工作区那份（写得含糊就等于没钉）。
     assert Path(tempfile.gettempdir()).resolve() in cfg_path.resolve().parents, (
-        f"服务用的配置不在系统 Temp 里：{cfg_path}")
+        f"服务用的配置不在系统 Temp 里：{cfg_path}"
+    )
     assert cfg_path.resolve() != (ROOT / "config.yaml").resolve(), cfg_path
     assert errors == [], f"控制台有 error：{errors}"
 

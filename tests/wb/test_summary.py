@@ -33,12 +33,10 @@ import json
 from pathlib import Path
 
 import pytest
+from wb_parity_tiers import loose_env as loose_env  # noqa: F401  档位 fixture 由 pytest 注入
 
 from video_workbench.core import summarizer
-
 from video_workbench.core.subtitles import normalize
-from wb_parity_tiers import loose_env  # noqa: F401  档位 fixture 由 pytest 注入
-
 
 GOOD = {
     "one_line": "这期讲三件事",
@@ -114,14 +112,22 @@ def configure(service, monkeypatch, client):
 def make_project(service, tmp_path: Path, *, texts=None, stage="transcribed"):
     root = tmp_path / "media" / "UP" / "标题"
     root.mkdir(parents=True, exist_ok=True)
-    project = service.repo.project_create(title="标题", up_name="UP", root_dir=str(root),
-                                          stage=stage)
-    items = normalize([
-        {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
-        for i, t in enumerate(texts or ["今天讲三件事", "然后第一件事", "第二件事"])
-    ])
-    service.repo.transcript_upsert(project["id"], segments=items, language="zh",
-                                   model="tiny", srt_path=str(root / "transcript.srt"))
+    project = service.repo.project_create(
+        title="标题", up_name="UP", root_dir=str(root), stage=stage
+    )
+    items = normalize(
+        [
+            {"start_ms": i * 1000, "end_ms": i * 1000 + 900, "text": t}
+            for i, t in enumerate(texts or ["今天讲三件事", "然后第一件事", "第二件事"])
+        ]
+    )
+    service.repo.transcript_upsert(
+        project["id"],
+        segments=items,
+        language="zh",
+        model="tiny",
+        srt_path=str(root / "transcript.srt"),
+    )
     return project
 
 
@@ -139,10 +145,12 @@ def run_job(service, monkeypatch, client, payload, project=None):
 
 
 def test_segments_text_keeps_timestamps():
-    body = summarizer.segments_text([
-        {"start_ms": 0, "end_ms": 900, "text": "开场"},
-        {"start_ms": 3723000, "end_ms": 3724000, "text": "一小时处"},
-    ])
+    body = summarizer.segments_text(
+        [
+            {"start_ms": 0, "end_ms": 900, "text": "开场"},
+            {"start_ms": 3723000, "end_ms": 3724000, "text": "一小时处"},
+        ]
+    )
     assert "[00:00] 开场" in body
     assert "[1:02:03] 一小时处" in body
 
@@ -165,10 +173,12 @@ def test_build_bundle_refuses_empty_segments():
 
 
 def test_segments_with_blank_text_are_skipped():
-    body = summarizer.segments_text([
-        {"start_ms": 0, "text": "  "},
-        {"start_ms": 1000, "text": "有内容"},
-    ])
+    body = summarizer.segments_text(
+        [
+            {"start_ms": 0, "text": "  "},
+            {"start_ms": 1000, "text": "有内容"},
+        ]
+    )
     assert body == "[00:01] 有内容"
 
 
@@ -203,25 +213,42 @@ def test_role_changes_the_system_prompt():
     这里要证的是「角色真的参与提示词」，不是「某个特定角色的提示词长什么样」——
     特定角色的提示词由 `test_summary_prompt_source.py` 逐字钉。
     """
-    other = next(key for key in summarizer.ROLE_KEYS
-                 if key != summarizer.DEFAULT_ROLE)
+    other = next(key for key in summarizer.ROLE_KEYS if key != summarizer.DEFAULT_ROLE)
     one = StubClient([json.dumps(GOOD)])
-    summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=one, cfg=_cfg(), ctx=FakeCtx(), role=summarizer.DEFAULT_ROLE)
+    summarizer.run(
+        {"title": "t"},
+        [{"start_ms": 0, "text": "x"}],
+        client=one,
+        cfg=_cfg(),
+        ctx=FakeCtx(),
+        role=summarizer.DEFAULT_ROLE,
+    )
     two = StubClient([json.dumps(GOOD)])
-    summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=two, cfg=_cfg(), ctx=FakeCtx(), role=other)
+    summarizer.run(
+        {"title": "t"},
+        [{"start_ms": 0, "text": "x"}],
+        client=two,
+        cfg=_cfg(),
+        ctx=FakeCtx(),
+        role=other,
+    )
     assert one.calls[0][0]["content"] != two.calls[0][0]["content"], (
-        f"{summarizer.DEFAULT_ROLE} 与 {other} 的 system 相同——角色没参与提示词")
+        f"{summarizer.DEFAULT_ROLE} 与 {other} 的 system 相同——角色没参与提示词"
+    )
 
 
 def test_unknown_role_is_rejected():
     from video_workbench.app.errors import WBError
 
     with pytest.raises(WBError) as exc:
-        summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                       client=StubClient([json.dumps(GOOD)]), cfg=_cfg(),
-                       ctx=FakeCtx(), role="nope")
+        summarizer.run(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "x"}],
+            client=StubClient([json.dumps(GOOD)]),
+            cfg=_cfg(),
+            ctx=FakeCtx(),
+            role="nope",
+        )
     assert exc.value.code == "VALIDATION"
 
 
@@ -231,14 +258,16 @@ def test_non_json_reply_raises_bad_response():
     # 阶梯：主请求 →（截断才续写）→ 分批（正文/时间线两步）→ 重问 → 才失败。
     # 这里每次都给废话，所以四步都走完才抛。
     with pytest.raises(WBError) as exc:
-        summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                       client=StubClient(
-                           ["我今天不想按格式回话", "分批正文也是废话", "分批时间线还是废话",
-                            "重问也还是废话"]
-                       ),
-                       cfg=_cfg(), ctx=FakeCtx())
+        summarizer.run(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "x"}],
+            client=StubClient(
+                ["我今天不想按格式回话", "分批正文也是废话", "分批时间线还是废话", "重问也还是废话"]
+            ),
+            cfg=_cfg(),
+            ctx=FakeCtx(),
+        )
     assert exc.value.code == "LLM_BAD_RESPONSE"
-
 
 
 # 档位=宽松：重问一次是③；默认严格档一次即抛（parity I 组钉那边）。
@@ -246,21 +275,30 @@ def test_non_json_reply_is_asked_again_once(loose_env):
     """模型偶尔会把 JSON 说成人话；走完分批仍不行，重问一次能救回来就别让用户白跑一轮预读。"""
     from video_workbench.infra.jsonfix import repair_json
 
-    assert repair_json('{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段' + chr(10) + '第二段"}'),         "字符串里的原始换行应该能修好"
+    assert repair_json(
+        '{"one_line": "一行",' + chr(10) + ' "summary_md": "第一段' + chr(10) + '第二段"}'
+    ), "字符串里的原始换行应该能修好"
     ctx = FakeCtx()
-    result = summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                            client=StubClient(["我先说两句废话", "分批正文不行", "分批时间线也不行",
-                                               json.dumps(GOOD)]),
-                            cfg=_cfg(), ctx=ctx)
+    result = summarizer.run(
+        {"title": "t"},
+        [{"start_ms": 0, "text": "x"}],
+        client=StubClient(["我先说两句废话", "分批正文不行", "分批时间线也不行", json.dumps(GOOD)]),
+        cfg=_cfg(),
+        ctx=ctx,
+    )
     assert result["summary"]["one_line"], "重问之后应该拿到一份总结"
     assert any("重问" in note for note in result.get("notes") or []), "没记下重问这件事"
 
 
-
 def test_progress_reports_chinese_stages():
     ctx = FakeCtx()
-    summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                   client=StubClient([json.dumps(GOOD)]), cfg=_cfg(), ctx=ctx)
+    summarizer.run(
+        {"title": "t"},
+        [{"start_ms": 0, "text": "x"}],
+        client=StubClient([json.dumps(GOOD)]),
+        cfg=_cfg(),
+        ctx=ctx,
+    )
     stages = [stage for _value, stage in ctx.steps]
     assert "准备素材" in stages
     # 界面上不能出现 bili-scribe 的英文 stage。
@@ -285,8 +323,9 @@ def test_json_mode_rejected_falls_back_once(loose_env):
             return super().chat(messages, **kwargs)
 
     client = Picky()
-    result = summarizer.run({"title": "t"}, [{"start_ms": 0, "text": "x"}],
-                            client=client, cfg=_cfg(), ctx=FakeCtx())
+    result = summarizer.run(
+        {"title": "t"}, [{"start_ms": 0, "text": "x"}], client=client, cfg=_cfg(), ctx=FakeCtx()
+    )
     # 同步断言（分类标准第 1 类）：_cfg() 的默认角色换成 wengao 之后是三轮回，
     # 退回形状因此是 5 项——两个 JSON 请求（生成、修订）各配一次退回，
     # 中间那次「自我批判」本来就不开 json_mode。
@@ -298,13 +337,15 @@ def test_json_mode_rejected_falls_back_once(loose_env):
 
 def test_long_material_is_chunked_by_policy():
     """超过 max_input_chars 要分段预读——这是 bili-scribe 的核心能力，不能悄悄关掉。"""
-    long_text = "长素材内容。" * 400      # ≈2400 字，配合调小的预算就会分块
+    long_text = "长素材内容。" * 400  # ≈2400 字，配合调小的预算就会分块
     cfg = _cfg(max_input_chars=500, chunk_size=200, chunk_overlap=20)
     client = StubClient(["笔记一", "笔记二", json.dumps(GOOD)])
     result = summarizer.run(
         {"title": "t"},
         [{"start_ms": i * 1000, "text": long_text} for i in range(3)],
-        client=client, cfg=cfg, ctx=FakeCtx(),
+        client=client,
+        cfg=cfg,
+        ctx=FakeCtx(),
     )
     assert result["summary"]["chunks"] >= 2
     assert len(client.calls) > 1
@@ -316,21 +357,36 @@ def test_refine_requires_previous_and_keeps_material():
     # 同步断言（分类标准第 1 类）：默认角色改成 wengao 之后是三轮回
     # （生成 → 批判 → 修订），最终那一版的字段来自**第三次**调用，
     # 所以 revise_note 要挂在脚本的第三项上；第一项只是草稿。
-    client = StubClient([
-        json.dumps(GOOD),
-        "诊断：正文偏长，要点没有排序。",
-        json.dumps({**GOOD, "revise_note": "收紧了措辞"}),
-    ])
+    client = StubClient(
+        [
+            json.dumps(GOOD),
+            "诊断：正文偏长，要点没有排序。",
+            json.dumps({**GOOD, "revise_note": "收紧了措辞"}),
+        ]
+    )
     with pytest.raises(WBError) as exc:
-        summarizer.refine({"title": "t"}, [{"start_ms": 0, "text": "x"}], {},
-                          "再短一点", client=client, cfg=_cfg(), ctx=FakeCtx())
+        summarizer.refine(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "x"}],
+            {},
+            "再短一点",
+            client=client,
+            cfg=_cfg(),
+            ctx=FakeCtx(),
+        )
     assert exc.value.code == "CONFLICT"
 
     result = summarizer.refine(
-        {"title": "t"}, [{"start_ms": 0, "text": "内容还在"}], GOOD,
-        "再短一点", client=client, cfg=_cfg(), ctx=FakeCtx())
+        {"title": "t"},
+        [{"start_ms": 0, "text": "内容还在"}],
+        GOOD,
+        "再短一点",
+        client=client,
+        cfg=_cfg(),
+        ctx=FakeCtx(),
+    )
     prompt = client.calls[0][1]["content"]
-    assert "内容还在" in prompt          # 素材没被丢掉（否则会越改越远）
+    assert "内容还在" in prompt  # 素材没被丢掉（否则会越改越远）
     assert "再短一点" in prompt
     assert result["summary"]["revise_note"] == "收紧了措辞"
 
@@ -339,8 +395,15 @@ def test_refine_rejects_too_short_requirement():
     from video_workbench.app.errors import WBError
 
     with pytest.raises(WBError) as exc:
-        summarizer.refine({"title": "t"}, [{"start_ms": 0, "text": "x"}], GOOD, "改",
-                          client=StubClient([]), cfg=_cfg(), ctx=FakeCtx())
+        summarizer.refine(
+            {"title": "t"},
+            [{"start_ms": 0, "text": "x"}],
+            GOOD,
+            "改",
+            client=StubClient([]),
+            cfg=_cfg(),
+            ctx=FakeCtx(),
+        )
     assert exc.value.code == "VALIDATION"
 
 
@@ -349,8 +412,17 @@ def test_refine_rejects_too_short_requirement():
 
 def test_markdown_carries_every_section():
     md = summarizer.to_markdown({**GOOD, "role": "wengao", "model": "m", "chunks": 2})
-    for piece in ("这期讲三件事", "## 要点", "第一件", "## 时间线", "`00:01`",
-                  "## 评论用短版", "角色：wengao", "模型：m", "分段：2"):
+    for piece in (
+        "这期讲三件事",
+        "## 要点",
+        "第一件",
+        "## 时间线",
+        "`00:01`",
+        "## 评论用短版",
+        "角色：wengao",
+        "模型：m",
+        "分段：2",
+    ):
         assert piece in md
 
 
@@ -408,8 +480,13 @@ def test_summary_start_rejects_unknown_role(service, tmp_path, monkeypatch):
 
 def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    result, ctx = run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-                          {"kind": "fresh", "role": "wengao"}, project)
+    result, ctx = run_job(
+        service,
+        monkeypatch,
+        StubClient([json.dumps(GOOD)]),
+        {"kind": "fresh", "role": "wengao"},
+        project,
+    )
     root = Path(service.repo.project_get(project["id"])["root_dir"])
     assert (root / "summary.md").is_file()
     assert (root / "summary.json").is_file()
@@ -429,13 +506,22 @@ def test_job_writes_files_and_version(service, tmp_path, monkeypatch):
 def test_two_versions_both_kept_and_numbered(service, tmp_path, monkeypatch):
     # 第二版用哪个角色现读（原来写死 xueshu，task-31 退役后它进不了生成入口）。
     # 这条管的是「两版都在、版本号对、各自记住自己的角色」，角色只要是**两个不同的现役值**。
-    second = next(key for key in summarizer.ROLE_KEYS
-                  if key != summarizer.DEFAULT_ROLE)
+    second = next(key for key in summarizer.ROLE_KEYS if key != summarizer.DEFAULT_ROLE)
     project = make_project(service, tmp_path)
-    run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-            {"kind": "fresh", "role": summarizer.DEFAULT_ROLE}, project)
-    run_job(service, monkeypatch, StubClient([json.dumps({**GOOD, "one_line": "第二版"})]),
-            {"kind": "fresh", "role": second}, project)
+    run_job(
+        service,
+        monkeypatch,
+        StubClient([json.dumps(GOOD)]),
+        {"kind": "fresh", "role": summarizer.DEFAULT_ROLE},
+        project,
+    )
+    run_job(
+        service,
+        monkeypatch,
+        StubClient([json.dumps({**GOOD, "one_line": "第二版"})]),
+        {"kind": "fresh", "role": second},
+        project,
+    )
     rows = service.repo.summary_list(project["id"])
     assert [row["version"] for row in rows] == [2, 1]
     assert {row["role"] for row in rows} == {summarizer.DEFAULT_ROLE, second}
@@ -443,18 +529,23 @@ def test_two_versions_both_kept_and_numbered(service, tmp_path, monkeypatch):
 
 def test_refine_creates_new_version_with_note(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
-    run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]),
-            {"kind": "fresh"}, project)
+    run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
     base = service.repo.summary_latest(project["id"])
     result, _ctx = run_job(
-        service, monkeypatch,
+        service,
+        monkeypatch,
         # 同步脚本长度（分类标准第 1 类）：默认角色改成 wengao 之后走三轮回，
         # 入库的是**修订那一次**的产出，所以 revise_note 挂在第三项。
-        StubClient([json.dumps(GOOD),
-                    "诊断：要点没有排序。",
-                    json.dumps({**GOOD, "revise_note": "把要点压到两条"})]),
+        StubClient(
+            [
+                json.dumps(GOOD),
+                "诊断：要点没有排序。",
+                json.dumps({**GOOD, "revise_note": "把要点压到两条"}),
+            ]
+        ),
         {"kind": "refine", "requirement": "要点压到两条", "previous_id": base["id"]},
-        project)
+        project,
+    )
     assert result["version"] == 2
     latest = service.repo.summary_latest(project["id"])
     assert latest["content"]["revise_note"] == "把要点压到两条"
@@ -465,13 +556,17 @@ def test_restore_adds_a_version_instead_of_deleting(service, tmp_path, monkeypat
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
     first = service.repo.summary_latest(project["id"])
-    run_job(service, monkeypatch, StubClient([json.dumps({**GOOD, "one_line": "改过的"})]),
-            {"kind": "fresh"}, project)
-    data = rpc(service, "summary.restore",
-               {"project_id": project["id"], "summary_id": first["id"]})
+    run_job(
+        service,
+        monkeypatch,
+        StubClient([json.dumps({**GOOD, "one_line": "改过的"})]),
+        {"kind": "fresh"},
+        project,
+    )
+    data = rpc(service, "summary.restore", {"project_id": project["id"], "summary_id": first["id"]})
     assert data["summary"]["version"] == 3
     rows = service.repo.summary_list(project["id"])
-    assert len(rows) == 3                     # 历史一条没少
+    assert len(rows) == 3  # 历史一条没少
     assert rows[0]["content"]["one_line"] == "这期讲三件事"
     assert "恢复自第 1 版" in rows[0]["content"]["revise_note"]
 
@@ -481,8 +576,7 @@ def test_restore_rejects_foreign_project(service, tmp_path, monkeypatch):
     other = service.repo.project_create(title="别的", root_dir=str(tmp_path / "other"))
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, one)
     first = service.repo.summary_latest(one["id"])
-    error = err(service, "summary.restore",
-                {"project_id": other["id"], "summary_id": first["id"]})
+    error = err(service, "summary.restore", {"project_id": other["id"], "summary_id": first["id"]})
     assert error["code"] == "VALIDATION"
 
 
@@ -520,11 +614,11 @@ def test_roles_endpoint_lists_every_role(service):
     bs_keys = [role.key for role in bs_roles.ALL_ROLES]
     retired = set(summarizer.RETIRED_ROLES)
     shared = [key for key in bs_keys if key not in retired]
-    assert keys[:len(shared)] == shared, (
-        f"共有角色那一段漂了：期望 {shared} 开头，实得 {keys}")
-    tail = keys[len(shared):]
+    assert keys[: len(shared)] == shared, f"共有角色那一段漂了：期望 {shared} 开头，实得 {keys}"
+    tail = keys[len(shared) :]
     assert all(key not in bs_keys for key in tail), (
-        f"后段 {tail} 里出现了 bs 已有的角色：前段被删短了，不是新角色进来了")
+        f"后段 {tail} 里出现了 bs 已有的角色：前段被删短了，不是新角色进来了"
+    )
     assert "standard" not in keys, "退役角色还在清单里，用户选了就会拿到 VALIDATION"
     assert data["default"] in keys
     assert data["default"] == "wengao"
@@ -545,7 +639,9 @@ def test_legacy_standard_rows_stay_readable_after_retirement(service, tmp_path, 
         project["id"],
         content={**GOOD, "role": "standard"},
         content_md=summarizer.to_markdown({**GOOD, "role": "standard"}),
-        role="standard", model="stub-legacy")
+        role="standard",
+        model="stub-legacy",
+    )
 
     assert [item["role"] for item in service.repo.summary_list(project["id"])] == ["standard"]
     assert service.repo.summary_latest(project["id"])["id"] == row["id"]
@@ -560,8 +656,7 @@ def test_legacy_standard_rows_stay_readable_after_retirement(service, tmp_path, 
     # （service.py:2542-2550），所以要先把假客户端装上，否则拿到的是
     # LLM_NOT_CONFIGURED，测不到角色这一层。
     configure(service, monkeypatch, StubClient([json.dumps(GOOD)]))
-    error = err(service, "summary.start",
-                {"project_id": project["id"], "role": "standard"})
+    error = err(service, "summary.start", {"project_id": project["id"], "role": "standard"})
     assert error["code"] == "VALIDATION"
     assert "standard" in error["message"], f"错误要说清是哪个角色不行：{error['message']}"
 
@@ -580,13 +675,15 @@ def test_job_failure_keeps_previous_versions(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
     # 四次都不是 JSON：主请求 → 分批正文 → 分批时间线 → 重问。分批也救不回来才该失败。
-    configure(service, monkeypatch,
-              StubClient(["不是 JSON", "分批正文不是", "分批时间线不是", "还不是 JSON"]))
+    configure(
+        service,
+        monkeypatch,
+        StubClient(["不是 JSON", "分批正文不是", "分批时间线不是", "还不是 JSON"]),
+    )
     with pytest.raises(WBError) as exc:
         service._summary_job(FakeCtx(), {"project_id": project["id"], "kind": "fresh"})
     assert exc.value.code == "LLM_BAD_RESPONSE"
     assert len(service.repo.summary_list(project["id"])) == 1
-
 
 
 def test_every_llm_error_code_is_registered():

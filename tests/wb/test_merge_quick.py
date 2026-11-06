@@ -15,11 +15,11 @@ PROJ = Path(__file__).resolve().parents[2]
 if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
 
-import pytest
+import pytest  # noqa: E402
 
-from video_workbench.app.errors import WBError
-from video_workbench.core import merger
-from video_workbench.infra.ffmpeg import MediaInfo
+from video_workbench.app.errors import WBError  # noqa: E402
+from video_workbench.core import merger  # noqa: E402
+from video_workbench.infra.ffmpeg import MediaInfo  # noqa: E402
 
 
 class FakeFFmpeg:
@@ -68,7 +68,6 @@ def make_files(tmp_path: Path, names: list[str]) -> list[str]:
         path.write_bytes(b"x" * 128)
         paths.append(str(path))
     return paths
-
 
 
 def wait_job(service, job_id, timeout=8.0):
@@ -120,7 +119,11 @@ def test_block_reason_needs_two_items():
 
 
 def test_block_reason_reports_missing_before_broken():
-    result = {"count": 3, "missing": [{"name": "gone.mp4"}], "broken": [{"name": "a"}, {"name": "b"}]}
+    result = {
+        "count": 3,
+        "missing": [{"name": "gone.mp4"}],
+        "broken": [{"name": "a"}, {"name": "b"}],
+    }
     assert "不在了" in merger.block_reason(result)
 
 
@@ -168,6 +171,7 @@ def test_precise_mode_is_submitted_with_its_own_payload(service, tmp_path, monke
     """
     fake = FakeFFmpeg()
     monkeypatch.setattr(service, "_ffmpeg", fake)
+
     def fake_precise(**kw):
         # 真实现会建目录，假实现也得建——否则等于在测"文件系统会不会自己长目录"
         target = Path(kw["dest"])

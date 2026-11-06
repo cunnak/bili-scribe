@@ -19,7 +19,6 @@ from video_workbench.infra.files import (
     unique_path,
 )
 
-
 # --------------------------------------------------------------- 文件名
 
 
@@ -49,7 +48,7 @@ def test_sanitize_truncates_long_names():
 def test_sanitize_relpath_keeps_levels():
     got = sanitize_relpath("字幕/v1/乱:名?.srt")
     parts = [p for p in got.replace("\\", "/").split("/") if p]
-    assert len(parts) == 3, got          # 层级不能被压平
+    assert len(parts) == 3, got  # 层级不能被压平
     assert ":" not in got and "?" not in got
 
 

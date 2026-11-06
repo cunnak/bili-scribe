@@ -60,7 +60,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -134,11 +133,7 @@ def _tree_fingerprint(root: Path) -> dict[str, str]:
     """
     if not root.is_dir():
         return {}
-    return {
-        str(p.relative_to(root)): _sha(p)
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-    }
+    return {str(p.relative_to(root)): _sha(p) for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def _real_home_snapshot() -> dict[str, str]:
@@ -196,9 +191,8 @@ def homes(monkeypatch, tmp_path):
         "new_ext": new / "workbench.json",
     }
     after = _real_home_snapshot()
-    assert after == before, (
-        "搬家用例写到真实家目录了：\n"
-        + "\n".join(f"  {k}: {before[k]} → {after[k]}" for k in before if before[k] != after[k])
+    assert after == before, "搬家用例写到真实家目录了：\n" + "\n".join(
+        f"  {k}: {before[k]} → {after[k]}" for k in before if before[k] != after[k]
     )
 
 
@@ -310,9 +304,7 @@ def test_migration_moves_every_value_and_writes_nothing_in_the_old_home(homes):
     assert homes["new_config"].exists(), "新家没出现 config.yaml —— 迁移没落盘"
     assert homes["new_ext"].exists(), "新家没出现 workbench.json —— 服务商/tasks 这类扩展配置会丢"
 
-    assert _tree_fingerprint(homes["legacy"]) == legacy_before, (
-        "旧家被动过：搬家只许读它"
-    )
+    assert _tree_fingerprint(homes["legacy"]) == legacy_before, "旧家被动过：搬家只许读它"
 
 
 def test_migration_carries_the_broken_budget_and_role_verbatim(homes):
@@ -432,9 +424,7 @@ def test_the_new_home_wins_and_the_old_home_is_never_a_fallback(homes):
     _write_legacy_home(homes)
     # 新家写一个和旧家明显不同的值。
     homes["new_config"].write_text(
-        yaml.safe_dump(
-            {"llm": {**OLD_LLM, "model": "NEWHOME-model-z", "api_key": "sk-NEWHOME-9"}}
-        ),
+        yaml.safe_dump({"llm": {**OLD_LLM, "model": "NEWHOME-model-z", "api_key": "sk-NEWHOME-9"}}),
         encoding="utf-8",
     )
     first = WorkbenchConfig.load()
@@ -510,9 +500,9 @@ def test_an_explicit_path_never_triggers_migration(homes):
     cfg = WorkbenchConfig.load(explicit)
     assert cfg.llm.model == "EXPLICIT-model-e"
     assert Path(cfg.source_path) == explicit
-    assert not any(
-        (homes["new"] / name).exists() for name in ("config.yaml", "workbench.json")
-    ), "显式路径也触发了迁移：新家被凭空建出来了"
+    assert not any((homes["new"] / name).exists() for name in ("config.yaml", "workbench.json")), (
+        "显式路径也触发了迁移：新家被凭空建出来了"
+    )
 
 
 def test_an_explicit_path_that_does_not_exist_does_not_read_the_old_home(homes):
@@ -527,14 +517,12 @@ def test_an_explicit_path_that_does_not_exist_does_not_read_the_old_home(homes):
 
     cfg = WorkbenchConfig.load(missing)
 
-    assert cfg.llm.model != OLD_LLM["model"], (
-        f"显式路径不存在却读到了旧家的值：{cfg.llm.model!r}"
-    )
+    assert cfg.llm.model != OLD_LLM["model"], f"显式路径不存在却读到了旧家的值：{cfg.llm.model!r}"
     assert cfg.llm.api_key != OLD_LLM["api_key"], "显式路径不存在却读到了旧家的密钥"
     assert not missing.exists(), "读一个不存在的显式路径不该顺手把它写出来"
-    assert not any(
-        (homes["new"] / name).exists() for name in ("config.yaml", "workbench.json")
-    ), "显式路径的回落把新家也建出来了"
+    assert not any((homes["new"] / name).exists() for name in ("config.yaml", "workbench.json")), (
+        "显式路径的回落把新家也建出来了"
+    )
 
 
 # ---------------------------------------------------------------- 判据 A5/A6
@@ -560,7 +548,9 @@ def test_saving_never_writes_the_old_home_and_keeps_the_new_yaml_bili_shaped(hom
     )
     assert Path(info["path"]) == homes["new_config"]
     raw = yaml.safe_load(homes["new_config"].read_text(encoding="utf-8"))
-    assert set(raw) <= BILI_SECTIONS, f"新家 yaml 冒出 bili 不认识的段：{sorted(set(raw) - BILI_SECTIONS)}"
+    assert set(raw) <= BILI_SECTIONS, (
+        f"新家 yaml 冒出 bili 不认识的段：{sorted(set(raw) - BILI_SECTIONS)}"
+    )
     assert wb.foreign_keys(raw) == [], f"新家 yaml 里还有扩展键：{wb.foreign_keys(raw)}"
     assert "providers" not in raw.get("llm", {}), "服务商列表必须留在 sidecar"
     assert "tasks" not in raw.get("llm", {}), "llm.tasks 必须留在 sidecar"
@@ -788,8 +778,10 @@ def test_tooth_3_moving_the_database_default_turns_b_red(homes, monkeypatch):
     import dataclasses as _dc
 
     real_storage = wb.StorageConfig
-    moved = {f.name: (str(homes["new"] / "bili-scribe.db") if f.name == "db_path" else f.default)
-             for f in _dc.fields(real_storage)}
+    moved = {
+        f.name: (str(homes["new"] / "bili-scribe.db") if f.name == "db_path" else f.default)
+        for f in _dc.fields(real_storage)
+    }
 
     class MovedStorage(real_storage):
         def __init__(self, *args, **kwargs):

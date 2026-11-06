@@ -26,7 +26,6 @@ from video_workbench.config import (
     provider_id,
     render_yaml,
     resolve_task_model,
-    validate,
 )
 
 
@@ -51,6 +50,7 @@ def write_cfg(tmp_path, llm: dict) -> WorkbenchConfig:
 
 # ── 1. provider_id：id 要人能看懂 ───────────────────────────────────────────
 
+
 def test_provider_id_takes_brand_not_generic_prefix():
     assert provider_id("DeepSeek 官方", "https://api.deepseek.com/v1") == "deepseek"
     assert provider_id("Kimi", "https://api.moonshot.cn/v1") == "moonshot"
@@ -66,12 +66,16 @@ def test_provider_id_falls_back_to_hash_when_host_is_useless():
 
 # ── 2. sync_providers：谁是真相 ─────────────────────────────────────────────
 
+
 def test_legacy_flat_config_becomes_one_card(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key": "sk-old",
-        "model": "deepseek-chat",
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "sk-old",
+            "model": "deepseek-chat",
+        },
+    )
     cards = cfg.llm.providers
     assert len(cards) == 1, "老配置读进来不能是空列表，否则设置页一开就把密钥弄丢"
     assert cards[0].base_url == "https://api.deepseek.com/v1"
@@ -83,18 +87,30 @@ def test_legacy_flat_config_becomes_one_card(tmp_path):
 
 
 def test_active_card_mirrors_into_flat_fields(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "base_url": "https://OLD.example/v1",
-        "api_key": "sk-old",
-        "model": "old-model",
-        "active_provider": "kimi",
-        "providers": [
-            {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "sk-ds", "models": ["deepseek-chat"]},
-            {"id": "kimi", "name": "Kimi", "base_url": "https://api.moonshot.cn/v1",
-             "api_key": "sk-kimi", "models": ["moonshot-v1-8k", "moonshot-v1-32k"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "base_url": "https://OLD.example/v1",
+            "api_key": "sk-old",
+            "model": "old-model",
+            "active_provider": "kimi",
+            "providers": [
+                {
+                    "name": "DeepSeek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-ds",
+                    "models": ["deepseek-chat"],
+                },
+                {
+                    "id": "kimi",
+                    "name": "Kimi",
+                    "base_url": "https://api.moonshot.cn/v1",
+                    "api_key": "sk-kimi",
+                    "models": ["moonshot-v1-8k", "moonshot-v1-32k"],
+                },
+            ],
+        },
+    )
     assert cfg.llm.base_url == "https://api.moonshot.cn/v1"
     assert cfg.llm.api_key == "sk-kimi"
     assert cfg.llm.model == "moonshot-v1-8k", "默认模型必须落在当前这家列表里"
@@ -107,43 +123,80 @@ def test_active_card_mirrors_into_flat_fields(tmp_path):
 
 
 def test_unknown_active_falls_back_to_first_card(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "active_provider": "不存在的一家",
-        "providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1",
-             "api_key": "k", "models": ["m1"]},
-            {"id": "b", "name": "B", "base_url": "https://b.example/v1",
-             "api_key": "k", "models": ["m2"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "active_provider": "不存在的一家",
+            "providers": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "base_url": "https://a.example/v1",
+                    "api_key": "k",
+                    "models": ["m1"],
+                },
+                {
+                    "id": "b",
+                    "name": "B",
+                    "base_url": "https://b.example/v1",
+                    "api_key": "k",
+                    "models": ["m2"],
+                },
+            ],
+        },
+    )
     assert cfg.llm.active_provider == "a"
     assert cfg.llm.model == "m1"
 
 
 def test_ids_are_filled_and_deduped(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "providers": [
-            {"name": "同一地址", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "k1", "models": ["m"]},
-            {"name": "同一地址", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "k2", "models": ["m"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "name": "同一地址",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "k1",
+                    "models": ["m"],
+                },
+                {
+                    "name": "同一地址",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "k2",
+                    "models": ["m"],
+                },
+            ],
+        },
+    )
     ids = [p.id for p in cfg.llm.providers]
     assert len(set(ids)) == 2, "重复 id 会让界面点一张卡改到另一张"
 
 
 def test_env_key_overrides_active_card_only(tmp_path, monkeypatch):
     monkeypatch.setenv("BILI_SCRIBE_API_KEY", "sk-from-env")
-    cfg = write_cfg(tmp_path, {
-        "active_provider": "b",
-        "providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1",
-             "api_key": "k-a", "models": ["m"]},
-            {"id": "b", "name": "B", "base_url": "https://b.example/v1",
-             "api_key": "k-b", "models": ["m"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "active_provider": "b",
+            "providers": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "base_url": "https://a.example/v1",
+                    "api_key": "k-a",
+                    "models": ["m"],
+                },
+                {
+                    "id": "b",
+                    "name": "B",
+                    "base_url": "https://b.example/v1",
+                    "api_key": "k-b",
+                    "models": ["m"],
+                },
+            ],
+        },
+    )
     assert cfg.llm.api_key == "sk-from-env"
     by_id = {p.id: p for p in cfg.llm.providers}
     assert by_id["b"].api_key == "sk-from-env", "生效卡也要一起换，否则界面显示的还是文件里那把"
@@ -152,6 +205,7 @@ def test_env_key_overrides_active_card_only(tmp_path, monkeypatch):
 
 # ── 3. 任务 → 服务商/模型 ───────────────────────────────────────────────────
 
+
 def test_parse_model_spec_both_spellings():
     assert parse_model_spec("deepseek/deepseek-chat") == ("deepseek", "deepseek-chat")
     assert parse_model_spec("deepseek-chat") == ("", "deepseek-chat")
@@ -159,10 +213,20 @@ def test_parse_model_spec_both_spellings():
 
 
 def two_cards_llm():
-    a = LlmProviderConfig(id="deepseek", name="DeepSeek", base_url="https://api.deepseek.com/v1",
-                          api_key="k", models=["deepseek-chat", "deepseek-reasoner"])
-    b = LlmProviderConfig(id="kimi", name="Kimi", base_url="https://api.moonshot.cn/v1",
-                          api_key="k", models=["moonshot-v1-8k"])
+    a = LlmProviderConfig(
+        id="deepseek",
+        name="DeepSeek",
+        base_url="https://api.deepseek.com/v1",
+        api_key="k",
+        models=["deepseek-chat", "deepseek-reasoner"],
+    )
+    b = LlmProviderConfig(
+        id="kimi",
+        name="Kimi",
+        base_url="https://api.moonshot.cn/v1",
+        api_key="k",
+        models=["moonshot-v1-8k"],
+    )
     return _FakeLlm([a, b], active="deepseek", model="deepseek-chat")
 
 
@@ -243,13 +307,22 @@ def test_resolve_survives_bili_scribe_flat_config():
 
 # ── 4. 校验 / 往返 / 对外形状 ───────────────────────────────────────────────
 
+
 def test_validate_rejects_cards_that_would_hit_the_wrong_door(tmp_path):
     """只拦"配了但会静默打错门"的：地址缺协议、协议枚举写错。"""
     cases = [
         # 少了 https:// —— urllib 会当相对地址，症状是"连不上"，跟真原因隔一层
         {"providers": [{"name": "A", "base_url": "api.deepseek.com/v1", "models": ["m"]}]},
-        {"providers": [{"name": "A", "base_url": "https://a.example/v1", "models": ["m"],
-                        "protocol": "anthropic"}]},
+        {
+            "providers": [
+                {
+                    "name": "A",
+                    "base_url": "https://a.example/v1",
+                    "models": ["m"],
+                    "protocol": "anthropic",
+                }
+            ]
+        },
     ]
     for i, llm in enumerate(cases):
         with pytest.raises(Exception) as ei:
@@ -265,10 +338,19 @@ def test_validate_allows_model_ids_with_slashes(tmp_path):
     拦掉，结果真网关的模型根本存不下来（实测：接入 magpie 时首存就报 VALIDATION）。
     前缀消歧交给 ``parse_model_spec``：只有前缀命中已知服务商 id 才当服务商用。
     """
-    cfg = write_cfg(tmp_path, {
-        "providers": [{"name": "本机网关", "base_url": "http://127.0.0.1:3425/v1",
-                       "api_key": "k", "models": ["auto/hy4-preview", "Qwen/Qwen3-VL-Plus"]}],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "name": "本机网关",
+                    "base_url": "http://127.0.0.1:3425/v1",
+                    "api_key": "k",
+                    "models": ["auto/hy4-preview", "Qwen/Qwen3-VL-Plus"],
+                }
+            ],
+        },
+    )
     assert cfg.llm.providers[0].models == ["auto/hy4-preview", "Qwen/Qwen3-VL-Plus"]
     # 本机地址给的是可读 id，不是 sha1
     assert cfg.llm.providers[0].id == "local"
@@ -300,9 +382,13 @@ def test_unknown_provider_ref_falls_back_instead_of_empty_client():
 
 def test_validate_allows_empty_cards_on_a_fresh_install(tmp_path):
     """地址与模型留空是"还没配"，不是"配错了"——首启就该是这个形状，不许拦。"""
-    cfg = write_cfg(tmp_path, {"model": "keepme",
-                               "providers": [{"name": "还没配的一家", "base_url": "",
-                                              "api_key": "", "models": []}]})
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "model": "keepme",
+            "providers": [{"name": "还没配的一家", "base_url": "", "api_key": "", "models": []}],
+        },
+    )
     assert cfg.llm.providers[0].id, "空卡也要有 id，否则界面删不掉它"
     # 空卡不许把已有的扁平 model 清空：老配置可能只填了 model，界面一开就丢是最坏结果。
     # （列表非空的卡才会把默认模型拉回自己名下，见 test_active_card_mirrors_into_flat_fields）
@@ -311,16 +397,29 @@ def test_validate_allows_empty_cards_on_a_fresh_install(tmp_path):
 
 def _two_cards(tmp_path):
     """两张服务商卡的真实起点（走 `write_cfg` 那条真 load 链路，不手搓对象）。"""
-    return write_cfg(tmp_path, {
-        "active_provider": "kimi",
-        "model": "moonshot-v1-8k",
-        "providers": [
-            {"id": "deepseek", "name": "DeepSeek 官方", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "sk-ds", "models": ["deepseek-chat"]},
-            {"id": "kimi", "name": "Kimi", "base_url": "https://api.moonshot.cn/v1",
-             "api_key": "sk-kimi", "models": ["moonshot-v1-8k"]},
-        ],
-    })
+    return write_cfg(
+        tmp_path,
+        {
+            "active_provider": "kimi",
+            "model": "moonshot-v1-8k",
+            "providers": [
+                {
+                    "id": "deepseek",
+                    "name": "DeepSeek 官方",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-ds",
+                    "models": ["deepseek-chat"],
+                },
+                {
+                    "id": "kimi",
+                    "name": "Kimi",
+                    "base_url": "https://api.moonshot.cn/v1",
+                    "api_key": "sk-kimi",
+                    "models": ["moonshot-v1-8k"],
+                },
+            ],
+        },
+    )
 
 
 def test_save_roundtrip_keeps_cards(tmp_path):
@@ -374,10 +473,16 @@ def test_render_yaml_alone_drops_the_cards(tmp_path):
     solo = solo_dir / "config.yaml"
     solo.write_text(text, encoding="utf-8")
 
-    assert ext_path(solo).exists() is False, "这份夹具旁边不该有 sidecar（否则就测不到单 yaml 的形状）"
+    assert ext_path(solo).exists() is False, (
+        "这份夹具旁边不该有 sidecar（否则就测不到单 yaml 的形状）"
+    )
     back = WorkbenchConfig.load(solo)
-    assert len(back.llm.providers) == 1, f"单 yaml 往返只剩扁平推出的那一张：{[p.id for p in back.llm.providers]}"
-    assert back.llm.providers[0].base_url == "https://api.moonshot.cn/v1", "扁平字段是 active 那张的地址"
+    assert len(back.llm.providers) == 1, (
+        f"单 yaml 往返只剩扁平推出的那一张：{[p.id for p in back.llm.providers]}"
+    )
+    assert back.llm.providers[0].base_url == "https://api.moonshot.cn/v1", (
+        "扁平字段是 active 那张的地址"
+    )
     assert back.llm.model == "moonshot-v1-8k", "model 是共享键，单 yaml 往返带得住"
 
 
@@ -401,9 +506,19 @@ def test_the_sidecar_is_scoped_per_directory(tmp_path):
     second_in_same_dir = same_dir / "another.yaml"
     third = other_dir / "config.yaml"
     for p in (first, second_in_same_dir, third):
-        p.write_text(render_yaml(write_cfg(same_dir, {
-            "base_url": "https://api.deepseek.com/v1", "api_key": "sk-one", "model": "deepseek-chat",
-        })), encoding="utf-8")
+        p.write_text(
+            render_yaml(
+                write_cfg(
+                    same_dir,
+                    {
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key": "sk-one",
+                        "model": "deepseek-chat",
+                    },
+                )
+            ),
+            encoding="utf-8",
+        )
 
     assert ext_path(first).name == "workbench.json"
     assert ext_path(first) == ext_path(second_in_same_dir), "同目录两份 config 现在共用一份 sidecar"
@@ -411,12 +526,20 @@ def test_the_sidecar_is_scoped_per_directory(tmp_path):
 
 
 def test_public_view_hides_keys_settings_view_keeps(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "providers": [
-            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "sk-abcdef123455", "models": ["deepseek-chat"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-abcdef123455",
+                    "models": ["deepseek-chat"],
+                },
+            ],
+        },
+    )
     pub = cfg.public_view()
     card = pub["llm"]["providers"][0]
     # 契约：键还在（设置页要按形状回填），但值必须是空串——明文一格都不许外泄。
@@ -431,39 +554,88 @@ def test_public_view_hides_keys_settings_view_keeps(tmp_path):
 
 # ── 5. apply（设置页保存）与 RPC 指名 ───────────────────────────────────────
 
+
 def test_apply_replaces_whole_provider_list(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1",
-             "api_key": "k", "models": ["m"]},
-        ],
-    })
-    cfg.apply({"llm": {
-        "providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1",
-             "api_key": "k", "models": ["m"]},
-            {"id": "b", "name": "B", "base_url": "https://b.example/v1",
-             "api_key": "k2", "models": ["x"]},
-        ],
-        "active_provider": "b",
-    }})
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "base_url": "https://a.example/v1",
+                    "api_key": "k",
+                    "models": ["m"],
+                },
+            ],
+        },
+    )
+    cfg.apply(
+        {
+            "llm": {
+                "providers": [
+                    {
+                        "id": "a",
+                        "name": "A",
+                        "base_url": "https://a.example/v1",
+                        "api_key": "k",
+                        "models": ["m"],
+                    },
+                    {
+                        "id": "b",
+                        "name": "B",
+                        "base_url": "https://b.example/v1",
+                        "api_key": "k2",
+                        "models": ["x"],
+                    },
+                ],
+                "active_provider": "b",
+            }
+        }
+    )
     assert len(cfg.llm.providers) == 2
     assert cfg.llm.base_url == "https://b.example/v1"
 
 
 def test_apply_rollback_on_invalid_card(tmp_path):
-    cfg = write_cfg(tmp_path, {
-        "providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1",
-             "api_key": "k", "models": ["m"]},
-        ],
-    })
+    cfg = write_cfg(
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "base_url": "https://a.example/v1",
+                    "api_key": "k",
+                    "models": ["m"],
+                },
+            ],
+        },
+    )
     before = cfg.llm.base_url
     with pytest.raises(Exception):
-        cfg.apply({"llm": {"providers": [
-            {"id": "a", "name": "A", "base_url": "https://a.example/v1", "api_key": "k", "models": ["m"]},
-            {"id": "b", "name": "B", "base_url": "not-a-url", "api_key": "k", "models": ["x"]},
-        ]}})
+        cfg.apply(
+            {
+                "llm": {
+                    "providers": [
+                        {
+                            "id": "a",
+                            "name": "A",
+                            "base_url": "https://a.example/v1",
+                            "api_key": "k",
+                            "models": ["m"],
+                        },
+                        {
+                            "id": "b",
+                            "name": "B",
+                            "base_url": "not-a-url",
+                            "api_key": "k",
+                            "models": ["x"],
+                        },
+                    ]
+                }
+            }
+        )
     assert cfg.llm.base_url == before, "任一张卡不合法必须整体回滚，不能改一半"
 
 
@@ -478,7 +650,7 @@ class RecordingClient:
         card = find_provider(cfg.llm, provider) if provider else None
         self.base_url = card.base_url if card is not None else cfg.llm.base_url
         self.api_key = card.api_key if card is not None else cfg.llm.api_key
-        self.model = (card.models[0] if card and card.models else cfg.llm.model)
+        self.model = card.models[0] if card and card.models else cfg.llm.model
         self.provider_name = card.name if card is not None else "默认服务商"
         self.chat_called = 0
         RecordingClient.instances.append(self)
@@ -509,18 +681,31 @@ class RecordingClient:
 
 
 def test_llm_rpc_tests_the_named_card(service, monkeypatch):
-    from video_workbench import app as app_pkg
     import video_workbench.app.service as svc_mod
 
-    service.cfg.apply({"llm": {
-        "providers": [
-            {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1",
-             "api_key": "sk-ds", "models": ["deepseek-chat"]},
-            {"id": "kimi", "name": "Kimi", "base_url": "https://api.moonshot.cn/v1",
-             "api_key": "", "models": ["moonshot-v1-8k"]},
-        ],
-        "active_provider": "deepseek",
-    }})
+    service.cfg.apply(
+        {
+            "llm": {
+                "providers": [
+                    {
+                        "id": "deepseek",
+                        "name": "DeepSeek",
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key": "sk-ds",
+                        "models": ["deepseek-chat"],
+                    },
+                    {
+                        "id": "kimi",
+                        "name": "Kimi",
+                        "base_url": "https://api.moonshot.cn/v1",
+                        "api_key": "",
+                        "models": ["moonshot-v1-8k"],
+                    },
+                ],
+                "active_provider": "deepseek",
+            }
+        }
+    )
     RecordingClient.instances.clear()
     monkeypatch.setattr(svc_mod, "ChatClient", RecordingClient)
 
@@ -534,8 +719,9 @@ def test_llm_rpc_tests_the_named_card(service, monkeypatch):
     assert bad["ok"] is False
     assert bad["error"]["code"] == "LLM_NOT_CONFIGURED"
     assert "Kimi" in bad["error"]["message"]
-    assert all(c.api_key != "sk-ds" for c in RecordingClient.instances if c.provider == "kimi"), \
+    assert all(c.api_key != "sk-ds" for c in RecordingClient.instances if c.provider == "kimi"), (
         "测 kimi 时不许拿 deepseek 的密钥"
+    )
 
     # 不传 provider：测当前生效那家（走 _llm_client → for_task）。
     plain = service.dispatch("llm.test", {})
@@ -574,6 +760,7 @@ def test_stub_client_without_provider_name_still_works(service, monkeypatch):
             return BareFactory._strip(Bare(cfg, provider))
 
     import video_workbench.app.service as svc_mod
+
     monkeypatch.setattr(svc_mod, "ChatClient", BareFactory)
     out = service.dispatch("llm.test", {"provider": ""})
     assert out["ok"] is True, out

@@ -54,9 +54,9 @@ class FakeModel:
 
     calls: list[dict] = []
     devices: list[str] = []
-    plan: list = []                   # 每次 transcribe 返回的段数
-    fail_on: tuple[str, ...] = ()      # 构造时就失败（缺 cuDNN 之类）
-    fail_call: tuple[str, ...] = ()    # 编码时才失败（缺 cublas64_12.dll 的真实形状）
+    plan: list = []  # 每次 transcribe 返回的段数
+    fail_on: tuple[str, ...] = ()  # 构造时就失败（缺 cuDNN 之类）
+    fail_call: tuple[str, ...] = ()  # 编码时才失败（缺 cublas64_12.dll 的真实形状）
 
     def __init__(self, path, device, compute_type):
         FakeModel.devices.append(device)
@@ -73,8 +73,10 @@ class FakeModel:
         count = 1
         if FakeModel.plan:
             count = FakeModel.plan.pop(0)
-        segs = [Seg(f"句子{i}", i * 1.0, i * 1.0 + 0.9,
-                    [Word("词", i * 1.0, i * 1.0 + 0.4)]) for i in range(count)]
+        segs = [
+            Seg(f"句子{i}", i * 1.0, i * 1.0 + 0.9, [Word("词", i * 1.0, i * 1.0 + 0.4)])
+            for i in range(count)
+        ]
         return iter(segs), Info(duration=1.0)
 
 
@@ -186,11 +188,13 @@ def test_corrupt_probe_file_does_not_break(tmp_path):
 
 
 def test_srt_format_and_timestamps():
-    srt = W.format_srt([
-        {"text": "你好", "start_ms": 0, "end_ms": 1500},
-        {"text": " ", "start_ms": 1500, "end_ms": 2000},
-        {"text": "世界", "start_ms": 3_723_456, "end_ms": 3_725_000},
-    ])
+    srt = W.format_srt(
+        [
+            {"text": "你好", "start_ms": 0, "end_ms": 1500},
+            {"text": " ", "start_ms": 1500, "end_ms": 2000},
+            {"text": "世界", "start_ms": 3_723_456, "end_ms": 3_725_000},
+        ]
+    )
     assert "00:00:00,000 --> 00:00:01,500" in srt
     assert "01:02:03,456 --> 01:02:05,000" in srt
     assert "2\n" not in srt.split("\n")[4], "空文本段不占编号"

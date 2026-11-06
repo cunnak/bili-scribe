@@ -99,7 +99,10 @@ ROOT = _repo_root()
 def _git(*args: str, binary: bytes | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-c", "core.quotepath=false", *args],
-        cwd=str(ROOT), input=binary, capture_output=True, check=False,
+        cwd=str(ROOT),
+        input=binary,
+        capture_output=True,
+        check=False,
     )
 
 
@@ -165,8 +168,11 @@ def drift_copy_locks() -> tuple[str, ...]:
 def _locked_or_broken() -> list[str]:
     """参数化列表：清单读失败时**不许**退化成零条，塞一个假路径让每条用例自己红。"""
     try:
-        paths = sorted({f"{PROMPT_REL}/{n}" for n in manifest_txt_names()}
-                       | set(drift_copy_locks()) | set(PY_LOCK_FLOOR))
+        paths = sorted(
+            {f"{PROMPT_REL}/{n}" for n in manifest_txt_names()}
+            | set(drift_copy_locks())
+            | set(PY_LOCK_FLOOR)
+        )
         if paths:
             return paths
     except Exception as exc:  # noqa: BLE001 —— 这里就是要把它变成用例里的红
@@ -186,8 +192,11 @@ def attr_rules() -> list[str]:
     """.gitattributes 的有效行（去注释/空行），原样留着让调用方判 token。"""
     path = ROOT / ".gitattributes"
     assert path.is_file(), ".gitattributes 不在了：字节锁闸失去判据来源"
-    return [ln.strip() for ln in path.read_bytes().decode("utf-8").splitlines()
-            if ln.strip() and not ln.lstrip().startswith("#")]
+    return [
+        ln.strip()
+        for ln in path.read_bytes().decode("utf-8").splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
 
 
 def _rule_matches(rule: str, rel: str) -> bool:
@@ -437,7 +446,8 @@ def test_the_agents_md_rule_table_names_this_gate_and_a_real_file():
     mine = [cells for cells in rows if _names_gate(cells)]
     assert mine, (
         "AGENTS.md 第七节没有一行在「由什么拦住」列点名本闸"
-        f"（{Path(__file__).name}）——按结构找的行，与文案无关")
+        f"（{Path(__file__).name}）——按结构找的行，与文案无关"
+    )
     row = mine[0]
     blocking = row[-1]
     assert "暂无自动闸" not in blocking, f"文档还写着没有自动闸，而本文件就是那道闸：{blocking}"
@@ -453,8 +463,10 @@ def _agents_md_text() -> str:
     raw = os.environ.get("WB_AGENTS_MD_OVERRIDE", "").strip()
     path = Path(raw) if raw else ROOT / "AGENTS.md"
     if not path.is_file():
-        pytest.fail(f"AGENTS.md 扫描域不存在：{path}"
-                    "（默认读仓库根；牙齿用 WB_AGENTS_MD_OVERRIDE 指 Temp 副本）")
+        pytest.fail(
+            f"AGENTS.md 扫描域不存在：{path}"
+            "（默认读仓库根；牙齿用 WB_AGENTS_MD_OVERRIDE 指 Temp 副本）"
+        )
     return path.read_bytes().decode("utf-8")
 
 
@@ -468,22 +480,32 @@ def _section_seven_rows(md: str) -> list[list[str]]:
     与字节锁无关的锁 —— 那是拿措辞当证据（lead 2026-11-05 定的反向腿）。
     """
     lines = md.splitlines()
-    start = next((i for i, ln in enumerate(lines)
-                  if ln.startswith("## ") and ln[3:].lstrip().startswith("七")), None)
+    start = next(
+        (
+            i
+            for i, ln in enumerate(lines)
+            if ln.startswith("## ") and ln[3:].lstrip().startswith("七")
+        ),
+        None,
+    )
     if start is None:
         pytest.fail("AGENTS.md 里找不到「## 七、」这节标题；节序变了要同步改本闸")
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-               len(lines))
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")]
-            for ln in lines[start:end] if ln.strip().startswith("|")]
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    rows = [
+        [c.strip() for c in ln.strip().strip("|").split("|")]
+        for ln in lines[start:end]
+        if ln.strip().startswith("|")
+    ]
     if len(rows) < 3:
         pytest.fail(f"第七节表格至少要 表头+分隔+1 条数据，实得 {len(rows)} 行")
     header, sep, data = rows[0], rows[1], rows[2:]
     if not all(set(cell or "-") <= set("-: ") for cell in sep):
         pytest.fail(f"第七节第二行不是 markdown 分隔行，结构变了要改本闸：{sep}")
     if any(len(cells) != len(header) for cells in data):
-        pytest.fail("第七节有数据行的列数与表头不一致："
-                    f"表头 {len(header)} 列，数据 {[len(c) for c in data]}")
+        pytest.fail(
+            "第七节有数据行的列数与表头不一致："
+            f"表头 {len(header)} 列，数据 {[len(c) for c in data]}"
+        )
     return data
 
 
@@ -502,9 +524,14 @@ def _resolve_named_token(token: str) -> tuple[bool, str, str]:
     if "/" in token:
         if (ROOT / token).is_file():
             return True, token, "literal"
-        return False, (
-            f"{token}：写了目录「{token.rsplit('/', 1)[0]}/」但那条路径在盘上不存在"
-            f"⇒ 不许靠 basename 放行"), "ghost"
+        return (
+            False,
+            (
+                f"{token}：写了目录「{token.rsplit('/', 1)[0]}/」但那条路径在盘上不存在"
+                f"⇒ 不许靠 basename 放行"
+            ),
+            "ghost",
+        )
     rel = f"tests/wb/{token}"
     if (ROOT / rel).is_file():
         return True, rel, "bare-fallback"
@@ -547,7 +574,8 @@ def test_section_seven_names_only_files_that_exist_on_disk():
     assert resolved, "第七节的「由什么拦住」列一个 .py 都没点名（闸清单被清空了）"
     assert not ghosts, (
         "AGENTS.md 点名了盘上不存在的文件"
-        f"（带目录的一律按字面路径判，不靠 basename 放行）：{ghosts}")
+        f"（带目录的一律按字面路径判，不靠 basename 放行）：{ghosts}"
+    )
 
 
 def test_a_ghost_path_with_a_directory_is_not_taken_as_naming_the_gate():
@@ -574,7 +602,8 @@ def test_a_ghost_path_with_a_directory_is_not_taken_as_naming_the_gate():
 
     # 点名腿：幽灵路径不算点名本闸
     assert not _names_gate([PLACEHOLDER_RULE, swapped]), (
-        f"点名腿被 `{ghost}` 放行：basename 撞上就当点名，等于文档可以指空气")
+        f"点名腿被 `{ghost}` 放行：basename 撞上就当点名，等于文档可以指空气"
+    )
     # 存在腿同一个解析器：必须报 ghost，而不是静默放行
     exists, where, how = _resolve_named_token(ghost)
     assert exists is False and how == "ghost", f"幽灵路径被判成 {how}：{where}"
@@ -604,8 +633,8 @@ def test_the_gate_row_is_found_even_when_the_wording_is_rewritten():
     named_before = sorted(c[-1] for c in rows if _names_gate(c))
     named_after = sorted(c[-1] for c in after if _names_gate(c))
     assert named_after == named_before, (
-        "把规则列换成占位文案后，点名本闸的那一列内容变了 —— "
-        "说明定位里混进了措辞依赖")
+        "把规则列换成占位文案后，点名本闸的那一列内容变了 —— 说明定位里混进了措辞依赖"
+    )
 
 
 def test_the_agents_source_override_switches_the_file_not_the_verdict(tmp_path):
@@ -643,16 +672,20 @@ def test_the_agents_source_override_switches_the_file_not_the_verdict(tmp_path):
         else:
             os.environ.pop("WB_AGENTS_MD_OVERRIDE", None)
 
-    assert len(via_rows) == len(default_rows), \
+    assert len(via_rows) == len(default_rows), (
         f"换文件之后行数变了：{len(default_rows)} → {len(via_rows)}"
-    assert [c[0] for c in via_rows] == [PLACEHOLDER_RULE] * len(via_rows), \
+    )
+    assert [c[0] for c in via_rows] == [PLACEHOLDER_RULE] * len(via_rows), (
         "规则列没有被整体改写，这份对照等于没做"
-    assert [c[-1] for c in via_rows] == [c[-1] for c in default_rows], \
+    )
+    assert [c[-1] for c in via_rows] == [c[-1] for c in default_rows], (
         "「由什么拦住」列变了 —— 判据依赖的不该只有结构"
+    )
     named_default = [c[-1] for c in default_rows if _names_gate(c)]
     named_via = [c[-1] for c in via_rows if _names_gate(c)]
-    assert named_via == named_default and named_default, \
+    assert named_via == named_default and named_default, (
         f"换文件之后点名本闸的结果变了：{named_default} → {named_via}"
+    )
 
 
 def test_this_gate_file_is_tracked_by_git():

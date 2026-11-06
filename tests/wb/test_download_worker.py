@@ -7,14 +7,17 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from video_workbench.app.errors import WBError
 from video_workbench.core.downloader import DownloadResult
-from video_workbench.core.layout import SIDECAR, SIDECAR_KEYS, read_sidecar, write_sidecar, allocate, build_sidecar
+from video_workbench.core.layout import (
+    SIDECAR,
+    SIDECAR_KEYS,
+    read_sidecar,
+)
 from video_workbench.workers import download_worker as W
 
 
@@ -55,7 +58,9 @@ def make_downloader(service, *, reuse_calls=None, result_path=None, error=None):
             {"type": "progress", "percent": 100.0},
         ):
             kwargs["on_event"](event)
-        return DownloadResult(path=target, height=1080, format_id="137+140", quality_requested="1080P")
+        return DownloadResult(
+            path=target, height=1080, format_id="137+140", quality_requested="1080P"
+        )
 
     if reuse_calls is not None:
         reuse_calls.extend(calls)
@@ -82,7 +87,9 @@ def payload(bvid="BV1xx411c7mD", **extra):
 
 def test_download_creates_layout_sidecar_and_asset(service, tmp_path):
     run, calls = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     ctx = FakeCtx()
     result = handler(ctx, payload())
 
@@ -138,7 +145,9 @@ def test_truncated_file_is_redownloaded(service, tmp_path):
 
 def test_multi_part_gets_part_layer(service, tmp_path):
     run, calls = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     body = payload(page_count=3)
     body["item"]["page"] = 2
     body["item"]["part_title"] = "第二讲"
@@ -150,7 +159,9 @@ def test_multi_part_gets_part_layer(service, tmp_path):
 
 def test_failure_marks_project_failed(service, tmp_path):
     run, _ = make_downloader(service, error=WBError("AUTH_REQUIRED", "需要大会员"))
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     with pytest.raises(WBError):
         handler(FakeCtx(), payload())
     rows = service.repo.project_list("", 10, 0)
@@ -160,7 +171,9 @@ def test_failure_marks_project_failed(service, tmp_path):
 
 def test_cancel_before_start_aborts(service, tmp_path):
     run, calls = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(cancel=True), payload())
     assert info.value.code == "CANCELED"
@@ -169,7 +182,9 @@ def test_cancel_before_start_aborts(service, tmp_path):
 
 def test_progress_is_mapped_and_throttled(service, tmp_path):
     run, _ = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     ctx = FakeCtx()
     handler(ctx, payload())
     values = [v for v, _stage, _s, _e in ctx.events if v is not None]
@@ -221,7 +236,9 @@ def test_watch_url():
 
 def test_missing_bvid_is_validation_error(service, tmp_path):
     run, _ = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     with pytest.raises(WBError) as info:
         handler(FakeCtx(), {"item": {}})
     assert info.value.code == "VALIDATION"
@@ -238,7 +255,9 @@ def test_thumb_is_recorded_as_asset(service, tmp_path):
         dest.write_bytes(b"jpeg")
         return dest
 
-    handler = W.make_download_handler(repo=service.repo, media_root=media, downloader=run, thumbs=thumbs)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=media, downloader=run, thumbs=thumbs
+    )
     result = handler(FakeCtx(), payload())
     kinds = {row["kind"]: row for row in service.repo.asset_list(result["project_id"])}
     assert "thumb" in kinds
@@ -253,7 +272,9 @@ def test_thumb_failure_does_not_fail_download(service, tmp_path):
         raise RuntimeError("ffmpeg 罢工")
 
     ctx = FakeCtx()
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run, thumbs=thumbs)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run, thumbs=thumbs
+    )
     result = handler(ctx, payload())
     project = service.repo.project_get(result["project_id"])
     assert project["stage"] == "downloaded"
@@ -263,7 +284,9 @@ def test_thumb_failure_does_not_fail_download(service, tmp_path):
 def test_no_thumb_injection_is_fine(service, tmp_path):
     """没注抽帧器（比如没装 ffmpeg 的环境）照常跑完，只是少一张图。"""
     run, _ = make_downloader(service)
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=run)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
     result = handler(FakeCtx(), payload())
     kinds = {row["kind"] for row in service.repo.asset_list(result["project_id"])}
     assert "source" in kinds and "thumb" not in kinds

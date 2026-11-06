@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -30,7 +29,6 @@ from video_workbench.core.layout import (
 )
 from video_workbench.core.resolver import normalize_cover
 from video_workbench.workers import download_worker as W
-
 
 MIN_BYTES = W.MIN_REUSE_BYTES + 1
 
@@ -60,7 +58,9 @@ def make_downloader(*, title_suffix: str = ".mp4"):
         target = home / f"source{title_suffix}"
         target.write_bytes(b"x" * MIN_BYTES)
         kwargs["on_event"]({"type": "progress", "percent": 100.0})
-        return DownloadResult(path=target, height=1080, format_id="137+140", quality_requested="1080P")
+        return DownloadResult(
+            path=target, height=1080, format_id="137+140", quality_requested="1080P"
+        )
 
     return run
 
@@ -87,10 +87,10 @@ def payload(bvid="BV1xx411c7mD", title="第一讲 · 引论", cid=1001, **extra)
         ('含非法字符 <>:"/\\|?* 的标题', "", "含非法字符 的标题"),
         ("  首尾空白  ", "", "首尾空白"),
         ("首尾点...", "", "首尾点"),
-        ("CON", "", "_CON"),           # Win32 保留设备名，不能直接当文件名
+        ("CON", "", "_CON"),  # Win32 保留设备名，不能直接当文件名
         ("", "", "untitled"),
-        ("", "只有分P名", "只有分P名"),   # 没主标题时别留一个孤零零的 " - "
-        ("主标题", "第二讲", "主标题 - 第二讲"),   # 与列表里的 display_title 同规则
+        ("", "只有分P名", "只有分P名"),  # 没主标题时别留一个孤零零的 " - "
+        ("主标题", "第二讲", "主标题 - 第二讲"),  # 与列表里的 display_title 同规则
         ("同一个标题", "同一个标题", "同一个标题"),  # 分P名与主标题相同不重复拼
     ],
 )
@@ -137,7 +137,8 @@ def test_finalize_source_overwrites_same_name(tmp_path):
 
 def test_finalize_source_leaves_foreign_dir_alone(tmp_path):
     home, elsewhere = tmp_path / "a", tmp_path / "b"
-    home.mkdir(); elsewhere.mkdir()
+    home.mkdir()
+    elsewhere.mkdir()
     foreign = elsewhere / "source.mp4"
     foreign.write_bytes(b"x")
     assert finalize_source(home, foreign, stem="标题") == foreign
@@ -148,7 +149,9 @@ def test_finalize_source_survives_failure(tmp_path, monkeypatch):
     """改名失败不判下载失败：DB 记的是真实存在的暂存名路径。"""
     staged = tmp_path / "source.mp4"
     staged.write_bytes(b"x")
-    monkeypatch.setattr(Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError("锁住了")))
+    monkeypatch.setattr(
+        Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError("锁住了"))
+    )
     assert finalize_source(tmp_path, staged, stem="标题") == staged
 
 
@@ -158,7 +161,7 @@ def test_finalize_source_survives_failure(tmp_path, monkeypatch):
 def test_find_source_prefers_authoritative_path(tmp_path):
     real = tmp_path / "视频标题.mp4"
     real.write_bytes(b"x")
-    (tmp_path / "source.mp4").write_bytes(b"x")   # 目录里同时有遗留文件时不猜
+    (tmp_path / "source.mp4").write_bytes(b"x")  # 目录里同时有遗留文件时不猜
     assert find_source(tmp_path, prefer=str(real), stem="视频标题") == real
 
 
@@ -224,7 +227,10 @@ def test_singleton_upsert_keeps_other_kinds_untouched(service):
     ("raw", "expected"),
     [
         # 实测：view 接口给的 pic 就是明文 http，而页面 CSP 的 img-src 不含 http:
-        ("http://i2.hdslb.com/bfs/archive/ac31f3.jpg", "https://i2.hdslb.com/bfs/archive/ac31f3.jpg"),
+        (
+            "http://i2.hdslb.com/bfs/archive/ac31f3.jpg",
+            "https://i2.hdslb.com/bfs/archive/ac31f3.jpg",
+        ),
         ("http://i0.hdslb.com/x.jpg", "https://i0.hdslb.com/x.jpg"),
         ("//i0.hdslb.com/x.jpg", "https://i0.hdslb.com/x.jpg"),
         ("https://i0.hdslb.com/x.jpg", "https://i0.hdslb.com/x.jpg"),
@@ -247,7 +253,9 @@ def test_normalize_cover(raw, expected):
 
 
 def test_download_names_file_after_title_and_records_one_asset(service, tmp_path):
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     result = handler(FakeCtx(), payload(title="【简单意识形态学】论FX战士"))
 
     path = Path(result["path"])
@@ -259,7 +267,9 @@ def test_download_names_file_after_title_and_records_one_asset(service, tmp_path
 
 def test_title_with_hash_survives_the_round_trip(service, tmp_path):
     """标题里带 `#` 是常态；文件名与 DB 路径必须一致（前端 mediaUrl 另有转义测试）。"""
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     result = handler(FakeCtx(), payload(title="第 3 章 #12 讲"))
     path = Path(result["path"])
     assert "#" in path.name
@@ -275,7 +285,9 @@ def test_up_renamed_title_does_not_split_the_asset(service, tmp_path):
     本次要钉死的是：库里那行不会一分为二、不会遮蔽成新路径读不到。
     """
     media = tmp_path / "media"
-    handler = W.make_download_handler(repo=service.repo, media_root=media, downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=media, downloader=make_downloader()
+    )
 
     first = handler(FakeCtx(), payload(title="旧标题"))
     assert Path(first["path"]).is_file()
@@ -294,7 +306,9 @@ def test_up_renamed_title_does_not_split_the_asset(service, tmp_path):
 
 
 def test_repeated_download_stays_single_row(service, tmp_path):
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     first = handler(FakeCtx(), payload())
     for _ in range(3):
         handler(FakeCtx(), payload())
@@ -306,19 +320,35 @@ def test_legacy_project_dir_is_reused_without_rename(service, tmp_path):
     """历史项目（只有 source.mp4）：重下同集要认出是同一集，并且**不**把老文件改名。"""
     layout = allocate(
         tmp_path / "media",
-        up_name="示例UP", title="第一讲 · 引论", collection_title="方法论合集",
-        bvid="BV1xx411c7mD", cid=1001,
+        up_name="示例UP",
+        title="第一讲 · 引论",
+        collection_title="方法论合集",
+        bvid="BV1xx411c7mD",
+        cid=1001,
     ).ensure()
     legacy = layout.root / "source.mp4"
     legacy.write_bytes(b"x" * MIN_BYTES)
-    write_sidecar(layout, build_sidecar(
-        bvid="BV1xx411c7mD", aid=42, cid=1001, page=1, title="第一讲 · 引论", up="示例UP",
-        collection="方法论合集", quality_requested="1080P", quality_actual="1080P",
-        url="https://www.bilibili.com/video/BV1xx411c7mD", downloaded_at="2026-10-01T00:00:00+08:00",
-        tool_version="0.1.0",
-    ))
+    write_sidecar(
+        layout,
+        build_sidecar(
+            bvid="BV1xx411c7mD",
+            aid=42,
+            cid=1001,
+            page=1,
+            title="第一讲 · 引论",
+            up="示例UP",
+            collection="方法论合集",
+            quality_requested="1080P",
+            quality_actual="1080P",
+            url="https://www.bilibili.com/video/BV1xx411c7mD",
+            downloaded_at="2026-10-01T00:00:00+08:00",
+            tool_version="0.1.0",
+        ),
+    )
 
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     result = handler(FakeCtx(), payload())
 
     assert result["reused"] is True, "旧目录里的 source.mp4 应被认出来，不该整集重下"
@@ -330,7 +360,9 @@ def test_transcriber_reads_source_from_db_not_a_hardcoded_name(service, tmp_path
     """转录侧：文件叫什么都无所谓，只要库里的路径对得上。"""
     from video_workbench.core import transcriber as T
 
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     result = handler(FakeCtx(), payload(title="一个很长的标题 带空格 和#号"))
     project = service.repo.project_get(result["project_id"])
     assert T._source_video(project, service.repo) == Path(result["path"])
@@ -338,7 +370,9 @@ def test_transcriber_reads_source_from_db_not_a_hardcoded_name(service, tmp_path
 
 def test_sidecar_name_is_still_the_format_anchor(service, tmp_path):
     """侧车名保持 source.wb.json：它是"还不知道媒体文件名时"唯一能定位目录身份的锚点。"""
-    handler = W.make_download_handler(repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader())
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=make_downloader()
+    )
     result = handler(FakeCtx(), payload(title="标题"))
     root = Path(result["path"]).parent
     assert (root / SIDECAR).is_file()

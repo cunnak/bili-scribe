@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from video_workbench.core import clipper
 
 SEGMENTS = [
@@ -182,7 +180,9 @@ def test_refine_preserves_raw_values():
 
 def test_refine_trims_then_snaps_and_keeps_enough_length():
     """先剪静音再吸附：如果顺序倒了，起点会被吸到 8 秒那句的句尾，开头就是静音。"""
-    out = clipper.refine([_cand("highlight", 9_500, 20_000, 70, "甲")], SEGMENTS, duration_ms=36_000)
+    out = clipper.refine(
+        [_cand("highlight", 9_500, 20_000, 70, "甲")], SEGMENTS, duration_ms=36_000
+    )
     row = out["candidates"][0]
     assert row["start_ms"] >= 12_000
     assert row["end_ms"] - row["start_ms"] >= 15_000, "短于下限要补齐"
@@ -197,7 +197,9 @@ def test_refine_truncates_overlong_segment():
 
 def test_refine_clamps_out_of_range_candidate():
     """超界的候选先被夹回片长，仍在 0 之后。"""
-    out = clipper.refine([_cand("highlight", -5_000, 900_000, 70, "越界")], SEGMENTS, duration_ms=36_000)
+    out = clipper.refine(
+        [_cand("highlight", -5_000, 900_000, 70, "越界")], SEGMENTS, duration_ms=36_000
+    )
     row = out["candidates"][0]
     assert row["start_ms"] >= 0
     assert row["end_ms"] <= 36_000
@@ -206,7 +208,10 @@ def test_refine_clamps_out_of_range_candidate():
 
 def test_refine_marks_candidates_without_boundary():
     """句边界都在容差外：boundary 留空、原因写进 snap_notes，前端据此标提示。"""
-    rows = [{"start_ms": 0, "end_ms": 1_000, "text": "嗯"}, {"start_ms": 40_000, "end_ms": 41_000, "text": "好"}]
+    rows = [
+        {"start_ms": 0, "end_ms": 1_000, "text": "嗯"},
+        {"start_ms": 40_000, "end_ms": 41_000, "text": "好"},
+    ]
     out = clipper.refine(
         [_cand("highlight", 20_000, 35_000, 70, "悬空")],
         rows,

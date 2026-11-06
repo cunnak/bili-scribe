@@ -15,7 +15,6 @@ from pathlib import Path
 
 from video_workbench.core import copywriter, cover
 
-
 GOOD = {
     "title": "定价不是成本加法",
     "description": "同一款产品把价格翻三倍，这段讲清定价靠的是判断而不是算账。",
@@ -186,7 +185,12 @@ def test_copy_save_marks_edited_and_warns(service):
     out = call(
         service,
         "clip.copy.save",
-        {"candidate_id": candidate["id"], "title": "改过的标题", "description": "改过的简介", "tags": ["甲"]},
+        {
+            "candidate_id": candidate["id"],
+            "title": "改过的标题",
+            "description": "改过的简介",
+            "tags": ["甲"],
+        },
     )
     assert out["copy"]["edited"] is True
     assert out["copy"]["title"] == "改过的标题"
@@ -212,7 +216,9 @@ def test_copy_save_truncates_overlong_fields(service):
 
 
 def test_copy_save_rejects_unknown_candidate(service):
-    assert err(service, "clip.copy.save", {"candidate_id": "cand_nope", "title": "x"}) == "NOT_FOUND"
+    assert (
+        err(service, "clip.copy.save", {"candidate_id": "cand_nope", "title": "x"}) == "NOT_FOUND"
+    )
 
 
 def test_cover_requires_source_asset(service, monkeypatch):
@@ -256,7 +262,9 @@ def test_cover_upload_copies_file_into_project(service, tmp_path):
     out = call(service, "clip.cover.upload", {"candidate_id": candidate["id"], "path": str(upload)})
     assert Path(out["cover"]["path"]).is_file()
     assert out["cover"]["source"] == "upload"
-    assert service.repo.candidate_get(candidate["id"])["copy"]["cover"]["path"] == out["cover"]["path"]
+    assert (
+        service.repo.candidate_get(candidate["id"])["copy"]["cover"]["path"] == out["cover"]["path"]
+    )
 
 
 def test_cover_upload_rejects_non_image(service, tmp_path):
@@ -264,7 +272,10 @@ def test_cover_upload_rejects_non_image(service, tmp_path):
     candidate = _candidate(service, project)
     bad = tmp_path / "note.txt"
     bad.write_text("x", encoding="utf-8")
-    assert err(service, "clip.cover.upload", {"candidate_id": candidate["id"], "path": str(bad)}) == "VALIDATION"
+    assert (
+        err(service, "clip.cover.upload", {"candidate_id": candidate["id"], "path": str(bad)})
+        == "VALIDATION"
+    )
 
 
 def test_candidates_list_carries_copy(service):

@@ -2,6 +2,7 @@
 
 这三条都是「密钥没问题、网关就是不认」的真实故障，各钉一条。
 """
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,9 @@ from video_workbench.infra.llm import DEFAULT_USER_AGENT, ChatClient
 
 
 def client(**kw):
-    return ChatClient(**{"base_url": "https://api.example.com/v1", "api_key": "k", "model": "m", **kw})
+    return ChatClient(
+        **{"base_url": "https://api.example.com/v1", "api_key": "k", "model": "m", **kw}
+    )
 
 
 def test_default_user_agent_looks_like_a_browser() -> None:
@@ -87,7 +90,9 @@ def test_extra_headers_are_merged_and_can_override() -> None:
         seen.update(headers)
         return 200, json.dumps({"choices": [{"message": {"content": "ok"}}]})
 
-    c = client(transport=transport, extra_headers={"api-version": "2024-02-01", "User-Agent": "custom/1"})
+    c = client(
+        transport=transport, extra_headers={"api-version": "2024-02-01", "User-Agent": "custom/1"}
+    )
     c.chat([{"role": "user", "content": "hi"}])
     assert seen["api-version"] == "2024-02-01"
     assert seen["User-Agent"] == "custom/1"

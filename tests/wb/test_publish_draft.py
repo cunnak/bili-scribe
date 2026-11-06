@@ -101,9 +101,7 @@ def test_draft_reports_limits_and_chars():
 
 
 def test_draft_warns_instead_of_silently_truncating_over_limit():
-    draft = publisher.build_draft(
-        PROJECT, CONTENT, max_summary_chars=10, title="标题" * 50
-    )
+    draft = publisher.build_draft(PROJECT, CONTENT, max_summary_chars=10, title="标题" * 50)
     joined = "；".join(draft["warnings"])
     assert "标题超过 80 字" in joined
     assert "摘要超过 10 字" in joined
@@ -140,8 +138,14 @@ def test_summary_from_content_accepts_pair_timeline():
 
 
 def test_row_view_adds_counts():
-    view = publisher.row_view({"id": "d1", "title": "标题", "summary": "摘要",
-                               "content": publisher.to_delta("第一行\n第二行")})
+    view = publisher.row_view(
+        {
+            "id": "d1",
+            "title": "标题",
+            "summary": "摘要",
+            "content": publisher.to_delta("第一行\n第二行"),
+        }
+    )
     assert view["chars"] == 6
     assert view["title_chars"] == 2 and view["summary_chars"] == 2
     assert "第一行" in view["content_text"]

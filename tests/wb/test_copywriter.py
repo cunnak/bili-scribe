@@ -47,14 +47,19 @@ GOOD = {
 
 def test_normalize_truncates_long_title_and_says_so():
     notes = []
-    copy = copywriter.normalize_copy({"title": "这是一个明显超过三十个字的标题" * 3, "description": "短", "tags": []}, notes=notes)
+    copy = copywriter.normalize_copy(
+        {"title": "这是一个明显超过三十个字的标题" * 3, "description": "短", "tags": []},
+        notes=notes,
+    )
     assert len(copy["title"]) <= copywriter.TITLE_MAX
     assert any("标题超长" in item for item in notes)
 
 
 def test_normalize_truncates_long_description():
     notes = []
-    copy = copywriter.normalize_copy({"title": "标题还在", "description": "描" * 300, "tags": ["a", "b", "c"]}, notes=notes)
+    copy = copywriter.normalize_copy(
+        {"title": "标题还在", "description": "描" * 300, "tags": ["a", "b", "c"]}, notes=notes
+    )
     assert len(copy["description"]) <= copywriter.DESC_MAX
     assert any("简介超长" in item for item in notes)
 
@@ -151,7 +156,9 @@ def test_rule_copy_uses_candidate_only():
 
 def test_generate_uses_model_and_marks_source():
     stub = Stub(json.dumps(GOOD, ensure_ascii=False))
-    out = copywriter.generate({"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=stub)
+    out = copywriter.generate(
+        {"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=stub
+    )
     assert out["source"] == "llm"
     assert out["copy"]["title"] == GOOD["title"]
     assert out["model"] == "stub-model"
@@ -172,7 +179,9 @@ def test_generate_falls_back_when_model_raises():
 
 def test_generate_retries_once_on_bad_json_then_succeeds():
     stub = Stub("不是 JSON", json.dumps(GOOD, ensure_ascii=False))
-    out = copywriter.generate({"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=stub)
+    out = copywriter.generate(
+        {"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=stub
+    )
     assert out["source"] == "llm"
     assert out["attempts"] == 2
 
@@ -189,7 +198,9 @@ def test_generate_tolerates_client_without_json_mode():
             return json.dumps(GOOD, ensure_ascii=False)
 
     client = Bashful()
-    out = copywriter.generate({"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=client)
+    out = copywriter.generate(
+        {"id": "c1", "start_ms": 0, "end_ms": 30_000, "title": "t"}, [{"text": "x"}], client=client
+    )
     assert out["source"] == "llm"
     assert client.calls >= 1
 
@@ -252,7 +263,11 @@ def test_grab_frame_writes_cover_and_reports_offset(tmp_path):
 def test_grab_frame_accepts_explicit_offset(tmp_path):
     ff = FakeFF()
     info = cover.grab_frame(
-        ff, tmp_path / "src.mp4", {"id": "c", "start_ms": 0, "end_ms": 10_000}, tmp_path, at_ms=7_000
+        ff,
+        tmp_path / "src.mp4",
+        {"id": "c", "start_ms": 0, "end_ms": 10_000},
+        tmp_path,
+        at_ms=7_000,
     )
     assert info["at_ms"] == 7_000
 
@@ -260,7 +275,9 @@ def test_grab_frame_accepts_explicit_offset(tmp_path):
 def test_grab_frame_raises_when_no_file_written(tmp_path):
     ff = FakeFF(write=False)
     try:
-        cover.grab_frame(ff, tmp_path / "src.mp4", {"id": "c", "start_ms": 0, "end_ms": 9_000}, tmp_path)
+        cover.grab_frame(
+            ff, tmp_path / "src.mp4", {"id": "c", "start_ms": 0, "end_ms": 9_000}, tmp_path
+        )
     except Exception as exc:  # noqa: BLE001
         assert getattr(exc, "code", "") == "PROCESS_FAILED"
     else:  # pragma: no cover
@@ -269,7 +286,9 @@ def test_grab_frame_raises_when_no_file_written(tmp_path):
 
 def test_frames_for_returns_one_pick_per_slot(tmp_path):
     ff = FakeFF()
-    out = cover.frames_for(ff, tmp_path / "src.mp4", {"id": "c", "start_ms": 0, "end_ms": 10_000}, tmp_path, count=4)
+    out = cover.frames_for(
+        ff, tmp_path / "src.mp4", {"id": "c", "start_ms": 0, "end_ms": 10_000}, tmp_path, count=4
+    )
     assert out["count"] == 4
     offsets = [item["at_ms"] for item in out["frames"]]
     assert offsets == sorted(offsets)

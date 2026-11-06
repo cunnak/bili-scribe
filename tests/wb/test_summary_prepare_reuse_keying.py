@@ -27,14 +27,8 @@ import json
 
 import pytest
 
-from bili_scribe.core import roles as bs_roles
-from bili_scribe.core import summarizer as bs_summarizer
-from video_workbench.core import prompt_source as ps
-from video_workbench.core import summarizer as ad
-from video_workbench.infra.notecache import NoteCache
-
-from wb_parity_tiers import default_env  # noqa: F401  （pytest fixture，不是未使用导入）
-from test_summary_parity import make_cfg
+#: 附加提示词全文里的特征串。从 `test_summary_parity` 引同一份，不在这里另抄一遍。
+from test_summary_parity import EXTRA_MARKERS, make_cfg
 from test_summary_prepare_reuse import (  # 复用同一套假 LLM 与素材，不再造第二个假对象
     MAP_PREFIX,
     RAW_MARK,
@@ -44,9 +38,13 @@ from test_summary_prepare_reuse import (  # 复用同一套假 LLM 与素材，�
     _project,
     _segments,
 )
+from wb_parity_tiers import default_env as default_env  # noqa: F401  （pytest fixture，不是未使用导入）
 
-#: 附加提示词全文里的特征串。从 `test_summary_parity` 引同一份，不在这里另抄一遍。
-from test_summary_parity import EXTRA_MARKERS
+from bili_scribe.core import roles as bs_roles
+from bili_scribe.core import summarizer as bs_summarizer
+from video_workbench.core import prompt_source as ps
+from video_workbench.core import summarizer as ad
+from video_workbench.infra.notecache import NoteCache
 
 #: 第二份素材独有的标记句。5c/5e 要靠它证明「换了素材」而不是「换了个键」。
 OTHER_MARK = "另一份素材的标记句，长度足够触发分段预读。"
@@ -59,8 +57,10 @@ OTHER_SEGMENT_COUNT = 700
 
 def _other_segments(count: int = OTHER_SEGMENT_COUNT) -> list[dict]:
     """与 `_segments` 长度同量级、**内容不同**的第二份素材。"""
-    return [{"start_ms": index * 5000, "text": f"另说第{index}段{OTHER_MARK}"}
-            for index in range(1, count + 1)]
+    return [
+        {"start_ms": index * 5000, "text": f"另说第{index}段{OTHER_MARK}"}
+        for index in range(1, count + 1)
+    ]
 
 
 class _Quiet:
@@ -84,14 +84,16 @@ class RecordingCache(NoteCache):
 
     def make_key(self, body, source_label, recipe, map_prompt):
         key = NoteCache.make_key(body, source_label, recipe, map_prompt)
-        self.make_key_calls.append({
-            "key": key,
-            "body_chars": len(body),
-            "body_head": body[:24],
-            "source_label": source_label,
-            "recipe": dict(recipe),
-            "map_prompt": map_prompt,
-        })
+        self.make_key_calls.append(
+            {
+                "key": key,
+                "body_chars": len(body),
+                "body_head": body[:24],
+                "source_label": source_label,
+                "recipe": dict(recipe),
+                "map_prompt": map_prompt,
+            }
+        )
         return key
 
     def get(self, key):
@@ -103,31 +105,63 @@ class RecordingCache(NoteCache):
         return super().put(key, body, chunks, meta=meta)
 
 
-def _run(cache, task_key: str, role: str, *, cfg=None, extra_prompt=None,
-         segments=None):
+def _run(cache, task_key: str, role: str, *, cfg=None, extra_prompt=None, segments=None):
     llm = ReuseLLM()
-    out = ad.run(_project(), segments if segments is not None else _segments(),
-                 client=llm, cfg=cfg or make_cfg(), ctx=_Quiet(), role=role,
-                 cache=cache, task_key=task_key, extra_prompt=extra_prompt)
+    out = ad.run(
+        _project(),
+        segments if segments is not None else _segments(),
+        client=llm,
+        cfg=cfg or make_cfg(),
+        ctx=_Quiet(),
+        role=role,
+        cache=cache,
+        task_key=task_key,
+        extra_prompt=extra_prompt,
+    )
     return llm, out
 
 
-def _refine(cache, task_key: str, previous, role: str, requirement: str, *,
-            cfg=None, extra_prompt=None, segments=None):
+def _refine(
+    cache,
+    task_key: str,
+    previous,
+    role: str,
+    requirement: str,
+    *,
+    cfg=None,
+    extra_prompt=None,
+    segments=None,
+):
     llm = ReuseLLM()
-    out = ad.refine(_project(), segments if segments is not None else _segments(),
-                    previous, requirement, client=llm, cfg=cfg or make_cfg(),
-                    ctx=_Quiet(), role=role, cache=cache, task_key=task_key,
-                    extra_prompt=extra_prompt)
+    out = ad.refine(
+        _project(),
+        segments if segments is not None else _segments(),
+        previous,
+        requirement,
+        client=llm,
+        cfg=cfg or make_cfg(),
+        ctx=_Quiet(),
+        role=role,
+        cache=cache,
+        task_key=task_key,
+        extra_prompt=extra_prompt,
+    )
     return llm, out
 
 
 def _previous(tag: str) -> dict:
     """手搭一份「上一次总结」，只为让 refine 过 `previous` 那道门（CONFLICT）。"""
-    return {"one_line": f"前次总结 {tag}", "summary_md": f"正文 {tag}",
-            "key_points": ["点一", "点二"], "timeline": [], "quotes": [],
-            "chapters": [], "tags": ["固定"], "role": "wengao",
-            "model": "reuse-fake"}
+    return {
+        "one_line": f"前次总结 {tag}",
+        "summary_md": f"正文 {tag}",
+        "key_points": ["点一", "点二"],
+        "timeline": [],
+        "quotes": [],
+        "chapters": [],
+        "tags": ["固定"],
+        "role": "wengao",
+        "model": "reuse-fake",
+    }
 
 
 def _assert_no_role_material_in_address(call: dict, label: str) -> None:
@@ -139,11 +173,13 @@ def _assert_no_role_material_in_address(call: dict, label: str) -> None:
             text = ps.load(name).strip()
             assert text[:40] not in blob, (
                 f"{label}：预读地址的实参里出现了 {role_key} 的 txt 真源正文——"
-                "角色不参与预读，进地址等于每换一个角色白付一次预读")
+                "角色不参与预读，进地址等于每换一个角色白付一次预读"
+            )
         compressed = bs_roles.get_role(role_key).system
         if compressed:
             assert compressed[:40] not in blob, (
-                f"{label}：地址实参里出现了 {role_key} 的压缩版 system（同上）")
+                f"{label}：地址实参里出现了 {role_key} 的压缩版 system（同上）"
+            )
 
 
 # ============================================================ 5b 换角色不换地址
@@ -163,26 +199,30 @@ def test_switching_the_role_does_not_change_the_pre_read_address(default_env, tm
     cold, produced = _run(cache, key_wengao, "wengao")
     assert cold.count("map") >= 2, "前置不成立：首角色没真的分段预读"
     assert len(cache.make_key_calls) == 1, (
-        f"一次生成应当只算一次地址，实得 {len(cache.make_key_calls)} 次")
+        f"一次生成应当只算一次地址，实得 {len(cache.make_key_calls)} 次"
+    )
     first = cache.make_key_calls[0]
     assert first["map_prompt"] == bs_summarizer.MAP_SYSTEM, (
-        "预读地址里的 map_prompt 不是 MAP_SYSTEM——角色 system 混进预读了")
+        "预读地址里的 map_prompt 不是 MAP_SYSTEM——角色 system 混进预读了"
+    )
     _assert_no_role_material_in_address(first, "首角色")
 
-    warm, _ = _refine(cache, key_xiezuo, produced["summary"], "xiezuo",
-                      "换个角色重出一版，保留三个论点")
-    assert warm.count("map") == 0, (
-        f"换角色后仍发了 {warm.count('map')} 次预读——地址里混进了角色")
+    warm, _ = _refine(
+        cache, key_xiezuo, produced["summary"], "xiezuo", "换个角色重出一版，保留三个论点"
+    )
+    assert warm.count("map") == 0, f"换角色后仍发了 {warm.count('map')} 次预读——地址里混进了角色"
     assert warm.total() == THREE_PASS_REQUESTS
     assert len(cache.make_key_calls) == 2, "第二轮应当只多算一次地址"
     second = cache.make_key_calls[-1]
     assert second["key"] == first["key"], (
-        f"同一素材换角色后地址变了：{first['key'][:12]}… → {second['key'][:12]}…")
+        f"同一素材换角色后地址变了：{first['key'][:12]}… → {second['key'][:12]}…"
+    )
     assert second["recipe"] == first["recipe"], "recipe 漂了但 key 没变"
     assert second["map_prompt"] == first["map_prompt"], "map_prompt 漂了但 key 没变"
     _assert_no_role_material_in_address(second, "换角色后")
     assert cache.get_calls and cache.get_calls[-1] == second["key"], (
-        "复用必须是拿同一个地址去查磁盘")
+        "复用必须是拿同一个地址去查磁盘"
+    )
 
 
 def test_turning_the_extra_prompt_on_does_not_change_the_address(default_env, tmp_path):
@@ -199,17 +239,23 @@ def test_turning_the_extra_prompt_on_does_not_change_the_address(default_env, tm
     assert cold_off.count("map") >= 2
     key_before = cache.make_key_calls[-1]["key"]
 
-    warm_on, _ = _refine(cache, _fresh_key("extra-on"), produced["summary"],
-                         "wengao", "加上附加提示词再出一版", extra_prompt=True)
+    warm_on, _ = _refine(
+        cache,
+        _fresh_key("extra-on"),
+        produced["summary"],
+        "wengao",
+        "加上附加提示词再出一版",
+        extra_prompt=True,
+    )
     assert warm_on.count("map") == 0, (
-        f"打开附加提示词后重付了 {warm_on.count('map')} 次预读——开关进了地址")
+        f"打开附加提示词后重付了 {warm_on.count('map')} 次预读——开关进了地址"
+    )
     assert cache.make_key_calls[-1]["key"] == key_before, "附加提示词不该改变预读地址"
 
     # 开关确实生效的那一处：归约两轮的 system 必须含 extra 全文特征串。
     # 不钉这个就是假绿——「没进地址」和「根本没接进产品」会长得一模一样。
     hit = [marker for marker in EXTRA_MARKERS if marker in warm_on.system_of(0)]
-    assert hit, (
-        "开着附加提示词，生成那轮的 system 里却没有它——开关根本没接到模型")
+    assert hit, "开着附加提示词，生成那轮的 system 里却没有它——开关根本没接到模型"
 
 
 def test_the_extra_prompt_is_still_absent_when_the_switch_is_off(default_env, tmp_path):
@@ -222,8 +268,7 @@ def test_the_extra_prompt_is_still_absent_when_the_switch_is_off(default_env, tm
     llm, _ = _run(cache, _fresh_key("extra-off-only"), "wengao", extra_prompt=False)
     blob = llm.all_text()
     for marker in EXTRA_MARKERS:
-        assert marker not in blob, (
-            f"显式关掉附加提示词，{marker} 却出现在请求里——开关是装饰")
+        assert marker not in blob, f"显式关掉附加提示词，{marker} 却出现在请求里——开关是装饰"
     assert llm.count("map") >= 2, "前置不成立：这条素材没触发分段预读"
 
 
@@ -243,15 +288,12 @@ def test_different_material_changes_the_address_and_pays_again(default_env, tmp_
     key_first = cache.make_key_calls[-1]["key"]
     chars_first = cache.make_key_calls[-1]["body_chars"]
 
-    shorter = _other_segments()        # 同样够长、但内容不同的第二份素材
+    shorter = _other_segments()  # 同样够长、但内容不同的第二份素材
     again, _ = _run(cache, _fresh_key("mat-b"), "wengao", segments=shorter)
-    assert again.count("map") >= 2, (
-        "第二份素材没触发分段预读——夹具长度不够，下面的地址对照就是空跑")
+    assert again.count("map") >= 2, "第二份素材没触发分段预读——夹具长度不够，下面的地址对照就是空跑"
     changed = cache.make_key_calls[-1]
-    assert changed["key"] != key_first, (
-        f"素材正文不同而地址相同：{key_first[:12]}…——旧笔记会被误用")
-    assert changed["body_chars"] != chars_first, (
-        "两份不同素材量出来的 body_chars 相同，夹具失效")
+    assert changed["key"] != key_first, f"素材正文不同而地址相同：{key_first[:12]}…——旧笔记会被误用"
+    assert changed["body_chars"] != chars_first, "两份不同素材量出来的 body_chars 相同，夹具失效"
     assert OTHER_MARK in again.all_text(), "第二次预读吃的不是新素材，是旧笔记"
 
 
@@ -267,7 +309,8 @@ def test_recipe_change_invalidates_the_address(default_env, tmp_path):
     assert llm.count("map") >= 2, "改了分块参数却没重新预读"
     recipe_b = cache.make_key_calls[-1]["recipe"]
     assert cache.make_key_calls[-1]["key"] != key_a, (
-        f"recipe 变了地址却没变：{recipe_a} vs {recipe_b}")
+        f"recipe 变了地址却没变：{recipe_a} vs {recipe_b}"
+    )
 
 
 def test_map_prompt_change_invalidates_the_address(default_env, tmp_path, monkeypatch):
@@ -293,11 +336,13 @@ def test_map_prompt_change_invalidates_the_address(default_env, tmp_path, monkey
     monkeypatch.setattr(copy_summarizer, "MAP_SYSTEM", patched)
     llm, _ = _run(cache, _fresh_key("prompt-b"), "wengao")
     assert llm.count("map") >= 2, (
-        "预读指令变了却没重新预读——要么地址含的 map_prompt 不是这一份，要么夹具没生效")
+        "预读指令变了却没重新预读——要么地址含的 map_prompt 不是这一份，要么夹具没生效"
+    )
     last = cache.make_key_calls[-1]
     assert last["key"] != key_a, "map_prompt 变了地址却没变"
     assert last["map_prompt"] == patched, (
-        "产品送进地址的不是被打断的那份预读指令——那它送的是哪一份？")
+        "产品送进地址的不是被打断的那份预读指令——那它送的是哪一份？"
+    )
 
 
 # ============================================================ 5d put 的真实形状
@@ -316,14 +361,16 @@ def test_put_runs_once_on_the_cold_path_and_zero_times_when_reusing(default_env,
     cold, produced = _run(cold_cache, key_cold, "wengao")
     assert cold.count("map") >= 2, "前置不成立：冷路径没真的预读"
     assert len(cold_cache.put_calls) == 1, (
-        f"冷路径应当写一次盘，实得 {len(cold_cache.put_calls)} 次")
+        f"冷路径应当写一次盘，实得 {len(cold_cache.put_calls)} 次"
+    )
     assert len(cold_cache.get_calls) == 1, "冷路径应当先查一次盘（未命中）"
 
     # 同一 task_key 第二轮：内存命中，根本不进 prepare_material → get/put 都不动。
     gets_before = len(cold_cache.get_calls)
     puts_before = len(cold_cache.put_calls)
-    warm, produced2 = _refine(cold_cache, key_cold, produced["summary"], "wengao",
-                             "同一任务再改一版")
+    warm, produced2 = _refine(
+        cold_cache, key_cold, produced["summary"], "wengao", "同一任务再改一版"
+    )
     assert warm.count("map") == 0, "内存命中失败，后面两段的对照就失去意义"
     assert len(cold_cache.get_calls) == gets_before, "内存命中却去查了磁盘"
     assert len(cold_cache.put_calls) == puts_before, "内存命中却回写了磁盘"
@@ -331,12 +378,12 @@ def test_put_runs_once_on_the_cold_path_and_zero_times_when_reusing(default_env,
     # 新 task_key + 同目录：磁盘命中 → get 1 次、put 0 次。
     reopened = RecordingCache(root)
     hits_before = reopened.hits
-    disk_warm, _ = _refine(reopened, _fresh_key("put-disk"), produced2["summary"],
-                          "wengao", "重开项目再改一版")
+    disk_warm, _ = _refine(
+        reopened, _fresh_key("put-disk"), produced2["summary"], "wengao", "重开项目再改一版"
+    )
     assert disk_warm.count("map") == 0, "磁盘命中失败"
     assert reopened.hits == hits_before + 1, "命中没体现在计数上"
-    assert len(reopened.get_calls) == 1, (
-        f"磁盘命中应当只查一次，实得 {len(reopened.get_calls)} 次")
+    assert len(reopened.get_calls) == 1, f"磁盘命中应当只查一次，实得 {len(reopened.get_calls)} 次"
     assert reopened.put_calls == [], "磁盘命中却回写了——put 只应发生在真跑过预读之后"
 
 
@@ -357,30 +404,47 @@ def test_each_job_gets_its_own_pre_read_not_the_others(default_env):
     segments_a = _segments()
     segments_b = _other_segments()
 
-    llm_a, _ = _refine(None, _fresh_key("iso-a"), _previous("A"), "wengao",
-                       "第一个 job 的要求", segments=segments_a)
+    llm_a, _ = _refine(
+        None,
+        _fresh_key("iso-a"),
+        _previous("A"),
+        "wengao",
+        "第一个 job 的要求",
+        segments=segments_a,
+    )
     assert llm_a.count("map") >= 2, "前置不成立：第一个 job 没真的预读"
     assert RAW_MARK in llm_a.all_text(), (
-        "第一个 job 的素材标记句没进请求——没有对照，下面的反向断言就是空断言")
+        "第一个 job 的素材标记句没进请求——没有对照，下面的反向断言就是空断言"
+    )
 
-    llm_b, _ = _refine(None, _fresh_key("iso-b"), _previous("B"), "wengao",
-                       "第二个 job 的要求", segments=segments_b)
+    llm_b, _ = _refine(
+        None,
+        _fresh_key("iso-b"),
+        _previous("B"),
+        "wengao",
+        "第二个 job 的要求",
+        segments=segments_b,
+    )
     assert llm_b.count("map") >= 2, "第二个 job 没重新预读——内存层把别人的笔记顶给了它"
     blob_b = llm_b.all_text()
     assert OTHER_MARK in blob_b, "第二个 job 的预读没吃自己的素材"
     assert RAW_MARK not in blob_b, (
-        "第二个 job 的请求里出现了第一个 job 的素材标记句——内存层串了 job")
+        "第二个 job 的请求里出现了第一个 job 的素材标记句——内存层串了 job"
+    )
 
     # 反向对照：同一份素材、不同 task_key，也必须各自付（内存键是 task_key，不是内容）。
-    llm_c, _ = _refine(None, _fresh_key("iso-c"), _previous("C"), "wengao",
-                       "第三个 job", segments=segments_a)
+    llm_c, _ = _refine(
+        None, _fresh_key("iso-c"), _previous("C"), "wengao", "第三个 job", segments=segments_a
+    )
     assert llm_c.count("map") >= 2, (
-        "同素材不同 job 共用了内存笔记——地址式共享会把「谁在跑」这件事丢掉")
+        "同素材不同 job 共用了内存笔记——地址式共享会把「谁在跑」这件事丢掉"
+    )
 
 
 @pytest.mark.parametrize("role_key", ["wengao", "xiezuo"])
 def test_the_address_is_the_same_for_both_roles_before_and_after_pre_reading(
-        default_env, tmp_path, role_key):
+    default_env, tmp_path, role_key
+):
     """5b 的可读版：把「两次地址相同」按角色参数化跑一遍，防止只有 wengao→xiezuo 单向成立。
 
     两个方向都跑：先 xiezuo 后 wengao、先 wengao 后 xiezuo。地址若含角色，
@@ -390,7 +454,12 @@ def test_the_address_is_the_same_for_both_roles_before_and_after_pre_reading(
     cache = RecordingCache(tmp_path / f"notes-{role_key}")
     cold, produced = _run(cache, _fresh_key(f"pair-{role_key}-1"), order[0])
     assert cold.count("map") >= 2, f"前置不成立：{order[0]} 没真的预读"
-    warm, _ = _refine(cache, _fresh_key(f"pair-{role_key}-2"), produced["summary"],
-                      order[1], "换角色再出一版，结构别动")
+    warm, _ = _refine(
+        cache,
+        _fresh_key(f"pair-{role_key}-2"),
+        produced["summary"],
+        order[1],
+        "换角色再出一版，结构别动",
+    )
     assert warm.count("map") == 0, f"{order[0]} → {order[1]} 没复用"
     assert cache.make_key_calls[0]["key"] == cache.make_key_calls[-1]["key"]

@@ -46,7 +46,9 @@ def run(cfg_path, tmp_path):
 def test_info_json_is_one_line_and_reports_paths(run, cfg_path):
     code, text, payload = run("--json", "info")
     assert code == 0
-    assert len([line for line in text.splitlines() if line.strip()]) == 1, "stdout 不止一行，脚本没法直接 parse"
+    assert len([line for line in text.splitlines() if line.strip()]) == 1, (
+        "stdout 不止一行，脚本没法直接 parse"
+    )
     assert payload["ok"] is True
     assert payload["cmd"] == "info"
     info = payload["data"]["info"]
@@ -78,7 +80,10 @@ def test_unknown_project_exits_2_with_not_found(run):
 def test_missing_llm_is_bad_input_not_crash(run, service):
     """没配大模型是"环境没准备好"，脚本据此应当停下来改配置，而不是以为批处理跑挂了。"""
     project = service.repo.project_create(
-        title="CLI 无模型用例", source_kind="local", root_dir=str(Path(str(service.cfg.media_root)) / "cli"), stage="transcribed"
+        title="CLI 无模型用例",
+        source_kind="local",
+        root_dir=str(Path(str(service.cfg.media_root)) / "cli"),
+        stage="transcribed",
     )
     service.repo.transcript_upsert(
         project["id"],
@@ -114,9 +119,14 @@ def test_transcribe_without_projects_is_rejected(run):
 def test_run_with_project_id_and_skips_returns_project(run, service):
     """`run --project-id --skip-*` 是脚本里最常用的形态：只做编排，不碰真模型。"""
     project = service.repo.project_create(
-        title="CLI 编排用例", source_kind="local", root_dir=str(Path(str(service.cfg.media_root)) / "cli2"), stage="transcribed"
+        title="CLI 编排用例",
+        source_kind="local",
+        root_dir=str(Path(str(service.cfg.media_root)) / "cli2"),
+        stage="transcribed",
     )
-    code, _, payload = run("--json", "run", "--project-id", project["id"], "--skip-transcribe", "--skip-summary")
+    code, _, payload = run(
+        "--json", "run", "--project-id", project["id"], "--skip-transcribe", "--skip-summary"
+    )
     assert code == 0
     assert payload["data"]["project_id"] == project["id"]
     assert payload["data"]["steps"] == []
@@ -146,7 +156,12 @@ def test_globals_can_follow_the_subcommand():
     这条红了说明 `hoist_globals()` 被改坏——症状很讨厌：参数看着都对，命令直接 usage 退出 2。
     """
     assert cli_mod.hoist_globals(["info", "--json"]) == ["--json", "info"]
-    assert cli_mod.hoist_globals(["jobs", "--quiet", "--timeout", "5"]) == ["--quiet", "--timeout", "5", "jobs"]
+    assert cli_mod.hoist_globals(["jobs", "--quiet", "--timeout", "5"]) == [
+        "--quiet",
+        "--timeout",
+        "5",
+        "jobs",
+    ]
     # 已经在前面的不能重复搬
     assert cli_mod.hoist_globals(["--json", "info"]) == ["--json", "info"]
     # 子命令自己的参数不能被当成全局参数搬走
@@ -159,7 +174,10 @@ def test_globals_can_follow_the_subcommand():
         "precise",
     ]
     # --config=... 这种带等号的写法要整体搬
-    assert cli_mod.hoist_globals(["info", "--config=/tmp/x.yaml"]) == ["--config=/tmp/x.yaml", "info"]
+    assert cli_mod.hoist_globals(["info", "--config=/tmp/x.yaml"]) == [
+        "--config=/tmp/x.yaml",
+        "info",
+    ]
 
 
 def test_json_works_after_subcommand(run):

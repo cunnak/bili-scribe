@@ -40,9 +40,7 @@ def _reply(prompt: int, completion: int) -> str:
 
 def test_chat_accumulates_usage_across_calls():
     replies = [_reply(100, 20), _reply(30, 7)]
-    client = ChatClient(
-        "http://x", "k", "m", transport=lambda *a: (200, replies.pop(0))
-    )
+    client = ChatClient("http://x", "k", "m", transport=lambda *a: (200, replies.pop(0)))
     client.chat([{"role": "user", "content": "a"}])
     client.chat([{"role": "user", "content": "b"}])
     assert client.calls == 2
@@ -89,12 +87,24 @@ def test_usage_of_carries_tokens_seconds_and_chunks():
 
 def test_usage_totals_sums_all_versions():
     rows = [
-        {"usage": {"calls": 9, "prompt_tokens": 120_000,
-                   "completion_tokens": 18_000, "total_tokens": 138_000,
-                   "seconds": 1089}},
-        {"usage": {"calls": 12, "prompt_tokens": 121_242,
-                   "completion_tokens": 16_879, "total_tokens": 138_121,
-                   "seconds": 1092}},
+        {
+            "usage": {
+                "calls": 9,
+                "prompt_tokens": 120_000,
+                "completion_tokens": 18_000,
+                "total_tokens": 138_000,
+                "seconds": 1089,
+            }
+        },
+        {
+            "usage": {
+                "calls": 12,
+                "prompt_tokens": 121_242,
+                "completion_tokens": 16_879,
+                "total_tokens": 138_121,
+                "seconds": 1092,
+            }
+        },
     ]
     totals = _usage_totals(rows)
     assert totals["versions"] == 2
@@ -122,8 +132,13 @@ def test_usage_totals_falls_back_to_sum_of_parts_and_tolerates_junk():
 def test_version_row_exposes_usage():
     row = {
         # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
-        "id": "sum_x", "version": 3, "role": "standard", "model": "m",
-        "chars": 10, "created_at": "2026-11-01T00:00:00Z", "status": "ready",
+        "id": "sum_x",
+        "version": 3,
+        "role": "standard",
+        "model": "m",
+        "chars": 10,
+        "created_at": "2026-11-01T00:00:00Z",
+        "status": "ready",
         "content": {"one_line": "一句话"},
         "usage": {"calls": 12, "prompt_tokens": 1},
     }
@@ -157,9 +172,13 @@ def test_summary_get_returns_totals_for_whole_video(service):
             # 保留 standard：直接写库/历史行的字面量，是「退役前数据仍可读」的证据（分类标准见 test_summary.py 文件头）
             role="standard",
             model="m",
-            usage={"calls": calls, "prompt_tokens": prompt,
-                   "completion_tokens": completion,
-                   "total_tokens": prompt + completion, "seconds": 1092},
+            usage={
+                "calls": calls,
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": prompt + completion,
+                "seconds": 1092,
+            },
             status="ready",
         )
     res = svc.dispatch("summary.get", {"id": project["id"]})

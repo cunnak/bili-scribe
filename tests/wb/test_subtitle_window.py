@@ -28,20 +28,32 @@ def test_window_keeps_only_overlapping_and_shifts_to_zero():
 
 def test_window_ids_are_renumbered_and_sorted():
     out = subtitles.window(segs(), 12_400)
-    assert [s["id"] for s in out] == ["s1", "s2", "s3"]   # 无 end 上限：窗口后那条也留
+    assert [s["id"] for s in out] == ["s1", "s2", "s3"]  # 无 end 上限：窗口后那条也留
     assert out == sorted(out, key=lambda s: s["start_ms"])
 
 
 def test_window_zero_start_is_a_copy():
     out = subtitles.window(segs(), 0)
     assert [(s["start_ms"], s["end_ms"]) for s in out] == [
-        (0, 2_000), (12_000, 14_000), (20_000, 22_000), (40_000, 42_000)]
+        (0, 2_000),
+        (12_000, 14_000),
+        (20_000, 22_000),
+        (40_000, 42_000),
+    ]
 
 
 def test_window_shifts_word_timestamps_too():
-    items = [{"start_ms": 20_000, "end_ms": 22_000, "text": "hai",
-              "words": [{"word": "ha", "start_ms": 20_000, "end_ms": 21_000},
-                        {"word": "i", "start_ms": 21_000, "end_ms": 22_000}]}]
+    items = [
+        {
+            "start_ms": 20_000,
+            "end_ms": 22_000,
+            "text": "hai",
+            "words": [
+                {"word": "ha", "start_ms": 20_000, "end_ms": 21_000},
+                {"word": "i", "start_ms": 21_000, "end_ms": 22_000},
+            ],
+        }
+    ]
     out = subtitles.window(items, 20_500, 21_500)
     assert len(out) == 1
     assert (out[0]["start_ms"], out[0]["end_ms"]) == (0, 1_000)
