@@ -153,3 +153,43 @@
 - 六份提示词真源 txt 与三份 vendored `.py` 的字节；`bili_scribe/**`（含 `config.py:107` 那个默认值，
   用户选的是"保持"，不是"去 bs 里改成 False"）。
 - `Pillow 13.0.0` 已在场，抽帧不需要新依赖；真模型调用在 task-70 阶段 1 **禁止**（`calls=0`）。
+
+### 落地记录（2026-11-06 17:4x，lead 现读）：阶段 1 已接完，走的是**本地 ffmpeg 腿**
+
+上面那三条「等用户拍」的口子，实现按下面这样落了；**如果用户要的是另一条腿，改动面只在服务层那一个函数**（见「还没验的」）。
+
+1. **采集腿 = 本地 ffmpeg**，新文件 `video_workbench/core/frames.py`（`collect` / `frame_offsets` /
+   `quality_to_qv` / `FRAME_WIDTH = 480`）。选它不是偏好，是实测：`wb_project.aid` 32 行全空
+   （`bvid` 只有 24 行有值）⇒ bs 那条 `x/player/videoshot` 服务端腿**当前 0/32 可用**，要先补一遍
+   bvid→aid；而 `bili_scribe/infra/bili_client.py` 的 `get_bytes(url)` 是裸 `session.get`——跟重定向、
+   无 host 白名单、无大小上限，url 又来自外部接口，WB 不该继承这个面。本地腿实测 24/32 条源视频仍在盘。
+   **数据类仍复用 bs**（`Frame` / `FrameSet` / `FrameError` / `as_content_blocks` 全是纯数据），
+   所以副本那句 `as_content_blocks(frameset)` 一个字都不用改。
+2. **接线位置**：适配层 `video_workbench/core/summarizer.py` 的 `run`/`refine` 各加一个可选 `frameset=None`
+   并透传给副本；服务层 `WorkbenchService._summary_frameset()` 每次生成与修订都现抽一组（refine 不复用
+   上一版那次采集，否则只有画面才有的信息会悄悄丢）。三条降级路径（开关关 / 无源视频 / `FrameError`）
+   全部是「log 一句 + 返回 None」，**总结照跑**，与 bs 同口径。
+3. **对账锁没被摘、口径没被扩**（候选乙成立）：`EFFECTIVE_FIELDS` 仍是
+   `(json_mode, temperature, max_tokens, messages)`，`_normalized()` 里那条 `isinstance(content, str)`
+   守卫原样保留。`tests/wb/test_summary_parity.py` 只把 `FRAMES_PRECONDITION_NOTE` 的**说明**从
+   「今天 0 个调用点」改成「本文件的用例一律不传 `frameset`；带帧那条路的判据在
+   `tests/wb/test_summary_frames.py`」。⇒ 一句话：**没传帧时两侧仍逐请求一致，传了帧由另一个文件管**。
+4. **补救腿单独降回纯文本**（`_text_only`）：四条补救腿（重问 / 续写 / 分批 / 补时间线）都是
+   `list(messages) + [...]` 的形状，不降就会把同一批图再传一遍（12 帧 ≈ 1,464 image_tokens，四遍 ≈ 5.8k 白烧）。
+   画面只对「这次讲了什么」有用，补救腿要的是 JSON 形状——所以主请求带帧、补救腿不带。
+5. **界面那句 help 改掉了**：`settings.js` 里「给总结配图用；关掉可明显提速。」换成
+   「总结时附上画面：PPT、图表、代码里的字能进正文。关掉省图片 token，也少一次本地抽帧。」，
+   `max_frames` 也补了一句「帧会作为图片发给模型，越多越贵」。
+6. **判据**：`tests/wb/test_summary_frames.py` 13 条（本地腿 5 / 适配层 3 / 服务层 4 / 界面 1），控制组
+   `13 passed`。牙齿 8 个变体全部**有牙**（脚本 `C:/Users/b1596/AppData/Local/Temp/wb_teeth_t70.py`，
+   产物同目录 `wb_teeth_t70.json`；只在 Temp 副本里改坏，工作区零覆盖回写）：T1 run 不透帧、T2 refine 不透帧、
+   T3 `_text_only` 退化、T4a/b/c 三条降级各自改成抛、T5 文案退回旧话、T6 清理删父目录。
+   真模型调用 `calls=0`——全部走桩。
+
+还没验的（等拍板或等放行）：
+
+- 真实一次带帧总结的 token 差与正文质量变化。预估：`wengao` 三轮 + 12 帧 ⇒ 现有输入 +约 1.7%，
+  在 `max_tokens=32768` 预算内；按预算闸这条要 lead 拿去问用户才烧。
+- **服务端 aid 腿要不要补**：现在完全没接。要接，入口就是 `_summary_frameset` 一个函数，
+  本地腿那 5 条判据按同形状再加一组服务端用例；补之前得先解决 bvid→aid 与 `get_bytes` 的白名单。
+- 帧的磁盘缓存与 `purge_stale` 生命周期（今天采完即删，只留内存里的 data URL）。
