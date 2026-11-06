@@ -82,8 +82,10 @@ def _write_probe(path: Path | None, reason: str) -> None:
         return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"cuda_error": reason[:400], "at": int(time.time())},
-                                   ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps({"cuda_error": reason[:400], "at": int(time.time())}, ensure_ascii=False),
+            encoding="utf-8",
+        )
     except OSError:
         pass
 
@@ -125,7 +127,9 @@ def transcribe(spec: dict[str, Any]) -> dict[str, Any]:
     model_path = str(spec["model_path"])
     language = str(spec.get("language") or "auto").strip()
     language = "" if language.lower() in ("auto", "") else language
-    device, compute = _pick_device(str(spec.get("device") or "auto"), str(spec.get("compute_type") or "auto"))
+    device, compute = _pick_device(
+        str(spec.get("device") or "auto"), str(spec.get("compute_type") or "auto")
+    )
     vad = bool(spec.get("vad", True))
     want_words = bool(spec.get("word_timestamps", True))
     duration_ms = int(spec.get("duration_ms") or 0)
@@ -321,13 +325,21 @@ def main(argv: list[str] | None = None) -> int:
             "segments": segments,
         }
         Path(out_json).parent.mkdir(parents=True, exist_ok=True)
-        Path(out_json).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        Path(out_json).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     if out_srt:
         Path(out_srt).parent.mkdir(parents=True, exist_ok=True)
         Path(out_srt).write_text(format_srt(segments), encoding="utf-8")
 
     emit({"event": "progress", "progress": 1.0, "stage": "完成"})
-    emit({"event": "done", "result": {k: v for k, v in result.items() if k != "segments"} | {"segment_count": len(segments)}})
+    emit(
+        {
+            "event": "done",
+            "result": {k: v for k, v in result.items() if k != "segments"}
+            | {"segment_count": len(segments)},
+        }
+    )
     return 0
 
 

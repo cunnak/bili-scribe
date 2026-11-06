@@ -121,8 +121,16 @@ class Repo:
     def job_update(self, job_id: str, **fields: Any) -> None:
         """只更新传入的列。显式白名单，避免前端塞一个 ``id`` 进来把主键改掉。"""
         allowed = {
-            "status", "stage", "progress", "result", "error_code",
-            "error_message", "attempts", "cancel_requested", "started_at", "finished_at",
+            "status",
+            "stage",
+            "progress",
+            "result",
+            "error_code",
+            "error_message",
+            "attempts",
+            "cancel_requested",
+            "started_at",
+            "finished_at",
         }
         sets: list[str] = []
         params: list[Any] = []
@@ -148,8 +156,7 @@ class Repo:
         也没有重试入口——比直接报失败更让人无措。
         """
         cur = self._exec(
-            "UPDATE wb_merge SET status='failed', error=?"
-            " WHERE status='running'",
+            "UPDATE wb_merge SET status='failed', error=? WHERE status='running'",
             ("上次退出时这次合并还没跑完（可以重新开始）",),
         )
         return int(cur.rowcount or 0)
@@ -230,10 +237,14 @@ class Repo:
     def project_find_by_bvid(self, bvid: str, cid: int | None = None) -> dict[str, Any] | None:
         """按 bvid(+cid) 找已有项目——「重复添加同一集」是最高频的误操作。"""
         if cid is None:
-            return self._one("SELECT * FROM wb_project WHERE bvid=? ORDER BY created_at LIMIT 1", (bvid,))
+            return self._one(
+                "SELECT * FROM wb_project WHERE bvid=? ORDER BY created_at LIMIT 1", (bvid,)
+            )
         return self._one("SELECT * FROM wb_project WHERE bvid=? AND cid=?", (bvid, cid))
 
-    def project_list(self, query: str = "", limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def project_list(
+        self, query: str = "", limit: int = 50, offset: int = 0
+    ) -> list[dict[str, Any]]:
         sql = "SELECT * FROM wb_project"
         params: list[Any] = []
         if query:
@@ -255,7 +266,15 @@ class Repo:
         return int(row["n"]) if row else 0
 
     def project_update(self, project_id: str, **fields: Any) -> None:
-        allowed = {"title", "stage", "status", "error", "root_dir", "collection_id", "collection_title"}
+        allowed = {
+            "title",
+            "stage",
+            "status",
+            "error",
+            "root_dir",
+            "collection_id",
+            "collection_title",
+        }
         sets: list[str] = []
         params: list[Any] = []
         for key, value in fields.items():
@@ -275,8 +294,15 @@ class Repo:
     # ------------------------------------------------------------- 资产
 
     ASSET_FIELDS = (
-        "bytes", "duration_ms", "width", "height", "fps",
-        "vcodec", "acodec", "language", "status",
+        "bytes",
+        "duration_ms",
+        "width",
+        "height",
+        "fps",
+        "vcodec",
+        "acodec",
+        "language",
+        "status",
     )
 
     def asset_upsert(self, project_id: str, kind: str, path: str, **fields: Any) -> dict[str, Any]:
@@ -460,7 +486,9 @@ class Repo:
         self._exec(f"INSERT INTO wb_subtitle ({columns}) VALUES ({marks})", list(row.values()))
         return self.subtitle_get(project_id, kind=kind, language=language) or {}
 
-    def subtitle_get(self, project_id: str, *, kind: str, language: str = "") -> dict[str, Any] | None:
+    def subtitle_get(
+        self, project_id: str, *, kind: str, language: str = ""
+    ) -> dict[str, Any] | None:
         row = self._one(
             "SELECT * FROM wb_subtitle WHERE project_id=? AND kind=? AND language=?"
             " ORDER BY updated_at DESC LIMIT 1",
@@ -472,8 +500,9 @@ class Repo:
         return row
 
     def subtitle_list(self, project_id: str) -> list[dict[str, Any]]:
-        rows = self._all("SELECT * FROM wb_subtitle WHERE project_id=? ORDER BY kind, language",
-                         (project_id,))
+        rows = self._all(
+            "SELECT * FROM wb_subtitle WHERE project_id=? ORDER BY kind, language", (project_id,)
+        )
         for row in rows:
             row["segments"] = _loads(row.pop("segments_json", None)) or []
         return rows
@@ -539,12 +568,9 @@ class Repo:
         row = self._one("SELECT * FROM wb_summary WHERE id=?", (summary_id,))
         return self._summary_row(row)
 
-    def summary_latest(
-        self, project_id: str, scope: str = "video"
-    ) -> dict[str, Any] | None:
+    def summary_latest(self, project_id: str, scope: str = "video") -> dict[str, Any] | None:
         row = self._one(
-            "SELECT * FROM wb_summary WHERE project_id=? AND scope=?"
-            " ORDER BY version DESC LIMIT 1",
+            "SELECT * FROM wb_summary WHERE project_id=? AND scope=? ORDER BY version DESC LIMIT 1",
             (project_id, scope),
         )
         return self._summary_row(row)
@@ -553,8 +579,7 @@ class Repo:
         self, project_id: str, scope: str = "video", limit: int = 50
     ) -> list[dict[str, Any]]:
         rows = self._all(
-            "SELECT * FROM wb_summary WHERE project_id=? AND scope=?"
-            " ORDER BY version DESC LIMIT ?",
+            "SELECT * FROM wb_summary WHERE project_id=? AND scope=? ORDER BY version DESC LIMIT ?",
             (project_id, scope, max(1, int(limit))),
         )
         return [item for item in (self._summary_row(row) for row in rows) if item]
@@ -624,19 +649,32 @@ class Repo:
             if up_mid and not merged.get("up_mid"):
                 merged["up_mid"] = up_mid
             self._exec(
-                "UPDATE wb_collection SET source_url=?, up_mid=?, up_name=?, root_dir=?"
-                " WHERE id=?",
-                (merged.get("source_url") or "", merged.get("up_mid"),
-                 merged.get("up_name") or "", merged.get("root_dir") or "", key),
+                "UPDATE wb_collection SET source_url=?, up_mid=?, up_name=?, root_dir=? WHERE id=?",
+                (
+                    merged.get("source_url") or "",
+                    merged.get("up_mid"),
+                    merged.get("up_name") or "",
+                    merged.get("root_dir") or "",
+                    key,
+                ),
             )
             return self.collection_get(key) or {}
-        columns = ",".join(["id", "title", "kind", "source_url", "up_mid", "up_name",
-                           "root_dir", "created_at"])
+        columns = ",".join(
+            ["id", "title", "kind", "source_url", "up_mid", "up_name", "root_dir", "created_at"]
+        )
         marks = ",".join("?" for _ in range(8))
         self._exec(
             f"INSERT INTO wb_collection ({columns}) VALUES ({marks})",
-            [row["id"], row["title"], row["kind"], row["source_url"], row["up_mid"],
-             row["up_name"], row["root_dir"], now_iso()],
+            [
+                row["id"],
+                row["title"],
+                row["kind"],
+                row["source_url"],
+                row["up_mid"],
+                row["up_name"],
+                row["root_dir"],
+                now_iso(),
+            ],
         )
         return self.collection_get(key) or {}
 
@@ -710,9 +748,7 @@ class Repo:
         )
         return self._summary_row(row)
 
-    def collection_summary_list(
-        self, collection_id: str, limit: int = 50
-    ) -> list[dict[str, Any]]:
+    def collection_summary_list(self, collection_id: str, limit: int = 50) -> list[dict[str, Any]]:
         rows = self._all(
             "SELECT * FROM wb_summary WHERE collection_id=? AND scope='collection'"
             " ORDER BY version DESC LIMIT ?",

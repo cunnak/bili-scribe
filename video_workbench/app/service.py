@@ -361,7 +361,7 @@ class SummaryRestoreParams(BaseModel):
 
 class PublishRegenerateParams(BaseModel):
     id: str
-    part: str = "all"   # all | summary | title
+    part: str = "all"  # all | summary | title
 
 
 class PublishPreviewParams(BaseModel):
@@ -650,7 +650,7 @@ def _reject_dotted(values: dict[str, Any], prefix: str = "") -> None:
             raise WBError(
                 "VALIDATION",
                 f"设置项名字不对：{where}",
-                "用嵌套对象提交，例如 {\"llm\": {\"timeout_seconds\": 900}}",
+                '用嵌套对象提交，例如 {"llm": {"timeout_seconds": 900}}',
             )
         if isinstance(value, dict):
             _reject_dotted(value, where + ".")
@@ -948,8 +948,11 @@ class WorkbenchService:
         # 判定只有一个出处：core/prompt_source.py，前端不复制映射表。
         r.add("summary.prompt.list", self.summary_prompt_list)
         r.add("collection.list", self.collection_list)
-        r.add("summary.collection.overview", self.summary_collection_overview,
-              CollectionOverviewParams)
+        r.add(
+            "summary.collection.overview",
+            self.summary_collection_overview,
+            CollectionOverviewParams,
+        )
         r.add("summary.collection.get", self.summary_collection_get, IdParams)
         r.add("clip.analyze", self.clip_analyze, ClipAnalyzeParams)
         r.add("clip.candidates", self.clip_candidates, IdParams)
@@ -998,7 +1001,9 @@ class WorkbenchService:
         r.add("fs.pick", self.fs_pick, _PickParams)
         r.add("fs.media", self.fs_media)
 
-    def dispatch(self, method: str, params: Any = None, request_id: str | None = None) -> dict[str, Any]:
+    def dispatch(
+        self, method: str, params: Any = None, request_id: str | None = None
+    ) -> dict[str, Any]:
         return self.router.dispatch(method, params, request_id)
 
     # ------------------------------------------------------- 信息
@@ -1142,7 +1147,12 @@ class WorkbenchService:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         items = [self._decorate(p) for p in self.repo.project_list(query, limit, offset)]
-        return {"items": items, "total": self.repo.project_count(query), "limit": limit, "offset": offset}
+        return {
+            "items": items,
+            "total": self.repo.project_count(query),
+            "limit": limit,
+            "offset": offset,
+        }
 
     def library_get(self, id: str) -> dict[str, Any]:
         project = self.repo.project_get(id)
@@ -1164,16 +1174,18 @@ class WorkbenchService:
         out = []
         for row in rows:
             conf = styles_core.normalize_base(row)
-            out.append({
-                "id": conf["id"],
-                "name": conf["name"],
-                "mode": conf["mode"],
-                "layout": conf["layout"],
-                "builtin": bool(row.get("builtin")),
-                "size": int(conf["primary"]["size"]),
-                "font": conf["primary"]["font"],
-                "config": conf,
-            })
+            out.append(
+                {
+                    "id": conf["id"],
+                    "name": conf["name"],
+                    "mode": conf["mode"],
+                    "layout": conf["layout"],
+                    "builtin": bool(row.get("builtin")),
+                    "size": int(conf["primary"]["size"]),
+                    "font": conf["primary"]["font"],
+                    "config": conf,
+                }
+            )
         return out
 
     # ------------------------------------------------- 样式编辑（P3-07）
@@ -1234,8 +1246,9 @@ class WorkbenchService:
             "canvas": styles_core.canvas_size(conf),
         }
 
-    def style_save(self, id: str = "", name: str = "",
-                   config: dict[str, Any] | None = None) -> dict[str, Any]:
+    def style_save(
+        self, id: str = "", name: str = "", config: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         style_id = str(id or "").strip()
         existing: dict[str, Any] | None = None
         if style_id:
@@ -1246,8 +1259,11 @@ class WorkbenchService:
         if not style_id:
             style_id = new_id("sty")
         merged = styles_core.normalize(
-            {"id": style_id, "name": name or (existing or {}).get("name") or "新样式",
-             **(config or {})},
+            {
+                "id": style_id,
+                "name": name or (existing or {}).get("name") or "新样式",
+                **(config or {}),
+            },
             base=existing or styles_core.default_preset(),
         )
         merged["id"] = style_id
@@ -1296,14 +1312,20 @@ class WorkbenchService:
 
     def style_export(self, id: str = "", path: str = "") -> dict[str, Any]:
         conf, builtin, _file = self._style_resolve(id)
-        target = Path(str(path or "")).expanduser() if path else self._style_dir() / f"{conf['id']}.json"
+        target = (
+            Path(str(path or "")).expanduser() if path else self._style_dir() / f"{conf['id']}.json"
+        )
         if path:
             roots = self._allowed_roots()
             if not any(is_within(root, target) for root in roots):
                 raise WBError("VALIDATION", "样式只能导出到媒体/缓存目录里", str(target))
         _dump_json(target, conf)
-        return {"path": str(target), "bytes": target.stat().st_size if target.is_file() else 0,
-                "builtin": builtin, "style": conf}
+        return {
+            "path": str(target),
+            "bytes": target.stat().st_size if target.is_file() else 0,
+            "builtin": builtin,
+            "style": conf,
+        }
 
     def style_fonts(self) -> dict[str, Any]:
         """系统已装字体家族。只读注册表，不扫描字体文件（扫描要解析 TTF，慢且没必要）。"""
@@ -1330,11 +1352,15 @@ class WorkbenchService:
         for family in families:
             seen.setdefault(family.lower(), family)
         fonts = sorted(seen.values(), key=str.lower)
-        return {"fonts": fonts, "count": len(fonts),
-                "note": "" if fonts else "读不到系统字体列表，可直接手填字体名"}
+        return {
+            "fonts": fonts,
+            "count": len(fonts),
+            "note": "" if fonts else "读不到系统字体列表，可直接手填字体名",
+        }
 
-    def style_render(self, id: str = "", config: dict[str, Any] | None = None,
-                     text: str = "") -> dict[str, Any]:
+    def style_render(
+        self, id: str = "", config: dict[str, Any] | None = None, text: str = ""
+    ) -> dict[str, Any]:
         """真渲一张 PNG。失败就该失败——界面自己退画布预览，别在这里返回假图。"""
         if config:
             base = None
@@ -1358,24 +1384,42 @@ class WorkbenchService:
         # 用户看到的可能是上一次的图。unique_path 保证每次都留一张。
         stamp = time.strftime("%Y%m%d-%H%M%S")
         ass_path = unique_path(cache / f"style-{stamp}.ass")
-        png_path = unique_path(Path(str(self.cfg.storage.media_root)) / "previews" / f"style-{stamp}.png")
+        png_path = unique_path(
+            Path(str(self.cfg.storage.media_root)) / "previews" / f"style-{stamp}.png"
+        )
         png_path.parent.mkdir(parents=True, exist_ok=True)
         ass_path.write_text(ass_body, encoding="utf-8")
         background = str((style.get("preview") or {}).get("background") or "dark")
         color = {"light": "0xF7F6F1", "image": "0x14181A"}.get(background, "0x14181A")
-        self._ffmpeg.run([
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi",
-            "-i", f"color=c={color}:s={canvas['width']}x{canvas['height']}:d=1",
-            "-vf", subtitle_filter(ass_path),
-            "-frames:v", "1",
-            str(png_path),
-        ])
+        self._ffmpeg.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s={canvas['width']}x{canvas['height']}:d=1",
+                "-vf",
+                subtitle_filter(ass_path),
+                "-frames:v",
+                "1",
+                str(png_path),
+            ]
+        )
         if not png_path.is_file() or png_path.stat().st_size == 0:
             raise WBError("PROCESS_FAILED", "渲染没有产生图片")
-        return {"path": str(png_path), "width": canvas["width"], "height": canvas["height"],
-                "style_id": str(style.get("id") or ""), "warnings": warnings,
-                "ass": str(ass_path), "bytes": png_path.stat().st_size}
+        return {
+            "path": str(png_path),
+            "width": canvas["width"],
+            "height": canvas["height"],
+            "style_id": str(style.get("id") or ""),
+            "warnings": warnings,
+            "ass": str(ass_path),
+            "bytes": png_path.stat().st_size,
+        }
 
     # ------------------------------------------------------- 任务
 
@@ -1410,7 +1454,6 @@ class WorkbenchService:
             time.sleep(0.1)
         return {"seconds": total}
 
-
     # ------------------------------------------------------- 下载 / 导入
 
     def _cookies(self) -> str | None:
@@ -1432,7 +1475,9 @@ class WorkbenchService:
         for name, value in jar.items():
             if not value:
                 continue
-            lines.append("	".join([".bilibili.com", "TRUE", "/", "FALSE", "0", name, str(value)]))
+            lines.append(
+                "	".join([".bilibili.com", "TRUE", "/", "FALSE", "0", name, str(value)])
+            )
         path = os.path.join(tempfile.gettempdir(), "video-workbench-cookies.txt")
         with open(path, "w", encoding="utf-8", newline=chr(10)) as fh:
             fh.write(chr(10).join(lines) + chr(10))
@@ -1454,8 +1499,15 @@ class WorkbenchService:
             raise WBError("VALIDATION", "请先粘贴 B站链接")
         return self._resolver.resolve(str(url).strip()).to_payload()
 
-    def download_start(self, url: str = "", quality: str = "1080P", items: list[dict[str, Any]] | None = None,
-                       up_name: str = "", collection_title: str = "", backend: str = "") -> dict[str, Any]:
+    def download_start(
+        self,
+        url: str = "",
+        quality: str = "1080P",
+        items: list[dict[str, Any]] | None = None,
+        up_name: str = "",
+        collection_title: str = "",
+        backend: str = "",
+    ) -> dict[str, Any]:
         """建一个批量下载任务。单集也走批量——只有一条代码路径才不会被漏测。"""
         quality = str(quality or "1080P").upper()
         backend = str(backend or "").strip().lower()
@@ -1541,7 +1593,9 @@ class WorkbenchService:
         )
         return {"job": new_job, "count": len(todo)}
 
-    def import_local(self, paths: list[str] | None = None, recursive: bool = True) -> dict[str, Any]:
+    def import_local(
+        self, paths: list[str] | None = None, recursive: bool = True
+    ) -> dict[str, Any]:
         """本地导入。跑在 RPC 线程里：只建库记录，慢的是抽帧，失败也不影响入库。"""
         picked = [str(p) for p in (paths or []) if str(p).strip()]
         if not picked:
@@ -1558,9 +1612,16 @@ class WorkbenchService:
 
     # ------------------------------------------------------- 转录
 
-    def transcribe_start(self, project_ids: list[str] | None = None, model: str = "",
-                         language: str = "", device: str = "", compute_type: str = "",
-                         vad: bool | None = None, word_timestamps: bool | None = None) -> dict[str, Any]:
+    def transcribe_start(
+        self,
+        project_ids: list[str] | None = None,
+        model: str = "",
+        language: str = "",
+        device: str = "",
+        compute_type: str = "",
+        vad: bool | None = None,
+        word_timestamps: bool | None = None,
+    ) -> dict[str, Any]:
         """一个项目一个任务。
 
         不给"批量父任务"的理由：转录是串行的（一份显存），父任务除了把进度加起来
@@ -1605,7 +1666,9 @@ class WorkbenchService:
         items = models_mod.list_status(self.cfg.models_root)
         return {
             "items": items,
-            "current": current if any(i["name"] == current for i in items) else models_mod.DEFAULT_MODEL,
+            "current": current
+            if any(i["name"] == current for i in items)
+            else models_mod.DEFAULT_MODEL,
             "models_root": self.cfg.models_root,
             "engine": str(self.cfg.transcribe.engine or "faster-whisper"),
         }
@@ -1656,11 +1719,24 @@ class WorkbenchService:
         # 读错了整条波形就退化成"时长 0"，播放头拖不动。
         duration_ms = int((source or {}).get("duration_ms") or 0)
         if not media or not media.is_file():
-            return {"project_id": project_id, "peaks": [], "buckets": waveform.BUCKETS,
-                    "duration_ms": duration_ms, "cached": False, "error": "找不到源文件"}
-        return {"project_id": project_id,
-                **waveform.get_peaks(root, media, ffmpeg_bin=self._ffmpeg.ffmpeg,
-                                     refresh=refresh, duration_ms=duration_ms)}
+            return {
+                "project_id": project_id,
+                "peaks": [],
+                "buckets": waveform.BUCKETS,
+                "duration_ms": duration_ms,
+                "cached": False,
+                "error": "找不到源文件",
+            }
+        return {
+            "project_id": project_id,
+            **waveform.get_peaks(
+                root,
+                media,
+                ffmpeg_bin=self._ffmpeg.ffmpeg,
+                refresh=refresh,
+                duration_ms=duration_ms,
+            ),
+        }
 
     # ------------------------------------------------------- 字幕编辑
 
@@ -1685,7 +1761,9 @@ class WorkbenchService:
             "stats": subtitles.stats(segments),
         }
 
-    def subtitle_save(self, project_id: str = "", segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def subtitle_save(
+        self, project_id: str = "", segments: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         """整份保存。前端自动保存走这条；编辑动作走 ``subtitle.op``。
 
         整份保存不做语义校验，只做结构归一——它是"用户已经完成的编辑结果"的落盘
@@ -1729,17 +1807,26 @@ class WorkbenchService:
         try:
             hits = 0
             if op == "update":
-                items = subtitles.update_text(current, str(kw.get("segment_id") or ""), str(kw.get("text") or ""))
+                items = subtitles.update_text(
+                    current, str(kw.get("segment_id") or ""), str(kw.get("text") or "")
+                )
             elif op == "split":
-                items = subtitles.split(current, str(kw.get("segment_id") or ""), int(kw.get("at_ms") or 0))
+                items = subtitles.split(
+                    current, str(kw.get("segment_id") or ""), int(kw.get("at_ms") or 0)
+                )
             elif op == "merge":
                 items = subtitles.merge(current, kw.get("segment_ids") or [])
             elif op == "shift":
-                items = subtitles.shift(current, int(kw.get("offset_ms") or 0), kw.get("segment_ids") or None)
+                items = subtitles.shift(
+                    current, int(kw.get("offset_ms") or 0), kw.get("segment_ids") or None
+                )
             elif op == "replace":
                 items, hits = subtitles.replace_text(
-                    current, str(kw.get("pattern") or ""), str(kw.get("replacement") or ""),
-                    regex=bool(kw.get("regex")), ids=kw.get("segment_ids") or None,
+                    current,
+                    str(kw.get("pattern") or ""),
+                    str(kw.get("replacement") or ""),
+                    regex=bool(kw.get("regex")),
+                    ids=kw.get("segment_ids") or None,
                     case_sensitive=kw.get("case_sensitive") is not False,
                 )
             elif op == "delete":
@@ -1780,8 +1867,12 @@ class WorkbenchService:
         return ChatClient.from_config(self.cfg, task=task)
 
     def _llm_client_for(
-        self, provider: str = "", base_url: str = "", api_key: str = "", task: str = "",
-        model: str = ""
+        self,
+        provider: str = "",
+        base_url: str = "",
+        api_key: str = "",
+        task: str = "",
+        model: str = "",
     ):
         """按界面上**当前**的地址/密钥造客户端，允许它们还没保存。
 
@@ -1927,8 +2018,9 @@ class WorkbenchService:
             "count": len(models),
         }
 
-    def subtitle_optimize(self, project_id: str = "", batch_size: int = 30,
-                          segment_ids: list[str] | None = None) -> dict[str, Any]:
+    def subtitle_optimize(
+        self, project_id: str = "", batch_size: int = 30, segment_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         """提交一次优化任务。``require()`` 放在提交前——没配好就别建一个注定失败的任务。"""
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
@@ -2001,8 +2093,12 @@ class WorkbenchService:
         ctx.log(f"共 {result.get('changed', 0)} 段有改动")
         return result
 
-    def subtitle_optimize_apply(self, project_id: str = "", changes: list[dict[str, Any]] | None = None,
-                                accepted_ids: list[str] | None = None) -> dict[str, Any]:
+    def subtitle_optimize_apply(
+        self,
+        project_id: str = "",
+        changes: list[dict[str, Any]] | None = None,
+        accepted_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         """把（用户接受的）改动落库。落库前先存快照，随时能回滚。"""
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
@@ -2024,7 +2120,9 @@ class WorkbenchService:
             }
         snapshot = self._write_snapshot(project_id, current)
         self._store_subtitles(project_id, items)
-        self.events.emit("library.changed", {"project_id": project_id, "reason": "subtitle.optimize"})
+        self.events.emit(
+            "library.changed", {"project_id": project_id, "reason": "subtitle.optimize"}
+        )
         return {
             "project_id": project_id,
             "applied": applied,
@@ -2042,7 +2140,11 @@ class WorkbenchService:
     def _write_snapshot(self, project_id: str, items: list[dict[str, Any]]) -> Path:
         """在项目目录里留一份改前副本。放在媒体目录而不是临时目录，是为了用户自己也能翻。"""
         path = self._snapshot_path(project_id)
-        payload = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "reason": "subtitle.optimize", "segments": items}
+        payload = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "reason": "subtitle.optimize",
+            "segments": items,
+        }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2081,9 +2183,14 @@ class WorkbenchService:
     # 好处不止一个：重译同一种语言是替换草稿，原始转录永远安全；
     # 单条重试也能直接拿草稿当底稿，不用把整篇重新喂给模型。
 
-    def subtitle_translate(self, project_id: str = "", target: str = "auto",
-                           layout: str = "", batch_size: int = 10,
-                           segment_ids: list[str] | None = None) -> dict[str, Any]:
+    def subtitle_translate(
+        self,
+        project_id: str = "",
+        target: str = "auto",
+        layout: str = "",
+        batch_size: int = 10,
+        segment_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         """提交一次翻译任务。目标语言在这里就定死，任务里不再猜。"""
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
@@ -2140,8 +2247,10 @@ class WorkbenchService:
         # "重试一条、丢掉整篇"）。草稿里没有的段就留空，由模型补。
         draft = self.repo.subtitle_get(project_id, kind="translation", language=target)
         if draft and draft.get("segments"):
-            have = {str(seg.get("id")): str(seg.get("translated_text") or "")
-                    for seg in draft["segments"]}
+            have = {
+                str(seg.get("id")): str(seg.get("translated_text") or "")
+                for seg in draft["segments"]
+            }
             for seg in base:
                 seg["translated_text"] = have.get(str(seg.get("id")), "")
         else:
@@ -2150,7 +2259,9 @@ class WorkbenchService:
 
         client = self._llm_client("translate")
         glossary = list(self.cfg.subtitle.translate.glossary or [])
-        ctx.log(f"用 {client.model} 翻译成{translator.LANG_NAMES.get(target, target)}，{len(base)} 段")
+        ctx.log(
+            f"用 {client.model} 翻译成{translator.LANG_NAMES.get(target, target)}，{len(base)} 段"
+        )
 
         def on_progress(done: int, total: int) -> None:
             ctx.progress(
@@ -2204,7 +2315,9 @@ class WorkbenchService:
         want = (target or self.cfg.subtitle.translate.target or "").strip().lower()
         if want in ("", "auto"):
             # auto 在这里不能留：草稿是按具体语言存的，取已存的那一份即可。
-            rows = [r for r in self.repo.subtitle_list(project_id) if r.get("kind") == "translation"]
+            rows = [
+                r for r in self.repo.subtitle_list(project_id) if r.get("kind") == "translation"
+            ]
             row = rows[0] if rows else None
         else:
             row = self.repo.subtitle_get(project_id, kind="translation", language=want)
@@ -2219,10 +2332,14 @@ class WorkbenchService:
             "segments": row.get("segments") or [],
         }
 
-    def subtitle_translation_apply(self, project_id: str = "", target: str = "",
-                                   layout: str = "",
-                                   accepted_ids: list[str] | None = None,
-                                   overrides: dict[str, str] | None = None) -> dict[str, Any]:
+    def subtitle_translation_apply(
+        self,
+        project_id: str = "",
+        target: str = "",
+        layout: str = "",
+        accepted_ids: list[str] | None = None,
+        overrides: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """人工确认后落盘：``subtitle.{lang}.srt``（纯译文）+ ``subtitle.bilingual.ass``（双语）。
 
         ``accepted_ids`` 为空＝全接受；给了列表就只认这些段有译文，其余退回原文。
@@ -2265,8 +2382,12 @@ class WorkbenchService:
         ass_path = root / "subtitle.bilingual.ass"
         # 纯译文 SRT：把译文搬到 text 上再复用 format_srt，不为译文再造一个格式化函数
         srt_items = [
-            {"id": s.get("id"), "start_ms": s.get("start_ms"), "end_ms": s.get("end_ms"),
-             "text": str(s.get("translated_text") or s.get("text") or "")}
+            {
+                "id": s.get("id"),
+                "start_ms": s.get("start_ms"),
+                "end_ms": s.get("end_ms"),
+                "text": str(s.get("translated_text") or s.get("text") or ""),
+            }
             for s in items
         ]
         written: list[str] = []
@@ -2277,19 +2398,37 @@ class WorkbenchService:
             written = [str(srt_path), str(ass_path)]
         except OSError as exc:
             raise WBError("IO", "字幕文件写入失败", str(exc)) from exc
-        self.repo.asset_upsert(project_id, "subtitle", str(srt_path), language=lang,
-                               bytes=srt_path.stat().st_size)
-        self.repo.asset_upsert(project_id, "subtitle", str(ass_path), language="bilingual",
-                               bytes=ass_path.stat().st_size)
-        self.repo.subtitle_upsert(
-            project_id, kind="bilingual", language=lang, format="ass",
-            segments=merged, path=str(ass_path), status="ready",
+        self.repo.asset_upsert(
+            project_id, "subtitle", str(srt_path), language=lang, bytes=srt_path.stat().st_size
+        )
+        self.repo.asset_upsert(
+            project_id,
+            "subtitle",
+            str(ass_path),
+            language="bilingual",
+            bytes=ass_path.stat().st_size,
         )
         self.repo.subtitle_upsert(
-            project_id, kind="translation", language=lang, format="json",
-            segments=items, path=str(srt_path), status="confirmed",
+            project_id,
+            kind="bilingual",
+            language=lang,
+            format="ass",
+            segments=merged,
+            path=str(ass_path),
+            status="ready",
         )
-        self.events.emit("library.changed", {"project_id": project_id, "reason": "subtitle.translate"})
+        self.repo.subtitle_upsert(
+            project_id,
+            kind="translation",
+            language=lang,
+            format="json",
+            segments=items,
+            path=str(srt_path),
+            status="confirmed",
+        )
+        self.events.emit(
+            "library.changed", {"project_id": project_id, "reason": "subtitle.translate"}
+        )
         return {
             "project_id": project_id,
             "target": lang,
@@ -2353,9 +2492,17 @@ class WorkbenchService:
         if not entries:
             raise WBError("VALIDATION", "这个 CSV 里没有可用的术语行", str(src))
         if merge:
-            have = {str(e).split("=", 1)[0]: i for i, e in
-                    enumerate([str(x).strip() for x in (self.cfg.subtitle.translate.glossary or [])])}
-            merged = [str(x).strip() for x in (self.cfg.subtitle.translate.glossary or []) if str(x).strip()]
+            have = {
+                str(e).split("=", 1)[0]: i
+                for i, e in enumerate(
+                    [str(x).strip() for x in (self.cfg.subtitle.translate.glossary or [])]
+                )
+            }
+            merged = [
+                str(x).strip()
+                for x in (self.cfg.subtitle.translate.glossary or [])
+                if str(x).strip()
+            ]
             for e in entries:
                 key = e.split("=", 1)[0]
                 if key in have:
@@ -2391,10 +2538,15 @@ class WorkbenchService:
 
     EXPORT_FORMATS = ("srt", "ass", "vtt")
 
-    def subtitle_export(self, project_id: str = "",
-                        formats: list[str] | None = None,
-                        mode: str = "none", height: int = 0,
-                        style_id: str = "", language: str = "") -> dict[str, Any]:
+    def subtitle_export(
+        self,
+        project_id: str = "",
+        formats: list[str] | None = None,
+        mode: str = "none",
+        height: int = 0,
+        style_id: str = "",
+        language: str = "",
+    ) -> dict[str, Any]:
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
         mode = str(mode or "none").strip().lower()
@@ -2434,9 +2586,12 @@ class WorkbenchService:
             draft_items = draft.get("segments") or []
             payload_items = translator.merge_bilingual(draft_items, layout)
             plain_items = [
-                {"id": seg.get("id"), "start_ms": seg.get("start_ms"),
-                 "end_ms": seg.get("end_ms"),
-                 "text": str(seg.get("translated_text") or seg.get("text") or "")}
+                {
+                    "id": seg.get("id"),
+                    "start_ms": seg.get("start_ms"),
+                    "end_ms": seg.get("end_ms"),
+                    "text": str(seg.get("translated_text") or seg.get("text") or ""),
+                }
                 for seg in subtitles.normalize(draft_items)
             ]
 
@@ -2464,10 +2619,10 @@ class WorkbenchService:
                 else:
                     body = subtitles.format_ass(payload_items, style=style, height=want)
                 path.write_text(body, encoding="utf-8")
-                self.repo.asset_upsert(project_id, "subtitle", str(path),
-                                       language=suffix, bytes=path.stat().st_size)
-                files.append({"format": fmt, "path": str(path),
-                              "bytes": path.stat().st_size})
+                self.repo.asset_upsert(
+                    project_id, "subtitle", str(path), language=suffix, bytes=path.stat().st_size
+                )
+                files.append({"format": fmt, "path": str(path), "bytes": path.stat().st_size})
         except OSError as exc:
             raise WBError("IO", "字幕文件写入失败", str(exc)) from exc
 
@@ -2480,8 +2635,9 @@ class WorkbenchService:
             "job_id": "",
         }
         if mode == "none":
-            self.events.emit("library.changed", {"project_id": project_id,
-                                                 "reason": "subtitle.export"})
+            self.events.emit(
+                "library.changed", {"project_id": project_id, "reason": "subtitle.export"}
+            )
             return result
 
         ass_path = next((Path(f["path"]) for f in files if f["format"] == "ass"), None)
@@ -2521,9 +2677,14 @@ class WorkbenchService:
         ctx.log(f"{'软字幕' if mode == 'soft' else '硬字幕'}：{output.name}")
         try:
             if mode == "soft":
-                self._ffmpeg.mux_subtitle(source, subtitle, output,
-                                          language="chi", title=subtitle.stem,
-                                          **ctx.guard_kwargs())
+                self._ffmpeg.mux_subtitle(
+                    source,
+                    subtitle,
+                    output,
+                    language="chi",
+                    title=subtitle.stem,
+                    **ctx.guard_kwargs(),
+                )
             else:
                 self._ffmpeg.burn_subtitle(source, subtitle, output, **ctx.guard_kwargs())
         except WBError:
@@ -2541,11 +2702,17 @@ class WorkbenchService:
             raise WBError("PROCESS_FAILED", "软字幕没有进容器，导出文件不可用", str(output))
         project_id = ctx.project_id or str(payload.get("project_id") or "")
         if project_id:
-            self.repo.asset_upsert(project_id, "export", str(output),
-                                   bytes=info.bytes, duration_ms=info.duration_ms,
-                                   language=str(payload.get("language") or ""))
-            self.events.emit("library.changed", {"project_id": project_id,
-                                                 "reason": "subtitle.export"})
+            self.repo.asset_upsert(
+                project_id,
+                "export",
+                str(output),
+                bytes=info.bytes,
+                duration_ms=info.duration_ms,
+                language=str(payload.get("language") or ""),
+            )
+            self.events.emit(
+                "library.changed", {"project_id": project_id, "reason": "subtitle.export"}
+            )
         ctx.progress(1.0, "完成")
         return {
             "output": str(output),
@@ -2580,7 +2747,9 @@ class WorkbenchService:
         payload.setdefault("model", row.get("model") or "")
         try:
             json_path.parent.mkdir(parents=True, exist_ok=True)
-            json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            json_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             srt_path.write_text(format_srt(items), encoding="utf-8")
         except OSError as exc:  # pragma: no cover - 磁盘满/权限问题
             self.events.toast(f"字幕文件写入失败：{exc}", "warning")
@@ -2655,20 +2824,27 @@ class WorkbenchService:
         items: list[dict[str, Any]] = []
         for card in self.cfg.llm.providers or []:
             for name in card.models or []:
-                items.append({
-                    "spec": f"{card.id}/{name}",
-                    "provider": card.id,
-                    "provider_name": card.name or card.id,
-                    "model": name,
-                })
+                items.append(
+                    {
+                        "spec": f"{card.id}/{name}",
+                        "provider": card.id,
+                        "provider_name": card.name or card.id,
+                        "model": name,
+                    }
+                )
         card_default, model_default = resolve_task_model(self.cfg.llm, "summary")
         default = ""
         if card_default is not None and model_default:
             default = f"{card_default.id}/{model_default}"
         return {"items": items, "default": default, "configured": bool(items)}
-    def summary_start(self, project_id: str = "", role: str = "",
-                      danmaku: list[str] | None = None,
-                      model: str = "") -> dict[str, Any]:
+
+    def summary_start(
+        self,
+        project_id: str = "",
+        role: str = "",
+        danmaku: list[str] | None = None,
+        model: str = "",
+    ) -> dict[str, Any]:
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
         project = self.repo.project_get(project_id)
@@ -2707,8 +2883,13 @@ class WorkbenchService:
                 "provider": provider_id,
             },
         )
-        return {"job": job, "role": picked, "model": client.model,
-                "provider": provider_id, "segments": len(row.get("segments") or [])}
+        return {
+            "job": job,
+            "role": picked,
+            "model": client.model,
+            "provider": provider_id,
+            "segments": len(row.get("segments") or []),
+        }
 
     def summary_get(self, id: str = "") -> dict[str, Any]:
         """读最新一版（``id`` 是项目 id）。没有总结时返回 ``found=False``。"""
@@ -2730,9 +2911,14 @@ class WorkbenchService:
         rows = self.repo.summary_list(id, limit=100)
         return {"versions": [_version_row(item) for item in rows]}
 
-    def summary_refine(self, project_id: str = "", requirement: str = "",
-                       role: str = "", summary_id: str = "",
-                       model: str = "") -> dict[str, Any]:
+    def summary_refine(
+        self,
+        project_id: str = "",
+        requirement: str = "",
+        role: str = "",
+        summary_id: str = "",
+        model: str = "",
+    ) -> dict[str, Any]:
         if not project_id:
             raise WBError("VALIDATION", "缺少 project_id")
         demand = (requirement or "").strip()
@@ -2744,7 +2930,11 @@ class WorkbenchService:
         row = self.repo.transcript_get(project_id)
         if not row or not (row.get("segments") or []):
             raise WBError("CONFLICT", "这条视频还没有字幕，先转录")
-        base = self.repo.summary_get(summary_id) if summary_id else self.repo.summary_latest(project_id)
+        base = (
+            self.repo.summary_get(summary_id)
+            if summary_id
+            else self.repo.summary_latest(project_id)
+        )
         if not base:
             raise WBError("CONFLICT", "还没有总结，先生成一版再改")
         provider_id, model_name = self._pick_model(model, "summary")
@@ -2758,7 +2948,8 @@ class WorkbenchService:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         # 上一版存的 role 属于 fallback（那次不是用户此刻的选择）：退役就回落并留痕。
         picked, role_notice = summarizer.resolve_role(
-            role, str(base.get("role") or "") or self.cfg.llm.role)
+            role, str(base.get("role") or "") or self.cfg.llm.role
+        )
         job = self.jobs.submit(
             "summary.run",
             project_id,
@@ -2867,8 +3058,10 @@ class WorkbenchService:
                             "stage": str((entry.get("project") or {}).get("stage") or ""),
                             "bvid": str((entry.get("project") or {}).get("bvid") or ""),
                             "has_summary": bool(entry.get("summary")),
-                            "one_line": str(((entry.get("summary") or {}).get("content") or {})
-                                            .get("one_line") or ""),
+                            "one_line": str(
+                                ((entry.get("summary") or {}).get("content") or {}).get("one_line")
+                                or ""
+                            ),
                         }
                         for entry in children
                     ],
@@ -2876,9 +3069,9 @@ class WorkbenchService:
             )
         return {"collections": items}
 
-    def summary_collection_overview(self, collection: str = "", role: str = "",
-                                    extra: str = "",
-                                    model: str = "") -> dict[str, Any]:
+    def summary_collection_overview(
+        self, collection: str = "", role: str = "", extra: str = "", model: str = ""
+    ) -> dict[str, Any]:
         title = (collection or "").strip()
         if not title:
             raise WBError("VALIDATION", "缺少合集名")
@@ -2889,8 +3082,11 @@ class WorkbenchService:
                 f"合集至少要有 {overview_core.MIN_ITEMS} 集才能出总览",
                 f"「{title}」现在只有 {len(children)} 集",
             )
-        missing = [str((entry.get("project") or {}).get("title") or "")
-                   for entry in children if not entry.get("summary")]
+        missing = [
+            str((entry.get("project") or {}).get("title") or "")
+            for entry in children
+            if not entry.get("summary")
+        ]
         if missing:
             raise WBError(
                 "CONFLICT",
@@ -2898,9 +3094,7 @@ class WorkbenchService:
                 "缺总结的：" + "、".join(missing[:5]),
             )
         provider_id, model_name = self._pick_model(model, "collection_overview")
-        client = self._llm_client_for(
-            provider_id, task="collection_overview", model=model_name
-        )
+        client = self._llm_client_for(provider_id, task="collection_overview", model=model_name)
         if not client.configured:
             raise WBError("LLM_NOT_CONFIGURED", "还没有配置大模型")
         picked, role_notice = summarizer.resolve_role(role, self.cfg.llm.role)
@@ -2919,8 +3113,14 @@ class WorkbenchService:
                 "provider": provider_id,
             },
         )
-        return {"job": job, "collection": title, "items": len(children),
-                "model": client.model, "provider": provider_id, "role": picked}
+        return {
+            "job": job,
+            "collection": title,
+            "items": len(children),
+            "model": client.model,
+            "provider": provider_id,
+            "role": picked,
+        }
 
     def summary_collection_get(self, id: str = "") -> dict[str, Any]:
         """``id`` 可以是合集名，也可以是 ``col_xxx``。界面两种都有。"""
@@ -2935,8 +3135,11 @@ class WorkbenchService:
         children = self._collection_children(title)
         return {
             "found": bool(latest),
-            "collection": {"id": collection_id, "title": title,
-                           "root_dir": str((row or {}).get("root_dir") or "")},
+            "collection": {
+                "id": collection_id,
+                "title": title,
+                "root_dir": str((row or {}).get("root_dir") or ""),
+            },
             "overview": latest or {},
             "versions": [_version_row(item) for item in versions],
             "children": [
@@ -2964,7 +3167,8 @@ class WorkbenchService:
         # job 重放读到的 role 是**已落库**的历史值，不是这次的选择 → 按合同算 fallback：
         # 退役就回落默认角色，并把原因写进任务日志（入口算出的说明随 payload 带过来）。
         role, notice = summarizer.resolve_role(
-            "", str(payload.get("role") or "") or self.cfg.llm.role)
+            "", str(payload.get("role") or "") or self.cfg.llm.role
+        )
         notice = str(payload.get("role_notice") or "") or notice
         if notice:
             ctx.log(notice)
@@ -3003,8 +3207,7 @@ class WorkbenchService:
             status="ready",
         )
         paths = self._write_collection_files(root, record, saved)
-        self.events.emit_now("library.changed", {"reason": "collection",
-                                                "collection": title})
+        self.events.emit_now("library.changed", {"reason": "collection", "collection": title})
         return {
             "summary_id": saved.get("id"),
             "collection": title,
@@ -3017,8 +3220,9 @@ class WorkbenchService:
             "chars": saved.get("chars"),
         }
 
-    def _write_collection_files(self, root: str, record: dict[str, Any],
-                                row: dict[str, Any]) -> list[str]:
+    def _write_collection_files(
+        self, root: str, record: dict[str, Any], row: dict[str, Any]
+    ) -> list[str]:
         """把总览写成 ``collection_overview.md`` / ``.json``（放在合集目录根上）。
 
         为什么不像单集那样 ``asset_upsert``：资产表挂在 ``project_id`` 上，合集不是
@@ -3052,7 +3256,11 @@ class WorkbenchService:
 
     def _publish_content(self, project_id: str, summary_id: str = "") -> dict[str, Any]:
         """取一版总结的 content。没有总结就没得写草稿，直接说清楚。"""
-        record = self.repo.summary_get(summary_id) if summary_id else self.repo.summary_latest(project_id)
+        record = (
+            self.repo.summary_get(summary_id)
+            if summary_id
+            else self.repo.summary_latest(project_id)
+        )
         if not record:
             raise WBError("CONFLICT", "这个项目还没有总结，先去「总结」页出一版")
         if record.get("project_id") != project_id:
@@ -3240,7 +3448,9 @@ class WorkbenchService:
                     "summary": row.get("summary"),
                     "content": row.get("content"),
                 },
-                on_retry=lambda msg: self.events.emit_now("app.toast", {"level": "info", "text": msg}),
+                on_retry=lambda msg: self.events.emit_now(
+                    "app.toast", {"level": "info", "text": msg}
+                ),
             )
         except WBError as exc:
             # 失败**保留草稿**：用户改两个字就能重发，不该让他从总结重来一遍
@@ -3370,7 +3580,6 @@ class WorkbenchService:
     def _publish_limits(self) -> dict[str, int]:
         return {"title": publisher_core.TITLE_MAX, "summary": self.cfg.publish.max_summary_chars}
 
-
     # ------------------------------------------------------- 切片候选（P3-01/02/03）
 
     def _clip_client(self) -> tuple[Any, str]:
@@ -3408,8 +3617,13 @@ class WorkbenchService:
                 raise
             return None, ""
 
-    def clip_analyze(self, project_id: str = "", kinds: list[str] | None = None,
-                     count: int = 12, refine: bool | None = None) -> dict[str, Any]:
+    def clip_analyze(
+        self,
+        project_id: str = "",
+        kinds: list[str] | None = None,
+        count: int = 12,
+        refine: bool | None = None,
+    ) -> dict[str, Any]:
         project = self.repo.project_get(project_id)
         if not project:
             raise WBError("NOT_FOUND", "找不到这个项目")
@@ -3495,9 +3709,7 @@ class WorkbenchService:
 
         # 旧的 AI 候选让位，`locked` 与手动的保留（P3-04：改过的不能被重跑冲掉）
         cleared = self.repo.candidate_clear(project_id)
-        rows = clipper.to_rows(
-            out["candidates"], source="ai", origin=str(out["source"])
-        )
+        rows = clipper.to_rows(out["candidates"], source="ai", origin=str(out["source"]))
         created = [self.repo.candidate_insert(project_id, **row) for row in rows]
         ctx.log(f"清掉旧候选 {cleared} 条，写入 {len(created)} 条")
         self.events.emit_now("clip.updated", {"project_id": project_id, "reason": "analyze"})
@@ -3523,14 +3735,8 @@ class WorkbenchService:
         # 磁吸线：句首/句尾都算一条，前端拖动时就往这些点上贴。
         # 在这里算而不是让前端自己扫字幕，是为了和 P3-02 的吸附用同一份坐标。
         edges = sorted(
-            {
-                int(seg.get("start_ms") or 0)
-                for seg in segments
-            }
-            | {
-                int(seg.get("end_ms") or 0)
-                for seg in segments
-            }
+            {int(seg.get("start_ms") or 0) for seg in segments}
+            | {int(seg.get("end_ms") or 0) for seg in segments}
         )
         decorated = self._decorate(project)
         sources = [item for item in self.repo.asset_list(id) if item.get("kind") == "source"]
@@ -3561,7 +3767,9 @@ class WorkbenchService:
         project = self.repo.project_get(project_id)
         if not project:
             return 40
-        sources = [item for item in self.repo.asset_list(project_id) if item.get("kind") == "source"]
+        sources = [
+            item for item in self.repo.asset_list(project_id) if item.get("kind") == "source"
+        ]
         path = str((sources[0] if sources else {}).get("path") or "")
         if not path:
             return 40
@@ -3597,10 +3805,16 @@ class WorkbenchService:
         endings = [int(seg.get("end_ms") or 0) for seg in transcript.get("segments") or []]
         return max(endings) if endings else 0
 
-    def clip_update(self, id: str = "", start_ms: int | None = None,
-                    end_ms: int | None = None, title: str | None = None,
-                    score: int | None = None, status: str = "",
-                    align: str = "") -> dict[str, Any]:
+    def clip_update(
+        self,
+        id: str = "",
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        title: str | None = None,
+        score: int | None = None,
+        status: str = "",
+        align: str = "",
+    ) -> dict[str, Any]:
         current = self.repo.candidate_get(id)
         if not current:
             raise WBError("NOT_FOUND", "找不到这个候选")
@@ -3638,8 +3852,15 @@ class WorkbenchService:
         self.events.emit_now("clip.updated", {"project_id": row["project_id"], "reason": "update"})
         return {"candidate": row}
 
-    def clip_create(self, project_id: str = "", kind: str = "highlight", start_ms: int = 0,
-                    end_ms: int = 0, title: str = "", align: str = "") -> dict[str, Any]:
+    def clip_create(
+        self,
+        project_id: str = "",
+        kind: str = "highlight",
+        start_ms: int = 0,
+        end_ms: int = 0,
+        title: str = "",
+        align: str = "",
+    ) -> dict[str, Any]:
         duration = self._clip_duration(project_id)
         if kind not in clipper.RANGES:
             raise WBError("VALIDATION", "类型只能是 " + " / ".join(clipper.RANGES))
@@ -3778,8 +3999,9 @@ class WorkbenchService:
             "attempts": out.get("attempts") or 1,
         }
 
-    def _grab_cover(self, candidate: dict[str, Any], *, at_ms: int | None = None,
-                    log: Any = None) -> dict[str, Any]:
+    def _grab_cover(
+        self, candidate: dict[str, Any], *, at_ms: int | None = None, log: Any = None
+    ) -> dict[str, Any]:
         """抽一张封面。失败只记一笔——没有封面不该让文案任务整体失败。"""
         try:
             project_id = str(candidate.get("project_id") or "")
@@ -3804,8 +4026,13 @@ class WorkbenchService:
                 log(f"封面没抽出来：{type(exc).__name__}")
             return {}
 
-    def clip_copy_save(self, candidate_id: str = "", title: str = "", description: str = "",
-                       tags: list[str] | None = None) -> dict[str, Any]:
+    def clip_copy_save(
+        self,
+        candidate_id: str = "",
+        title: str = "",
+        description: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
         candidate = self._candidate_or_404(candidate_id)
         copy = dict(candidate.get("copy") or {})
         copy["title"] = copywriter.cut(title, copywriter.TITLE_MAX)
@@ -3927,8 +4154,9 @@ class WorkbenchService:
             "dir": str(out_dir),
         }
 
-    def _clip_style_ass(self, project_id: str, style_id: str, *, height: int = 0,
-                        start_ms: int = 0, end_ms: int = 0) -> str:
+    def _clip_style_ass(
+        self, project_id: str, style_id: str, *, height: int = 0, start_ms: int = 0, end_ms: int = 0
+    ) -> str:
         """按指定样式把当前字幕重写成一份 ASS，返回路径。
 
         高度按导出目标给（竖屏 1920、横屏跟源）；探不到就按 720 基准走——
@@ -3963,18 +4191,31 @@ class WorkbenchService:
         style, _builtin, _file = self._style_resolve(style_id)
         body = subtitles.format_ass(items, style=style, height=want)
         # 用毫秒而不是秒：两条切片起点只差半秒也会生成不同文件，不会互相覆盖
-        name = (f"subtitle.{style['id']}.ass" if not shift_ms
-                else f"subtitle.{style['id']}@{shift_ms}ms.ass")
+        name = (
+            f"subtitle.{style['id']}.ass"
+            if not shift_ms
+            else f"subtitle.{style['id']}@{shift_ms}ms.ass"
+        )
         target = Path(str(project["root_dir"])) / "export" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
         return str(target)
 
-    def clip_export(self, project_id: str = "", candidate_id: str = "", mode: str = "precise",
-                    subtitle_mode: str = "none", aspect: str = "16x9",
-                    vertical_mode: str = "center", crop_x: float = 0.5,
-                    style_id: str = "", bgm: str = "", bgm_volume: float = -1,
-                    bgm_duck: bool | None = None, fade_ms: int = -1) -> dict[str, Any]:
+    def clip_export(
+        self,
+        project_id: str = "",
+        candidate_id: str = "",
+        mode: str = "precise",
+        subtitle_mode: str = "none",
+        aspect: str = "16x9",
+        vertical_mode: str = "center",
+        crop_x: float = 0.5,
+        style_id: str = "",
+        bgm: str = "",
+        bgm_volume: float = -1,
+        bgm_duck: bool | None = None,
+        fade_ms: int = -1,
+    ) -> dict[str, Any]:
         candidate = self.repo.candidate_get(candidate_id)
         if not candidate:
             raise WBError("NOT_FOUND", "找不到这个候选")
@@ -4069,8 +4310,7 @@ class WorkbenchService:
                     )
                 except WBError:
                     picks = [
-                        a for a in subs
-                        if str(a.get("path", "")).lower().endswith((".ass", ".ssa"))
+                        a for a in subs if str(a.get("path", "")).lower().endswith((".ass", ".ssa"))
                     ] or subs
                     subtitle = str(picks[0]["path"]) if picks else ""
                 if not subtitle:
@@ -4086,13 +4326,19 @@ class WorkbenchService:
                     # 项目磁盘上从来没有 srt，这里再要用户"先导出字幕"就多余了。
                     items = subtitles.window(
                         subtitles.normalize(
-                            list((self.repo.transcript_get(project_id) or {}).get("segments") or [])),
-                        int(candidate["start_ms"]), int(candidate["end_ms"]))
+                            list((self.repo.transcript_get(project_id) or {}).get("segments") or [])
+                        ),
+                        int(candidate["start_ms"]),
+                        int(candidate["end_ms"]),
+                    )
                     if not items:
                         raise WBError("CONFLICT", "这个项目还没有字幕，先转录或导出字幕再挂软字幕")
                     project = self.repo.project_get(project_id) or {}
-                    target = (Path(str(project.get("root_dir") or "")) / "export"
-                              / f"subtitle@{int(candidate['start_ms'])}ms.srt")
+                    target = (
+                        Path(str(project.get("root_dir") or ""))
+                        / "export"
+                        / f"subtitle@{int(candidate['start_ms'])}ms.srt"
+                    )
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(format_srt(items), encoding="utf-8")
                     subtitle = str(target)
@@ -4115,9 +4361,7 @@ class WorkbenchService:
             "bgm_volume": audio_mix.clamp_volume(
                 bgm_volume if bgm_volume >= 0 else self.cfg.clip.bgm_volume
             ),
-            "bgm_duck": bool(
-                self.cfg.clip.bgm_duck if bgm_duck is None else bgm_duck
-            ),
+            "bgm_duck": bool(self.cfg.clip.bgm_duck if bgm_duck is None else bgm_duck),
             "fade_ms": audio_mix.clamp_fade_ms(
                 span_ms, fade_ms if fade_ms >= 0 else self.cfg.clip.fade_ms
             ),
@@ -4164,14 +4408,22 @@ class WorkbenchService:
         span = sum(max(0, int(c["end_ms"]) - int(c["start_ms"])) for c in candidates)
         return int(size * span / total * 1.2) + 1_000_000
 
-    def clip_export_batch(self, project_id: str = "", candidate_ids: list[str] | None = None,
-                          mode: str = "precise", subtitle_mode: str = "none",
-                          aspect: str = "16x9", vertical_mode: str = "center",
-                          crop_x: float = 0.5, style_id: str = "",
-                          skip_exported: bool = False,
-                          bgm: str = "", bgm_volume: float = -1,
-                          bgm_duck: bool | None = None,
-                          fade_ms: int = -1) -> dict[str, Any]:
+    def clip_export_batch(
+        self,
+        project_id: str = "",
+        candidate_ids: list[str] | None = None,
+        mode: str = "precise",
+        subtitle_mode: str = "none",
+        aspect: str = "16x9",
+        vertical_mode: str = "center",
+        crop_x: float = 0.5,
+        style_id: str = "",
+        skip_exported: bool = False,
+        bgm: str = "",
+        bgm_volume: float = -1,
+        bgm_duck: bool | None = None,
+        fade_ms: int = -1,
+    ) -> dict[str, Any]:
         """多选切片一起导出：每条一个 ``clip.export`` 任务，共用同一个 ``batch_id``。
 
         并发靠 ``clip.export`` 的信号量（2），这里不排第二层队；一条失败不影响其他，
@@ -4213,12 +4465,18 @@ class WorkbenchService:
             if str(bgm or "").strip():
                 bgm_sig = str(Path(str(bgm).strip()).expanduser().resolve())
             sig = (
-                candidate_id, mode, subtitle_mode, aspect, vertical_mode,
+                candidate_id,
+                mode,
+                subtitle_mode,
+                aspect,
+                vertical_mode,
                 bgm_sig,
-                str(audio_mix.clamp_fade_ms(
-                    max(1, int(candidate["end_ms"]) - int(candidate["start_ms"])),
-                    self.cfg.clip.fade_ms if fade_ms < 0 else fade_ms,
-                )),
+                str(
+                    audio_mix.clamp_fade_ms(
+                        max(1, int(candidate["end_ms"]) - int(candidate["start_ms"])),
+                        self.cfg.clip.fade_ms if fade_ms < 0 else fade_ms,
+                    )
+                ),
             )
             if skip_exported and sig in done:
                 skipped.append({"candidate_id": candidate_id, "reason": "这条已经导出过（同参数）"})
@@ -4312,9 +4570,7 @@ class WorkbenchService:
                     "subtitle_mode": str(result.get("subtitle_mode") or ""),
                     # 竖屏标记：队列里要能分清 16:9 和 9:16，别把竖屏当成原画幅
                     "aspect": str(
-                        result.get("aspect")
-                        or (job.get("payload") or {}).get("aspect")
-                        or "16x9"
+                        result.get("aspect") or (job.get("payload") or {}).get("aspect") or "16x9"
                     ),
                     "vertical_mode": str(
                         result.get("vertical_mode")
@@ -4345,8 +4601,14 @@ class WorkbenchService:
         vertical_mode = str(payload.get("vertical_mode") or "center")
         crop_x = reframe.clamp_x(payload.get("crop_x"))
         ctx.progress(0.1)
-        line = ("精确重编码" if mode == "precise" else "快速切（关键帧对齐）")
-        line += "，烧字幕" if subtitle_mode == "hard" else "，带软字幕" if subtitle_mode == "soft" else ""
+        line = "精确重编码" if mode == "precise" else "快速切（关键帧对齐）"
+        line += (
+            "，烧字幕"
+            if subtitle_mode == "hard"
+            else "，带软字幕"
+            if subtitle_mode == "soft"
+            else ""
+        )
         if aspect == "9x16":
             label = {"center": "居中", "blur": "模糊背景", "follow": "人脸跟随"}.get(
                 vertical_mode, vertical_mode
@@ -4355,7 +4617,8 @@ class WorkbenchService:
         ctx.log(line)
         if payload.get("bgm"):
             ctx.log(
-                "混入背景音乐：" + Path(str(payload.get("bgm"))).name
+                "混入背景音乐："
+                + Path(str(payload.get("bgm"))).name
                 + ("（人声出现时自动压低）" if payload.get("bgm_duck", True) else "")
             )
         if int(payload.get("fade_ms") or 0) > 0:
@@ -4491,9 +4754,13 @@ class WorkbenchService:
             "apps": apps,
         }
 
-    def clip_deliver(self, project_id: str = "", candidate_id: str = "",
-                     channel: str = "jianying",
-                     place_in_app: bool = False) -> dict[str, Any]:
+    def clip_deliver(
+        self,
+        project_id: str = "",
+        candidate_id: str = "",
+        channel: str = "jianying",
+        place_in_app: bool = False,
+    ) -> dict[str, Any]:
         candidate = self._candidate_or_404(candidate_id)
         if project_id and str(candidate["project_id"]) != project_id:
             raise WBError("VALIDATION", "候选不属于这个项目")
@@ -4534,7 +4801,8 @@ class WorkbenchService:
         if best:
             return best, True
         sources = [
-            a for a in self.repo.asset_list(str(candidate.get("project_id") or ""))
+            a
+            for a in self.repo.asset_list(str(candidate.get("project_id") or ""))
             if a.get("kind") == "source"
         ]
         return (str(sources[0]["path"]) if sources else ""), False
@@ -4619,7 +4887,9 @@ class WorkbenchService:
             meta_tpl = nle.load_template(nle.DRAFT_META_TEMPLATE)
             root = nle.find_jianying_root()
             placed = bool(root and payload.get("place_in_app"))
-            base = root if placed else Path(str(project.get("root_dir") or "")) / "export" / "jianying"
+            base = (
+                root if placed else Path(str(project.get("root_dir") or "")) / "export" / "jianying"
+            )
             folder = unique_path(Path(str(base)) / name)
             subtitles = self._candidate_segments(candidate)
             content = nle.jianying_document(
@@ -4636,14 +4906,18 @@ class WorkbenchService:
             )
             ctx.progress(0.5)
             meta = nle.jianying_meta(
-                meta_tpl, name=folder.name, folder=folder,
+                meta_tpl,
+                name=folder.name,
+                folder=folder,
                 created_ms=int(time.time() * 1000),
             )
             written = nle.write_jianying(folder, content, meta)
             if placed:
                 notes.append(f"已放进剪映草稿箱：打开剪映就能看到「{folder.name}」")
             elif payload.get("place_in_app"):
-                notes.append("没检测到剪映草稿箱，草稿放在本项目的 export/jianying 下，可手动拷进去")
+                notes.append(
+                    "没检测到剪映草稿箱，草稿放在本项目的 export/jianying 下，可手动拷进去"
+                )
             else:
                 notes.append("草稿放在本项目的 export/jianying 下，拷进剪映草稿箱即能打开")
             notes.append("字幕样式不跟随：草稿里的字幕用中性样式，进剪映后自己调一次")
@@ -4671,7 +4945,9 @@ class WorkbenchService:
             )
             ctx.progress(0.5)
             written = nle.write_otio(target, doc)
-            notes.append("用达芬奇「文件 → 导入 → 时间线」选这个 .otio；素材按原路径引用，别挪源文件")
+            notes.append(
+                "用达芬奇「文件 → 导入 → 时间线」选这个 .otio；素材按原路径引用，别挪源文件"
+            )
             notes.append("字幕样式不跟随：OTIO 只带画面与时长，字幕请在成片里烧好或单独导入")
             result.update(
                 {"path": written["path"], "files": [written["path"]], "bytes": written["bytes"]}
@@ -4702,9 +4978,7 @@ class WorkbenchService:
                 files=[dest for _src, dest in files],
             )
             ctx.progress(0.5)
-            written = nle.write_bundle(
-                folder, files=files, notes=note_text, copy_text=copy_text
-            )
+            written = nle.write_bundle(folder, files=files, notes=note_text, copy_text=copy_text)
             if not is_export:
                 notes.append("这段还没导出成片，包里放的是整段源视频（时长比切片长）")
             notes.append("按包里的「导入说明.txt」拖进剪映/达芬奇即可；字幕样式不跟随")
@@ -4727,9 +5001,7 @@ class WorkbenchService:
             status="ready",
             duration_ms=0 if channel != "otio" else span,
         )
-        self.events.emit_now(
-            "clip.updated", {"project_id": project_id, "reason": "deliver"}
-        )
+        self.events.emit_now("clip.updated", {"project_id": project_id, "reason": "deliver"})
         for note in notes:
             ctx.log(note)
         result["notes"] = notes
@@ -4820,10 +5092,15 @@ class WorkbenchService:
             except FileNotFoundError:
                 pass
             self.events.emit_now("clip.updated", {"project_id": project_id, "reason": "focus"})
-            return {"project_id": project_id, "focus": [], "manual": 0, "cleared": True,
-                    "path": str(path)}
+            return {
+                "project_id": project_id,
+                "focus": [],
+                "manual": 0,
+                "cleared": True,
+                "path": str(path),
+            }
         points: list[dict[str, Any]] = []
-        for item in (focus or []):
+        for item in focus or []:
             if not isinstance(item, dict):
                 continue
             try:
@@ -4835,7 +5112,9 @@ class WorkbenchService:
         old = _load_json(path)
         keep = old if isinstance(old, dict) else {}
         detected = [
-            point for point in reframe.load_focus(path) if point.get("t_ms") not in {p["t_ms"] for p in points}
+            point
+            for point in reframe.load_focus(path)
+            if point.get("t_ms") not in {p["t_ms"] for p in points}
         ]
         merged = sorted(detected + points, key=lambda point: point["t_ms"])
         meta: dict[str, Any] = {
@@ -5071,7 +5350,8 @@ class WorkbenchService:
         # job 重放读到的 role 是**已落库**的历史值，不是这次的选择 → 按合同算 fallback：
         # 退役就回落默认角色，并把原因写进任务日志（入口算出的说明随 payload 带过来）。
         role, notice = summarizer.resolve_role(
-            "", str(payload.get("role") or "") or self.cfg.llm.role)
+            "", str(payload.get("role") or "") or self.cfg.llm.role
+        )
         notice = str(payload.get("role_notice") or "") or notice
         if notice:
             ctx.log(notice)
@@ -5081,8 +5361,10 @@ class WorkbenchService:
             previous = self.repo.summary_get(str(payload.get("previous_id") or ""))
             if not previous:
                 raise WBError("CONFLICT", "上一版总结不见了，重新生成一次")
-            ctx.log(f"按你的要求改第 {previous.get('version')} 版："
-                    f"{str(payload.get('requirement') or '')[:40]}")
+            ctx.log(
+                f"按你的要求改第 {previous.get('version')} 版："
+                f"{str(payload.get('requirement') or '')[:40]}"
+            )
             result = summarizer.refine(
                 _bundle_project(project),
                 segments,
@@ -5126,8 +5408,7 @@ class WorkbenchService:
         # 打回 summarized——那会让切片台的数据看起来"还没做"。
         if stage in ("new", "downloaded", "subtitle", "transcribed"):
             self.repo.project_update(project_id, stage="summarized")
-        self.events.emit_now("library.changed", {"project_id": project_id,
-                                                "reason": "summary"})
+        self.events.emit_now("library.changed", {"project_id": project_id, "reason": "summary"})
         return {
             "summary_id": saved.get("id"),
             "version": saved.get("version"),
@@ -5161,16 +5442,18 @@ class WorkbenchService:
         try:
             root.mkdir(parents=True, exist_ok=True)
             json_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             md_path.write_text(str(row.get("content_md") or ""), encoding="utf-8")
-            history.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            history.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as exc:
             raise WBError("IO", "总结写入失败", str(exc)) from exc
         paths = [str(md_path), str(json_path)]
         for path in (md_path, json_path):
             self.repo.asset_upsert(
-                project_id, "summary", str(path),
+                project_id,
+                "summary",
+                str(path),
                 bytes=path.stat().st_size if path.exists() else None,
             )
         return paths
@@ -5295,8 +5578,10 @@ class WorkbenchService:
                 json.dumps(result.get("differences") or [], ensure_ascii=False),
             )
 
-        directory = Path(out_dir) if out_dir else merger.default_output_dir(
-            str(Path(usable[0]["path"]).parent), self.cfg.media_root
+        directory = (
+            Path(out_dir)
+            if out_dir
+            else merger.default_output_dir(str(Path(usable[0]["path"]).parent), self.cfg.media_root)
         )
         suffix = "_quick" if mode == "quick" else "_precise"
         name = out_name.strip() or merger.output_name(usable, suffix=suffix)
@@ -5579,7 +5864,9 @@ class WorkbenchService:
         }
         errors = chr(10).join(f"{code}: {text}" for code, text in sorted(ERROR_CODES.items()))
         counts = {
-            "projects": self.repo.project_count() if hasattr(self.repo, "project_count") else "(未统计)",
+            "projects": self.repo.project_count()
+            if hasattr(self.repo, "project_count")
+            else "(未统计)",
         }
         return [
             ("环境", chr(10).join(log_mod.environment_lines())),
@@ -5599,8 +5886,17 @@ class WorkbenchService:
             ),
             ("依赖", chr(10).join(f"{key}: {value}" for key, value in deps.items())),
             ("数据库", chr(10).join(f"{key}: {value}" for key, value in db_info.items())),
-            ("目录", chr(10).join([f"media: {self.cfg.media_root}", f"cache: {self.cfg.cache_root}",
-                                f"models: {self.cfg.models_root}", f"logs: {self.logs['dir']}"])),
+            (
+                "目录",
+                chr(10).join(
+                    [
+                        f"media: {self.cfg.media_root}",
+                        f"cache: {self.cfg.cache_root}",
+                        f"models: {self.cfg.models_root}",
+                        f"logs: {self.logs['dir']}",
+                    ]
+                ),
+            ),
             ("错误码表", errors),
             ("统计", chr(10).join(f"{key}: {value}" for key, value in counts.items())),
             ("启动恢复", json.dumps(getattr(self, "recovery", {}), ensure_ascii=False, indent=2)),
@@ -5692,8 +5988,13 @@ class WorkbenchService:
         limit = max(1, min(2000, int(lines or 200)))
         rows = log_mod.tail_lines(self.logs["file"], limit)
         text = log_mod.redact(chr(10).join(rows))
-        return {"file": self.logs["file"], "dir": self.logs["dir"], "lines": len(rows),
-                "text": text, "files": log_mod.list_logs(self.logs["dir"])}
+        return {
+            "file": self.logs["file"],
+            "dir": self.logs["dir"],
+            "lines": len(rows),
+            "text": text,
+            "files": log_mod.list_logs(self.logs["dir"]),
+        }
 
     def open_url(self, url: str) -> dict[str, Any]:
         """用系统浏览器打开一个链接（发布记录里的「打开视频」）。
@@ -5802,8 +6103,14 @@ def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     按库里所有版本求和，不是「最后一次的账」——小村的问题是「这条视频一共花了多少」，
     打磨七八版之后只看最新一版会严重低估。缺字段的老版本按 0 计，不报错。
     """
-    out = {"versions": len(rows), "calls": 0, "prompt_tokens": 0,
-           "completion_tokens": 0, "total_tokens": 0, "seconds": 0.0}
+    out = {
+        "versions": len(rows),
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "seconds": 0.0,
+    }
     for row in rows:
         usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
         for key in ("calls", "prompt_tokens", "completion_tokens"):
@@ -5820,7 +6127,8 @@ def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if not given:
             try:
                 given = int(usage.get("prompt_tokens") or 0) + int(
-                    usage.get("completion_tokens") or 0)
+                    usage.get("completion_tokens") or 0
+                )
             except (TypeError, ValueError):
                 given = 0
         out["total_tokens"] += given

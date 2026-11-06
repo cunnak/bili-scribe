@@ -25,7 +25,10 @@ _INVALID = set('<>:"/\\|?*')
 
 # 设备名不能作为文件名主干，即使带扩展名也不行（CON.txt 同样打不开）。
 _RESERVED = {
-    "CON", "PRN", "AUX", "NUL",
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
 }

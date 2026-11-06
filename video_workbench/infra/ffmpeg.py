@@ -208,8 +208,10 @@ class FFmpeg:
         out = self.run(
             [
                 ffprobe,
-                "-v", "error",
-                "-print_format", "json",
+                "-v",
+                "error",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
                 str(target),
@@ -243,12 +245,20 @@ class FFmpeg:
         self.run(
             [
                 ffmpeg,
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-ss", f"{max(0.0, float(at)):.3f}",
-                "-i", str(src),
-                "-frames:v", "1",
-                "-vf", f"scale={int(width)}:-2",
-                "-q:v", str(int(quality)),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{max(0.0, float(at)):.3f}",
+                "-i",
+                str(src),
+                "-frames:v",
+                "1",
+                "-vf",
+                f"scale={int(width)}:-2",
+                "-q:v",
+                str(int(quality)),
                 str(out),
             ],
             timeout=120,
@@ -272,10 +282,19 @@ class FFmpeg:
         self.run(
             [
                 ffmpeg,
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(src),
-                "-vn", "-ac", str(int(channels)), "-ar", str(int(sample_rate)),
-                "-c:a", "pcm_s16le",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(src),
+                "-vn",
+                "-ac",
+                str(int(channels)),
+                "-ar",
+                str(int(sample_rate)),
+                "-c:a",
+                "pcm_s16le",
                 str(out),
             ]
         )
@@ -406,9 +425,7 @@ class FFmpeg:
             on_proc=on_proc,
         )
         if not target.is_file() or target.stat().st_size <= 0:
-            raise WBError(
-                "PROCESS_FAILED", "拼接没有产生文件", str(target), retryable=True
-            )
+            raise WBError("PROCESS_FAILED", "拼接没有产生文件", str(target), retryable=True)
         return target
 
     def _reap(self, proc: subprocess.Popen, grace: float = 5.0) -> None:
@@ -498,9 +515,7 @@ class FFmpeg:
                     except ValueError:
                         micros = 0
                     on_progress(
-                        merger_core.merge_progress(
-                            micros, segments_ms, expected_ms=expected_ms
-                        )
+                        merger_core.merge_progress(micros, segments_ms, expected_ms=expected_ms)
                     )
                 if should_cancel and should_cancel():
                     canceled = True
@@ -517,7 +532,9 @@ class FFmpeg:
             kill_tree(proc.pid)
             self._reap(proc)
             raise WBError(
-                "PROCESS_FAILED", "合并超时，已中止", f"{Path(ffmpeg).name} 超过 {timeout or self.timeout}s",
+                "PROCESS_FAILED",
+                "合并超时，已中止",
+                f"{Path(ffmpeg).name} 超过 {timeout or self.timeout}s",
                 retryable=True,
             ) from None
         finally:
@@ -537,9 +554,7 @@ class FFmpeg:
                 target.unlink(missing_ok=True)
             except OSError:
                 pass
-            raise WBError(
-                "PROCESS_FAILED", "精确合并失败", detail, retryable=True
-            )
+            raise WBError("PROCESS_FAILED", "精确合并失败", detail, retryable=True)
         return target
 
     def mux_subtitle(
@@ -562,12 +577,27 @@ class FFmpeg:
         output = Path(dest)
         output.parent.mkdir(parents=True, exist_ok=True)
         args = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(src), "-i", str(subtitle),
-            "-map", "0:v:0", "-map", "0:a?",
-            "-map", "1:0",
-            "-c", "copy", "-c:s", "mov_text",
-            "-metadata:s:s:0", f"language={language}",
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(src),
+            "-i",
+            str(subtitle),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-map",
+            "1:0",
+            "-c",
+            "copy",
+            "-c:s",
+            "mov_text",
+            "-metadata:s:s:0",
+            f"language={language}",
         ]
         if title:
             args += ["-metadata:s:s:0", f"title={title}"]
@@ -592,13 +622,27 @@ class FFmpeg:
         output.parent.mkdir(parents=True, exist_ok=True)
         self.run(
             [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(src),
-                "-vf", subtitle_filter(subtitle),
-                "-c:v", "libx264", "-crf", str(int(crf)), "-preset", preset,
-                "-pix_fmt", "yuv420p",
-                "-c:a", "copy",
-                "-movflags", "+faststart",
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(src),
+                "-vf",
+                subtitle_filter(subtitle),
+                "-c:v",
+                "libx264",
+                "-crf",
+                str(int(crf)),
+                "-preset",
+                preset,
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "copy",
+                "-movflags",
+                "+faststart",
                 str(output),
             ],
             should_cancel=should_cancel,
@@ -626,7 +670,9 @@ def mirror_for_filter(path: Path) -> Path:
     import shutil
     import tempfile
 
-    stem = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in path.stem)[:60] or "subtitle"
+    stem = (
+        "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in path.stem)[:60] or "subtitle"
+    )
     digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:10]
     name = f"{stem}-{digest}{path.suffix.lower()}"
     roots = [Path(tempfile.gettempdir()), Path(os.environ.get("SystemDrive", "C:")) / "wb-temp"]
@@ -636,9 +682,11 @@ def mirror_for_filter(path: Path) -> Path:
         dest = root / "video_workbench" / _FILTER_MIRROR / name
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            if (not dest.is_file()
-                    or dest.stat().st_size != path.stat().st_size
-                    or dest.stat().st_mtime_ns < path.stat().st_mtime_ns):
+            if (
+                not dest.is_file()
+                or dest.stat().st_size != path.stat().st_size
+                or dest.stat().st_mtime_ns < path.stat().st_mtime_ns
+            ):
                 shutil.copyfile(path, dest)
         except OSError:
             continue

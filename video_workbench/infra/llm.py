@@ -58,7 +58,9 @@ class ChatError(WBError):
 def _urllib_transport(proxy: str = "") -> Transport:
     """默认传输：标准库 urllib。代理只认配置里的 llm.proxy（不走系统设置）。"""
 
-    def send(url: str, payload: bytes, headers: Mapping[str, str], timeout: float) -> tuple[int, str]:
+    def send(
+        url: str, payload: bytes, headers: Mapping[str, str], timeout: float
+    ) -> tuple[int, str]:
         request = urllib.request.Request(url, data=payload, headers=dict(headers), method="POST")
         opener = _opener_for(proxy, url)
         try:
@@ -183,12 +185,14 @@ def normalize_models(payload: Any) -> list[dict[str, str]]:
 class _SupportsChat(Protocol):  # pragma: no cover - 仅用于类型说明
     def chat(self, messages: Iterable[dict[str, str]], **kwargs: Any) -> str: ...
 
+
 def _as_int(value: Any) -> int:
     try:
         number = int(value)
     except (TypeError, ValueError):
         return 0
     return max(0, number)
+
 
 class ChatClient:
     """一次请求 = 一次 ``chat``。批量、分批、进度由调用方管（那是业务逻辑）。"""
@@ -293,7 +297,9 @@ class ChatClient:
         try:
             payload = json.loads(text or "null")
         except ValueError as exc:
-            raise ChatError("LLM_BAD_RESPONSE", "模型列表返回的不是 JSON", (text or "")[:400]) from exc
+            raise ChatError(
+                "LLM_BAD_RESPONSE", "模型列表返回的不是 JSON", (text or "")[:400]
+            ) from exc
         models = normalize_models(payload)
         if not models:
             # 200 但空列表：多半是网关不实现 /models（有的只认 chat 路径）。
@@ -308,8 +314,9 @@ class ChatClient:
     # ------------------------------------------------------------- 装配
 
     @classmethod
-    def from_config(cls, cfg: Any, *, transport: Transport | None = None,
-                    task: str = "", provider: str = "") -> "ChatClient":
+    def from_config(
+        cls, cfg: Any, *, transport: Transport | None = None, task: str = "", provider: str = ""
+    ) -> "ChatClient":
         """按配置装配客户端。
 
         **传 ``task`` 才会走服务商映射**（``llm.tasks.<task>``），传 ``provider``
@@ -348,7 +355,9 @@ class ChatClient:
             )
         provider_obj, model = resolve_task_model(llm, task)
         return cls(
-            base_url=str(getattr(provider_obj, "base_url", "") or getattr(llm, "base_url", "") or ""),
+            base_url=str(
+                getattr(provider_obj, "base_url", "") or getattr(llm, "base_url", "") or ""
+            ),
             api_key=str(getattr(provider_obj, "api_key", "") or getattr(llm, "api_key", "") or ""),
             model=str(model or ""),
             timeout=float(getattr(llm, "timeout_seconds", 120) or 120),
@@ -367,7 +376,11 @@ class ChatClient:
         """没配置就别往下走，省得在第一批请求里炸出 401。"""
         missing = [
             name
-            for name, value in (("base_url", self.base_url), ("api_key", self.api_key), ("model", self.model))
+            for name, value in (
+                ("base_url", self.base_url),
+                ("api_key", self.api_key),
+                ("model", self.model),
+            )
             if not value
         ]
         if missing:
@@ -455,7 +468,9 @@ class ChatClient:
     def _error_for(self, status: int, text: str) -> ChatError:
         snippet = (text or "").strip()[:400]
         if status == 401:
-            return ChatError("LLM_AUTH", "大模型鉴权失败（api_key 不对或没有权限）", snippet, status)
+            return ChatError(
+                "LLM_AUTH", "大模型鉴权失败（api_key 不对或没有权限）", snippet, status
+            )
         if status == 403:
             # 403 ≠ 密钥错。最常见是 CDN 按客户端指纹/UA 拦人（Cloudflare 1010）。
             # 文案必须把这条说清，否则用户会一直怀疑自己的 key。
@@ -470,7 +485,9 @@ class ChatClient:
         if status == 429:
             return ChatError("LLM_RATE_LIMIT", "大模型限流，稍后再试", snippet, status)
         if status in (400, 404, 422):
-            return ChatError("LLM_BAD_REQUEST", "大模型拒绝了这次请求（模型名或参数不对）", snippet, status)
+            return ChatError(
+                "LLM_BAD_REQUEST", "大模型拒绝了这次请求（模型名或参数不对）", snippet, status
+            )
         if status >= 500:
             return ChatError("LLM_UPSTREAM", "大模型服务端错误", snippet, status)
         return ChatError("LLM_FAILED", f"大模型调用失败（HTTP {status}）", snippet, status)
@@ -480,16 +497,22 @@ class ChatClient:
         try:
             data = json.loads(text)
         except ValueError as exc:
-            raise ChatError("LLM_BAD_RESPONSE", "大模型返回的不是 JSON", (text or "")[:400]) from exc
+            raise ChatError(
+                "LLM_BAD_RESPONSE", "大模型返回的不是 JSON", (text or "")[:400]
+            ) from exc
         choices = data.get("choices") or []
         if not choices:
             # 有些网关把错误塞进 200 的 body 里，这种情况也要说清楚
-            raise ChatError("LLM_BAD_RESPONSE", "大模型没有返回内容", json.dumps(data, ensure_ascii=False)[:400])
+            raise ChatError(
+                "LLM_BAD_RESPONSE", "大模型没有返回内容", json.dumps(data, ensure_ascii=False)[:400]
+            )
         choice = choices[0] or {}
         message = choice.get("message") or {}
         content = message.get("content")
         if isinstance(content, list):  # 少数实现返回分段结构
-            content = "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+            content = "".join(
+                str(part.get("text", "")) for part in content if isinstance(part, dict)
+            )
         out = str(content or "").strip()
         if out:
             return out
@@ -506,7 +529,8 @@ class ChatClient:
                 "模型这次只输出了思考过程，正文是空的（预算被思考吃掉了）",
                 (
                     "finish_reason=%s，思考用了 %s tokens。把 max_tokens 调大，"
-                    "或换一个非推理模型，再试。" % (choice.get("finish_reason") or "?", spent or "?")
+                    "或换一个非推理模型，再试。"
+                    % (choice.get("finish_reason") or "?", spent or "?")
                 ),
             )
         raise ChatError(

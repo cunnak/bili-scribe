@@ -51,11 +51,15 @@ class ModelSpec:
 # 仓库 id 与体积按 CTranslate2 的 int8/fp16 转换版量级估的；体积只用于设置页
 # 提前告诉用户"要下多大"，不参与任何判定。
 SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec("tiny", "tiny · 最快，准确率低", "Systran/faster-whisper-tiny", 75 * MB, "只适合试跑"),
+    ModelSpec(
+        "tiny", "tiny · 最快，准确率低", "Systran/faster-whisper-tiny", 75 * MB, "只适合试跑"
+    ),
     ModelSpec("base", "base · 快", "Systran/faster-whisper-base", 145 * MB, ""),
     ModelSpec("small", "small · 均衡", "Systran/faster-whisper-small", 484 * MB, ""),
     ModelSpec("medium", "medium · 较准，较慢", "Systran/faster-whisper-medium", 1500 * MB, ""),
-    ModelSpec("large-v3", "large-v3 · 最准", "Systran/faster-whisper-large-v3", 3100 * MB, "CPU 上很慢"),
+    ModelSpec(
+        "large-v3", "large-v3 · 最准", "Systran/faster-whisper-large-v3", 3100 * MB, "CPU 上很慢"
+    ),
     ModelSpec(
         "large-v3-turbo",
         "large-v3-turbo · 默认",
@@ -207,8 +211,13 @@ def download(
     if _files_ok(target):
         if progress:
             progress(1.0, "已下载")
-        return {"name": found.name, "downloaded": True, "bytes_on_disk": dir_size(target),
-                "path": str(target), "cached": True}
+        return {
+            "name": found.name,
+            "downloaded": True,
+            "bytes_on_disk": dir_size(target),
+            "path": str(target),
+            "cached": True,
+        }
 
     if os.environ.get("HF_ENDPOINT") is None:
         os.environ["HF_ENDPOINT"] = _hf_endpoint()
@@ -248,12 +257,19 @@ def download(
         )
 
     if not _files_ok(target):
-        raise WBError("NETWORK", "模型下载不完整", f"缺 {REQUIRED_ALWAYS} 或 {REQUIRED_ANY}，目录：{target}")
+        raise WBError(
+            "NETWORK", "模型下载不完整", f"缺 {REQUIRED_ALWAYS} 或 {REQUIRED_ANY}，目录：{target}"
+        )
 
     if progress:
         progress(1.0, "下载完成")
-    return {"name": found.name, "downloaded": True, "bytes_on_disk": dir_size(target),
-            "path": str(target), "cached": False}
+    return {
+        "name": found.name,
+        "downloaded": True,
+        "bytes_on_disk": dir_size(target),
+        "path": str(target),
+        "cached": False,
+    }
 
 
 def resolve_for_use(models_root: str | os.PathLike[str], name: str) -> dict[str, Any]:

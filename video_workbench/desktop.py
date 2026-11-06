@@ -195,7 +195,9 @@ def _ensure_streams() -> None:
     except OSError:
         import tempfile
 
-        log = open(Path(tempfile.gettempdir()) / "video-workbench.log", "a", encoding="utf-8", buffering=1)
+        log = open(
+            Path(tempfile.gettempdir()) / "video-workbench.log", "a", encoding="utf-8", buffering=1
+        )
     if sys.stdout is None or _frozen():
         sys.stdout = log
     if sys.stderr is None or _frozen():
@@ -392,6 +394,7 @@ def _run_ytdlp(argv: list[str]) -> int:
         return 2
     return int(ytdlp_main(argv) or 0)
 
+
 # Windows 上「没有控制台」的父进程去起「控制台子系统」的子进程（ffmpeg.exe 就是），
 # 系统会给子进程新开一个黑窗口。下载时那两个一闪而过的终端就是这么来的：
 # yt-dlp 合并音视频要调 ffmpeg。CREATE_NO_WINDOW 让子进程照常跑、不建窗口。
@@ -416,6 +419,7 @@ def _hide_console_children() -> None:
     subprocess.Popen.__init__ = patched  # type: ignore[method-assign]
     subprocess.Popen._wb_no_window = True  # type: ignore[attr-defined]
 
+
 def _bind_stdio() -> None:
     """把 stdout/stderr 接回真正的句柄 1/2，不接日志文件。
 
@@ -428,11 +432,15 @@ def _bind_stdio() -> None:
     for name, fd in (("stdout", 1), ("stderr", 2)):
         try:
             stream = io.TextIOWrapper(
-                io.FileIO(fd, "w", closefd=False), encoding="utf-8", errors="replace", line_buffering=True
+                io.FileIO(fd, "w", closefd=False),
+                encoding="utf-8",
+                errors="replace",
+                line_buffering=True,
             )
         except OSError:
             stream = open(os.devnull, "w", encoding="utf-8")
         setattr(sys, name, stream)
+
 
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
@@ -449,11 +457,18 @@ def main(argv: list[str] | None = None) -> int:
     _ensure_streams()
 
     parser = argparse.ArgumentParser(description=f"{APP_NAME} 桌面版")
-    parser.add_argument("--config", default=None, help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只在首次启动时被只读搬运一次）")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只在首次启动时被只读搬运一次）",
+    )
     parser.add_argument("--debug", action="store_true", help="打开 WebView 开发者工具")
     parser.add_argument("--check", action="store_true", help="只做装配自检，不开窗口")
-    parser.add_argument("--roles", action="store_true",
-                        help="离线打印角色名单与各自真源（写 exe 旁的 wb-roles.json，不开窗口）")
+    parser.add_argument(
+        "--roles",
+        action="store_true",
+        help="离线打印角色名单与各自真源（写 exe 旁的 wb-roles.json，不开窗口）",
+    )
     args = parser.parse_args(argv)
 
     if args.check:

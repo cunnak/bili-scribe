@@ -220,15 +220,22 @@ def _legacy_foreign_keys() -> list[str]:
         return []
     try:
         raw = yaml.safe_load(LEGACY_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    except Exception:      # 坏 YAML 不是这次要报的事： bili 自己会报，别在这里抢话
+    except Exception:  # 坏 YAML 不是这次要报的事： bili 自己会报，别在这里抢话
         return []
     if not isinstance(raw, dict):
         return []
     return sorted(str(k) for k in foreign_keys(raw))
 
 
-def _migration_notice(target: Path, origin: Path, migrated_from: "str | None",
-                      foreign: list[str], merged: dict[str, Any], *, explicit: bool):
+def _migration_notice(
+    target: Path,
+    origin: Path,
+    migrated_from: "str | None",
+    foreign: list[str],
+    merged: dict[str, Any],
+    *,
+    explicit: bool,
+):
     """这次要不要给用户记一条「搬家把 bili-scribe 的坑留在旧家了」的事实。
 
     为什么必须讲：搬家之前 ``load()`` 里那句 ``if foreign: cfg.save(target)`` 会顺手把
@@ -253,9 +260,9 @@ def _migration_notice(target: Path, origin: Path, migrated_from: "str | None",
     """
     existing = (merged.get("ui") or {}).get("migration_notice")
     if isinstance(existing, dict) and existing.get("dismissed"):
-        return None                       # 说过了，不再重复打扰，也不再碰旧家
+        return None  # 说过了，不再重复打扰，也不再碰旧家
     if explicit or target == LEGACY_CONFIG_PATH:
-        return None                       # 显式指定 / 读的就是旧家：不发明提示
+        return None  # 显式指定 / 读的就是旧家：不发明提示
     if migrated_from is not None:
         keys = sorted(str(k) for k in foreign)
         src = str(LEGACY_CONFIG_PATH)
@@ -350,7 +357,11 @@ def provider_id(name: str, base_url: str) -> str:
         low = label.strip().lower()
         if not low or low in generic or low in tails:
             continue
-        if low.isascii() and any("a" <= ch <= "z" for ch in low) and low.replace("-", "").replace("_", "").isalnum():
+        if (
+            low.isascii()
+            and any("a" <= ch <= "z" for ch in low)
+            and low.replace("-", "").replace("_", "").isalnum()
+        ):
             return low
         break
     seed = f"{(name or '').strip()}|{url}".encode("utf-8", "replace")
@@ -385,7 +396,10 @@ def find_provider(llm: Any, ref: str) -> Any | None:
     if not key:
         return None
     for p in getattr(llm, "providers", None) or []:
-        if str(getattr(p, "id", "")).lower() == key or (getattr(p, "name", "") or "").strip().lower() == key:
+        if (
+            str(getattr(p, "id", "")).lower() == key
+            or (getattr(p, "name", "") or "").strip().lower() == key
+        ):
             return p
     return None
 
@@ -660,9 +674,14 @@ class WorkbenchConfig:
         if card is None:
             new_id = provider_id("accept", llm.base_url)
             llm.providers = list(llm.providers) + [
-                LlmProviderConfig(id=new_id, name="验收端点", protocol="openai",
-                                  base_url=llm.base_url, api_key=llm.api_key,
-                                  models=[llm.model] if llm.model else [])
+                LlmProviderConfig(
+                    id=new_id,
+                    name="验收端点",
+                    protocol="openai",
+                    base_url=llm.base_url,
+                    api_key=llm.api_key,
+                    models=[llm.model] if llm.model else [],
+                )
             ]
             llm.active_provider = new_id
             return
@@ -810,7 +829,6 @@ class WorkbenchConfig:
 
     # ------------------------------------------------------- 装载
 
-
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> "WorkbenchConfig":
         """装载。文件不存在时用默认值（首次启动不该因为没配置而起不来）。"""
@@ -847,8 +865,9 @@ class WorkbenchConfig:
         merged = _merge_raw(raw, read_ext(origin))
         # 老版本把扩展键写进了共享 yaml：记下来，构造完立刻按新形状重写一次。
         foreign = foreign_keys(raw)
-        notice = _migration_notice(target, origin, migrated_from, foreign, merged,
-                                   explicit=path is not None)
+        notice = _migration_notice(
+            target, origin, migrated_from, foreign, merged, explicit=path is not None
+        )
         if notice is not None:
             merged.setdefault("ui", {})["migration_notice"] = notice
         cfg = cls(
@@ -941,7 +960,9 @@ class WorkbenchConfig:
             validate(self)
         except Exception:
             for name in _SECTION_NAMES:
-                setattr(self, name, _fill(type(getattr(self, name)), snapshot.get(name) or {}, name))
+                setattr(
+                    self, name, _fill(type(getattr(self, name)), snapshot.get(name) or {}, name)
+                )
             raise
         return [n for n in ("server",) if isinstance(values.get(n), dict)]
 
@@ -1244,9 +1265,7 @@ WB_THINKING_NOTES = (
 
 #: ``llm.timeout_seconds`` 上面那行注释：bili-scribe 写的是「根治靠关思考」，按上面同一条
 #: 实测就是错的（关不掉）。这里只留「调大是缓解」这半句，不给不存在的根治办法。
-WB_TIMEOUT_NOTE = (
-    "  # 单次请求的读超时（秒）。思考模型的耗时主要花在推理上，调大它只是缓解。",
-)
+WB_TIMEOUT_NOTE = ("  # 单次请求的读超时（秒）。思考模型的耗时主要花在推理上，调大它只是缓解。",)
 
 
 _SECTION_RE = re.compile(r"^[a-z_]+:[ \t]*$")

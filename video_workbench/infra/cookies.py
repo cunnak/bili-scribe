@@ -52,9 +52,7 @@ def to_netscape(
             continue
         # 域以 . 开头说明是通配域，第二列必须是 TRUE，否则 yt-dlp 只在精确域上发
         include_sub = "TRUE" if domain.startswith(".") else "FALSE"
-        lines.append(
-            "\t".join([domain, include_sub, "/", "TRUE", str(expires), name, text])
-        )
+        lines.append("\t".join([domain, include_sub, "/", "TRUE", str(expires), name, text]))
     if not lines:
         return ""
     return HEADER + "\n".join(lines) + "\n"
@@ -65,7 +63,9 @@ def filter_bili(cookies: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in cookies.items() if k in BILI_COOKIE_KEYS and v}
 
 
-def write_netscape(path: str | Path, cookies: Mapping[str, Any], domain: str = DEFAULT_DOMAIN) -> Path:
+def write_netscape(
+    path: str | Path, cookies: Mapping[str, Any], domain: str = DEFAULT_DOMAIN
+) -> Path:
     """写文件。权限收到 0600——除了当前用户不该有人读得到。"""
     target = Path(path)
     body = to_netscape(cookies, domain=domain)

@@ -77,16 +77,12 @@ def _preferred_source_path(repo: Any, project_id: str) -> str:
     return ""
 
 
-def _existing_source(
-    repo: Any, project_id: str, layout_root: Path, *, stem: str
-) -> Path | None:
+def _existing_source(repo: Any, project_id: str, layout_root: Path, *, stem: str) -> Path | None:
     """盘上这一集的视频文件；兜底规则只写在 :func:`find_source` 里。"""
     return find_source(layout_root, prefer=_preferred_source_path(repo, project_id), stem=stem)
 
 
-def _existing_is_same(
-    source: Path | None, sidecar_path: Path, bvid: str, cid: int | None
-) -> bool:
+def _existing_is_same(source: Path | None, sidecar_path: Path, bvid: str, cid: int | None) -> bool:
     """目录里那一份是不是就是这一集，且文件确实在。
 
     判据是**侧车里的 bvid+cid**，不是文件名——所以文件名换成视频标题之后，
@@ -157,7 +153,9 @@ def make_download_handler(
             up_name=str(payload.get("up_name") or item.get("up_name") or ""),
             title=source_title,
             collection_title=str(payload.get("collection_title") or ""),
-            part_index=page_no if int(item.get("page_count") or payload.get("page_count") or 0) > 1 else None,
+            part_index=page_no
+            if int(item.get("page_count") or payload.get("page_count") or 0) > 1
+            else None,
             part_title=source_part,
             bvid=bvid,
             cid=cid,
@@ -286,7 +284,9 @@ def make_download_handler(
                 ctx.log(f"[thumb] 抽帧失败（不影响下载）：{exc}")
             if thumb is not None:
                 try:
-                    repo.asset_upsert(project_id, "thumb", str(thumb), bytes=Path(thumb).stat().st_size)
+                    repo.asset_upsert(
+                        project_id, "thumb", str(thumb), bytes=Path(thumb).stat().st_size
+                    )
                 except Exception as exc:  # noqa: BLE001
                     ctx.log(f"[thumb] 记录缩略图失败：{exc}")
 

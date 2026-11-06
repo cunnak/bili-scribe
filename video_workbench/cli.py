@@ -161,12 +161,17 @@ class Cli:
                 last = line
             if status in _DONE:
                 if status != "succeeded":
-                    code = str(job.get("error_code") or ("CANCELED" if status == "canceled" else "PROCESS_FAILED"))
+                    code = str(
+                        job.get("error_code")
+                        or ("CANCELED" if status == "canceled" else "PROCESS_FAILED")
+                    )
                     message = str(job.get("error_message") or status)
                     raise CliError(
                         f"{label or job_id} {status}：{message}",
                         code=code,
-                        exit_code=EXIT_CANCELED if status == "canceled" else _exit_for({"code": code}),
+                        exit_code=EXIT_CANCELED
+                        if status == "canceled"
+                        else _exit_for({"code": code}),
                     )
                 self.say(f"{label or job_id} 完成（{time.time() - started:.1f}s）")
                 return job
@@ -335,8 +340,10 @@ class Cli:
         if not self.json:
             for job in done:
                 result = job.get("result") or {}
-                print(f"{result.get('project_id') or ''} {result.get('segments') or 0} 段"
-                      f"  {result.get('language') or ''}  {result.get('srt') or ''}")
+                print(
+                    f"{result.get('project_id') or ''} {result.get('segments') or 0} 段"
+                    f"  {result.get('language') or ''}  {result.get('srt') or ''}"
+                )
         return EXIT_OK
 
     def summary_text(self, project_id: str) -> str:
@@ -360,7 +367,9 @@ class Cli:
         project_id = str(self.args.project_id or "")
         if not project_id:
             raise CliError("summarize 需要项目 id")
-        data = self.rpc("summary.start", {"project_id": project_id, "role": str(self.args.role or "")})
+        data = self.rpc(
+            "summary.start", {"project_id": project_id, "role": str(self.args.role or "")}
+        )
         job = data.get("job") or data
         final = self.wait(str(job.get("id") or ""), label="总结")
         text = self.summary_text(project_id)
@@ -375,7 +384,11 @@ class Cli:
             raise CliError("clip 需要项目 id")
         analyze = self.rpc(
             "clip.analyze",
-            {"project_id": project_id, "kinds": list(self.args.kinds or []), "count": int(self.args.count or 0)},
+            {
+                "project_id": project_id,
+                "kinds": list(self.args.kinds or []),
+                "count": int(self.args.count or 0),
+            },
         )
         job = analyze.get("job") or analyze
         self.wait(str(job.get("id") or ""), label="选段")
@@ -409,7 +422,9 @@ class Cli:
         paths = [str(p) for p in (self.args.paths or [])]
         if len(paths) < 2:
             raise CliError("merge 需要至少两个文件")
-        report = self.rpc("merge.preflight", {"paths": paths, "mode": str(self.args.mode or "quick")})
+        report = self.rpc(
+            "merge.preflight", {"paths": paths, "mode": str(self.args.mode or "quick")}
+        )
         if not report.get("ok", True) and report.get("blocking"):
             raise CliError(
                 "预检没通过：" + "；".join(str(b) for b in report.get("blocking") or []),
@@ -447,7 +462,11 @@ class Cli:
             assert len(steps) > before
             project_id = str(steps[-1].get("project_id") or "")
             if not project_id:
-                raise CliError("下载没有拿到项目 id（看 jobs 里的明细）", code="PROCESS_FAILED", exit_code=EXIT_JOB_FAILED)
+                raise CliError(
+                    "下载没有拿到项目 id（看 jobs 里的明细）",
+                    code="PROCESS_FAILED",
+                    exit_code=EXIT_JOB_FAILED,
+                )
 
         if self.args.skip_transcribe:
             self.say("跳过转录（--skip-transcribe）")
@@ -465,23 +484,39 @@ class Cli:
             )
             for job in data.get("jobs") or []:
                 final = self.wait(str(job.get("id")), label="转录")
-                steps.append({"step": "transcribe", "job": final.get("id"),
-                              "segments": (final.get("result") or {}).get("segments")})
+                steps.append(
+                    {
+                        "step": "transcribe",
+                        "job": final.get("id"),
+                        "segments": (final.get("result") or {}).get("segments"),
+                    }
+                )
 
         if self.args.skip_summary:
             self.say("跳过总结（--skip-summary）")
         else:
-            data = self.rpc("summary.start", {"project_id": project_id, "role": str(self.args.role or "")})
+            data = self.rpc(
+                "summary.start", {"project_id": project_id, "role": str(self.args.role or "")}
+            )
             job = data.get("job") or data
             final = self.wait(str(job.get("id") or ""), label="总结")
-            steps.append({"step": "summary", "job": final.get("id"),
-                          "chars": len(self.summary_text(project_id))})
+            steps.append(
+                {
+                    "step": "summary",
+                    "job": final.get("id"),
+                    "chars": len(self.summary_text(project_id)),
+                }
+            )
 
         exports: list[dict[str, Any]] = []
         if int(self.args.export or 0) > 0:
             data = self.rpc(
                 "clip.analyze",
-                {"project_id": project_id, "kinds": list(self.args.kinds or []), "count": int(self.args.clips or 0)},
+                {
+                    "project_id": project_id,
+                    "kinds": list(self.args.kinds or []),
+                    "count": int(self.args.clips or 0),
+                },
             )
             job = data.get("job") or data
             self.wait(str(job.get("id") or ""), label="选段")
@@ -489,13 +524,20 @@ class Cli:
             for cand in cands[: int(self.args.export or 0)]:
                 out = self.rpc(
                     "clip.export",
-                    {"project_id": project_id, "candidate_id": cand.get("id") or "",
-                     "mode": str(self.args.mode or "precise")},
+                    {
+                        "project_id": project_id,
+                        "candidate_id": cand.get("id") or "",
+                        "mode": str(self.args.mode or "precise"),
+                    },
                 )
                 out_job = out.get("job") or out
                 final = self.wait(str(out_job.get("id") or ""), label="导出")
-                exports.append({"candidate_id": cand.get("id"),
-                                "path": (final.get("result") or {}).get("path")})
+                exports.append(
+                    {
+                        "candidate_id": cand.get("id"),
+                        "path": (final.get("result") or {}).get("path"),
+                    }
+                )
 
         payload = {"project_id": project_id, "steps": steps, "exports": exports}
         self.emit("run", payload)
@@ -536,13 +578,20 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config", default="", help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只读）")
+    parser.add_argument(
+        "--config",
+        default="",
+        help="配置文件路径（默认 ~/.video-workbench/config.yaml；旧家 ~/.bili-scribe/config.yaml 只读）",
+    )
     parser.add_argument("--json", action="store_true", help="输出一行 JSON，日志走 stderr")
     parser.add_argument("--quiet", action="store_true", help="不打印过程信息")
     parser.add_argument("--timeout", type=float, default=0, help="等待任务的超时秒数（0 = 不限）")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
-    parser.add_argument("--roles", action="store_true",
-                        help="等价于 `roles` 子命令：离线打印角色名单与各自真源（打包验收用）")
+    parser.add_argument(
+        "--roles",
+        action="store_true",
+        help="等价于 `roles` 子命令：离线打印角色名单与各自真源（打包验收用）",
+    )
     subs = parser.add_subparsers(dest="cmd", required=True)
 
     subs.add_parser("info", help="环境与依赖状态")
@@ -711,7 +760,9 @@ def main(argv: list[str] | None = None) -> int:
     except CliError as exc:
         return cli.fail(args.cmd, exc)
     except WBError as exc:  # 服务层直接抛上来的（理论上都被 dispatch 收成信封了）
-        return cli.fail(args.cmd, CliError(exc.message, code=exc.code, exit_code=_exit_for({"code": exc.code})))
+        return cli.fail(
+            args.cmd, CliError(exc.message, code=exc.code, exit_code=_exit_for({"code": exc.code}))
+        )
     except KeyboardInterrupt:
         print("[INTERRUPTED] 已中断", file=sys.stderr, flush=True)
         return EXIT_INTERRUPTED

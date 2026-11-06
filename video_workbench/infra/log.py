@@ -49,9 +49,15 @@ SECRET_KEYS = (
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(sk-[A-Za-z0-9_\-]{8})[A-Za-z0-9_\-]{4,}"), r"\1***"),
     (re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._\-]{6,}"), r"\1***"),
-    (re.compile(r"(?i)\b(SESSDATA|bili_jct|buvid3|DedeUserID|access_key)=([^;&\s\"']{4,})"), r"\1=***"),
+    (
+        re.compile(r"(?i)\b(SESSDATA|bili_jct|buvid3|DedeUserID|access_key)=([^;&\s\"']{4,})"),
+        r"\1=***",
+    ),
     # JSON / YAML 两种写法：值前面可能还有一个引号
-    (re.compile(r"(?i)((?:api[_-]?key|token|secret|password)\"?\s*[:=]\s*\"?)([^\s,;\"'}]{6,})"), r"\1***"),
+    (
+        re.compile(r"(?i)((?:api[_-]?key|token|secret|password)\"?\s*[:=]\s*\"?)([^\s,;\"'}]{6,})"),
+        r"\1***",
+    ),
     (re.compile(r"(?i)(cookie\s*:\s*)([^\r\n]{8,})"), r"\1***"),
 )
 
@@ -183,7 +189,9 @@ def list_logs(log_dir: str | Path) -> list[dict[str, Any]]:
             stat = item.stat()
         except OSError:
             continue
-        rows.append({"name": item.name, "path": str(item), "bytes": stat.st_size, "mtime": stat.st_mtime})
+        rows.append(
+            {"name": item.name, "path": str(item), "bytes": stat.st_size, "mtime": stat.st_mtime}
+        )
     return rows
 
 
@@ -254,4 +262,9 @@ def write_bundle(
                 archive.writestr("log.txt", redact("\n".join(lines)))
 
     size = target.stat().st_size if target.is_file() else 0
-    return {"path": str(target), "bytes": size, "entries": entries, "log_lines": len(tail_lines(log_file, log_lines)) if log_file else 0}
+    return {
+        "path": str(target),
+        "bytes": size,
+        "entries": entries,
+        "log_lines": len(tail_lines(log_file, log_lines)) if log_file else 0,
+    }

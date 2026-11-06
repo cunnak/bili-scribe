@@ -267,7 +267,9 @@ class JobManager:
 
     # ------------------------------------------------------------- 执行
 
-    def _run(self, job_id: str, job_type: str, project_id: str | None, payload: dict[str, Any]) -> None:
+    def _run(
+        self, job_id: str, job_type: str, project_id: str | None, payload: dict[str, Any]
+    ) -> None:
         sem = self._sem(job_type)
         # 等信号量期间也允许取消：排队中被取消，不该等到轮到它才响应
         while not sem.acquire(timeout=0.2):
@@ -304,7 +306,11 @@ class JobManager:
             self._finish(
                 job_id,
                 "failed",
-                {"code": "INTERNAL", "message": str(exc) or exc.__class__.__name__, "detail": detail},
+                {
+                    "code": "INTERNAL",
+                    "message": str(exc) or exc.__class__.__name__,
+                    "detail": detail,
+                },
             )
         finally:
             sem.release()

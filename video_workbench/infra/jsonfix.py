@@ -4,6 +4,7 @@
 `json.loads` 在「line 3 column 230」报 `Expecting ',' delimiter`。
 这类输出人看着完全正常，是解析器太严——不该让用户重跑一遍八次预读。
 """
+
 from __future__ import annotations
 
 import json

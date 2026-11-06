@@ -55,12 +55,12 @@ class Router:
 
     # ------------------------------------------------------------- 分发
 
-    def dispatch(self, method: str, params: Any = None, request_id: str | None = None) -> dict[str, Any]:
+    def dispatch(
+        self, method: str, params: Any = None, request_id: str | None = None
+    ) -> dict[str, Any]:
         entry = self._table.get(str(method or ""))
         if entry is None:
-            return self._error(
-                WBError("UNSUPPORTED", f"未知接口：{method}"), request_id
-            )
+            return self._error(WBError("UNSUPPORTED", f"未知接口：{method}"), request_id)
         fn, model = entry
         try:
             if model is not None:

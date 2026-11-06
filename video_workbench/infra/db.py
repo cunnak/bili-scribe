@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS wb_meta (
 );
 """
 
+
 # 迁移时一起种入的内置样式。放这里而不是 Phase 3，
 # 是因为「样式表非空」是后续所有渲染路径的前提（NULL style_id 会让 FFmpeg 参数为空）。
 #
@@ -232,13 +233,15 @@ def _builtin_style_rows() -> list[tuple[str, str, str, str, int]]:
 
     rows = []
     for preset in style_presets.builtin_presets():
-        rows.append((
-            str(preset["id"]),
-            str(preset["name"]),
-            str(preset["mode"]),
-            json.dumps(preset, ensure_ascii=False),
-            1,
-        ))
+        rows.append(
+            (
+                str(preset["id"]),
+                str(preset["name"]),
+                str(preset["mode"]),
+                json.dumps(preset, ensure_ascii=False),
+                1,
+            )
+        )
     return rows
 
 
@@ -253,9 +256,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False + DB_LOCK：跨线程共享同一个连接（见上方说明）。
-    conn = sqlite3.connect(
-        str(path), timeout=3.0, isolation_level=None, check_same_thread=False
-    )
+    conn = sqlite3.connect(str(path), timeout=3.0, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -363,7 +364,11 @@ def migrate(conn: sqlite3.Connection, db_path: str | Path | None = None) -> dict
         " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (str(SCHEMA_VERSION),),
     )
-    return {"from": before, "to": SCHEMA_VERSION, "backup": str(backup_path) if backup_path else None}
+    return {
+        "from": before,
+        "to": SCHEMA_VERSION,
+        "backup": str(backup_path) if backup_path else None,
+    }
 
 
 def open_and_migrate(db_path: str | Path) -> sqlite3.Connection:
