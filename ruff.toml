@@ -33,11 +33,42 @@ select = [
 [lint]
 extend-safe-fixes = ["I001", "UP032", "F401"]
 
+# 锁定面必须在这里再写一遍：ruff 的 lint 与 format 有两套独立的 exclude 名单，
+# 顶层的 exclude 只落到 formatter.exclude（实测见文件头那段读数）。
+# 注意字段名：0.17.3 的 [lint] 只认 exclude，不认 extend-exclude（写错会直接报
+# unknown field 并让所有 ruff 命令 rc=1）。
+exclude = [
+  # 逐字节对齐 bili_scribe 的五份 .py 与六个真源 txt —— 改一个字节就是漂移。
+  "video_workbench/core/summary/roles.py",
+  "video_workbench/core/summary/summarizer.py",
+  "video_workbench/core/summary/__init__.py",
+  "video_workbench/core/prompt_source.py",
+  "video_workbench/infra/notecache.py",
+  "video_workbench/resources/prompts",
+  # 参考侧本体：本会话硬边界「禁改 bili_scribe/**」。
+  "bili_scribe",
+  # 发布镜像检出与打包中间产物（不是本仓源码）。
+  "build",
+  "dist",
+  ".venv",
+  "__pycache__",
+  ".pytest_cache",
+  "node_modules",
+]
+
 [format]
 # 与 lint 同一族范围；quote-style 保持默认双引号，避免对既有中文注释重排造成无意义 diff。
 docstring-code-format = false
 
 # ── exclude：三类东西，理由各不同，不许合并成一条通配 ──
+#
+# ⚠️ 这份清单必须**同时**出现在 [format] 与 [lint] 两节（见下面 [lint] exclude）。
+# 2026-11-06 实测：只写在顶层/只写在 [format] 时，ruff check 根本不看它——
+#   ruff check --show-settings video_workbench  → linter.exclude = []
+#   ruff check --show-files video_workbench     → 列出 core/summary/roles.py 等四份锁定文件
+#   ruff check --select F401,I001 --fix --diff  → diff 头就是 roles.py 与 summarizer.py
+# 也就是说：任何一次 check --fix 都会改锁定面字节，撞 drift 闸与打包期字节比对。
+# 两处清单由 tests/wb 的 lint 闸对账（见 task-71 的验收），不许只改一处。
 exclude = [
   # (1) 参考侧原样 vendored 的源码：逐字节对齐 bili_scribe，改了就是漂移。
   #     这份清单现读自 tests/wb/test_git_no_normalization_on_locked_paths.py 的
