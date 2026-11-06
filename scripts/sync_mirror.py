@@ -206,6 +206,8 @@ def preflight(main: Path, mirror: Path, commit_ok: bool = False, applying: bool 
     """返回 (blockers, notes)。blockers 非空即拒绝同步，此时不写任何文件。"""
     blockers: list[str] = []
     notes: list[str] = []
+    # 规划面按这一刻的主仓 HEAD 定，提交前用同一枚 pin 复验（评审 R73-3 的 journal）。
+    PLAN["main_head"] = current_main_head()
 
     if not (mirror / ".git").exists():
         return ([f"镜像根不是一个 git 仓库：{mirror}"], notes)
@@ -520,6 +522,15 @@ def rel_exists_in_head(main: Path, rel: str) -> bool:
     return head_bytes(main, rel) is not None
 
 
+PLAN: dict = {"main_head": None}
+
+
+def current_main_head() -> str:
+    """主仓 HEAD 的 sha。单独抽一个函数只为一件事：哨兵能在进程内把它换掉，
+    从而**真的**模拟「规划之后主仓前进了」，而不是只能靠运气撞上那个时间窗。"""
+    return git(ROOT, "rev-parse", "HEAD").strip()
+
+
 def _write_atomic(dst: Path, blob: bytes) -> None:
     """先写同目录临时文件再 os.replace 换名——镜像里半截文件的下场比没写更糟。
 
@@ -827,6 +838,20 @@ def main() -> int:
     ok, link_msg = align_gitlink(mirror, main_head)
     print(f"[{'ok' if ok else 'x'}] {link_msg}")
     if not ok:
+        return 2
+
+    # 规划（preflight）到写入这 100–150 秒之间，主仓完全可能又被提交了一次。
+    # 那时候镜像里落的是**半旧半新**的内容，而 gitlink 已被对齐到规划时那个 sha：
+    # 直接提交就得到一棵「指针指向 A、文件掺了 B」的树。旧实现没有任何入口记录
+    # 计划按的是哪一版（评审 R73-3），也就没有自愈路径 —— 只能靠人重跑。
+    # 这里不建 journal 文件（要处理残骸、版本、并发，成本高于收益），只做
+    # **拒绝提交**：写入是幂等的，重跑一次就按新版重新规划。
+    if args.commit and PLAN["main_head"] and current_main_head() != PLAN["main_head"]:
+        print(
+            f"[x] 主仓在同步期间前进了：计划按 {PLAN['main_head'][:7]}，现在 HEAD 是 "
+            f"{current_main_head()[:7]}。镜像已按旧计划写过，但这一笔**不提交**"
+            " —— 重跑一次即可按新版重新规划。"
+        )
         return 2
 
     if args.commit:

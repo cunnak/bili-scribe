@@ -135,6 +135,15 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   两面：`scripts/` 里住着发布仓自有的 `link_bili_scribe.py`，`docs/` 整体不在产品面上，把它们算进删除面，
   第一次同步就会去删发布仓自己的工具（那是 `_new_product_targets` 那笔事故的反向版本，同一个错误方向）。
   非删除面的「镜像有、主仓没有」继续按 `mirror_only` 报给人判，绝不动手。
+- **A/B 用「上一版实现」跑常驻判据时，崩掉的那一条必须记成 RED，不能留成 traceback。**
+  实录（2026-11-06，R73-3）：给哨兵加了 L18 三条腿（进程内 `mod.main()` + 把 `current_main_head` 换成
+  「第一次给真 sha、之后给假 sha」以**确定地**复现「规划之后主仓又前进」），拿 `git show HEAD:scripts/sync_mirror.py`
+  做 A/B 时整棵驱动死在 `AttributeError: module 'sm' has no attribute 'current_main_head'`、`AB_EXIT=1`、
+  日志里连 `ok=` 那行都没有 —— 这个读数和第二天没人重跑的「没红」长得一模一样。
+  正解：整段包 `try/except AttributeError`，except 里 `check(那条, False, "AttributeError: … —— 这支闸不在这份实现里")`。
+  现读两条读数：工作树版 `ok=40 red=0`（`EXIT=0`），HEAD 版 `ok=37 red=1` 且红的正是那条自证腿。
+  **同类口径**：判据脚本的退出码 `∉ (0,1)`（崩、收集失败、内部错）一律不许读成「没红」——这是第二节那条的加强版：
+  断言写对了但**跑崩**，仍然是假绿的一种。
 - **`sync_mirror.py` 的退出码有两种，腿位必须按真的那一种断。** 现读 `main()`：
   **`rc=2` = `early_arg_check` 在 preflight 之前把参数问倒**（未入库的 `--adopt`/`--from-head`、缺 `-m`、落点越界）；
   **`rc=1` = `preflight` 返回 blockers**（junction 形状不对、镜像 `.gitignore` 缺排除行或被改脏、镜像工作区不等于 HEAD 版）。

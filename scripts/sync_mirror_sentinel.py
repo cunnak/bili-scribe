@@ -83,6 +83,16 @@ def check(name, cond, detail=""):
         say("  [RED] " + name + " :: " + str(detail)[:500])
 
 
+#: 夹具仓库的提交身份。sh() 逐次注入，进程内跑工具 main() 的那条腿（L18）必须
+#: 自己补上——否则镜像第一次 commit 就 rc=128，红在夹具环境而不是被测功能上。
+IDENTITY = {
+    "GIT_AUTHOR_NAME": "sentinel",
+    "GIT_COMMITTER_NAME": "sentinel",
+    "GIT_AUTHOR_EMAIL": "s@e.l",
+    "GIT_COMMITTER_EMAIL": "s@e.l",
+}
+
+
 def sh(cwd, *a, env_extra=None, check_true=True, timeout=GIT_TIMEOUT):
     env = dict(subprocess.os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
@@ -436,6 +446,89 @@ def main():
         f"got={dst.read_bytes()!r}",
     )
     check("L14c 失败后不留下 .syncing 残骸", leftover == [], f"leftover={leftover}")
+
+    say("== L18 规划与提交之间主仓前进了：那一笔不许提交 ==")
+    try:
+        # 进程内跑 main()，把 current_main_head 换成「第一次给真 sha、之后给假 sha」——
+        # 这就是**确定地**复现 preflight 到提交之间那 100–150 秒里主仓又前进一次，
+        # 而不是等它偶然发生。旧实现没有这个概念：写入按旧计划、gitlink 按旧 sha，
+        # 却把掺了新内容的文件提交上去（评审 R73-3）。
+        import contextlib
+        import io as _io
+        import os as _os
+
+        m18 = new_repo(BASE / "l18" / "main", shared)
+        mi18 = new_repo(BASE / "l18" / "mirror", shared)
+        (m18 / "a.py").write_bytes(b"line1" + bytes([10]) + b"V2" + bytes([10]))
+        sh(m18, "git", "add", "--", "a.py")
+        sh(m18, "git", "commit", "-q", "-m", "v2")
+        real_root = mod.ROOT
+        real_ch = mod.current_main_head
+        real_argv = list(sys.argv)
+
+        def run_inprocess(shift: bool):
+            hits = {"n": 0}
+
+            def shifting() -> str:
+                hits["n"] += 1
+                return real_ch() if (not shift or hits["n"] == 1) else "f" * 40
+
+            # 进程内跑 main() 时，工具自己起的 git 子进程继承的是**本进程**环境；
+            # 而 sh() 那份身份注入是逐次调用加的，不在这里生效。缺了它，镜像里
+            # 第一次 commit 就 rc=128「Author identity unknown」——L18c 第一版就是
+            # 这样红的，红在夹具环境上而不是被测功能上（同 new_repo 那条护栏同族）。
+            saved = {k: _os.environ.get(k) for k in IDENTITY}
+            _os.environ.update(IDENTITY)
+            _os.environ["WB_MIRROR_ROOT"] = str(mi18)
+            mod.ROOT = m18
+            mod.current_main_head = shifting
+            buf = _io.StringIO()
+            sys.argv = ["sync_mirror.py", "--apply", "--commit", "-m", "l18"]
+            try:
+                with contextlib.redirect_stdout(buf):
+                    rc = mod.main()
+            except SystemExit as exc:  # argparse 自己退出也算一种读数
+                rc = exc.code
+            finally:
+                mod.ROOT = real_root
+                mod.current_main_head = real_ch
+                sys.argv = real_argv
+                for k, v in saved.items():
+                    if v is None:
+                        _os.environ.pop(k, None)
+                    else:
+                        _os.environ[k] = v
+            return rc, buf.getvalue()
+
+        sha0 = sh(mi18, "git", "rev-parse", "HEAD").stdout.strip()
+        rc18, out18 = run_inprocess(True)
+        sha1 = sh(mi18, "git", "rev-parse", "HEAD").stdout.strip()
+        check(
+            "L18a 主仓在规划后前进 ⇒ rc=2 且镜像那一笔没提交",
+            rc18 == 2 and sha1 == sha0 and "前进了" in out18,
+            f"rc={rc18} {sha0[:7]}→{sha1[:7]} out={out18[-320:]}",
+        )
+        check(
+            "L18b PLAN 真的被填过（不是恒 None 的空转）",
+            mod.PLAN["main_head"] == sh(m18, "git", "rev-parse", "HEAD").stdout.strip(),
+            f"PLAN={str(mod.PLAN['main_head'])[:12]} 主仓={sh(m18, 'git', 'rev-parse', 'HEAD').stdout.strip()[:12]}",
+        )
+        rc18c, out18c = run_inprocess(False)
+        sha2 = sh(mi18, "git", "rev-parse", "HEAD").stdout.strip()
+        check(
+            "L18c 控制组：没前进就照常提交，重跑就是恢复入口（防这支闸退化成恒不提交）",
+            rc18c == 0 and sha2 != sha0,
+            f"rc={rc18c} {sha1[:7]}→{sha2[:7]} out={out18c[-320:]}",
+        )
+    except AttributeError as _exc:
+        # 拿 HEAD 版工具做 A/B 时走到这里：这支闸不在那份实现里。
+        # 必须记成 RED 并写明原因，不能让 AttributeError 把整个驱动炸掉 ——
+        # 崩溃的读数和「没红」在下一轮里长得太像（AGENTS 第二节同族口径）。
+        check(
+            "L18 三条腿跑得起来（工具里必须有 current_main_head / PLAN）",
+            False,
+            f"AttributeError: {_exc} —— 这支闸不在这份实现里",
+        )
 
     say("== L11 非产品独树一律不新建 + 幂等 ==")
     (m / "_temp_junk.py").write_bytes(b"junk" + bytes([10]))
