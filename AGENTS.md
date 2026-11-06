@@ -167,6 +167,15 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   （`MIN_SIZE`/`min_size`）都正常命中，只有中文那条空，报错信息里模式串显示成乱码 ⇒ **是传参被 GBK 折了一遍**，不是文件问题。
   **判据**：中文关键词的存在性判据要么用 `read`/`grep` 工具，要么先 `$OutputEncoding = [Text.UTF8Encoding]::new()` 再传；
   拿 pwsh 的中文 grep 0 命中去定罪别人的工作「没落盘」，和拿 `git diff` 判未跟踪文件是同一类错误。
+- **界面文案里「关掉会怎样」这类收益承诺，没实测过就不许写；改一处 help 要连同段 hint 和下一行 help 一起核。**
+  事故实录（2026-11-06，task-70）：`settings.js` 的截帧开关写着「给总结配图用；关掉可明显提速。」，同分区 hint 写着
+  「省流量就把截帧关掉。」——前一句是假开关时代留下的（那时 WB 侧 0 个调用点，关掉确实什么都不省），后一句方向就是错的
+  （帧从**已下载到本地**的源视频抽，不走网络）。task-70 把帧真接上之后 help 换成实测站得住的那句，但**新句子又和下一行
+  `max_frames` 的 help 重复讲「帧会作为图片发给模型」**——两句话讲同一件事就是 slop，按删除测试只留一句。⇒ 动界面一句话时：
+  ①这句收益有没有对应实测数据（没有就删掉收益半句，只留机制半句）；②同分区 hint 与相邻字段 help 有没有说重；
+  ③可见性要在真浏览器里量（藏在 `display:none` 里不算跟用户说过）。常驻判据：`tests/wb/test_settings_frames_help.py`
+  （源码级两条 + 真 chromium 两条）。**窄态视口取产品自己的窗口下限**（`MIN_SIZE`），不拿 390 宽当合同：
+  390 下实测 `label.field__label` 解析得到 6 个但一个都不可见，那是「要不要做手机宽度」的待定决策输入，不是缺陷。
 - **真模型调用要有预算闸，起跑前先报预估，单张任务卡上限 3 次真实调用。** 今天已经烧掉的两笔（写在这里当例子，不是抽象教条）：task-52 长素材 11 次调用 `prompt 154748 / completion 141260`（≈29.6 万 token，602s）；实配抬到 32768 之后走真配置又跑一遍同样的长素材（11 次、约 770s，出处 `%TEMP%/wb_live32768.log`，149 行）。**两张卡的正文都没写过「真模型能花多少」**，所以谁都不觉得自己在花钱。四句口径：
   ① **起跑前必须写一句预估**：模型名 × 预计调用次数 × 单次大概 token 形状。写不出预估 = 不许起跑。
   ② **单张卡真实调用上限 3 次**，超过要先拿到 lead 显式放行（lead 拿去问用户）。
@@ -182,6 +191,7 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
 | 6 个 txt 真源不许被改一个字节 | `tests/wb/test_summary_prompt_source.py` P1 的 sha256 登记表 + 打包期字节比对 |
 | 被字节锁住的路径不许被 git 规范化 | `tests/wb/test_git_no_normalization_on_locked_paths.py`（自动闸：锁清单现读自 `scripts/build_wb.py:PROMPT_TXT_NAMES` + `tests/wb/test_summary_drift.py`；四道判据 J1–J4，含 `core.autocrlf=true` 与 `* text=auto eol=lf` 组合在场的读数）+ `.gitattributes` 的 `-text` 行 |
 | 界面字段必须真的可达可点 | `tests/wb/test_settings_role_warning_ui.py` N1/N2/N3（同快照三条件：内容盒高>0、行在盒内、`elementFromPoint` 命中） |
+| 界面 help/hint 不许写没有实测支撑的收益，也不许两句话讲同一件事 | `tests/wb/test_settings_frames_help.py`（旧两句字面不许回来 + 新那句必须还在 + 真浏览器里 `.field__help` 可读且高度 > 0）。窄态视口取 `MIN_SIZE`，不写手机宽度 |
 | 配置搬家不改任何值 | `tests/wb/test_*_migration*` 反向常驻用例（旧家 `max_tokens:4096` → 新家仍 4096） |
 | 只读诊断口不许写用户配置、不许建库建 logs | `tests/wb/test_cli_roles_route.py` C4（首次运行即不写）+ C5（无 `workbench.json`/`cli.db`/`logs`）+ **正向对照**（`info` 真会落 `cli.db` 与 `logs/`，防四个 `not exists` 因路径写错变永真） |
 | 退役显示名只有一个 owner，且必须**现取**（不许 import 别名） | `tests/wb/test_cli_roles_route.py` D 组两条行为锁：patch 权威层 `video_workbench.core.summary.role_label` 后，CLI 那句退役与 `resolve_role` 的两条 notice 必须跟着变。牙齿变体 T-6（把三处取法退回别名）→ 只红这两条 |
