@@ -47,3 +47,21 @@
 - 打包版资产 `VideoWorkbench-0.2.2.zip` 解压后直接是 `VideoWorkbench/`（上一版外面多包了一层 `dist/`），双击 `VideoWorkbench.exe` 即可，无需安装。
 - 升级不动数据：配置仍在 `~/.video-workbench/`，媒体与库的位置都没变。
 
+## 发布执行记录（2026-11-06 22:0x，lead 现跑）
+
+四条链，每条给命令原文与读数，下一个人照抄就能复核。
+
+| 环节 | 命令原文 | 读数 |
+|---|---|---|
+| tag | `git tag -a v0.9.3 -- f069f36` | `git cat-file -t v0.9.3` = `tag`；`git rev-parse "v0.9.3^{commit}"` = `f069f36ee0496ee29da30e43a6e498c468a047fb`（解引用这一腿不能省） |
+| 主仓 push | `$env:HTTP_PROXY='http://127.0.0.1:7897'; git push origin main`；同法 push tag | `MAIN_PUSH_RC=0`、`TAG_PUSH_RC=0`；fetch 后 `git rev-list --count origin/main..HEAD` = `0` |
+| release | `gh release create v0.9.3 "dist/VideoWorkbench-0.2.2.zip" --title "VideoWorkbench 0.2.2（打包版）" --notes-file <Temp>/release_v093_body.md` | `REL_RC=0` → https://github.com/cunnak/bili-scribe/releases/tag/v0.9.3 ；`gh release list --limit 3` 首行 `VideoWorkbench 0.2.2（打包版） / Latest / v0.9.3 / 2026-11-06T14:00:07Z` |
+| 镜像同步 | `.venv/Scripts/python.exe -u scripts/sync_mirror.py --apply --commit -m "sync: 主仓 f069f36 起的 v0.9.3（…）"` | `SYNC_RC=0 ELAPSED=118s`；日志逐字 `[ok] gitlink -> f069f36e`、`[ok] 镜像 commit 77b9606，含 9 个文件`；共同跟踪 284 项、内容不同 8 项、主仓独有 632 项不新建 |
+| 镜像 push | `git -C <镜像> push origin main` | `MIRROR_PUSH_RC=0`；同步后 ahead `0`，`origin/main` tip = `77b9606`；镜像 `git status --porcelain` 行数 `0` |
+
+三条口径，别再靠肉眼：
+
+- **`gh release view --json … -q '<带空格的表达式>'` 在 pwsh 里会被拆成三个参数**（`accepts at most 1 arg(s), received 3`）。用 `-q` 必须整体加引号，或者直接裸跑 `gh release view v0.9.3` 再筛。
+- **发布镜像里没有 `docs/decisions-product-defaults.md`，也没有这一份发布记录。** `docs/` 早先从 `PRODUCT_PREFIXES` 移除（含进去那一次同步把 236 份验收截图搬进发布仓，275 → 525 文件）。⇒ 镜像只带三份决策档（migration-budget / output-budget / role-retire-set），本文件的正文不在发布面上，这是设计不是漏搬。
+- 同步搬进去的 8 项做了字节复核（两边 `git show HEAD:<路径>` 的原始字节 sha256 前 16，脚本 `<Temp>/wb_cmp_mirror.py`），全部 SAME：AGENTS.md `7544536879c809d5`、`web/js/pages/settings.js` `2036398593b7affa`、`core/summarizer.py` `102ecb47217230e3`、`__init__.py` `d6d98314f62a3245`、`docs/decisions-output-budget.md` `c7b477d21bc77d1f`、`scripts/accept_frozen_package.py` `8803a508b2988224`、`scripts/sync_mirror_sentinel.py` `6435146a5dd1556c`、`tests/wb/test_summary_bad_json_copy.py` `d0e3dbbdce0803bd`。
+
