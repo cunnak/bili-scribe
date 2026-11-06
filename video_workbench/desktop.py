@@ -43,7 +43,6 @@ from bili_scribe.desktop import (
     _patch_webview_settings_hook,
     skin_window_bg,
 )
-
 from video_workbench import APP_NAME, __version__
 from video_workbench.app.service import WorkbenchService, roles_payload
 from video_workbench.config import WorkbenchConfig
@@ -471,7 +470,9 @@ def main(argv: list[str] | None = None) -> int:
 
     api = DesktopApi(service)
     try:
-        window = create_window(service, api)
+        # 不接返回值：create_window 内部已经 `api.attach(window)` 把窗口交给桥，
+        # 这里再存一个局部变量没人读（F841）。窗口对象的生命周期由 pywebview 持有。
+        create_window(service, api)
     except FileNotFoundError as exc:
         service.close()
         _fatal(str(exc))

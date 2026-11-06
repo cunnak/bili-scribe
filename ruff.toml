@@ -26,8 +26,11 @@ line-length = 100
 # 一处都不再出现。
 target-version = "py310"
 
+[lint]
 # 默认只开「错到会影响正确性」的一族。每加一族都要先跑一次看新增多少条，
 # 不许一次选 `select = ["ALL"]`——那等于把 1272 条直接变成永久红灯。
+# 写在 `[lint]` 而不是顶层：顶层 `select` 自 0.17.x 起被 ruff 判为 deprecated，
+# 每次跑都往 stderr 吐一段 warning（会把真错误淹没在噪声里，且让「命令回显干净」这条失去意义）。
 select = [
   "E4",   # import 位置/数量
   "E7",   # 明显的语句问题（裸 except 之外的可分性）
@@ -37,7 +40,6 @@ select = [
   "UP032",# f-string 替代 .format（低风险）
 ]
 
-[lint]
 extend-safe-fixes = ["I001", "UP032", "F401"]
 
 # 锁定面必须在这里再写一遍：ruff 的 lint 与 format 有两套独立的 exclude 名单，

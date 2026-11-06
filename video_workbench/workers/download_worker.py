@@ -30,8 +30,8 @@ from ..core import downloader as downloader_mod
 from ..core.layout import (
     allocate,
     build_sidecar,
-    find_source,
     finalize_source,
+    find_source,
     read_sidecar,
     source_stem,
     write_sidecar,

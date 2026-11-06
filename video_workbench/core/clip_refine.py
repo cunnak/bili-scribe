@@ -29,7 +29,7 @@ import math
 import re
 import wave
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Sequence
 
 from video_workbench.app.errors import WBError
 from video_workbench.infra.jsonfix import parse_json

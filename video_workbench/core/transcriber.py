@@ -28,7 +28,6 @@ import queue
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -38,8 +37,8 @@ from ..app.jobs import JobContext
 from ..core.downloader import kill_tree
 from ..infra import languages
 from ..infra import models as models_mod
-from ..infra.ffmpeg import FFmpeg
 from ..infra.db import now_iso
+from ..infra.ffmpeg import FFmpeg
 from .layout import find_source
 
 TRANSCRIPT_JSON = "transcript.json"

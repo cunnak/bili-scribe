@@ -32,11 +32,10 @@ import argparse
 import json
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from video_workbench import APP_NAME, __version__
-from video_workbench.app.errors import WBError, RETRYABLE_CODES
+from video_workbench.app.errors import RETRYABLE_CODES, WBError
 from video_workbench.app.service import WorkbenchService, roles_payload
 from video_workbench.config import WorkbenchConfig
 

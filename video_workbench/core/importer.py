@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable
 
 from ..app.errors import WBError
 from .layout import allocate
-from .probe import VIDEO_EXTS, is_video, make_thumbnail, probe_file, sibling_subtitles
+from .probe import is_video, make_thumbnail, probe_file, sibling_subtitles
 
 Prober = Callable[[Path], Any]
 ThumbMaker = Callable[..., Any]

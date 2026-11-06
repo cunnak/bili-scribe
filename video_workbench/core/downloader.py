@@ -21,12 +21,11 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from ..app.errors import WBError
-from ..infra.files import human_bytes
 
 # 画质 → 格式选择器（方案书 5.3.4）。
 # 1080P/720P 明确要 avc1，因为剪辑软件对 hevc 支持参差；4K/1080P+ 才放开编码，

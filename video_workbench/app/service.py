@@ -12,18 +12,18 @@ Phase 0 只有骨架方法（信息、设置、框架、任务控制）。下载
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-from pathlib import Path
 import copy
 import csv
 import io
 import json
+import os
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field, field_validator
@@ -34,47 +34,57 @@ from video_workbench.app.events import EventBus
 from video_workbench.app.jobs import JobContext, JobManager
 from video_workbench.app.rpc import Router
 from video_workbench.config import (
-    BILINGUAL_MODES,
     TRANSLATE_TARGETS,
     WorkbenchConfig,
     find_provider,
     parse_model_spec,
-    resolve_task_model,
     render_yaml,
+    resolve_task_model,
 )
-from video_workbench.core import resolver as resolver_mod
-from video_workbench.core import prompt_source
-from video_workbench.core import subtitles, summarizer, waveform
-from video_workbench.core import overview as overview_core
-from video_workbench.core import recovery as recovery_core
-from video_workbench.core import subtitle_llm
-from video_workbench.core import audio_mix, clipper, exporter, merger
-from video_workbench.core import nle
-from video_workbench.core import copywriter
+from video_workbench.core import (
+    audio_mix,
+    clip_refine,
+    clipper,
+    copywriter,
+    exporter,
+    merger,
+    nle,
+    prompt_source,
+    reframe,
+    subtitle_llm,
+    subtitles,
+    summarizer,
+    translator,
+    waveform,
+)
 from video_workbench.core import cover as cover_core
-from video_workbench.core import reframe
 from video_workbench.core import downloader as downloader_mod
-from video_workbench.core.downloader import BACKENDS
-from video_workbench.core import translator
-from video_workbench.core import publisher as publisher_core
-from video_workbench.core import styles as styles_core
 from video_workbench.core import onboard as onboard_core
-from video_workbench.core.transcriber import format_srt
+from video_workbench.core import overview as overview_core
+from video_workbench.core import publisher as publisher_core
+from video_workbench.core import recovery as recovery_core
+from video_workbench.core import resolver as resolver_mod
+from video_workbench.core import styles as styles_core
 from video_workbench.core.bili import default_gateway
-from video_workbench.core import clip_refine
+from video_workbench.core.downloader import BACKENDS
 from video_workbench.core.importer import import_videos
-from video_workbench.infra import languages
 from video_workbench.core.probe import make_thumbnail, probe_file
-from video_workbench.core.transcriber import make_transcribe_handler
-from video_workbench.infra import models as models_mod
+from video_workbench.core.transcriber import format_srt, make_transcribe_handler
+from video_workbench.infra import languages
 from video_workbench.infra import log as log_mod
+from video_workbench.infra import models as models_mod
+from video_workbench.infra.db import now_iso as db_now_iso
 from video_workbench.infra.db import open_and_migrate, schema_version
-from video_workbench.infra.ffmpeg import FFmpeg, filter_path, subtitle_filter
-from video_workbench.infra.files import is_within, unique_path
+from video_workbench.infra.ffmpeg import FFmpeg, subtitle_filter
+from video_workbench.infra.files import (
+    atomic_write_text,
+    ensure_free_space,
+    is_within,
+    sanitize_name,
+    unique_path,
+)
 from video_workbench.infra.llm import ChatClient, ChatError
 from video_workbench.infra.notecache import NoteCache
-from video_workbench.infra.db import now_iso as db_now_iso
-from video_workbench.infra.files import atomic_write_text, ensure_free_space, sanitize_name
 from video_workbench.infra.repo import Repo, new_id
 from video_workbench.workers.batch_worker import (
     BATCH_TYPE,
@@ -83,7 +93,6 @@ from video_workbench.workers.batch_worker import (
     make_batch_handler,
 )
 from video_workbench.workers.download_worker import make_download_handler
-
 
 # ============================================================ 参数模型
 #

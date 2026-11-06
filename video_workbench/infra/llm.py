@@ -16,12 +16,12 @@
 from __future__ import annotations
 
 import json
-import uuid
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit
+import uuid
 from typing import Any, Callable, Iterable, Mapping, Protocol
+from urllib.parse import urlsplit
 
 from ..app.errors import WBError
 

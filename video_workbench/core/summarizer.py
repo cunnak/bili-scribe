@@ -29,6 +29,16 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from bili_scribe.core.collector import Bundle
+from video_workbench.app.errors import WBError
+from video_workbench.core import prompt_source
+
+# 显示名一律**经这个模块属性现取**（下面 `role_label(...)` 的三个调用点都是），不用 import
+# 时绑进来的那个别名：别名在导入时就固定了函数对象，谁改了权威层的 `role_label`（或测试
+# monkeypatch 它）都传不到这里，于是「改 owner 的输出，下游必须跟着变」这条行为锁会假绿。
+# 别名本身留在上面的 from-import 清单里不动，那是 `summarizer.role_label` 这种取法的入口
+# （`tests/wb/test_summary.py:558` 就在这么取）。副作用要说清：改成走模块属性之后，
+# **patch 这个别名不再影响下面那几个调用点**，要换输出请 patch 权威层 `summary.role_label`。
+from video_workbench.core import summary as summary_pkg
 
 # 方法论本体在 video_workbench/core/summary/：那份副本与 bili_scribe 逐字节一致
 # （只换了 import 段），角色字典/默认角色/退役角色由它的 __init__ 权威层给出。
@@ -38,23 +48,21 @@ from video_workbench.core.summary import (
     PreparedMaterial,
     Refinement,
     SummarizeError,
-    Summary,
     UnknownRole,
     describe_roles,
     get_role,
-    role_label,
+)
+from video_workbench.core.summary import (
+    # `Summary` 与 `role_label` 是**有意保留的公开别名**，不是死 import：
+    # `tests/wb/test_summary.py` 直接用 `summarizer.role_label('standard')`，
+    # 下游也按 `summarizer.Summary` 取类型。写成 `X as X` 是 ruff 认的显式重导出写法，
+    # 既让 F401 不再把它当「可以删」的建议，又不加 noqa、不删名字。
+    Summary as Summary,
+)
+from video_workbench.core.summary import (
+    role_label as role_label,
 )
 from video_workbench.core.summary import summarizer as bs_summarizer
-# 显示名一律**经这个模块属性现取**（下面 `role_label(...)` 的三个调用点都是），不用 import
-# 时绑进来的那个别名：别名在导入时就固定了函数对象，谁改了权威层的 `role_label`（或测试
-# monkeypatch 它）都传不到这里，于是「改 owner 的输出，下游必须跟着变」这条行为锁会假绿。
-# 别名本身留在上面的 from-import 清单里不动，那是 `summarizer.role_label` 这种取法的入口
-# （`tests/wb/test_summary.py:558` 就在这么取）。副作用要说清：改成走模块属性之后，
-# **patch 这个别名不再影响下面那几个调用点**，要换输出请 patch 权威层 `summary.role_label`。
-from video_workbench.core import summary as summary_pkg
-from video_workbench.core import prompt_source
-
-from video_workbench.app.errors import WBError
 from video_workbench.infra.jsonfix import repair_json
 from video_workbench.infra.llm import ChatClient, ChatError
 

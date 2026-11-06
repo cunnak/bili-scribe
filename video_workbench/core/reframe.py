@@ -18,16 +18,15 @@ Haar 级联文件不内置（方案书 §0 第 3 条：模型按需下载），�
 
 from __future__ import annotations
 
-import re
-
+import hashlib
 import json
 import os
+import re
 import shutil
 import statistics
 import tempfile
-import urllib.request
-import hashlib
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -293,7 +292,7 @@ def crop_expression(
     """
     points = _simplify(focus)
     if not points:
-        return f"(iw-ih*9/16)*0.5000"
+        return "(iw-ih*9/16)*0.5000"
     points = jump_pairs(points, cuts)
     # 兼容 duration_ms：轨迹末点之后保持不变，时长本身不需要进表达式
     _ = duration_ms

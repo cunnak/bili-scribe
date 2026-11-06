@@ -39,12 +39,29 @@ from bili_scribe.config import (
     SKIN_KEYS,
     THINKING_MODES,
     CollectConfig,
-    DanmakuConfig,
-    FramesConfig,
-    LlmConfig as _LlmConfig,
-    PublishConfig as _PublishConfig,
     ServerConfig,
+)
+from bili_scribe.config import (
+    # 这两个在本模块里没有直接消费者，是**有意保留的重导出**：WB 侧代码要读弹幕/画面帧
+    # 配置时统一从 video_workbench.config 取，不各自去 import bili_scribe（那会让
+    # 「改参考侧」变成一条看不见的耦合）。写成 `X as X` 是 ruff 认的「显式重导出」写法，
+    # 不加 noqa、不删名字 —— 删了会让 `from video_workbench.config import FramesConfig`
+    # 这种取法在别处断掉（task-71 的 F401 不许用 auto-fix 清这两条）。
+    DanmakuConfig as DanmakuConfig,
+)
+from bili_scribe.config import (
+    FramesConfig as FramesConfig,
+)
+from bili_scribe.config import (
+    LlmConfig as _LlmConfig,
+)
+from bili_scribe.config import (
+    PublishConfig as _PublishConfig,
+)
+from bili_scribe.config import (
     StorageConfig as _StorageConfig,
+)
+from bili_scribe.config import (
     UiConfig as _UiConfig,
 )
 from video_workbench.app.errors import WBError
