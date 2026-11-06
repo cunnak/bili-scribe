@@ -109,6 +109,7 @@ def data_url(path: str | Path) -> str:
     raw = base64.b64encode(file.read_bytes()).decode("ascii")
     return f"data:image/jpeg;base64,{raw}"
 
+
 # ------------------------------------------------------------------ 服务端腿
 
 
@@ -183,9 +184,7 @@ def fetch_sprite(
             if declared_size < 0:
                 raise FrameError("抽帧图 Content-Length 为负数")
             if declared_size > limit:
-                raise FrameError(
-                    f"抽帧图超过大小上限：Content-Length={declared_size} > {limit}"
-                )
+                raise FrameError(f"抽帧图超过大小上限：Content-Length={declared_size} > {limit}")
         chunks: list[bytes] = []
         total = 0
         try:
@@ -370,9 +369,7 @@ def _frame_notes(meta: dict[str, Any], picks: list[int], want: int) -> list[str]
     return notes
 
 
-def _read_cached_frames(
-    meta: dict[str, Any], cache: Path, picks: list[int], want: int
-) -> FrameSet:
+def _read_cached_frames(meta: dict[str, Any], cache: Path, picks: list[int], want: int) -> FrameSet:
     frames: list[Frame] = []
     for order, cell in enumerate(picks, start=1):
         path = cache / f"{cell}.jpg"
@@ -453,9 +450,9 @@ def _download_frames(
                     )
                 fetched_sprites[sprite_i] = image
             buf = io.BytesIO()
-            fetched_sprites[sprite_i].crop(
-                cell_box(cell, grid_x, grid_y, cw, ch)
-            ).save(buf, "JPEG", quality=quality, optimize=True)
+            fetched_sprites[sprite_i].crop(cell_box(cell, grid_x, grid_y, cw, ch)).save(
+                buf, "JPEG", quality=quality, optimize=True
+            )
             raw = buf.getvalue()
             if not raw or len(raw) > MAX_IMAGE_BYTES:
                 raise FrameError("单帧超过大小上限")
@@ -615,7 +612,6 @@ def purge_stale_frames(root: str | Path, days: int) -> int:
         except OSError:
             continue
     return removed
-
 
 
 def collect(

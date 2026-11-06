@@ -31,7 +31,14 @@ WEB_DIR = Path(os.environ.get("WB_WEB_ROOT") or ROOT / "video_workbench" / "web"
 STRICT_ENV = adapter.PARITY_ENV
 MAX_TOKENS = 4096
 # 围栏样例：反引号用 chr(96) 拼，免得这份文件里混进 Markdown 围栏让人误读。
-FENCE = chr(96) * 3 + "json" + chr(10) + '{"one_line": "好", "summary_md": "正文", "key_points": [], "timeline": []}' + chr(10) + chr(96) * 3
+FENCE = (
+    chr(96) * 3
+    + "json"
+    + chr(10)
+    + '{"one_line": "好", "summary_md": "正文", "key_points": [], "timeline": []}'
+    + chr(10)
+    + chr(96) * 3
+)
 BAD = "这不是 JSON，也不会被修好"
 MSGS = [{"role": "user", "content": "给我 JSON"}]
 
@@ -59,7 +66,9 @@ class _Stub:
     def require(self) -> None:
         return None
 
-    def chat(self, messages, *, temperature=None, max_tokens=None, json_mode=False, note=None, **kw):
+    def chat(
+        self, messages, *, temperature=None, max_tokens=None, json_mode=False, note=None, **kw
+    ):
         self.requests.append(
             {"max_tokens": max_tokens, "json_mode": bool(json_mode), "temperature": temperature}
         )
@@ -271,7 +280,9 @@ def test_the_mock_default_matches_the_backend_default():
     # （SETTINGS.llm 之前那条注释里就有），拿它当切点会把 SETTINGS.llm 一起切进来，
     # 判据就退化成「注释里提到过这个键」——那是假绿。
     entry = 'case "summary.roles":'
-    assert mock.count(entry) == 1, f"夹具前提：mock 里 summary.roles 入口必须唯一，实际 {mock.count(entry)}"
+    assert mock.count(entry) == 1, (
+        f"夹具前提：mock 里 summary.roles 入口必须唯一，实际 {mock.count(entry)}"
+    )
     roles_payload = mock.split(entry, 1)[1].split("case ", 1)[0]
     assert "rescue_json" not in roles_payload, "summary.roles 的演示载荷里不该出现这个键"
 
@@ -307,4 +318,3 @@ def test_the_key_does_not_leak_into_the_bili_facing_yaml():
     cfg = WorkbenchConfig()
     cfg.llm.rescue_json = True
     assert "rescue_json" not in render_yaml(cfg)
-

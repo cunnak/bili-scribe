@@ -92,6 +92,8 @@ def test_a_transient_replace_denial_does_not_break_the_collect(tmp_path: Path, m
 
     assert len(result.frames) == 2, "重试腿没接住一次拒绝，整次抽帧白跑了"
     assert (cache / "0.jpg").is_file() and (cache / "1.jpg").is_file()
+
+
 def test_collect_from_api_cache_hit_keeps_all_cells(tmp_path: Path):
     cache = tmp_path / "frames" / "BV1cache"
     gateway = FakeGateway(sprite_meta())

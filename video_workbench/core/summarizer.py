@@ -331,14 +331,10 @@ class SummaryLLM:
                 if _rescue_json_on(self.app_cfg) and not _loads_object(reply):
                     # 止损：上一轮阶梯已经跑满仍失败，就不再跑第二轮（理由见 __init__）。
                     if self.rescue_runs and not self.rescue_last_ok:
-                        raise WBError(
-                            "LLM_BAD_RESPONSE", _rescue_exhausted_hint(reply)
-                        )
+                        raise WBError("LLM_BAD_RESPONSE", _rescue_exhausted_hint(reply))
                     self.rescue_runs += 1
                     try:
-                        saved = self._json_or_retry(
-                            reply, messages, sink, temperature, max_tokens
-                        )
+                        saved = self._json_or_retry(reply, messages, sink, temperature, max_tokens)
                     except BaseException:
                         self.rescue_last_ok = False
                         raise
