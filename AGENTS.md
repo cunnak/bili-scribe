@@ -46,6 +46,14 @@ git archive HEAD | tar -x -C /tmp/xx       # ③ 模拟 clone，逐字节 cmp
 .venv/Scripts/ruff.exe format .                    # 真改文件（先看清楚上面那条的 diff）
 ```
 
+- **跑测试前把 Git for Windows 放到 PATH 最前**：`export PATH="/c/Program Files/Git/cmd:$PATH"`。
+  `ops_bash` 默认 PATH 里排第一的是 niux 自带的 `git`（`2.56.0.windows.4.niugit`），它的
+  system gitconfig 只有 `http.sslbackend=schannel`、**没有 `core.autocrlf=true`**；
+  而 Git for Windows（`2.54.0.windows.1`）的系统级配置里有。`tests/wb/test_git_no_normalization_on_locked_paths.py`
+  的 `test_the_autocrlf_and_text_auto_combination_is_on_record` 钉的就是「危险组合此刻在场」这条
+  读数，换到 niugit 下它会**正确地报红**（`AssertionError: core.autocrlf=未设置、存在 '* text=auto'=True`）。
+  实测：niugit 下该文件红 1 条；把 Git for Windows 前置后同一条命令 **38 passed in 3.76s**。
+  判「这条红是不是产品坏了」之前，先跑 `git --version` 与 `git config --system --get core.autocrlf` 两个读数。
 - 规则范围与 `exclude` 全在仓库根 `ruff.toml`，**基线数记在那份文件的注释里**：装上当天下默认集 `Found 1272 errors`（567 fixable）、`format --diff` = `288 files would be reformatted, 68 already formatted`；按收窄面复跑 `video_workbench` = **28 条 check / 43 个文件待 format**、`tests/wb` = 204 条、`scripts` = 19 条。
 - **锁定面与参考侧本体在 `exclude` 里**（五份 vendored `.py` + 六份 txt + `bili_scribe`）：正常跑碰不到它们；**不许为了让某条规则过而去改 `exclude` 或加 `# noqa`** —— 那等于用格式闸改锁定面，会撞第三节的字节锁。
 - **现状登记（task-71 已还完，2026-11-06 现读）**：`ruff format` 已分三笔落地，**现读终态**：`video_workbench`（59 files already formatted）、`scripts`（58）、`tests/wb`（112）——这三个数会随新增文件往上走（task-70 之后多了 `core/frames.py`、两个 `accept_*.py` 与哨兵、两个新判据文件）；引用它们之前先重跑命令，别把本行当常量；`ruff check` 三面 `All checks passed!`，唯一例外是 `scripts/verify_cover_fix.py:20-21` 两条**有意保留**的 E402（`sys.path.insert` 之后的 import，挪了会真炸）。check 面另两笔：重导出改成 `X as X` 显式写法（产品侧 `Summary`/`role_label`/`DanmakuConfig`/`FramesConfig`，tests 侧 pytest 夹具同名复用），`target-version` 从 `py314` 改回 `py310`（README 写 3.10+，py314 会让 format 产出 3.14 才合法的 `except A, B:`）。任何人写「格式闸过了」之前，先想清楚自己跑的是哪条命令、哪个范围。
