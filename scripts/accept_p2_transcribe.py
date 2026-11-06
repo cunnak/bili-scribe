@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -39,7 +38,7 @@ def write_config(models_root: Path) -> Path:
             [
                 "app:",
                 "  language: zh",
-                f"storage:",
+                "storage:",
                 f"  db_path: {json.dumps(str(ACCEPT / 'wb_p2.db'))}",
                 f"  key_path: {json.dumps(str(ACCEPT / 'data' / 'keys.json'))}",
                 f"  media_root: {json.dumps(str(ACCEPT / 'media'))}",
@@ -73,10 +72,28 @@ def cut_clip(source: Path, dest: Path, seconds: int) -> Path:
     if dest.is_file() and dest.stat().st_size > 0:
         return dest
     subprocess.run(  # noqa: S603
-        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
-         "-ss", "30", "-t", str(seconds), "-i", str(source),
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-c:a", "aac",
-         str(dest)],
+        [
+            ffmpeg_bin(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            "30",
+            "-t",
+            str(seconds),
+            "-i",
+            str(source),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "28",
+            "-c:a",
+            "aac",
+            str(dest),
+        ],
         check=True,
     )
     return dest
@@ -90,7 +107,9 @@ def pick_source(explicit: str | None) -> Path:
         return path
     for candidate in sorted((ACCEPT / "media").rglob("source.mp4")):
         return candidate
-    raise SystemExit("[x] build/accept/media 下没有源片，先用 scripts/accept_p1_download.py 下一集，或用 --source 指定")
+    raise SystemExit(
+        "[x] build/accept/media 下没有源片，先用 scripts/accept_p1_download.py 下一集，或用 --source 指定"
+    )
 
 
 def main() -> int:
@@ -128,7 +147,9 @@ def main() -> int:
                     last["p"] = pct
                     print(f"[model] {pct}% {text}")
 
-            models_mod.download(service.cfg.models_root, args.model, progress=progress, poll_seconds=1.0)
+            models_mod.download(
+                service.cfg.models_root, args.model, progress=progress, poll_seconds=1.0
+            )
         print(f"[model] ready {args.model}")
 
         source = pick_source(args.source)
@@ -155,11 +176,11 @@ def main() -> int:
             print(f"[import] 复用已有项目 project={project_id}（{skipped[0]['reason']}）")
             # 旧字幕会被这次转录覆盖；后面的断言靠 model 字段确认"确实是这次跑的"
 
-
         started = time.time()
-        out = service.dispatch("transcribe.start",
-                             {"project_ids": [project_id], "model": args.model,
-                              "language": args.language})
+        out = service.dispatch(
+            "transcribe.start",
+            {"project_ids": [project_id], "model": args.model, "language": args.language},
+        )
         if not out.get("ok"):
             print("[x] 启动转录失败", out)
             return 4
@@ -193,8 +214,10 @@ def main() -> int:
         root = Path(detail["root_dir"])
         json_path = root / "transcript.json"
         srt_path = root / "transcript.srt"
-        print(f"[result] stage={detail['stage']} segments={meta.get('segments')} lang={meta.get('language')} "
-              f"model={meta.get('model')} 耗时 {elapsed:.1f}s")
+        print(
+            f"[result] stage={detail['stage']} segments={meta.get('segments')} lang={meta.get('language')} "
+            f"model={meta.get('model')} 耗时 {elapsed:.1f}s"
+        )
         if meta.get("model") and meta.get("model") != args.model:
             print(f"[x] 字幕不是本次模型产出的：期望 {args.model}，实际 {meta.get('model')}")
             return 9
@@ -212,15 +235,20 @@ def main() -> int:
         for seg in first:
             print(f"    {seg['start_ms']:>6}-{seg['end_ms']:>6}  {seg['text'][:40]}")
         words = sum(len(s.get("words") or []) for s in segments)
-        print(f"[check] 词级时间戳 {words} 个 · notes={payload.get('notes')} device={payload.get('device')}")
+        print(
+            f"[check] 词级时间戳 {words} 个 · notes={payload.get('notes')} device={payload.get('device')}"
+        )
         srt_text = srt_path.read_text(encoding="utf-8")
-        print(f"[check] SRT 行数 {len(srt_text.splitlines())}，首行 {srt_text.splitlines()[0] if srt_text else '(空)'}")
+        print(
+            f"[check] SRT 行数 {len(srt_text.splitlines())}，首行 {srt_text.splitlines()[0] if srt_text else '(空)'}"
+        )
 
         # 缓存命中：再点一次必须秒回
         again_started = time.time()
-        again = service.dispatch("transcribe.start",
-                             {"project_ids": [project_id], "model": args.model,
-                              "language": args.language})
+        again = service.dispatch(
+            "transcribe.start",
+            {"project_ids": [project_id], "model": args.model, "language": args.language},
+        )
         job2 = again["data"]["jobs"][0]["id"]
         while True:
             info2 = service.dispatch("job.get", {"id": job2})["data"]

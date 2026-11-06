@@ -24,7 +24,8 @@ PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "scripts"))
 
-from accept_p3_clip import GOOD, BAD, StubModel, call, error_of, pick_project, start_stub  # noqa: E402
+from accept_p3_clip import BAD, GOOD, StubModel, call, error_of, pick_project, start_stub  # noqa: E402
+
 from video_workbench.app.service import WorkbenchService  # noqa: E402
 from video_workbench.core import copywriter  # noqa: E402
 
@@ -33,7 +34,15 @@ FAILS: list[str] = []
 COPY_JSON = {
     "title": "他为什么坚持不做低价",
     "description": "同一款产品把价格翻了三倍，这段讲清定价靠的是判断而不是算账，听完能自己复盘一遍。",
-    "tags": ["#定价策略", "定价策略", "商业判断", "产品思维", "视频", "很长的标签超过八个字的那种", "多余"],
+    "tags": [
+        "#定价策略",
+        "定价策略",
+        "商业判断",
+        "产品思维",
+        "视频",
+        "很长的标签超过八个字的那种",
+        "多余",
+    ],
 }
 
 
@@ -66,7 +75,9 @@ _orig_payload = StubModel.payload
 def payload(self, body: dict) -> dict:  # noqa: ANN001
     """文案请求单独回一份"故意不规范"的 JSON，其余交给候选生成那套。"""
     messages = body.get("messages") or []
-    user = "".join(str(item.get("content") or "") for item in messages if item.get("role") == "user")
+    user = "".join(
+        str(item.get("content") or "") for item in messages if item.get("role") == "user"
+    )
     if "切片文案（P3-08）" not in user:
         return _orig_payload(self, body)
     StubModel.calls += 1
@@ -80,7 +91,11 @@ def payload(self, body: dict) -> dict:  # noqa: ANN001
         "created": int(time.time()),
         "model": "stub-copy",
         "choices": [
-            {"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": reply},
+                "finish_reason": "stop",
+            }
         ],
         "usage": {"prompt_tokens": 400, "completion_tokens": 120, "total_tokens": 520},
     }
@@ -112,7 +127,11 @@ def main() -> int:
         )
         pid = item["id"]
         sources = [a for a in service.repo.asset_list(pid) if a.get("kind") == "source"]
-        check("找到带源文件与字幕的项目", bool(sources), f"{pid} · {sources[0]['path'] if sources else '无'}")
+        check(
+            "找到带源文件与字幕的项目",
+            bool(sources),
+            f"{pid} · {sources[0]['path'] if sources else '无'}",
+        )
 
         # ---------------- 0. 生成候选作为素材
         StubModel.mode = GOOD
@@ -127,7 +146,11 @@ def main() -> int:
         # ---------------- 1. 写文案：任务化 + 规范化
         StubModel.calls = 0
         out = call(router, "clip.copy", {"candidate_id": target["id"]})
-        check("clip.copy 返回任务而不是同步结果", bool(out.get("job", {}).get("id")), str(out.get("job", {}).get("id")))
+        check(
+            "clip.copy 返回任务而不是同步结果",
+            bool(out.get("job", {}).get("id")),
+            str(out.get("job", {}).get("id")),
+        )
         job = wait_job(service, out["job"]["id"])
         check("任务成功", job["status"] == "succeeded", job.get("error_message") or "")
         row = service.repo.candidate_get(target["id"]) or {}
@@ -145,7 +168,10 @@ def main() -> int:
         )
         tags = list(copy.get("tags") or [])
         check("标签 3–5 个", copywriter.TAGS_MIN <= len(tags) <= copywriter.TAGS_MAX, str(tags))
-        check("标签去掉井号且去重", all("#" not in tag for tag in tags) and len(set(tags)) == len(tags))
+        check(
+            "标签去掉井号且去重",
+            all("#" not in tag for tag in tags) and len(set(tags)) == len(tags),
+        )
         check("来源标成 llm", copy.get("source") == "llm", str(copy.get("source")))
         check("刚写完不算手改", copy.get("edited") is False, str(copy.get("edited")))
         check("模型只被问了一次", StubModel.calls == 1, f"{StubModel.calls} 次")
@@ -162,18 +188,28 @@ def main() -> int:
         cover = (service.repo.candidate_get(target["id"]) or {}).get("copy", {}).get("cover") or {}
         cover_path = Path(str(cover.get("path") or ""))
         check("自动抽了封面", bool(cover_path) and cover_path.is_file(), str(cover_path))
-        check("封面文件有字节", cover_path.is_file() and cover_path.stat().st_size > 1024,
-              f"{cover_path.stat().st_size if cover_path.is_file() else 0} 字节")
+        check(
+            "封面文件有字节",
+            cover_path.is_file() and cover_path.stat().st_size > 1024,
+            f"{cover_path.stat().st_size if cover_path.is_file() else 0} 字节",
+        )
         expect_at = min(int(target["start_ms"]) + 1000, int(target["end_ms"]) - 1)
-        check("封面取切点后 1 秒", int(cover.get("at_ms") or -1) == expect_at,
-              f"期望 {expect_at}，实际 {cover.get('at_ms')}")
+        check(
+            "封面取切点后 1 秒",
+            int(cover.get("at_ms") or -1) == expect_at,
+            f"期望 {expect_at}，实际 {cover.get('at_ms')}",
+        )
         first_cover = str(cover.get("path") or "")
 
         # ---------------- 3. 已有文案不重烧请求
         calls_before = StubModel.calls
         again = call(router, "clip.copy", {"candidate_id": target["id"]})
         check("已有文案直接复用", bool(again.get("reused")), str(again.get("reused")))
-        check("复用不花模型调用", StubModel.calls == calls_before, f"{StubModel.calls - calls_before} 次")
+        check(
+            "复用不花模型调用",
+            StubModel.calls == calls_before,
+            f"{StubModel.calls - calls_before} 次",
+        )
         check("复用回的还是同一份标题", (again.get("copy") or {}).get("title") == copy.get("title"))
 
         # ---------------- 4. 重新生成：新增调用，但封面不丢
@@ -181,8 +217,11 @@ def main() -> int:
         wait_job(service, regen["job"]["id"])
         check("重新生成真的问了模型", StubModel.calls == calls_before + 1, f"{StubModel.calls} 次")
         row2 = service.repo.candidate_get(target["id"]) or {}
-        check("重写后封面保留", str((row2.get("copy") or {}).get("cover", {}).get("path") or "") == first_cover,
-              str((row2.get("copy") or {}).get("cover", {}).get("path")))
+        check(
+            "重写后封面保留",
+            str((row2.get("copy") or {}).get("cover", {}).get("path") or "") == first_cover,
+            str((row2.get("copy") or {}).get("cover", {}).get("path")),
+        )
         check("重写后文案仍在", bool((row2.get("copy") or {}).get("title")))
 
         # ---------------- 5. 手改：截断、去重、标记 edited
@@ -198,9 +237,21 @@ def main() -> int:
         )
         scopy = saved["copy"]
         check("手改后标记 edited", scopy.get("edited") is True)
-        check("超长标题被截断", len(scopy["title"]) <= copywriter.TITLE_MAX, f"{len(scopy['title'])} 字")
-        check("超长简介被截断", len(scopy["description"]) <= copywriter.DESC_MAX, f"{len(scopy['description'])} 字")
-        check("标签去重并封顶", len(scopy["tags"]) <= copywriter.TAGS_MAX and "甲" in scopy["tags"], str(scopy["tags"]))
+        check(
+            "超长标题被截断",
+            len(scopy["title"]) <= copywriter.TITLE_MAX,
+            f"{len(scopy['title'])} 字",
+        )
+        check(
+            "超长简介被截断",
+            len(scopy["description"]) <= copywriter.DESC_MAX,
+            f"{len(scopy['description'])} 字",
+        )
+        check(
+            "标签去重并封顶",
+            len(scopy["tags"]) <= copywriter.TAGS_MAX and "甲" in scopy["tags"],
+            str(scopy["tags"]),
+        )
         check(
             "投稿文本包含标题、简介与话题词",
             scopy["title"] in copywriter.publish_block(scopy)
@@ -208,9 +259,17 @@ def main() -> int:
         )
 
         # ---------------- 6. 换封面：指定时刻 / 抽帧候选 / 上传
-        picked = call(router, "clip.cover", {"candidate_id": target["id"], "at_ms": int(target["start_ms"]) + 3000})
+        picked = call(
+            router,
+            "clip.cover",
+            {"candidate_id": target["id"], "at_ms": int(target["start_ms"]) + 3000},
+        )
         pcover = picked["cover"]
-        check("指定时刻换封面", int(pcover["at_ms"]) == int(target["start_ms"]) + 3000, str(pcover["at_ms"]))
+        check(
+            "指定时刻换封面",
+            int(pcover["at_ms"]) == int(target["start_ms"]) + 3000,
+            str(pcover["at_ms"]),
+        )
         check("换完文件在盘上", Path(str(pcover["path"])).is_file(), str(pcover.get("path")))
 
         frames = call(router, "clip.cover.frames", {"candidate_id": target["id"], "count": 4})
@@ -234,22 +293,36 @@ def main() -> int:
             )
         up = call(router, "clip.cover.upload", {"candidate_id": target["id"], "path": str(upload)})
         check("上传封面标成 upload", up["cover"]["source"] == "upload", str(up["cover"]["source"]))
-        check("上传封面落进项目目录", int(target["start_ms"]) >= 0 and Path(up["cover"]["path"]).is_file(),
-              str(up["cover"]["path"]))
+        check(
+            "上传封面落进项目目录",
+            int(target["start_ms"]) >= 0 and Path(up["cover"]["path"]).is_file(),
+            str(up["cover"]["path"]),
+        )
         bad_upload = PROJ / "build" / "accept" / "upload-cover.txt"
         bad_upload.write_text("not an image", encoding="utf-8")
-        err = error_of(router, "clip.cover.upload", {"candidate_id": target["id"], "path": str(bad_upload)})
+        err = error_of(
+            router, "clip.cover.upload", {"candidate_id": target["id"], "path": str(bad_upload)}
+        )
         check("非图片被拦", err.get("code") == "VALIDATION", str(err.get("code")))
 
         # ---------------- 7. 短片封面时刻被夹在区间内
         tiny = call(
             router,
             "clip.create",
-            {"project_id": pid, "kind": "highlight", "start_ms": 6000, "end_ms": 6800, "title": "0.8 秒短片"},
+            {
+                "project_id": pid,
+                "kind": "highlight",
+                "start_ms": 6000,
+                "end_ms": 6800,
+                "title": "0.8 秒短片",
+            },
         )["candidate"]
         tiny_cover = call(router, "clip.cover", {"candidate_id": tiny["id"], "at_ms": -1})["cover"]
-        check("0.8 秒短片的封面时刻被夹在片内", 6000 <= int(tiny_cover["at_ms"]) <= 6799,
-              str(tiny_cover["at_ms"]))
+        check(
+            "0.8 秒短片的封面时刻被夹在片内",
+            6000 <= int(tiny_cover["at_ms"]) <= 6799,
+            str(tiny_cover["at_ms"]),
+        )
 
         # ---------------- 8. 模型 500：兜底文案，任务仍成功
         blank = [row for row in rows if row["id"] != target["id"]][0]
@@ -257,19 +330,38 @@ def main() -> int:
         bad = call(router, "clip.copy", {"candidate_id": blank["id"]})
         bad_job = wait_job(service, bad["job"]["id"])
         bcopy = (service.repo.candidate_get(blank["id"]) or {}).get("copy") or {}
-        check("模型挂了文案任务仍成功", bad_job["status"] == "succeeded", bad_job.get("error_message") or "")
+        check(
+            "模型挂了文案任务仍成功",
+            bad_job["status"] == "succeeded",
+            bad_job.get("error_message") or "",
+        )
         check("兜底文案标成 rule", bcopy.get("source") == "rule", str(bcopy.get("source")))
-        check("兜底文案用候选标题", bcopy.get("title") == blank.get("title"), str(bcopy.get("title")))
-        check("兜底写了原因", any("兜底" in str(item) for item in (bcopy.get("notes") or [])),
-              str(bcopy.get("notes")))
+        check(
+            "兜底文案用候选标题", bcopy.get("title") == blank.get("title"), str(bcopy.get("title"))
+        )
+        check(
+            "兜底写了原因",
+            any("兜底" in str(item) for item in (bcopy.get("notes") or [])),
+            str(bcopy.get("notes")),
+        )
 
         # ---------------- 9. 边界：不存在的候选
-        check("未知候选写文案 → NOT_FOUND", error_of(router, "clip.copy", {"candidate_id": "cand_x"}).get("code") == "NOT_FOUND")
+        check(
+            "未知候选写文案 → NOT_FOUND",
+            error_of(router, "clip.copy", {"candidate_id": "cand_x"}).get("code") == "NOT_FOUND",
+        )
         check(
             "未知候选保存文案 → NOT_FOUND",
-            error_of(router, "clip.copy.save", {"candidate_id": "cand_x", "title": "x"}).get("code") == "NOT_FOUND",
+            error_of(router, "clip.copy.save", {"candidate_id": "cand_x", "title": "x"}).get("code")
+            == "NOT_FOUND",
         )
-        check("候选列表能读回文案", any((row.get("copy") or {}).get("title") for row in call(router, "clip.candidates", {"id": pid})["candidates"]))
+        check(
+            "候选列表能读回文案",
+            any(
+                (row.get("copy") or {}).get("title")
+                for row in call(router, "clip.candidates", {"id": pid})["candidates"]
+            ),
+        )
     finally:
         service.close()
         server.shutdown()

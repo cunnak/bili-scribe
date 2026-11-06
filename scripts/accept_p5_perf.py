@@ -110,7 +110,9 @@ def main() -> int:
         elapsed = time.monotonic() - started
         time.sleep(0.4)  # 等节流线程把最后一条补发出来
 
-        updates = [payload for payload in collector.by("job.updated") if payload.get("id") == job_id]
+        updates = [
+            payload for payload in collector.by("job.updated") if payload.get("id") == job_id
+        ]
         budget = int(math.ceil(elapsed / 0.25)) + 3
         check("任务跑完了（demo）", row.get("status") == "succeeded", str(row.get("status")))
         check(
@@ -126,9 +128,13 @@ def main() -> int:
         before = len(collector.by("job.updated"))
         burst = 200
         for index in range(burst):
-            service.events.emit("job.updated", {"id": "job_burst", "progress": index / burst}, key="job_burst")
+            service.events.emit(
+                "job.updated", {"id": "job_burst", "progress": index / burst}, key="job_burst"
+            )
         time.sleep(0.5)
-        burst_rows = [payload for payload in collector.by("job.updated") if payload.get("id") == "job_burst"]
+        burst_rows = [
+            payload for payload in collector.by("job.updated") if payload.get("id") == "job_burst"
+        ]
         check(
             f"{burst} 次突发只送达个位数",
             len(burst_rows) <= 4,
@@ -147,15 +153,26 @@ def main() -> int:
         job2_id = str(job2.get("id") or "")
         row2 = wait_job(service, job2_id)
         time.sleep(0.3)
-        log_events = [payload for payload in collector.by("job.log") if payload.get("id") == job2_id]
+        log_events = [
+            payload for payload in collector.by("job.log") if payload.get("id") == job2_id
+        ]
         lines = [line for payload in log_events for line in (payload.get("lines") or [])]
         check("任务跑完了（40 步）", row2.get("status") == "succeeded", str(row2.get("status")))
-        check("日志事件带 lines 数组", bool(log_events) and all(isinstance(p.get("lines"), list) for p in log_events),
-              f"{len(log_events)} 条事件")
-        check("攒批后的行数≥事件数（真攒了）", len(lines) >= len(log_events), f"{len(lines)} 行 / {len(log_events)} 条")
+        check(
+            "日志事件带 lines 数组",
+            bool(log_events) and all(isinstance(p.get("lines"), list) for p in log_events),
+            f"{len(log_events)} 条事件",
+        )
+        check(
+            "攒批后的行数≥事件数（真攒了）",
+            len(lines) >= len(log_events),
+            f"{len(lines)} 行 / {len(log_events)} 条",
+        )
         check("日志一行都没丢", len(lines) >= 4, f"{len(lines)} 行")
         check("日志里有 demo 前缀", any("[demo]" in str(line) for line in lines), str(lines[:2]))
-        check("没有旧的单行字段（契约已改）", not any("line" in payload for payload in log_events), "")
+        check(
+            "没有旧的单行字段（契约已改）", not any("line" in payload for payload in log_events), ""
+        )
 
         # ---------------------------------------------------------- 4. 攒批时延
         collector.rows.clear()
@@ -170,9 +187,17 @@ def main() -> int:
                 delivered_at = collector.times("job.log")[0] - mark
                 break
             time.sleep(0.01)
-        check("200ms 窗口到点就发（≤0.4s）", 0 < delivered_at <= 0.4, f"{delivered_at * 1000:.0f}ms")
-        batched = [line for payload in collector.by("job.log") for line in (payload.get("lines") or [])]
-        check("窗口内的三行合成一条事件", collector.by("job.log") and batched == ["a", "b", "c"], str(batched))
+        check(
+            "200ms 窗口到点就发（≤0.4s）", 0 < delivered_at <= 0.4, f"{delivered_at * 1000:.0f}ms"
+        )
+        batched = [
+            line for payload in collector.by("job.log") for line in (payload.get("lines") or [])
+        ]
+        check(
+            "窗口内的三行合成一条事件",
+            collector.by("job.log") and batched == ["a", "b", "c"],
+            str(batched),
+        )
 
         # 真·攒批：25 行在同一窗口内连发，必须是 1 条事件带 25 行——
         # 上面 demo 任务是每秒一行，本来就不该合成，拿它证明攒批没意义。
@@ -206,15 +231,37 @@ def main() -> int:
         if out.is_file():
             payload = json.loads(out.read_text(encoding="utf-8"))
         check("前端基线脚本跑通", proc.returncode == 0, f"exit={proc.returncode}")
-        check("切页均值 <200ms", float(payload.get("switchAvg") or 999) < 200, f"{payload.get('switchAvg')}ms")
-        check("切页最差 <400ms", float(payload.get("switchMax") or 999) < 400, f"{payload.get('switchMax')}ms")
+        check(
+            "切页均值 <200ms",
+            float(payload.get("switchAvg") or 999) < 200,
+            f"{payload.get('switchAvg')}ms",
+        )
+        check(
+            "切页最差 <400ms",
+            float(payload.get("switchMax") or 999) < 400,
+            f"{payload.get('switchMax')}ms",
+        )
         editor = payload.get("editor") or {}
-        check("1000 段首屏 <400ms", float(editor.get("first") or 999) < 400, f"{editor.get('first')}ms")
-        check("1000 段滚动均值 <16.7ms", float(editor.get("scrollAvg") or 999) < 16.7, f"{editor.get('scrollAvg')}ms")
-        check("虚拟列表只留 ≤60 行", int(editor.get("rendered") or 999) <= 60, f"{editor.get('rendered')} 行")
+        check(
+            "1000 段首屏 <400ms",
+            float(editor.get("first") or 999) < 400,
+            f"{editor.get('first')}ms",
+        )
+        check(
+            "1000 段滚动均值 <16.7ms",
+            float(editor.get("scrollAvg") or 999) < 16.7,
+            f"{editor.get('scrollAvg')}ms",
+        )
+        check(
+            "虚拟列表只留 ≤60 行",
+            int(editor.get("rendered") or 999) <= 60,
+            f"{editor.get('rendered')} 行",
+        )
 
     print()
-    print(f"P5-04 性能与事件节流验收：{'全部通过' if FAIL == 0 else f'{FAIL} 项失败'}（{OK}/{OK + FAIL}）")
+    print(
+        f"P5-04 性能与事件节流验收：{'全部通过' if FAIL == 0 else f'{FAIL} 项失败'}（{OK}/{OK + FAIL}）"
+    )
     if FAIL:
         print("\n失败项：")
         for ok, name, detail in ROWS:

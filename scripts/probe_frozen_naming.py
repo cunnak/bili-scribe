@@ -26,10 +26,20 @@ KEYS = {
 }
 
 WANT = {
-    "video_workbench.core.layout": {"source_stem", "finalize_source", "find_source", "SOURCE_STAGING"},
+    "video_workbench.core.layout": {
+        "source_stem",
+        "finalize_source",
+        "find_source",
+        "SOURCE_STAGING",
+    },
     "video_workbench.core.resolver": {"normalize_cover", "COVER_HOSTS"},
     "video_workbench.infra.repo": {"asset_upsert_singleton"},
-    "video_workbench.workers.download_worker": {"source_stem", "finalize_source", "find_source", "asset_upsert_singleton"},
+    "video_workbench.workers.download_worker": {
+        "source_stem",
+        "finalize_source",
+        "find_source",
+        "asset_upsert_singleton",
+    },
     "video_workbench.core.transcriber": {"find_source"},
 }
 

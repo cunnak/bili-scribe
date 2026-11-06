@@ -3,6 +3,7 @@
 手法：把本进程伪装成 frozen（sys.frozen=True、sys.executable=dist 里的 exe），
 于是 downloader 会走 [exe, --ytdlp] 前缀——和打包版 GUI 里完全同一条命令。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -47,12 +48,24 @@ def main() -> int:
     meta = [e for e in events if e.get("type") in {"meta", "wb-meta"}]
     print("[events] 共 %d 条，progress %d 条，meta %d 条" % (len(events), len(prog), len(meta)))
     if prog:
-        print("[events] 进度抽样：", [round(p.get("percent", 0), 1) for p in prog[:5]], "…",
-              [round(p.get("percent", 0), 1) for p in prog[-2:]])
+        print(
+            "[events] 进度抽样：",
+            [round(p.get("percent", 0), 1) for p in prog[:5]],
+            "…",
+            [round(p.get("percent", 0), 1) for p in prog[-2:]],
+        )
     if meta:
         print("[events] meta 抽样：", meta[-1])
-    print("[result] file=%s height=%s format=%s events=%d elapsed=%.1fs" % (
-        Path(res.path).name if res.path else None, res.height, res.format_id, res.events, res.elapsed_s))
+    print(
+        "[result] file=%s height=%s format=%s events=%d elapsed=%.1fs"
+        % (
+            Path(res.path).name if res.path else None,
+            res.height,
+            res.format_id,
+            res.events,
+            res.elapsed_s,
+        )
+    )
     if res.stderr_tail:
         print("[stderr 尾] ", res.stderr_tail[-300:])
     files = sorted(p.name for p in out.iterdir())

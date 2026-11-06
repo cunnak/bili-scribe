@@ -39,6 +39,7 @@ from accept_p3_clip import (  # noqa: E402
     pick_project,
     start_stub,
 )
+
 from video_workbench.app.service import WorkbenchService  # noqa: E402
 
 FAILS: list[str] = []
@@ -89,13 +90,19 @@ def main() -> int:
         frame_ms = int(data.get("frame_ms") or 0)
         fps = float(data.get("fps") or 0)
         check("clip.candidates 给出 frame_ms", frame_ms > 0, f"{frame_ms} ms")
-        check("fps 与 frame_ms 自洽", abs(1000.0 / frame_ms - fps) < 3.5, f"{fps} fps / {frame_ms} ms")
+        check(
+            "fps 与 frame_ms 自洽", abs(1000.0 / frame_ms - fps) < 3.5, f"{fps} fps / {frame_ms} ms"
+        )
         check(
             "帧长落在常见帧率档位（25/30/29.97/60 或 40 的退回值）",
             frame_ms in (33, 34, 40, 41, 17, 16) or 10 <= frame_ms <= 50,
             str(frame_ms),
         )
-        check("有源文件路径（真 mp4 才探得到真帧率）", bool(data.get("source_path")), data.get("source_path") or "")
+        check(
+            "有源文件路径（真 mp4 才探得到真帧率）",
+            bool(data.get("source_path")),
+            data.get("source_path") or "",
+        )
 
         # ---------------- 2. 对齐误差 ≤ 1 帧
         StubModel.mode = GOOD
@@ -111,8 +118,13 @@ def main() -> int:
 
         worst = 0
         off_grid = 0
-        cases = [cand["start_ms"] + 1, cand["start_ms"] + 7, cand["start_ms"] + 13,
-                 cand["start_ms"] + 19, cand["start_ms"] + 21]
+        cases = [
+            cand["start_ms"] + 1,
+            cand["start_ms"] + 7,
+            cand["start_ms"] + 13,
+            cand["start_ms"] + 19,
+            cand["start_ms"] + 21,
+        ]
         for raw in cases:
             # 起点往后挪一点点，保证仍 ≥0.4s 且不越界
             got = call(
@@ -140,16 +152,27 @@ def main() -> int:
         check("不指定 align 时原样保存", kept == raw_ms, f"{raw_ms} → {kept}")
         check(
             "align 传未知值被拦",
-            (error_of(router, "clip.update", {"id": cand["id"], "start_ms": raw_ms, "align": "vad"}) or {}).get("code")
+            (
+                error_of(
+                    router, "clip.update", {"id": cand["id"], "start_ms": raw_ms, "align": "vad"}
+                )
+                or {}
+            ).get("code")
             == "VALIDATION",
         )
 
         # ---------------- 3. 锁定后重跑不覆盖
         call(router, "clip.update", {"id": cand["id"], "status": "locked"})
-        locked_start = call(router, "clip.update", {
-            "id": cand["id"], "start_ms": cand["start_ms"] + 400, "end_ms": cand["end_ms"],
-            "align": "frame",
-        })["candidate"]["start_ms"]
+        locked_start = call(
+            router,
+            "clip.update",
+            {
+                "id": cand["id"],
+                "start_ms": cand["start_ms"] + 400,
+                "end_ms": cand["end_ms"],
+                "align": "frame",
+            },
+        )["candidate"]["start_ms"]
         check(
             "锁定后仍能微调切点（锁的是重跑，不是手改）",
             locked_start != cand["start_ms"],
@@ -158,7 +181,11 @@ def main() -> int:
         StubModel.mode = BAD
         job2 = call(router, "clip.analyze", {"project_id": pid, "count": 12})["job"]
         done2 = wait_job(service, job2["id"])
-        check("模型挂了任务仍然结束（规则兜底）", done2.get("status") == "succeeded", str(done2.get("status")))
+        check(
+            "模型挂了任务仍然结束（规则兜底）",
+            done2.get("status") == "succeeded",
+            str(done2.get("status")),
+        )
         after = call(router, "clip.candidates", {"id": pid})["candidates"]
         locked_rows = [r for r in after if r["id"] == cand["id"]]
         check("锁定的候选还在", len(locked_rows) == 1)
@@ -190,11 +217,16 @@ def main() -> int:
             },
         )["candidate"]
         span = manual["end_ms"] - manual["start_ms"]
-        check("手动切片对齐后落在栅格", manual["start_ms"] % frame_ms == 0 and manual["end_ms"] % frame_ms == 0,
-              f"{manual['start_ms']}–{manual['end_ms']}")
+        check(
+            "手动切片对齐后落在栅格",
+            manual["start_ms"] % frame_ms == 0 and manual["end_ms"] % frame_ms == 0,
+            f"{manual['start_ms']}–{manual['end_ms']}",
+        )
         check("手动切片时长 ≥ 0.4 秒（可导出）", span >= 400, f"{span} ms")
         check("手动切片标了 manual 来源", manual["source"] == "manual", str(manual["source"]))
-        check("手动切片默认 draft（要人确认才发）", manual["status"] == "draft", str(manual["status"]))
+        check(
+            "手动切片默认 draft（要人确认才发）", manual["status"] == "draft", str(manual["status"])
+        )
         check(
             "对齐后不足 0.4 秒要被拦",
             (

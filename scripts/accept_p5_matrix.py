@@ -40,8 +40,8 @@ class Step:
     args: list[str] = field(default_factory=list)
     note: str = ""
     network: bool = False
-    outcome: str = ""      # passed / failed / skipped
-    last: str = ""         # 脚本最后一行
+    outcome: str = ""  # passed / failed / skipped
+    last: str = ""  # 脚本最后一行
     seconds: float = 0.0
 
 
@@ -49,7 +49,7 @@ class Step:
 class Group:
     key: str
     title: str
-    spec: list[str]          # 方案书 §8.x 的条目（照抄，便于对照）
+    spec: list[str]  # 方案书 §8.x 的条目（照抄，便于对照）
     steps: list[Step]
     extra: list[str] = field(default_factory=list)
 
@@ -71,13 +71,20 @@ GROUPS: list[Group] = [
             "解析失败有明确错误，不是空白",
         ],
         steps=[
-            _s("accept_p1_download.py", "--url", "BV1GJ411x7h7", "--quality", "720P",
-               note="真站解析 + 下载 + 缩略图 + 侧车（解析失败/权限不足的归因也在里面）",
-               network=True),
-            _s("accept_p2_summary.py", "--config", CFG,
-               note="「仅总结」路径：有字幕即可出总结"),
-            _s("accept_p1_bbdown.py",
-               note="yt-dlp 失败后的兜底：后端探测 + 失败项显式换 BBDown 重试（不自动切换）；自带隔离库"),
+            _s(
+                "accept_p1_download.py",
+                "--url",
+                "BV1GJ411x7h7",
+                "--quality",
+                "720P",
+                note="真站解析 + 下载 + 缩略图 + 侧车（解析失败/权限不足的归因也在里面）",
+                network=True,
+            ),
+            _s("accept_p2_summary.py", "--config", CFG, note="「仅总结」路径：有字幕即可出总结"),
+            _s(
+                "accept_p1_bbdown.py",
+                note="yt-dlp 失败后的兜底：后端探测 + 失败项显式换 BBDown 重试（不自动切换）；自带隔离库",
+            ),
         ],
     ),
     Group(
@@ -91,10 +98,10 @@ GROUPS: list[Group] = [
             "缺失文件标红，能重新定位",
         ],
         steps=[
-            _s("accept_p2_editor.py", "--config", CFG,
-               note="库→字幕入口、阶段推进、缺失文件处理"),
-            _s("accept_p5_perf.py", "--skip-bench",
-               note="100 段/1000 段渲染与滚动（不重跑 bench）"),
+            _s("accept_p2_editor.py", "--config", CFG, note="库→字幕入口、阶段推进、缺失文件处理"),
+            _s(
+                "accept_p5_perf.py", "--skip-bench", note="100 段/1000 段渲染与滚动（不重跑 bench）"
+            ),
         ],
         extra=["视觉矩阵 library / library-1100（两皮肤，见下）"],
     ),
@@ -147,7 +154,12 @@ GROUPS: list[Group] = [
         ],
         steps=[
             _s("accept_p4_publish.py", "--config", CFG, note="草稿/门禁/字数/更新时间"),
-            _s("accept_p4_publish_do.py", "--config", CFG, note="勾确认→发布→撤回 全链路（替身客户端）"),
+            _s(
+                "accept_p4_publish_do.py",
+                "--config",
+                CFG,
+                note="勾确认→发布→撤回 全链路（替身客户端）",
+            ),
             _s("accept_p4_records.py", "--config", CFG, note="发布记录 + 账号级限流"),
         ],
     ),
@@ -164,7 +176,10 @@ GROUPS: list[Group] = [
             _s("accept_p2_optimize.py", "--config", CFG, note="llm.test 成功/失败两态"),
             _s("check_colors.py", note="除 tokens.css 外禁硬编码颜色"),
         ],
-        extra=["视觉矩阵两套皮肤全套页面（见下）", "`accept_p3_styles.py` 已覆盖「样式保存后导出生效」"],
+        extra=[
+            "视觉矩阵两套皮肤全套页面（见下）",
+            "`accept_p3_styles.py` 已覆盖「样式保存后导出生效」",
+        ],
     ),
     Group(
         key="8.7",
@@ -186,8 +201,11 @@ GROUPS: list[Group] = [
         title="闭环回放（P2 文本链）",
         spec=["总结→优化→翻译→导出→合集总览 一条链上的断言，逐个复跑"],
         steps=[
-            _s("accept_p2_transcribe.py", "--reuse",
-               note="转录（复用已有产物，不重跑模型；该脚本自建配置，不收 --config）"),
+            _s(
+                "accept_p2_transcribe.py",
+                "--reuse",
+                note="转录（复用已有产物，不重跑模型；该脚本自建配置，不收 --config）",
+            ),
             _s("accept_p2_optimize.py", "--config", CFG, note="LLM 优化 diff/应用/回滚"),
             _s("accept_p2_translate.py", "--config", CFG, note="翻译草稿/术语/双语 ASS"),
             _s("accept_p2_export.py", "--config", CFG, note="SRT/ASS/VTT + 软硬字幕"),
@@ -205,13 +223,32 @@ GROUPS: list[Group] = [
             "一条命令跑完单稿闭环；退出码能区分成功/任务失败/参数错",
         ],
         steps=[
-            _s("accept_p6_refine.py", note="抽帧+响度→vision 重打分；未配置/点名关掉/源文件缺失三种跳过"),
-            _s("accept_p6_focus.py", note="真视频走 FaceDetectorYN 出轨迹；假采样器验多主体/切点；关增强回退单脸"),
-            _s("accept_p6_bgm.py", note="sidechaincompress 闪避按 dB 量；淡入淡出对比首段/中段；换配乐不被 skip 跳过"),
-            _s("accept_p6_nle.py", note="剪映草稿真写进草稿箱并打路径；OTIO 帧数/媒体引用；降级包四件齐"),
-            _s("accept_p6_cli.py", note="一条命令跑完单稿闭环（转录→总结→选段→导出）；退出码 0/1/2 三态"),
-            _s("accept_p6_burn.py", "--config", CFG,
-               note="黑底合成素材数亮像素（另有不烧对照）：srt 喂 subtitles=、切片字幕平移回 0、软字幕轨按成片时间走"),
+            _s(
+                "accept_p6_refine.py",
+                note="抽帧+响度→vision 重打分；未配置/点名关掉/源文件缺失三种跳过",
+            ),
+            _s(
+                "accept_p6_focus.py",
+                note="真视频走 FaceDetectorYN 出轨迹；假采样器验多主体/切点；关增强回退单脸",
+            ),
+            _s(
+                "accept_p6_bgm.py",
+                note="sidechaincompress 闪避按 dB 量；淡入淡出对比首段/中段；换配乐不被 skip 跳过",
+            ),
+            _s(
+                "accept_p6_nle.py",
+                note="剪映草稿真写进草稿箱并打路径；OTIO 帧数/媒体引用；降级包四件齐",
+            ),
+            _s(
+                "accept_p6_cli.py",
+                note="一条命令跑完单稿闭环（转录→总结→选段→导出）；退出码 0/1/2 三态",
+            ),
+            _s(
+                "accept_p6_burn.py",
+                "--config",
+                CFG,
+                note="黑底合成素材数亮像素（另有不烧对照）：srt 喂 subtitles=、切片字幕平移回 0、软字幕轨按成片时间走",
+            ),
         ],
     ),
 ]
@@ -288,8 +325,15 @@ def run_step(step: Step, *, timeout: int = 900) -> None:
     cmd = [PY, str(script)] + args
     started = time.time()
     try:
-        proc = subprocess.run(cmd, cwd=str(PROJ), capture_output=True, text=True,
-                              timeout=timeout, encoding="utf-8", errors="replace")
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PROJ),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
     except subprocess.TimeoutExpired:
         step.outcome, step.seconds = "failed", time.time() - started
         step.last = f"超时（>{timeout}s）"
@@ -307,11 +351,26 @@ def run_visual(*, skins: list[str], height: int = 1400) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for skin in skins:
         out_dir = PROJ / "docs" / "acceptance" / "matrix"
-        cmd = [PY, str(PROJ / "scripts" / "shoot_wb.py"), "--skin", skin,
-               "--out", str(out_dir), "--height", str(height)]
+        cmd = [
+            PY,
+            str(PROJ / "scripts" / "shoot_wb.py"),
+            "--skin",
+            skin,
+            "--out",
+            str(out_dir),
+            "--height",
+            str(height),
+        ]
         started = time.time()
-        proc = subprocess.run(cmd, cwd=str(PROJ), capture_output=True, text=True,
-                              timeout=1800, encoding="utf-8", errors="replace")
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PROJ),
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            encoding="utf-8",
+            errors="replace",
+        )
         files = sorted(p.name for p in out_dir.glob(f"{skin}-*.png"))
         want = SHOT_SETS.get(skin, 25)
         ok = proc.returncode == 0 and len(files) >= want
@@ -320,7 +379,9 @@ def run_visual(*, skins: list[str], height: int = 1400) -> dict[str, dict]:
             "files": len(files),
             "want": want,
             "seconds": round(time.time() - started, 1),
-            "tail": [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()][-1:],
+            "tail": [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()][
+                -1:
+            ],
         }
     return result
 
@@ -343,8 +404,12 @@ def save_state(state: dict, run_groups: list[Group], visual: dict[str, dict]) ->
             "at": stamp,
             "title": group.title,
             "steps": {
-                s.script: {"outcome": s.outcome, "seconds": round(s.seconds, 1),
-                           "last": s.last, "note": s.note}
+                s.script: {
+                    "outcome": s.outcome,
+                    "seconds": round(s.seconds, 1),
+                    "last": s.last,
+                    "note": s.note,
+                }
                 for s in group.steps
             },
         }
@@ -378,8 +443,13 @@ def hydrate(groups: list[Group], state: dict, run_keys: set[str]) -> dict[str, s
     return origin
 
 
-def write_record(groups: list[Group], visual: dict[str, dict], *,
-                  skipped_network: bool, origin: dict[str, str] | None = None) -> None:
+def write_record(
+    groups: list[Group],
+    visual: dict[str, dict],
+    *,
+    skipped_network: bool,
+    origin: dict[str, str] | None = None,
+) -> None:
     stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     origin = origin or {}
     total = sum(len(g.steps) for g in groups)
@@ -391,15 +461,23 @@ def write_record(groups: list[Group], visual: dict[str, dict], *,
     lines.append("# VideoWorkbench 验收记录")
     lines.append("")
     lines.append(f"- 生成时间：{stamp}")
-    lines.append(f"- 生成方式：`./.venv/Scripts/python.exe scripts/accept_p5_matrix.py`"
-                 f"{'（--skip-network）' if skipped_network else ''}")
+    lines.append(
+        f"- 生成方式：`./.venv/Scripts/python.exe scripts/accept_p5_matrix.py`"
+        f"{'（--skip-network）' if skipped_network else ''}"
+    )
     if origin:
         keys = "、".join(f"§{k}（{v or '上次'}）" for k, v in sorted(origin.items()))
-        lines.append(f"- 分批运行：本次只跑了 {len(groups) - len(origin)} 组，其余沿用上次结果 —— {keys}")
-    lines.append(f"- 断言来源：{total} 个验收脚本，逐条实测写在各自脚本与本目录 `docs/acceptance/p*` 里")
-    lines.append(f"- 结论：**{passed}/{total} 个脚本全过**"
-                 + (f"，{len(skipped)} 个跳过" if skipped else "")
-                 + (f"，**{len(failed)} 个失败**" if failed else ""))
+        lines.append(
+            f"- 分批运行：本次只跑了 {len(groups) - len(origin)} 组，其余沿用上次结果 —— {keys}"
+        )
+    lines.append(
+        f"- 断言来源：{total} 个验收脚本，逐条实测写在各自脚本与本目录 `docs/acceptance/p*` 里"
+    )
+    lines.append(
+        f"- 结论：**{passed}/{total} 个脚本全过**"
+        + (f"，{len(skipped)} 个跳过" if skipped else "")
+        + (f"，**{len(failed)} 个失败**" if failed else "")
+    )
     lines.append("")
     lines.append("## 一、逐条对照（方案书 §8.1–8.7）")
     lines.append("")
@@ -422,8 +500,9 @@ def write_record(groups: list[Group], visual: dict[str, dict], *,
             if group.key in origin and step.outcome:
                 icon = {"passed": "✅", "failed": "❌", "skipped": "⏭"}[step.outcome] + "⏱"
             note = f"（{step.note}）" if step.note else ""
-            lines.append(f"- {icon} `{step.script}` {note} — {step.seconds:.1f}s — "
-                         f"`{step.last[:160]}`")
+            lines.append(
+                f"- {icon} `{step.script}` {note} — {step.seconds:.1f}s — `{step.last[:160]}`"
+            )
         for extra in group.extra:
             lines.append(f"- • {extra}")
         lines.append("")
@@ -437,24 +516,36 @@ def write_record(groups: list[Group], visual: dict[str, dict], *,
             state = "⏭ 未重拍" if info["ok"] else "⏭ 跳过（无样张）"
         else:
             state = "✅" if info["ok"] else "❌"
-        lines.append(f"| {skin} | {info['files']} | ≥{info['want']} | {info['seconds']}s | {state} |")
+        lines.append(
+            f"| {skin} | {info['files']} | ≥{info['want']} | {info['seconds']}s | {state} |"
+        )
     lines.append("")
-    lines.append(f"样张在 `docs/acceptance/matrix/`（`--height 1400`，一屏能看完整个页面）。"
-                 "脚本只能证明「页面渲染出来了」，好不好看仍需人看一眼——本轮人工看过的样张见 "
-                 "`docs/acceptance/p1..p5/`。")
+    lines.append(
+        "样张在 `docs/acceptance/matrix/`（`--height 1400`，一屏能看完整个页面）。"
+        "脚本只能证明「页面渲染出来了」，好不好看仍需人看一眼——本轮人工看过的样张见 "
+        "`docs/acceptance/p1..p5/`。"
+    )
     lines.append("")
 
     lines.append("## 三、阻塞项与绕过方案")
     lines.append("")
     blocking = [
-        ("ASR 模型需下载 1.6 GB（`large-v3-turbo`）",
-         "转录类断言用 `--reuse` 复用已有 `transcript.json`；真要重跑模型时先 `transcribe.model.download`"),
-        ("B 站真实下载依赖网络与登录态",
-         "`--skip-network` 可整组跳过；其余发布/合并/导出断言全部用替身客户端，不需要网络"),
-        ("真实发布到 B 站（`publish.publish`）未做联网实测",
-         "全部走 `post_note/withdraw_note` 替身；真发一次需要账号，属于用户自己决定的操作"),
-        ("干净 Windows 虚拟机未验",
-         "打包产物已验 `exe --check` + 真窗口首屏；缺 WebView2 的路径只有代码与文案保证"),
+        (
+            "ASR 模型需下载 1.6 GB（`large-v3-turbo`）",
+            "转录类断言用 `--reuse` 复用已有 `transcript.json`；真要重跑模型时先 `transcribe.model.download`",
+        ),
+        (
+            "B 站真实下载依赖网络与登录态",
+            "`--skip-network` 可整组跳过；其余发布/合并/导出断言全部用替身客户端，不需要网络",
+        ),
+        (
+            "真实发布到 B 站（`publish.publish`）未做联网实测",
+            "全部走 `post_note/withdraw_note` 替身；真发一次需要账号，属于用户自己决定的操作",
+        ),
+        (
+            "干净 Windows 虚拟机未验",
+            "打包产物已验 `exe --check` + 真窗口首屏；缺 WebView2 的路径只有代码与文案保证",
+        ),
     ]
     lines.append("| 阻塞项 | 绕过方案 |")
     lines.append("|---|---|")
@@ -486,19 +577,23 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # pragma: no cover - 老 Python / 重定向流
         pass
     parser = argparse.ArgumentParser(description="P5-06 全量验收矩阵")
-    parser.add_argument("--skip-network", action="store_true", help="跳过真站下载（无网络/不想下载时）")
+    parser.add_argument(
+        "--skip-network", action="store_true", help="跳过真站下载（无网络/不想下载时）"
+    )
     parser.add_argument("--skip-visual", action="store_true", help="不重拍视觉矩阵（用已有样张）")
     parser.add_argument("--only", action="append", default=[], help="只跑这几组，如 --only 8.3")
     parser.add_argument("--height", type=int, default=1400)
     args = parser.parse_args(argv)
 
     run_groups = [g for g in GROUPS if not args.only or g.key in args.only]
-    groups = list(GROUPS)          # 记录要完整：没跑的组用上次结果补
+    groups = list(GROUPS)  # 记录要完整：没跑的组用上次结果补
     run_keys = {g.key for g in run_groups}
     state = load_state() if args.only else {}
     origin = hydrate(groups, state, run_keys) if state else {}
-    print(f"[matrix] 本次 {len(run_groups)} 组，共 {sum(len(g.steps) for g in run_groups)} 个脚本"
-          + (f"；另 {len(origin)} 组沿用上次" if origin else ""))
+    print(
+        f"[matrix] 本次 {len(run_groups)} 组，共 {sum(len(g.steps) for g in run_groups)} 个脚本"
+        + (f"；另 {len(origin)} 组沿用上次" if origin else "")
+    )
 
     for group in run_groups:
         print(f"\n=== §{group.key} {group.title} ===")
@@ -516,30 +611,50 @@ def main(argv: list[str] | None = None) -> int:
     if args.skip_visual:
         for skin, want in SHOT_SETS.items():
             have = len(list((PROJ / "docs" / "acceptance" / "matrix").glob(f"{skin}-*.png")))
-            visual[skin] = {"ok": have >= want, "files": have, "want": want,
-                            "seconds": 0.0, "skipped": True,
-                            "tail": ["按 --skip-visual 未重拍；上面的张数是已有样张"]
-                            if have else ["按 --skip-visual 跳过，且没有历史样张"]}
+            visual[skin] = {
+                "ok": have >= want,
+                "files": have,
+                "want": want,
+                "seconds": 0.0,
+                "skipped": True,
+                "tail": ["按 --skip-visual 未重拍；上面的张数是已有样张"]
+                if have
+                else ["按 --skip-visual 跳过，且没有历史样张"],
+            }
     elif args.only and state.get("_visual"):
-        visual = {k: dict(v, skipped=True, tail=["本次分批不重拍，沿用上次样张"])
-                  for k, v in state["_visual"].items()}
+        visual = {
+            k: dict(v, skipped=True, tail=["本次分批不重拍，沿用上次样张"])
+            for k, v in state["_visual"].items()
+        }
         for skin, want in SHOT_SETS.items():
-            visual.setdefault(skin, {"ok": False, "files": 0, "want": want, "seconds": 0.0,
-                                     "skipped": True, "tail": ["没有历史样张"]})
+            visual.setdefault(
+                skin,
+                {
+                    "ok": False,
+                    "files": 0,
+                    "want": want,
+                    "seconds": 0.0,
+                    "skipped": True,
+                    "tail": ["没有历史样张"],
+                },
+            )
     else:
         print("\n=== 视觉矩阵（两套皮肤 × 全部页面）===")
         visual = run_visual(skins=list(SHOT_SETS), height=args.height)
         for skin, info in visual.items():
-            print(f"[{'ok  ' if info['ok'] else 'FAIL'}] {skin}: {info['files']}/{info['want']} 张，"
-                  f"{info['seconds']}s")
+            print(
+                f"[{'ok  ' if info['ok'] else 'FAIL'}] {skin}: {info['files']}/{info['want']} 张，"
+                f"{info['seconds']}s"
+            )
 
     if args.only:
         save_state(state, run_groups, visual)
     write_record(groups, visual, skipped_network=args.skip_network, origin=origin)
 
     failed = [s for g in run_groups for s in g.steps if s.outcome == "failed"]
-    bad_visual = [skin for skin, info in visual.items()
-                  if not info["ok"] and not info.get("skipped")]
+    bad_visual = [
+        skin for skin, info in visual.items() if not info["ok"] and not info.get("skipped")
+    ]
     print(f"\n记录已写：{RECORD.relative_to(PROJ)}")
     if failed or bad_visual:
         print(f"P5-06 验收矩阵：{len(failed)} 个脚本失败 / 视觉异常 {bad_visual}")

@@ -81,12 +81,36 @@ def make_source(ffmpeg: str, dest: Path) -> None:
     """6 秒彩条 + 正弦音轨：草稿要引用真文件，太短会让片段挤在一起不好看。"""
     subprocess.run(
         [
-            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=6",
-            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=6",
-            "-map", "0:v", "-map", "1:a",
-            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "128k", "-t", "6", str(dest),
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=640x360:r=30:d=6",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=6",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-t",
+            "6",
+            str(dest),
         ],
         check=True,
         capture_output=True,
@@ -97,8 +121,11 @@ def make_project(service, source: Path, work: Path) -> tuple[str, str, Path]:
     root = work / "media" / "P6-04" / "三通道"
     root.mkdir(parents=True, exist_ok=True)
     project = service.repo.project_create(
-        title="三通道交付用例", up_name="UP", source_kind="local",
-        root_dir=str(root), stage="analyzed",
+        title="三通道交付用例",
+        up_name="UP",
+        source_kind="local",
+        root_dir=str(root),
+        stage="analyzed",
     )
     service.repo.asset_upsert(
         project["id"], "source", str(source), bytes=source.stat().st_size, duration_ms=6000
@@ -113,8 +140,13 @@ def make_project(service, source: Path, work: Path) -> tuple[str, str, Path]:
         model="tiny",
     )
     candidate = service.repo.candidate_insert(
-        project["id"], kind="highlight", start_ms=1000, end_ms=5000,
-        score=88, title="先证伪直觉", source="ai",
+        project["id"],
+        kind="highlight",
+        start_ms=1000,
+        end_ms=5000,
+        score=88,
+        title="先证伪直觉",
+        source="ai",
     )
     service.repo.candidate_update(
         candidate["id"],
@@ -178,8 +210,11 @@ def main() -> int:
 
         source = work / "src.mp4"
         make_source(ffmpeg, source)
-        check("造出测试素材", source.is_file() and source.stat().st_size > 10_000,
-              f"{source.stat().st_size / 1024:.0f} KB")
+        check(
+            "造出测试素材",
+            source.is_file() and source.stat().st_size > 10_000,
+            f"{source.stat().st_size / 1024:.0f} KB",
+        )
 
         # --------------------------------------------------------- 0. 通道与本机软件
         nle_info = call(router, "nle.info", {})
@@ -197,52 +232,74 @@ def main() -> int:
         # ---------------------------------------------------------- 1. 剪映草稿
         draft = deliver(service, router, pid, cid, channel="jianying")
         folder = Path(draft["path"])
-        check("草稿落在项目 export/jianying 下",
-              folder.parent == root / "export" / "jianying", str(folder))
+        check(
+            "草稿落在项目 export/jianying 下",
+            folder.parent == root / "export" / "jianying",
+            str(folder),
+        )
         content_file = folder / "draft_content.json"
         meta_file = folder / "draft_meta_info.json"
         check("草稿两件套都在", content_file.is_file() and meta_file.is_file())
 
         doc = json.loads(content_file.read_text(encoding="utf-8"))
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
-        check("保留剪映自己写的骨架（version/app_version）",
-              doc.get("version") == 360000 and "app_version" in (doc.get("platform") or {}),
-              f"version={doc.get('version')} app={doc.get('platform', {}).get('app_version')}")
-        check("materials 的槽位没被砍掉",
-              all(k in doc.get("materials", {}) for k in ("videos", "audios", "texts", "speeds")),
-              str(len(doc.get("materials") or {})) + " 个槽位")
-        check("片段按候选区间裁剪（4 秒 = 4000000 微秒）",
-              doc.get("duration") == 4_000_000, str(doc.get("duration")))
+        check(
+            "保留剪映自己写的骨架（version/app_version）",
+            doc.get("version") == 360000 and "app_version" in (doc.get("platform") or {}),
+            f"version={doc.get('version')} app={doc.get('platform', {}).get('app_version')}",
+        )
+        check(
+            "materials 的槽位没被砍掉",
+            all(k in doc.get("materials", {}) for k in ("videos", "audios", "texts", "speeds")),
+            str(len(doc.get("materials") or {})) + " 个槽位",
+        )
+        check(
+            "片段按候选区间裁剪（4 秒 = 4000000 微秒）",
+            doc.get("duration") == 4_000_000,
+            str(doc.get("duration")),
+        )
         kinds = [track["type"] for track in doc.get("tracks") or []]
         check("视频轨 + 字幕轨都在", kinds == ["video", "text"], str(kinds))
         if kinds == ["video", "text"]:
             first = doc["tracks"][1]["segments"][0]
-            check("字幕时间转成相对片头（1200ms − 1000ms = 200000 微秒）",
-                  first["target_timerange"]["start"] == 200_000,
-                  str(first["target_timerange"]))
+            check(
+                "字幕时间转成相对片头（1200ms − 1000ms = 200000 微秒）",
+                first["target_timerange"]["start"] == 200_000,
+                str(first["target_timerange"]),
+            )
         video = doc["tracks"][0]["segments"][0]
-        check("画面从源片 1 秒处开始取",
-              video["source_timerange"]["start"] == 1_000_000,
-              str(video["source_timerange"]))
-        check("meta 里草稿路径是正斜杠、ID 是 GUID 形态",
-              "\\" not in str(meta.get("draft_fold_path"))
-              and len(str(meta.get("draft_id") or "").replace("-", "")) == 32,
-              str(meta.get("draft_id")))
-        check("草稿说明里写明字幕样式不跟随",
-              any("字幕样式不跟随" in n for n in draft["notes"]),
-              str(draft["notes"][:2]))
+        check(
+            "画面从源片 1 秒处开始取",
+            video["source_timerange"]["start"] == 1_000_000,
+            str(video["source_timerange"]),
+        )
+        check(
+            "meta 里草稿路径是正斜杠、ID 是 GUID 形态",
+            "\\" not in str(meta.get("draft_fold_path"))
+            and len(str(meta.get("draft_id") or "").replace("-", "")) == 32,
+            str(meta.get("draft_id")),
+        )
+        check(
+            "草稿说明里写明字幕样式不跟随",
+            any("字幕样式不跟随" in n for n in draft["notes"]),
+            str(draft["notes"][:2]),
+        )
 
         # 真往剪映草稿箱放一份：验收原文要求"实际导入一次"
         root_jy = nle.find_jianying_root()
         if root_jy and not args.no_app:
             placed = deliver(service, router, pid, cid, channel="jianying", place_in_app=True)
             placed_dir = Path(placed["path"])
-            check("勾了放进草稿箱就必须真写进剪映草稿箱",
-                  placed["placed_in_app"] is True and placed_dir.parent == root_jy,
-                  str(placed_dir))
-            check("放进草稿箱的草稿同样两件齐",
-                  (placed_dir / "draft_content.json").is_file()
-                  and (placed_dir / "draft_meta_info.json").is_file())
+            check(
+                "勾了放进草稿箱就必须真写进剪映草稿箱",
+                placed["placed_in_app"] is True and placed_dir.parent == root_jy,
+                str(placed_dir),
+            )
+            check(
+                "放进草稿箱的草稿同样两件齐",
+                (placed_dir / "draft_content.json").is_file()
+                and (placed_dir / "draft_meta_info.json").is_file(),
+            )
             note("★ 打开剪映，草稿箱里找这一版（打开确认后可以删）：")
             note(f"   {placed_dir}")
             note(f"   名字：{placed_dir.name}")
@@ -252,17 +309,25 @@ def main() -> int:
         # ------------------------------------------------------------ 2. OTIO
         otio = deliver(service, router, pid, cid, channel="otio")
         otio_path = Path(otio["path"])
-        check("OTIO 落在 export/nle 且后缀是 .otio",
-              otio_path.suffix == ".otio" and otio_path.parent == root / "export" / "nle",
-              str(otio_path))
+        check(
+            "OTIO 落在 export/nle 且后缀是 .otio",
+            otio_path.suffix == ".otio" and otio_path.parent == root / "export" / "nle",
+            str(otio_path),
+        )
         otio_doc = json.loads(otio_path.read_text(encoding="utf-8"))
-        check("OTIO 根是 Timeline.1", otio_doc.get("OTIO_SCHEMA") == "Timeline.1",
-              str(otio_doc.get("OTIO_SCHEMA")))
+        check(
+            "OTIO 根是 Timeline.1",
+            otio_doc.get("OTIO_SCHEMA") == "Timeline.1",
+            str(otio_doc.get("OTIO_SCHEMA")),
+        )
         stack = (otio_doc.get("tracks") or {}).get("children") or []
         track = (stack[0] if stack else {}).get("children") or []
         clip = track[0] if track else {}
-        check("V1 轨里有 1 个 Clip.1", clip.get("OTIO_SCHEMA") == "Clip.1",
-              str(clip.get("OTIO_SCHEMA")))
+        check(
+            "V1 轨里有 1 个 Clip.1",
+            clip.get("OTIO_SCHEMA") == "Clip.1",
+            str(clip.get("OTIO_SCHEMA")),
+        )
         duration = int(((clip.get("source_range") or {}).get("duration") or {}).get("value") or 0)
         check("4 秒 @30fps = 120 帧", duration == 120, str(duration))
         ref = str(((clip.get("media_reference") or {}).get("target_url")) or "")
@@ -274,42 +339,60 @@ def main() -> int:
         bundle_dir = Path(bundle["path"])
         names = sorted(Path(p).name for p in bundle["files"])
         notes_file = bundle_dir / nle.BUNDLE_NOTE
-        check("降级包含片段 + 字幕 + 导入说明",
-              "片段.mp4" in names and nle.BUNDLE_SUBTITLE in names and nle.BUNDLE_NOTE in names,
-              str(names))
+        check(
+            "降级包含片段 + 字幕 + 导入说明",
+            "片段.mp4" in names and nle.BUNDLE_SUBTITLE in names and nle.BUNDLE_NOTE in names,
+            str(names),
+        )
         check("降级包带上文案", nle.BUNDLE_COPY in names, str(names))
         text = notes_file.read_text(encoding="utf-8") if notes_file.is_file() else ""
-        check("导入说明写清剪映与达芬奇两条路",
-              "剪映" in text and "达芬奇" in text, f"{len(text)} 字")
+        check(
+            "导入说明写清剪映与达芬奇两条路", "剪映" in text and "达芬奇" in text, f"{len(text)} 字"
+        )
         check("导入说明交代丢了什么（字幕样式不跟随）", "字幕样式不跟随" in text)
-        check("包里的视频不是空文件",
-              (bundle_dir / "片段.mp4").is_file()
-              and (bundle_dir / "片段.mp4").stat().st_size > 10_000,
-              f'{(bundle_dir / "片段.mp4").stat().st_size / 1024:.0f} KB')
+        check(
+            "包里的视频不是空文件",
+            (bundle_dir / "片段.mp4").is_file()
+            and (bundle_dir / "片段.mp4").stat().st_size > 10_000,
+            f"{(bundle_dir / '片段.mp4').stat().st_size / 1024:.0f} KB",
+        )
 
         # ---------------------------------------------------------- 4. 边界
-        bad = error_of(router, "clip.deliver",
-                       {"project_id": pid, "candidate_id": cid, "channel": "premiere"})
+        bad = error_of(
+            router, "clip.deliver", {"project_id": pid, "candidate_id": cid, "channel": "premiere"}
+        )
         check("非法通道报 VALIDATION", bad.get("code") == "VALIDATION", str(bad.get("message")))
-        missing = error_of(router, "clip.deliver",
-                           {"project_id": pid, "candidate_id": "cand_nope"})
-        check("候选不存在报 NOT_FOUND", missing.get("code") == "NOT_FOUND",
-              str(missing.get("message")))
+        missing = error_of(router, "clip.deliver", {"project_id": pid, "candidate_id": "cand_nope"})
+        check(
+            "候选不存在报 NOT_FOUND",
+            missing.get("code") == "NOT_FOUND",
+            str(missing.get("message")),
+        )
 
         blank = service.repo.project_create(
-            title="没有源视频", source_kind="local",
-            root_dir=str(work / "media" / "P6-04" / "空项目"), stage="new",
+            title="没有源视频",
+            source_kind="local",
+            root_dir=str(work / "media" / "P6-04" / "空项目"),
+            stage="new",
         )
         blank_cand = service.repo.candidate_insert(
-            blank["id"], kind="highlight", start_ms=0, end_ms=3000, score=50,
-            title="空", source="manual",
+            blank["id"],
+            kind="highlight",
+            start_ms=0,
+            end_ms=3000,
+            score=50,
+            title="空",
+            source="manual",
         )
-        out = call(router, "clip.deliver",
-                   {"project_id": blank["id"], "candidate_id": blank_cand["id"]})
+        out = call(
+            router, "clip.deliver", {"project_id": blank["id"], "candidate_id": blank_cand["id"]}
+        )
         job = wait_job(service, out["job"]["id"])
-        check("没有源视频时任务失败并报 CONFLICT",
-              job.get("status") == "failed" and job.get("error_code") == "CONFLICT",
-              f'{job.get("status")} / {job.get("error_code")}')
+        check(
+            "没有源视频时任务失败并报 CONFLICT",
+            job.get("status") == "failed" and job.get("error_code") == "CONFLICT",
+            f"{job.get('status')} / {job.get('error_code')}",
+        )
     finally:
         service.close()
 

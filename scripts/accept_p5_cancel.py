@@ -108,10 +108,24 @@ def main() -> int:
         if not source.is_file():
             raise SystemExit(f"缺少样片 {source}")
         slow = [
-            ff.ffmpeg or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-re", "-i", str(source), "-t", "60",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-            "-an", str(PROJ / "build/accept/clips/_cancel_probe.mp4"),
+            ff.ffmpeg or "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-re",
+            "-i",
+            str(source),
+            "-t",
+            "60",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "28",
+            "-an",
+            str(PROJ / "build/accept/clips/_cancel_probe.mp4"),
         ]
         started: list[int] = []
         t0 = time.monotonic()
@@ -128,8 +142,11 @@ def main() -> int:
         check("A1 真 ffmpeg 命令能取消", canceled, f"{spent:.1f} 秒返回")
         check("A2 取消在命令自然结束前返回", spent < 20, f"{spent:.1f} 秒")
         time.sleep(0.6)
-        check("A3 取消后进程真的没了", bool(started) and not alive(started[0]),
-              f"pid={started[0] if started else '—'}")
+        check(
+            "A3 取消后进程真的没了",
+            bool(started) and not alive(started[0]),
+            f"pid={started[0] if started else '—'}",
+        )
         leaked = ffmpeg_pids() - before
         check("A4 没有留下孤儿 ffmpeg", not leaked, f"新增 {sorted(leaked)}")
         probe = PROJ / "build/accept/clips/_cancel_probe.mp4"
@@ -139,11 +156,17 @@ def main() -> int:
         # ------------------------------------------------ B. 导出取消 + 半成品
         project = pick_project(service)
         pid = project["id"]
-        ok, created = call(service, "clip.create", {
-            "project_id": pid, "kind": "highlight", "start_ms": 0,
-            "end_ms": int(min(60000, float(project.get("duration_sec") or 60) * 1000)),
-            "title": "P5-01 取消验收",
-        })
+        ok, created = call(
+            service,
+            "clip.create",
+            {
+                "project_id": pid,
+                "kind": "highlight",
+                "start_ms": 0,
+                "end_ms": int(min(60000, float(project.get("duration_sec") or 60) * 1000)),
+                "title": "P5-01 取消验收",
+            },
+        )
         candidate_id = (created or {}).get("id") or (created or {}).get("candidate", {}).get("id")
         check("B0 造出一条候选", bool(candidate_id), str(candidate_id))
 
@@ -152,9 +175,15 @@ def main() -> int:
         export_dir = root / "export"
         before_files = {f.name for f in export_dir.glob("*.mp4")} if export_dir.is_dir() else set()
 
-        ok, sub = call(service, "clip.export", {
-            "project_id": pid, "candidate_id": candidate_id, "mode": "precise",
-        })
+        ok, sub = call(
+            service,
+            "clip.export",
+            {
+                "project_id": pid,
+                "candidate_id": candidate_id,
+                "mode": "precise",
+            },
+        )
         job_id = (sub or {}).get("job", {}).get("id", "")
         check("B1 导出任务已提交", bool(job_id), job_id)
         time.sleep(0.8)
@@ -162,10 +191,15 @@ def main() -> int:
         check("B2 取消请求被接受", ok, "")
         row = wait_job(service, job_id, timeout=45)
         check("B3 任务落到 canceled", row.get("status") == "canceled", row.get("status", ""))
-        check("B4 取消也保存了日志", bool((row.get("result") or {}).get("log")),
-              f"{len((row.get('result') or {}).get('log') or [])} 行")
+        check(
+            "B4 取消也保存了日志",
+            bool((row.get("result") or {}).get("log")),
+            f"{len((row.get('result') or {}).get('log') or [])} 行",
+        )
         ok, exports = call(service, "clip.exports", {"project_id": pid})
-        rows = [r for r in (exports or {}).get("items", []) if r.get("candidate_id") == candidate_id]
+        rows = [
+            r for r in (exports or {}).get("items", []) if r.get("candidate_id") == candidate_id
+        ]
         leftover = [r for r in rows if r.get("status") == "succeeded"]
         check("B5 取消的导出没被记成成功", not leftover, f"{len(leftover)} 条 succeeded")
         after_files = {f.name for f in export_dir.glob("*.mp4")} if export_dir.is_dir() else set()
@@ -179,11 +213,17 @@ def main() -> int:
         done = wait_job(service, new_id, timeout=180)
         check("C2 重试成功", done.get("status") == "succeeded", done.get("status", ""))
         result = done.get("result") or {}
-        check("C3 成片时长与期望相符", abs(int(result.get("delta_ms") or 0)) <= 400,
-              f"delta={result.get('delta_ms')}")
+        check(
+            "C3 成片时长与期望相符",
+            abs(int(result.get("delta_ms") or 0)) <= 400,
+            f"delta={result.get('delta_ms')}",
+        )
         out = Path(str(result.get("path") or ""))
-        check("C4 成片在盘上且非空", out.is_file() and out.stat().st_size > 0,
-              f"{out.name} {out.stat().st_size if out.is_file() else 0} B")
+        check(
+            "C4 成片在盘上且非空",
+            out.is_file() and out.stat().st_size > 0,
+            f"{out.name} {out.stat().st_size if out.is_file() else 0} B",
+        )
 
         # ------------------------------------------------ D. 失败保留日志
         # 造一次"提交之后文件被移走"的失败：这是真会发生的事（用户手动删了成片），
@@ -195,17 +235,22 @@ def main() -> int:
         data = Path(str(result.get("path") or "")).read_bytes()
         copy_a.write_bytes(data)
         copy_b.write_bytes(data)
-        ok, sub2 = call(service, "merge.start", {"paths": [str(copy_a), str(copy_b)], "mode": "precise"})
+        ok, sub2 = call(
+            service, "merge.start", {"paths": [str(copy_a), str(copy_b)], "mode": "precise"}
+        )
         job2 = (sub2 or {}).get("job", {}).get("id", "")
         check("D1 会失败的任务已提交", bool(job2), job2)
-        copy_b.unlink(missing_ok=True)   # 提交后把第二个片段移走
+        copy_b.unlink(missing_ok=True)  # 提交后把第二个片段移走
         row2 = wait_job(service, job2, timeout=120)
         check("D2 失败任务状态是 failed", row2.get("status") == "failed", row2.get("status", ""))
         logs = (row2.get("result") or {}).get("log") or []
         check("D3 失败任务带日志", bool(logs), f"{len(logs)} 行")
-        check("D4 失败原因可读", "b.mp4" in str(row2.get("error_message") or "")
-              or "失败" in str(row2.get("error_message") or ""),
-              str(row2.get("error_message"))[:60])
+        check(
+            "D4 失败原因可读",
+            "b.mp4" in str(row2.get("error_message") or "")
+            or "失败" in str(row2.get("error_message") or ""),
+            str(row2.get("error_message"))[:60],
+        )
         for leftover in (copy_a, copy_b):
             leftover.unlink(missing_ok=True)
         try:
@@ -214,14 +259,23 @@ def main() -> int:
             pass
 
         # ------------------------------------------------ E. 合并取消 + tmp 清理
-        ok, pre = call(service, "merge.preflight", {
-            "paths": [str(result.get("path") or ""), str(result.get("path") or "")],
-        })
+        ok, pre = call(
+            service,
+            "merge.preflight",
+            {
+                "paths": [str(result.get("path") or ""), str(result.get("path") or "")],
+            },
+        )
         same = (pre or {}).get("can_quick")
         check("E0 同一文件两段可快速拼接", bool(same), str((pre or {}).get("consistent")))
-        ok, started_merge = call(service, "merge.start", {
-            "paths": [str(result.get("path") or "")] * 2, "mode": "precise",
-        })
+        ok, started_merge = call(
+            service,
+            "merge.start",
+            {
+                "paths": [str(result.get("path") or "")] * 2,
+                "mode": "precise",
+            },
+        )
         merge_job = (started_merge or {}).get("job", {}).get("id", "")
         check("E1 合并任务已提交", bool(merge_job), merge_job)
         time.sleep(0.6)
@@ -231,10 +285,16 @@ def main() -> int:
         tmp_root = Path(service.cfg.storage.cache_root) / "tmp" / merge_job
         check("E3 任务临时目录已清", not tmp_root.exists(), str(tmp_root))
         ok, merges = call(service, "merge.list")
-        failed = [m for m in (merges or {}).get("items", []) if m.get("id") ==
-                  (started_merge or {}).get("merge_id")]
-        check("E4 合并记录没被标成功", not failed or failed[0].get("status") != "succeeded",
-              failed[0].get("status") if failed else "无记录")
+        failed = [
+            m
+            for m in (merges or {}).get("items", [])
+            if m.get("id") == (started_merge or {}).get("merge_id")
+        ]
+        check(
+            "E4 合并记录没被标成功",
+            not failed or failed[0].get("status") != "succeeded",
+            failed[0].get("status") if failed else "无记录",
+        )
     finally:
         service.close()
 

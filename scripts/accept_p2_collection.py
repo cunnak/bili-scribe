@@ -135,9 +135,21 @@ class StubModel:
                     "重复最多的提醒是「别信直觉」。",
                 ],
                 "timeline": [
-                    {"title": titles[0], "one_line": "建立词汇", "url": "https://example.invalid/1"},
-                    {"title": titles[1], "one_line": "给出写法", "url": "https://example.invalid/2"},
-                    {"title": titles[2], "one_line": "指出前两讲的边界", "url": "https://example.invalid/3"},
+                    {
+                        "title": titles[0],
+                        "one_line": "建立词汇",
+                        "url": "https://example.invalid/1",
+                    },
+                    {
+                        "title": titles[1],
+                        "one_line": "给出写法",
+                        "url": "https://example.invalid/2",
+                    },
+                    {
+                        "title": titles[2],
+                        "one_line": "指出前两讲的边界",
+                        "url": "https://example.invalid/3",
+                    },
                     # 故意的野条目：标题在素材里不存在，必须被丢掉
                     {"title": "第四讲 不存在的补课", "one_line": "编的", "url": ""},
                 ],
@@ -150,7 +162,9 @@ class StubModel:
             }
             reply = json.dumps(content, ensure_ascii=False)
         elif "待修订文本" in user:
-            reply = json.dumps({**SUMMARY_JSON, "revise_note": "按你的要求改过"}, ensure_ascii=False)
+            reply = json.dumps(
+                {**SUMMARY_JSON, "revise_note": "按你的要求改过"}, ensure_ascii=False
+            )
         elif "one_line" in user and "请输出 JSON" in user:
             reply = json.dumps(SUMMARY_JSON, ensure_ascii=False)
         elif "批判" in system or "批判" in user:
@@ -214,8 +228,16 @@ def wait_job(service, job_id: str, timeout: float = 240.0) -> dict:
 
 def fake_segments(offset: int) -> list[dict]:
     return [
-        {"start_ms": 1000 + offset, "end_ms": 4200 + offset, "text": f"第 {offset} 段：注意力是加权求和。"},
-        {"start_ms": 4600 + offset, "end_ms": 8100 + offset, "text": f"第 {offset} 段：缩放是为了让方差稳定。"},
+        {
+            "start_ms": 1000 + offset,
+            "end_ms": 4200 + offset,
+            "text": f"第 {offset} 段：注意力是加权求和。",
+        },
+        {
+            "start_ms": 4600 + offset,
+            "end_ms": 8100 + offset,
+            "text": f"第 {offset} 段：缩放是为了让方差稳定。",
+        },
     ]
 
 
@@ -286,23 +308,40 @@ def main() -> int:
         hit = next((row for row in box if row["title"] == COLLECTION), None)
         check("collection.list 认得这个合集", hit is not None, f"{len(box)} 个合集")
         check("合集有 3 集", bool(hit) and hit["items"] == 3, str(hit and hit["items"]))
-        check("还没总结时 summarized=0", bool(hit) and hit["summarized"] == 0, str(hit and hit["summarized"]))
+        check(
+            "还没总结时 summarized=0",
+            bool(hit) and hit["summarized"] == 0,
+            str(hit and hit["summarized"]),
+        )
         check("还没总结时 ready=False", bool(hit) and hit["ready"] is False)
         check("还没总览时 has_overview=False", bool(hit) and hit["has_overview"] is False)
 
         err = error_of(router, "summary.collection.overview", {"collection": COLLECTION})
-        check("子项没总结时拦住", err.get("code") == "CONFLICT", json.dumps(err, ensure_ascii=False)[:120])
+        check(
+            "子项没总结时拦住",
+            err.get("code") == "CONFLICT",
+            json.dumps(err, ensure_ascii=False)[:120],
+        )
 
         # 单集也要拦：另立一个只有一集的合集
         lonely = service.repo.project_list_by_collection(COLLECTION)[0]["id"]
         service.repo.project_update(lonely, collection_title="只有一集的合集 · 验收")
-        err2 = error_of(router, "summary.collection.overview", {"collection": "只有一集的合集 · 验收"})
-        check("只有一集时拦住", err2.get("code") == "CONFLICT", json.dumps(err2, ensure_ascii=False)[:120])
+        err2 = error_of(
+            router, "summary.collection.overview", {"collection": "只有一集的合集 · 验收"}
+        )
+        check(
+            "只有一集时拦住",
+            err2.get("code") == "CONFLICT",
+            json.dumps(err2, ensure_ascii=False)[:120],
+        )
         service.repo.project_update(lonely, collection_title=COLLECTION)
 
         # 三条子项各自总结
         for pid in ids:
-            job = wait_job(service, call(router, "summary.start", {"project_id": pid, "role": "standard"})["job"]["id"])
+            job = wait_job(
+                service,
+                call(router, "summary.start", {"project_id": pid, "role": "standard"})["job"]["id"],
+            )
             if job.get("status") != "succeeded":
                 raise SystemExit(f"子项 {pid} 总结失败：{job.get('error_message')}")
         check("三条子项都有总结", all(versions_of(router, pid) for pid in ids))
@@ -311,19 +350,33 @@ def main() -> int:
 
         # 生成总览
         calls_before = StubModel.calls
-        submitted = call(router, "summary.collection.overview", {"collection": COLLECTION, "role": "standard"})
-        check("提交返回了任务", bool(submitted.get("job", {}).get("id")), str(submitted.get("job", {}).get("type")))
+        submitted = call(
+            router, "summary.collection.overview", {"collection": COLLECTION, "role": "standard"}
+        )
+        check(
+            "提交返回了任务",
+            bool(submitted.get("job", {}).get("id")),
+            str(submitted.get("job", {}).get("type")),
+        )
         job = wait_job(service, submitted["job"]["id"])
         check("总览任务成功", job.get("status") == "succeeded", str(job.get("error_message") or ""))
         result = job.get("result") or {}
         check("任务回报第 1 版", int(result.get("version") or 0) == 1, str(result.get("version")))
-        check("只发了一次请求", StubModel.calls - calls_before == 1, f"{StubModel.calls - calls_before} 次")
+        check(
+            "只发了一次请求",
+            StubModel.calls - calls_before == 1,
+            f"{StubModel.calls - calls_before} 次",
+        )
 
         view = call(router, "summary.collection.get", {"id": COLLECTION})
         check("读得回总览", bool(view.get("found")))
         content = (view.get("overview") or {}).get("content") or {}
         check("有 theme", bool(content.get("theme")), str(content.get("theme"))[:30])
-        check("结论至少 3 条", len(content.get("conclusions") or []) >= 3, str(len(content.get("conclusions") or [])))
+        check(
+            "结论至少 3 条",
+            len(content.get("conclusions") or []) >= 3,
+            str(len(content.get("conclusions") or [])),
+        )
         items = content.get("items") or []
         check("timeline 只剩 3 条（野标题被丢）", len(items) == 3, str(len(items)))
         check(
@@ -332,7 +385,11 @@ def main() -> int:
             "、".join(row.get("title", "") for row in items),
         )
         check("野条目记进了 notes", len(content.get("notes") or []) >= 1, str(content.get("notes")))
-        check("watch_order 覆盖 3 集", len(content.get("watch_order") or []) == 3, str(len(content.get("watch_order") or [])))
+        check(
+            "watch_order 覆盖 3 集",
+            len(content.get("watch_order") or []) == 3,
+            str(len(content.get("watch_order") or [])),
+        )
         check("有 overlap", len(content.get("overlap") or []) >= 1)
         check("子项带了链接", all(row.get("bvid") is not None for row in items))
 
@@ -343,28 +400,58 @@ def main() -> int:
 
         after = {pid: digest(router, pid) for pid in ids}
         check("子项总结一字未动", after == before)
-        check("子项版本数没变", {pid: len(versions_of(router, pid)) for pid in ids} == before_versions)
+        check(
+            "子项版本数没变", {pid: len(versions_of(router, pid)) for pid in ids} == before_versions
+        )
 
         # 换角色重出
-        second = call(router, "summary.collection.overview", {"collection": COLLECTION, "role": "xueshu"})
+        second = call(
+            router, "summary.collection.overview", {"collection": COLLECTION, "role": "xueshu"}
+        )
         job2 = wait_job(service, second["job"]["id"])
-        check("换角色也能出", job2.get("status") == "succeeded", str(job2.get("error_message") or ""))
+        check(
+            "换角色也能出", job2.get("status") == "succeeded", str(job2.get("error_message") or "")
+        )
         view2 = call(router, "summary.collection.get", {"id": COLLECTION})
-        check("两版共存", len(view2.get("versions") or []) == 2, str(len(view2.get("versions") or [])))
-        check("新版本记了角色", (view2.get("overview") or {}).get("role") == "xueshu", str((view2.get("overview") or {}).get("role")))
+        check(
+            "两版共存", len(view2.get("versions") or []) == 2, str(len(view2.get("versions") or []))
+        )
+        check(
+            "新版本记了角色",
+            (view2.get("overview") or {}).get("role") == "xueshu",
+            str((view2.get("overview") or {}).get("role")),
+        )
 
-        by_id = call(router, "summary.collection.get", {"id": (view2.get("collection") or {}).get("id") or ""})
-        check("用 col_ id 也能读", bool(by_id.get("found")) or bool(by_id.get("children")), str(by_id.get("collection")))
+        by_id = call(
+            router,
+            "summary.collection.get",
+            {"id": (view2.get("collection") or {}).get("id") or ""},
+        )
+        check(
+            "用 col_ id 也能读",
+            bool(by_id.get("found")) or bool(by_id.get("children")),
+            str(by_id.get("collection")),
+        )
 
         # 模型乱写
         md_before = (root / "collection_overview.md").read_bytes()
         StubModel.mode = BAD
-        third = call(router, "summary.collection.overview", {"collection": COLLECTION, "role": "standard"})
+        third = call(
+            router, "summary.collection.overview", {"collection": COLLECTION, "role": "standard"}
+        )
         job3 = wait_job(service, third["job"]["id"])
         check("乱写时任务失败", job3.get("status") == "failed", str(job3.get("status")))
-        check("错误码说得清", job3.get("error_code") == "LLM_BAD_RESPONSE", str(job3.get("error_code")))
+        check(
+            "错误码说得清",
+            job3.get("error_code") == "LLM_BAD_RESPONSE",
+            str(job3.get("error_code")),
+        )
         view3 = call(router, "summary.collection.get", {"id": COLLECTION})
-        check("失败没加版本", len(view3.get("versions") or []) == 2, str(len(view3.get("versions") or [])))
+        check(
+            "失败没加版本",
+            len(view3.get("versions") or []) == 2,
+            str(len(view3.get("versions") or [])),
+        )
         check("失败没改文件", (root / "collection_overview.md").read_bytes() == md_before)
         StubModel.mode = GOOD
 

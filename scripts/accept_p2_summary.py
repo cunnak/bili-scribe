@@ -255,7 +255,11 @@ def main() -> int:
 
         submitted = call(router, "summary.start", {"project_id": pid, "role": "standard"})
         job = wait_job(service, submitted["job"]["id"])
-        check("standard 生成成功", job.get("status") == "succeeded", str(job.get("error_message") or ""))
+        check(
+            "standard 生成成功",
+            job.get("status") == "succeeded",
+            str(job.get("error_message") or ""),
+        )
         result = job.get("result") or {}
         check("任务回报了版本号", int(result.get("version") or 0) == 1, str(result.get("version")))
 
@@ -290,22 +294,38 @@ def main() -> int:
         calls1 = StubModel.calls
         submitted2 = call(router, "summary.start", {"project_id": pid, "role": role2})
         job2 = wait_job(service, submitted2["job"]["id"])
-        check(f"角色 {role2} 生成成功", job2.get("status") == "succeeded", str(job2.get("error_message") or ""))
+        check(
+            f"角色 {role2} 生成成功",
+            job2.get("status") == "succeeded",
+            str(job2.get("error_message") or ""),
+        )
         view2 = call(router, "summary.get", {"id": pid})
         check("换角色＝新增一版", len(view2["versions"]) == 2, str(len(view2["versions"])))
-        check("新版本记了角色", view2["summary"].get("role") == role2, str(view2["summary"].get("role")))
+        check(
+            "新版本记了角色",
+            view2["summary"].get("role") == role2,
+            str(view2["summary"].get("role")),
+        )
         new_systems = StubModel.systems[calls1:]
         check("提示词真的换了", bool(new_systems) and new_systems[0] != system_before)
-        check("三轮回跑满（批判＋修订）", StubModel.calls - calls1 >= 3, f"{StubModel.calls - calls1} 次调用")
+        check(
+            "三轮回跑满（批判＋修订）",
+            StubModel.calls - calls1 >= 3,
+            f"{StubModel.calls - calls1} 次调用",
+        )
         first_note = str((view2["summary"].get("content") or {}).get("revise_note") or "")
         check("首次生成（含三轮）不写改动说明", first_note == "", first_note[:20] or "空")
 
         # 一句话打磨
         submitted3 = call(
-            router, "summary.refine", {"project_id": pid, "requirement": "把语气改得更口语，短版再压一些"}
+            router,
+            "summary.refine",
+            {"project_id": pid, "requirement": "把语气改得更口语，短版再压一些"},
         )
         job3 = wait_job(service, submitted3["job"]["id"])
-        check("打磨任务成功", job3.get("status") == "succeeded", str(job3.get("error_message") or ""))
+        check(
+            "打磨任务成功", job3.get("status") == "succeeded", str(job3.get("error_message") or "")
+        )
         view3 = call(router, "summary.get", {"id": pid})
         check("打磨＝再加一版", len(view3["versions"]) == 3, str(len(view3["versions"])))
         note = str((view3["summary"].get("content") or {}).get("revise_note") or "")
@@ -350,8 +370,11 @@ def main() -> int:
         # 而"跳过"在验收里等于没验（2026-10-30 P5-06 矩阵跑出过：库里的无字幕项目
         # 后来被别的脚本补上了字幕，这条断言就变成了断言"成功也是对的"）。
         blank_id = f"pj_accept_blank_{int(time.time() * 1000) % 10_000_000}"
-        service.repo.project_create(id=blank_id, title="验收：没有字幕的空项目",
-                                        root_dir=str(PROJ / "build" / "accept" / "blank"))
+        service.repo.project_create(
+            id=blank_id,
+            title="验收：没有字幕的空项目",
+            root_dir=str(PROJ / "build" / "accept" / "blank"),
+        )
         try:
             err = error_of(router, "summary.start", {"project_id": blank_id})
             check("没字幕的项目被拦住", str(err.get("code")) == "CONFLICT", str(err.get("code")))

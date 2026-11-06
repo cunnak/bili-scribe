@@ -26,7 +26,6 @@ PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "scripts"))
 
-from video_workbench.app.errors import WBError  # noqa: E402
 from video_workbench.app.service import WorkbenchService  # noqa: E402
 
 results: list[tuple[bool, str, str]] = []
@@ -66,11 +65,35 @@ def make_clip(ffmpeg: str, src: Path, dest: Path, *, start: str, dur: str, scale
     """切一段并统一到目标规格（重编码，保证三段参数完全一致）。"""
     dest.parent.mkdir(parents=True, exist_ok=True)
     args = [
-        ffmpeg, "-hide_banner", "-y",
-        "-ss", start, "-t", dur, "-i", str(src),
-        "-vf", f"scale={scale}:force_original_aspect_ratio=increase,crop={scale}",
-        "-r", "30", "-c:v", "libx264", "-crf", "24", "-preset", "veryfast",
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+        ffmpeg,
+        "-hide_banner",
+        "-y",
+        "-ss",
+        start,
+        "-t",
+        dur,
+        "-i",
+        str(src),
+        "-vf",
+        f"scale={scale}:force_original_aspect_ratio=increase,crop={scale}",
+        "-r",
+        "30",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "24",
+        "-preset",
+        "veryfast",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
         str(dest),
     ]
     proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -104,15 +127,27 @@ def main(argv: list[str] | None = None) -> int:
         # 1) 预检：三条同规格
         pre = call(service, "merge.preflight", {"paths": paths})
         check("预检认得出三条可用", pre.get("count") == 3, f"count={pre.get('count')}")
-        check("同规格可以快速拼接", pre.get("can_quick") is True, f"differences={pre.get('differences')}")
-        check("总时长约 12 秒", 11_000 <= int(pre.get("total_ms") or 0) <= 13_500, f"{pre.get('total_ms')}ms")
+        check(
+            "同规格可以快速拼接",
+            pre.get("can_quick") is True,
+            f"differences={pre.get('differences')}",
+        )
+        check(
+            "总时长约 12 秒",
+            11_000 <= int(pre.get("total_ms") or 0) <= 13_500,
+            f"{pre.get('total_ms')}ms",
+        )
 
         # 2) 提交快速拼接
         started = call(service, "merge.start", {"paths": paths, "mode": "quick"})
         job = started.get("job") or {}
         check("提交后拿到任务", bool(job.get("id")), str(job.get("id")))
         final = wait_job(service, job.get("id") or "")
-        check("任务成功", final.get("status") == "succeeded", str(final.get("status")) + " " + str(final.get("error_message") or ""))
+        check(
+            "任务成功",
+            final.get("status") == "succeeded",
+            str(final.get("status")) + " " + str(final.get("error_message") or ""),
+        )
         result = final.get("result") or {}
         out = Path(str(result.get("path") or ""))
         check("成片存在", out.is_file(), str(out))
@@ -121,44 +156,79 @@ def main(argv: list[str] | None = None) -> int:
         info = service._ffmpeg.probe(out)
         expected = int(pre.get("total_ms") or 0)
         delta = int(info.duration_ms or 0) - expected
-        check("成片时长等于各段之和（误差 < 500ms）", abs(delta) < 500, f"实际 {info.duration_ms}ms / 期望 {expected}ms / 差 {delta}ms")
-        check("成片分辨率跟随源", (info.width, info.height) == (1280, 720), f"{info.width}x{info.height}")
+        check(
+            "成片时长等于各段之和（误差 < 500ms）",
+            abs(delta) < 500,
+            f"实际 {info.duration_ms}ms / 期望 {expected}ms / 差 {delta}ms",
+        )
+        check(
+            "成片分辨率跟随源",
+            (info.width, info.height) == (1280, 720),
+            f"{info.width}x{info.height}",
+        )
         check("成片保留音轨", bool(info.has_audio), f"acodec={info.acodec}")
 
         # 3) 合并记录
         rows = call(service, "merge.list")["items"]
         hit = [r for r in rows if r.get("id") == started.get("merge_id")]
         check("合并记录已入库", bool(hit), f"共有 {len(rows)} 条")
-        check("记录状态 succeeded", bool(hit) and hit[0].get("status") == "succeeded", str(hit[0].get("status") if hit else ""))
-        check("记录里存了三条素材", bool(hit) and len(hit[0].get("items") or []) == 3, str(len(hit[0].get("items") or []) if hit else 0))
+        check(
+            "记录状态 succeeded",
+            bool(hit) and hit[0].get("status") == "succeeded",
+            str(hit[0].get("status") if hit else ""),
+        )
+        check(
+            "记录里存了三条素材",
+            bool(hit) and len(hit[0].get("items") or []) == 3,
+            str(len(hit[0].get("items") or []) if hit else 0),
+        )
 
         # 4) 规格不一致：提交前拦住
         err = error_of(service, "merge.start", {"paths": paths + [str(odd)], "mode": "quick"})
         check("不同规格被拦下", err.get("code") == "CONFLICT", str(err.get("code")))
-        check("理由说清是规格不一致", "规格不一致" in str(err.get("message") or ""), str(err.get("message")))
+        check(
+            "理由说清是规格不一致",
+            "规格不一致" in str(err.get("message") or ""),
+            str(err.get("message")),
+        )
         detail = json.loads(err.get("detail") or "[]")
         fields = {row.get("field") for row in detail}
         check("差异表点名具体字段", bool(fields & {"width", "height", "fps"}), str(sorted(fields)))
 
         # 5) 边界：只有一条 / 文件不在 / 空列表
         err = error_of(service, "merge.start", {"paths": [str(a)], "mode": "quick"})
-        check("一条时拒绝并说清要两条", err.get("code") == "CONFLICT" and "至少" in str(err.get("message") or ""), str(err.get("message")))
+        check(
+            "一条时拒绝并说清要两条",
+            err.get("code") == "CONFLICT" and "至少" in str(err.get("message") or ""),
+            str(err.get("message")),
+        )
         gone = work / "not-here.mp4"
-        err = error_of(service, "merge.start", {"paths": [str(a), str(b), str(gone)], "mode": "quick"})
+        err = error_of(
+            service, "merge.start", {"paths": [str(a), str(b), str(gone)], "mode": "quick"}
+        )
         check("文件不在能点名", "不在了" in str(err.get("message") or ""), str(err.get("message")))
         err = error_of(service, "merge.start", {"paths": [], "mode": "quick"})
         check("空列表报 VALIDATION", err.get("code") == "VALIDATION", str(err.get("code")))
         # P4-03 把精确合并做完了，这条老断言（曾是 UNSUPPORTED + "P4-03"）已过时：
         # 现在应当能正常提交。诚实性由 accept_p4_precise.py 断言（那里会真跑 ffmpeg）。
         submitted = call(service, "merge.start", {"paths": paths, "mode": "precise"})
-        check("精确模式可以提交", bool((submitted.get("job") or {}).get("id")),
-              str(submitted.get("job") or {}))
+        check(
+            "精确模式可以提交",
+            bool((submitted.get("job") or {}).get("id")),
+            str(submitted.get("job") or {}),
+        )
         wait_job(service, (submitted.get("job") or {}).get("id") or "", timeout=180)
 
         # 6) 同一批素材反复合并不会互相覆盖
-        again = call(service, "merge.start", {"paths": paths, "mode": "quick", "out_name": out.stem})
+        again = call(
+            service, "merge.start", {"paths": paths, "mode": "quick", "out_name": out.stem}
+        )
         wait_job(service, again.get("job", {}).get("id") or "")
-        check("同名再合并不会覆盖上一条", again.get("name") != out.name, f"{again.get('name')} vs {out.name}")
+        check(
+            "同名再合并不会覆盖上一条",
+            again.get("name") != out.name,
+            f"{again.get('name')} vs {out.name}",
+        )
 
     finally:
         service.close()

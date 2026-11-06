@@ -80,7 +80,12 @@ def failed_batch(service, *, backend: str = "", bvid: str = "BV1xx411c7mD") -> s
         job_id,
         "download.batch",
         None,
-        {"quality": "1080P", "up_name": "P1-08 用例", "collection_title": "兜底用例", "backend": backend},
+        {
+            "quality": "1080P",
+            "up_name": "P1-08 用例",
+            "collection_title": "兜底用例",
+            "backend": backend,
+        },
     )
     service.repo.job_update(
         job_id,
@@ -136,8 +141,14 @@ def main() -> int:
         data = call(router, "app.info", {})
         check("app.info 可调用", bool(data.get("name")), str(data.get("version")))
         backends = call(router, "download.backends", {})
-        check("后端接口给出默认后端", backends.get("default") == "ytdlp", str(backends.get("default")))
-        check("yt-dlp 探测到（本机有）", bool(backends["ytdlp"]["found"]), json.dumps(backends["ytdlp"], ensure_ascii=False))
+        check(
+            "后端接口给出默认后端", backends.get("default") == "ytdlp", str(backends.get("default"))
+        )
+        check(
+            "yt-dlp 探测到（本机有）",
+            bool(backends["ytdlp"]["found"]),
+            json.dumps(backends["ytdlp"], ensure_ascii=False),
+        )
         check("没装 BBDown 时 found=False", backends["bbdown"]["found"] is False)
         check(
             "没装 BBDown 时给安装提示",
@@ -151,8 +162,14 @@ def main() -> int:
         fake_bbdown.write_bytes(b"MZ fake")
         service.cfg.download.bbdown_path = str(fake_bbdown)
         detected = call(router, "download.backends", {})["bbdown"]
-        check("配上路径后 BBDown 被检出", detected["found"] is True, json.dumps(detected, ensure_ascii=False))
-        check("检出的名字是 BBDown.exe", detected["name"] == "BBDown.exe", str(detected.get("name")))
+        check(
+            "配上路径后 BBDown 被检出",
+            detected["found"] is True,
+            json.dumps(detected, ensure_ascii=False),
+        )
+        check(
+            "检出的名字是 BBDown.exe", detected["name"] == "BBDown.exe", str(detected.get("name"))
+        )
         service.cfg.download.bbdown_path = ""
 
         # ------------------------------------------------ 2. downloader：失败归类与产物归一
@@ -180,7 +197,11 @@ def main() -> int:
             on_event=events.append,
             runner=ok_runner,
         )
-        check("兜底后端用的是配置里的 BBDown", ok_runner.calls[0][0] == str(fake_bbdown), ok_runner.calls[0][0])
+        check(
+            "兜底后端用的是配置里的 BBDown",
+            ok_runner.calls[0][0] == str(fake_bbdown),
+            ok_runner.calls[0][0],
+        )
         check("BBDown 收到 --work-dir", "--work-dir" in ok_runner.calls[0])
         check("产物归一到 source.mp4", Path(result.path).name == "source.mp4", str(result.path))
         check("产物文件真的存在", Path(result.path).is_file(), str(result.path))
@@ -188,7 +209,9 @@ def main() -> int:
         check("从 BBDown 百分比行读出进度", 50.0 in percents, str(percents))
 
         # 认不出的后端要报错，不能悄悄换成别的
-        bad = error_of(router, "download.start", {"url": "u", "items": [{"bvid": "BV1"}], "backend": "aria2"})
+        bad = error_of(
+            router, "download.start", {"url": "u", "items": [{"bvid": "BV1"}], "backend": "aria2"}
+        )
         check("未知后端 → VALIDATION", bad["code"] == "VALIDATION", bad.get("message", ""))
 
         # ------------------------------------------------ 3. 失败项重试：换后端要显式
@@ -201,7 +224,11 @@ def main() -> int:
         if isinstance(payload, str):
             payload = json.loads(payload)
         payload = payload or {}
-        check("新任务的 backend 是 bbdown", payload.get("backend") == "bbdown", str(payload.get("backend")))
+        check(
+            "新任务的 backend 是 bbdown",
+            payload.get("backend") == "bbdown",
+            str(payload.get("backend")),
+        )
         items = payload.get("items") or []
         check("只带失败那一集", len(items) == 1, f"{len(items)} 条")
         check(
@@ -217,7 +244,11 @@ def main() -> int:
         if isinstance(plain_payload, str):
             plain_payload = json.loads(plain_payload)
         plain_payload = plain_payload or {}
-        check("默认重试不带 bbdown", plain_payload.get("backend") == "", str(plain_payload.get("backend")))
+        check(
+            "默认重试不带 bbdown",
+            plain_payload.get("backend") == "",
+            str(plain_payload.get("backend")),
+        )
 
         # 父任务本身用的是 bbdown 时，默认重试要沿用
         bb_parent = failed_batch(service, backend="bbdown", bvid="BV1yy411c7mE")
@@ -225,11 +256,19 @@ def main() -> int:
         kept_payload = service.repo.job_get(str((kept.get("job") or {}).get("id"))).get("payload")
         if isinstance(kept_payload, str):
             kept_payload = json.loads(kept_payload)
-        check("沿用父任务的后端", (kept_payload or {}).get("backend") == "bbdown", str((kept_payload or {}).get("backend")))
+        check(
+            "沿用父任务的后端",
+            (kept_payload or {}).get("backend") == "bbdown",
+            str((kept_payload or {}).get("backend")),
+        )
 
         no_fail = "job_accept_all_ok"
         service.repo.job_create(no_fail, "download.batch", None, {"quality": "1080P"})
-        service.repo.job_update(no_fail, status="succeeded", result={"total": 1, "items": [{"bvid": "BV1", "status": "succeeded"}]})
+        service.repo.job_update(
+            no_fail,
+            status="succeeded",
+            result={"total": 1, "items": [{"bvid": "BV1", "status": "succeeded"}]},
+        )
         conflict = error_of(router, "download.retry_failed", {"id": no_fail})
         check("没有失败项 → CONFLICT", conflict["code"] == "CONFLICT", conflict.get("message", ""))
     finally:

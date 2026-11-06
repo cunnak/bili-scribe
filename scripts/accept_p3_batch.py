@@ -70,8 +70,13 @@ def make_candidates(service, pid: str, titles: list[str]) -> list[dict]:
         row = call(
             service,
             "clip.create",
-            {"project_id": pid, "kind": "highlight", "start_ms": start,
-             "end_ms": start + 5_000, "title": title},
+            {
+                "project_id": pid,
+                "kind": "highlight",
+                "start_ms": start,
+                "end_ms": start + 5_000,
+                "title": title,
+            },
         )["candidate"]
         made.append(row)
     return made
@@ -90,8 +95,9 @@ class FlakyFFmpeg:
     def export_clip(self, src, dest, **kwargs):
         name = Path(str(dest)).name
         if any(bad and bad in name for bad in self._bad):
-            raise WBError("PROCESS_FAILED", "ffmpeg 执行失败（exit 1）", "验收用的受控失败",
-                          retryable=True)
+            raise WBError(
+                "PROCESS_FAILED", "ffmpeg 执行失败（exit 1）", "验收用的受控失败", retryable=True
+            )
         return self._inner.export_clip(src, dest, **kwargs)
 
 
@@ -127,26 +133,41 @@ def main() -> int:
         check("空选被拦", blank.get("code") == "VALIDATION", blank.get("code", ""))
 
         # ---- 2. 正常批量：三条一起出，共用 batch_id
-        first = call(service, "clip.export.batch",
-                     {"project_id": pid, "candidate_ids": ids, "mode": "precise"})
+        first = call(
+            service,
+            "clip.export.batch",
+            {"project_id": pid, "candidate_ids": ids, "mode": "precise"},
+        )
         check("三条一起提交", first["submitted"] == 3, str(first["submitted"]))
         check("共用一个 batch_id", str(first["batch_id"]).startswith("batch_"), first["batch_id"])
         jobs = {row["candidate_id"]: row["job_id"] for row in first["jobs"]}
         payloads = [service.jobs.get(job_id)["payload"] for job_id in jobs.values()]
-        check("每条都带 batch_id",
-              {p.get("batch_id") for p in payloads} == {first["batch_id"]},
-              str(len(payloads)))
+        check(
+            "每条都带 batch_id",
+            {p.get("batch_id") for p in payloads} == {first["batch_id"]},
+            str(len(payloads)),
+        )
 
         settled = {cid: wait_job(service, job_id) for cid, job_id in jobs.items()}
-        check("三条全部导出成功",
-              all(job.get("status") == "succeeded" for job in settled.values()),
-              str([job.get("status") for job in settled.values()]))
-        paths = {cid: Path(str((job.get("result") or {}).get("path") or ""))
-                 for cid, job in settled.items()}
-        check("三条成片都在盘上", all(p.is_file() and p.stat().st_size > 0 for p in paths.values()),
-              str([p.name for p in paths.values()]))
-        check("文件名互不相同", len({p.name for p in paths.values()}) == 3,
-              str(sorted({p.name for p in paths.values()})))
+        check(
+            "三条全部导出成功",
+            all(job.get("status") == "succeeded" for job in settled.values()),
+            str([job.get("status") for job in settled.values()]),
+        )
+        paths = {
+            cid: Path(str((job.get("result") or {}).get("path") or ""))
+            for cid, job in settled.items()
+        }
+        check(
+            "三条成片都在盘上",
+            all(p.is_file() and p.stat().st_size > 0 for p in paths.values()),
+            str([p.name for p in paths.values()]),
+        )
+        check(
+            "文件名互不相同",
+            len({p.name for p in paths.values()}) == 3,
+            str(sorted({p.name for p in paths.values()})),
+        )
 
         # ffprobe 复核成片时长（精确模式误差 ≤1 帧）
         probe = service._ffmpeg
@@ -165,8 +186,11 @@ def main() -> int:
         inner = service._ffmpeg
         service._ffmpeg = FlakyFFmpeg(inner, ("批量验收2",))
         try:
-            second = call(service, "clip.export.batch",
-                          {"project_id": pid, "candidate_ids": ids, "mode": "fast"})
+            second = call(
+                service,
+                "clip.export.batch",
+                {"project_id": pid, "candidate_ids": ids, "mode": "fast"},
+            )
             jobs2 = {row["candidate_id"]: row["job_id"] for row in second["jobs"]}
             settled2 = {cid: wait_job(service, job_id) for cid, job_id in jobs2.items()}
         finally:
@@ -174,20 +198,26 @@ def main() -> int:
         statuses = {cid: job.get("status") for cid, job in settled2.items()}
         failed_ids = [cid for cid, status in statuses.items() if status == "failed"]
         check("恰好一条失败", len(failed_ids) == 1, str(statuses))
-        check("失败的是指定那条", failed_ids == [ids[1]],
-              f"失败 {failed_ids} / 期望 {[ids[1]]}")
-        check("其余两条不受影响",
-              sum(1 for s in statuses.values() if s == "succeeded") == 2, str(statuses))
+        check("失败的是指定那条", failed_ids == [ids[1]], f"失败 {failed_ids} / 期望 {[ids[1]]}")
+        check(
+            "其余两条不受影响",
+            sum(1 for s in statuses.values() if s == "succeeded") == 2,
+            str(statuses),
+        )
 
         rows = call(service, "clip.exports", {"project_id": pid})["exports"]
         mine = [row for row in rows if row.get("batch_id") == second["batch_id"]]
         check("队列能看到这一批", len(mine) == 3, f"{len(mine)} 行")
-        check("失败行带错误说明",
-              any(row["status"] == "failed" and row["error"] for row in mine),
-              str([row.get("error") for row in mine if row["status"] == "failed"]))
-        check("成功行的文件真的在",
-              sum(1 for row in mine if row["status"] == "succeeded" and row["exists"]) == 2,
-              str([row.get("exists") for row in mine]))
+        check(
+            "失败行带错误说明",
+            any(row["status"] == "failed" and row["error"] for row in mine),
+            str([row.get("error") for row in mine if row["status"] == "failed"]),
+        )
+        check(
+            "成功行的文件真的在",
+            sum(1 for row in mine if row["status"] == "succeeded" and row["exists"]) == 2,
+            str([row.get("exists") for row in mine]),
+        )
 
         # ---- 4. 重试失败那条（新建任务，失败历史留着）
         retried = call(service, "job.retry", {"id": jobs2[ids[1]]})
@@ -196,36 +226,55 @@ def main() -> int:
         check("重试成功", done.get("status") == "succeeded", str(done.get("status")))
         rows = call(service, "clip.exports", {"project_id": pid})["exports"]
         mine = [row for row in rows if row.get("batch_id") == second["batch_id"]]
-        check("重试后这批三条都成功",
-              sum(1 for row in mine if row["status"] == "succeeded") == 3,
-              str([row["status"] for row in mine]))
-        check("失败的旧记录还在（历史不删）",
-              sum(1 for row in rows if row["status"] == "failed") >= 1,
-              str([row["status"] for row in rows].count("failed")))
+        check(
+            "重试后这批三条都成功",
+            sum(1 for row in mine if row["status"] == "succeeded") == 3,
+            str([row["status"] for row in mine]),
+        )
+        check(
+            "失败的旧记录还在（历史不删）",
+            sum(1 for row in rows if row["status"] == "failed") >= 1,
+            str([row["status"] for row in rows].count("failed")),
+        )
 
         # ---- 5. skip_exported：同参数不重复导；换模式算新的一份
-        skipped = call(service, "clip.export.batch",
-                       {"project_id": pid, "candidate_ids": ids, "mode": "fast",
-                        "skip_exported": True})
+        skipped = call(
+            service,
+            "clip.export.batch",
+            {"project_id": pid, "candidate_ids": ids, "mode": "fast", "skip_exported": True},
+        )
         check("同参数跳过已导出的", skipped["submitted"] == 0, str(skipped["submitted"]))
-        check("跳过原因写清了",
-              {row["reason"] for row in skipped["skipped"]} == {"这条已经导出过（同参数）"},
-              str([row["reason"] for row in skipped["skipped"]]))
-        other = call(service, "clip.export.batch",
-                     {"project_id": pid, "candidate_ids": ids, "mode": "precise",
-                      "skip_exported": True})
+        check(
+            "跳过原因写清了",
+            {row["reason"] for row in skipped["skipped"]} == {"这条已经导出过（同参数）"},
+            str([row["reason"] for row in skipped["skipped"]]),
+        )
+        other = call(
+            service,
+            "clip.export.batch",
+            {"project_id": pid, "candidate_ids": ids, "mode": "precise", "skip_exported": True},
+        )
         check("换模式仍会重新导", other["submitted"] == 3, str(other["submitted"]))
         for row in other["jobs"]:
             wait_job(service, row["job_id"])
 
         # ---- 6. 未知候选被跳过而不是整批崩
-        mixed = call(service, "clip.export.batch",
-                     {"project_id": pid, "candidate_ids": [ids[0], "cand_nope"],
-                      "mode": "precise", "skip_exported": False})
+        mixed = call(
+            service,
+            "clip.export.batch",
+            {
+                "project_id": pid,
+                "candidate_ids": [ids[0], "cand_nope"],
+                "mode": "precise",
+                "skip_exported": False,
+            },
+        )
         check("未知候选只跳过自己", mixed["submitted"] == 1, str(mixed["submitted"]))
-        check("未知候选有原因",
-              mixed["skipped"] and mixed["skipped"][0]["reason"] == "候选不存在",
-              str(mixed["skipped"]))
+        check(
+            "未知候选有原因",
+            mixed["skipped"] and mixed["skipped"][0]["reason"] == "候选不存在",
+            str(mixed["skipped"]),
+        )
         wait_job(service, mixed["jobs"][0]["job_id"])
 
         # 清场：验收用的切片与成片不留

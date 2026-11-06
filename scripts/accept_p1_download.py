@@ -12,6 +12,7 @@
     python scripts/accept_p1_download.py --url https://www.bilibili.com/video/BV1GJ411x7h7
     python scripts/accept_p1_download.py --url BV1GJ411x7h7 --quality 720P --timeout 600
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,7 +44,7 @@ def write_config() -> Path:
                 f'  cache_root: "{ACCEPT.as_posix()}/cache"',
                 f'  models_root: "{ACCEPT.as_posix()}/models"',
                 "download:",
-                "  quality: \"720p\"",
+                '  quality: "720p"',
                 "",
             ]
         ),

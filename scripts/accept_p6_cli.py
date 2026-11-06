@@ -60,8 +60,13 @@ class ChatStub:
             "id": "chatcmpl-cli-stub",
             "object": "chat.completion",
             "model": body.get("model") or "stub",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                         "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 200, "completion_tokens": 80, "total_tokens": 280},
         }
 
@@ -124,9 +129,22 @@ def pick_source(work: Path) -> Path | None:
     ffmpeg, _probe = ff.require()
     dest = work / "src.mp4"
     subprocess.run(
-        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(candidates[0]),
-         "-t", "25", "-c", "copy", str(dest)],
-        check=True, capture_output=True,
+        [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(candidates[0]),
+            "-t",
+            "25",
+            "-c",
+            "copy",
+            str(dest),
+        ],
+        check=True,
+        capture_output=True,
     )
     return dest if dest.is_file() else None
 
@@ -150,7 +168,12 @@ def main() -> int:
 
     cfg = {
         "ui": {"skin": "ark"},
-        "llm": {"base_url": base_url, "api_key": "sk-cli-accept", "model": "stub-chat", "timeout_seconds": 60},
+        "llm": {
+            "base_url": base_url,
+            "api_key": "sk-cli-accept",
+            "model": "stub-chat",
+            "timeout_seconds": 60,
+        },
         "storage": {
             "db_path": str(work / "wb.db"),
             "media_root": str(work / "media"),
@@ -171,8 +194,13 @@ def main() -> int:
         # ------------------------------------------------ 0. 环境与素材
         code, out, err, payload = run_cli(cfg_path, "--json", "info")
         check("info 退出码 0", code == 0, f"rc={code} err={err[-160:]}")
-        check("info 的 stdout 只有一行 JSON", payload is not None and len([l for l in out.splitlines() if l.strip()]) == 1)
-        check("info 报出配置与依赖", bool((payload or {}).get("data", {}).get("info", {}).get("deps")))
+        check(
+            "info 的 stdout 只有一行 JSON",
+            payload is not None and len([line for line in out.splitlines() if line.strip()]) == 1,
+        )
+        check(
+            "info 报出配置与依赖", bool((payload or {}).get("data", {}).get("info", {}).get("deps"))
+        )
 
         source = pick_source(work)
         if not source:
@@ -191,28 +219,54 @@ def main() -> int:
 
         # ------------------------------------------------ 1. 一条命令跑完闭环
         code, out, err, payload = run_cli(
-            cfg_path, "--json", "run", "--project-id", project["id"],
-            "--clips", "2", "--export", "1", "--mode", "fast",
+            cfg_path,
+            "--json",
+            "run",
+            "--project-id",
+            project["id"],
+            "--clips",
+            "2",
+            "--export",
+            "1",
+            "--mode",
+            "fast",
         )
         data = (payload or {}).get("data") or {}
         check("run 退出码 0", code == 0, f"rc={code} err={err[-200:]}")
         check("run 的 stdout 是一行 JSON", payload is not None)
-        check("run 报出项目 id", data.get("project_id") == project["id"], str(data.get("project_id")))
+        check(
+            "run 报出项目 id", data.get("project_id") == project["id"], str(data.get("project_id"))
+        )
         steps = [s.get("step") for s in data.get("steps") or []]
         check("闭环里含转录", "transcribe" in steps, str(steps))
         check("闭环里含总结", "summary" in steps, str(steps))
-        check("总结正文非空", all((s.get("chars") or 0) > 0 for s in data.get("steps") or [] if s.get("step") == "summary"))
+        check(
+            "总结正文非空",
+            all(
+                (s.get("chars") or 0) > 0
+                for s in data.get("steps") or []
+                if s.get("step") == "summary"
+            ),
+        )
         exports = data.get("exports") or []
         check("导出了 1 条切片", len(exports) == 1, str(exports))
         if exports:
             path = Path(str(exports[0].get("path") or ""))
-            check("成片真的存在", path.is_file() and path.stat().st_size > 0, f"{path} {path.stat().st_size if path.exists() else 0}B")
+            check(
+                "成片真的存在",
+                path.is_file() and path.stat().st_size > 0,
+                f"{path} {path.stat().st_size if path.exists() else 0}B",
+            )
         check("假大模型被真的调用过", stub.calls >= 1, f"{stub.calls} 次")
 
         # 库里也要有账：命令行不是绕过 RPC 自己记账的
         jobs = service.repo.job_list(limit=20, project_id=project["id"])
         kinds = {str(j.get("type")) for j in jobs}
-        check("任务表里有转录/总结/选段/导出", {"transcribe", "summary.run", "clip.analyze", "clip.export"} <= kinds, str(sorted(kinds)))
+        check(
+            "任务表里有转录/总结/选段/导出",
+            {"transcribe", "summary.run", "clip.analyze", "clip.export"} <= kinds,
+            str(sorted(kinds)),
+        )
 
         # ------------------------------------------------ 2. 退出码
         code, _out, _err, payload = run_cli(cfg_path, "--json", "jobs")
@@ -221,7 +275,10 @@ def main() -> int:
 
         code, _out, _err, payload = run_cli(cfg_path, "--json", "summarize", "pj_不存在")
         check("找不到项目 → 退出码 2", code == 2, f"rc={code}")
-        check("找不到项目 → 错误码 NOT_FOUND", ((payload or {}).get("error") or {}).get("code") == "NOT_FOUND")
+        check(
+            "找不到项目 → 错误码 NOT_FOUND",
+            ((payload or {}).get("error") or {}).get("code") == "NOT_FOUND",
+        )
 
         # 坏文件在预检就被拦下：这属于"输入不对"，必须是 2，不能混成"跑挂了"
         bad_a = work / "bad_a.mp4"
@@ -230,24 +287,35 @@ def main() -> int:
         bad_b.write_bytes(b"not a video")
         code, _out, err, payload = run_cli(cfg_path, "--json", "merge", str(bad_a), str(bad_b))
         check("合并坏文件 → 退出码 2（预检拦下）", code == 2, f"rc={code} tail={err[-200:]}")
-        check("合并坏文件 → 错误码 CONFLICT",
-              ((payload or {}).get("error") or {}).get("code") == "CONFLICT",
-              str((payload or {}).get("error")))
+        check(
+            "合并坏文件 → 错误码 CONFLICT",
+            ((payload or {}).get("error") or {}).get("code") == "CONFLICT",
+            str((payload or {}).get("error")),
+        )
 
         # 真·任务失败（模型连不上）必须是 1：脚本据此决定"重试"还是"改参数"
         dead = dict(cfg)
         dead["llm"] = dict(cfg["llm"], base_url="http://127.0.0.1:9/v1", timeout_seconds=5)
         dead_cfg = work / "config_dead_llm.yaml"
-        dead_cfg.write_text(yaml.safe_dump(dead, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        dead_cfg.write_text(
+            yaml.safe_dump(dead, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
         code, _out, err, payload = run_cli(dead_cfg, "--json", "summarize", project["id"])
         check("模型连不上 → 退出码 1（任务失败）", code == 1, f"rc={code} tail={err[-160:]}")
-        check("模型连不上 → 错误码是 LLM_* / NETWORK",
-              str(((payload or {}).get("error") or {}).get("code", "")) in ("NETWORK", "LLM_ERROR", "LLM_TIMEOUT"),
-              str((payload or {}).get("error")))
+        check(
+            "模型连不上 → 错误码是 LLM_* / NETWORK",
+            str(((payload or {}).get("error") or {}).get("code", ""))
+            in ("NETWORK", "LLM_ERROR", "LLM_TIMEOUT"),
+            str((payload or {}).get("error")),
+        )
 
         proc = subprocess.run(
             [sys.executable, "-m", "video_workbench.cli", "download"],
-            cwd=str(PROJ), capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(PROJ),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         check("缺必填参数 → 退出码 2（argparse）", proc.returncode == 2, f"rc={proc.returncode}")
     finally:

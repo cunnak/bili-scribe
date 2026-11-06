@@ -96,8 +96,13 @@ class StubModel:
             "id": "chatcmpl-stub",
             "object": "chat.completion",
             "model": "stub-model",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                         "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
         }
 
@@ -180,8 +185,11 @@ def main() -> int:
     router = service.router
 
     try:
-        item = (call(router, "library.get", {"id": args.project})["project"]
-                if args.project else first_project_with_transcript(router))
+        item = (
+            call(router, "library.get", {"id": args.project})["project"]
+            if args.project
+            else first_project_with_transcript(router)
+        )
         pid = item["id"]
         root = Path(item["root_dir"])
         original = texts_of(service, pid)
@@ -195,8 +203,11 @@ def main() -> int:
                 break
         TERM = "XTERM-九号"
         service.cfg.subtitle.translate.glossary = [f"{first_word}={TERM}"] if first_word else []
-        check("准备好术语表", bool(first_word), service.cfg.subtitle.translate.glossary[0]
-              if first_word else "无可用词")
+        check(
+            "准备好术语表",
+            bool(first_word),
+            service.cfg.subtitle.translate.glossary[0] if first_word else "无可用词",
+        )
 
         probe = call(router, "llm.test", {})
         check("llm.test 连上假模型", probe.get("ok") is True, f"{probe.get('latency_ms')}ms")
@@ -207,45 +218,75 @@ def main() -> int:
             if stale.is_file():
                 stale.unlink()
 
-        submitted = call(router, "subtitle.translate",
-                         {"project_id": pid, "target": target, "batch_size": 4})
+        submitted = call(
+            router, "subtitle.translate", {"project_id": pid, "target": target, "batch_size": 4}
+        )
         job = wait_job(service, submitted["job"]["id"])
-        check("翻译任务成功结束", job.get("status") == "succeeded", str(job.get("error_message") or ""))
+        check(
+            "翻译任务成功结束",
+            job.get("status") == "succeeded",
+            str(job.get("error_message") or ""),
+        )
         result = job.get("result") or {}
-        check("每段都拿到了译文", result.get("translated") == result.get("total") == len(original),
-              f"translated={result.get('translated')} / total={result.get('total')}")
-        check("auto 在提交时就定死成具体语言", submitted.get("target") == target,
-              str(submitted.get("target")))
+        check(
+            "每段都拿到了译文",
+            result.get("translated") == result.get("total") == len(original),
+            f"translated={result.get('translated')} / total={result.get('total')}",
+        )
+        check(
+            "auto 在提交时就定死成具体语言",
+            submitted.get("target") == target,
+            str(submitted.get("target")),
+        )
         check("翻译不写 transcript（原文未动）", texts_of(service, pid) == original)
-        check("草稿不落文件（没有 srt / ass）",
-              not srt_path.exists() and not ass_path.exists())
+        check("草稿不落文件（没有 srt / ass）", not srt_path.exists() and not ass_path.exists())
 
         draft = draft_of(service, pid, target)
-        check("草稿进了 wb_subtitle", draft.get("status") == "draft",
-              f"{draft.get('id')} · {len(draft.get('segments') or [])} 段")
+        check(
+            "草稿进了 wb_subtitle",
+            draft.get("status") == "draft",
+            f"{draft.get('id')} · {len(draft.get('segments') or [])} 段",
+        )
         check("术语表真的进了 prompt", TERM in StubModel.last_prompt, TERM)
         segs = draft.get("segments") or []
-        check("译文带出了术语目标词", bool(segs) and TERM in str(segs[0].get("translated_text") or ""),
-              str(segs[0].get("translated_text") or "")[:40] if segs else "")
+        check(
+            "译文带出了术语目标词",
+            bool(segs) and TERM in str(segs[0].get("translated_text") or ""),
+            str(segs[0].get("translated_text") or "")[:40] if segs else "",
+        )
 
-        applied = call(router, "subtitle.translation.apply",
-                       {"project_id": pid, "target": target, "layout": "original_top"})
-        check("两处文件都写出来了", srt_path.is_file() and ass_path.is_file(),
-              f"{applied.get('files')}")
+        applied = call(
+            router,
+            "subtitle.translation.apply",
+            {"project_id": pid, "target": target, "layout": "original_top"},
+        )
+        check(
+            "两处文件都写出来了",
+            srt_path.is_file() and ass_path.is_file(),
+            f"{applied.get('files')}",
+        )
         srt_text = srt_path.read_text(encoding="utf-8")
         ass_text = ass_path.read_text(encoding="utf-8")
-        check("纯译文 SRT 段数一致", srt_text.count(" --> ") == len(original),
-              f"{srt_text.count(' --> ')} 条")
+        check(
+            "纯译文 SRT 段数一致",
+            srt_text.count(" --> ") == len(original),
+            f"{srt_text.count(' --> ')} 条",
+        )
         dialogues = [ln for ln in ass_text.splitlines() if ln.startswith("Dialogue:")]
-        check("双语 ASS 每段一条 Dialogue", len(dialogues) == len(original),
-              f"{len(dialogues)} 条")
-        check("ASS 是原文在上＋译文在下的双行",
-              all("\\N" in ln for ln in dialogues) and ass_text.startswith("[Script Info]"))
-        check("确认后草稿状态转 confirmed",
-              draft_of(service, pid, target).get("status") == "confirmed")
-        assets = [a for a in (call(router, "library.get", {"id": pid})["project"].get("assets") or [])
-                  if a.get("kind") == "subtitle" and str(a.get("path", "")).endswith(
-                      (".srt", ".ass"))]
+        check("双语 ASS 每段一条 Dialogue", len(dialogues) == len(original), f"{len(dialogues)} 条")
+        check(
+            "ASS 是原文在上＋译文在下的双行",
+            all("\\N" in ln for ln in dialogues) and ass_text.startswith("[Script Info]"),
+        )
+        check(
+            "确认后草稿状态转 confirmed",
+            draft_of(service, pid, target).get("status") == "confirmed",
+        )
+        assets = [
+            a
+            for a in (call(router, "library.get", {"id": pid})["project"].get("assets") or [])
+            if a.get("kind") == "subtitle" and str(a.get("path", "")).endswith((".srt", ".ass"))
+        ]
         langs = {str(a.get("language") or "") for a in assets}
         check("两个文件都登记成了资产", {target, "bilingual"} <= langs, str(sorted(langs)))
 
@@ -253,32 +294,43 @@ def main() -> int:
         StubModel.mode = BAD
         two = [str(s.get("id")) for s in (draft.get("segments") or [])[:2]]
         before_ass = ass_text
-        bad = call(router, "subtitle.translate",
-                   {"project_id": pid, "target": target, "segment_ids": two})
+        bad = call(
+            router, "subtitle.translate", {"project_id": pid, "target": target, "segment_ids": two}
+        )
         job_bad = wait_job(service, bad["job"]["id"])
         msg = str(job_bad.get("error_message") or "")
-        check("模型乱写时任务失败并给出原因",
-              job_bad.get("status") == "failed" and "所有批次都失败了" in msg,
-              f"status={job_bad.get('status')} msg={msg[:60]}")
-        check("失败不碰已确认的字幕文件",
-              ass_path.read_text(encoding="utf-8") == before_ass)
-        check("失败不把草稿打回 draft",
-              draft_of(service, pid, target).get("status") == "confirmed")
+        check(
+            "模型乱写时任务失败并给出原因",
+            job_bad.get("status") == "failed" and "所有批次都失败了" in msg,
+            f"status={job_bad.get('status')} msg={msg[:60]}",
+        )
+        check("失败不碰已确认的字幕文件", ass_path.read_text(encoding="utf-8") == before_ass)
+        check("失败不把草稿打回 draft", draft_of(service, pid, target).get("status") == "confirmed")
         check("失败不改原文", texts_of(service, pid) == original)
 
         # 只重试那两段：其它段译文必须还在
         StubModel.mode = GOOD
-        retry = call(router, "subtitle.translate",
-                     {"project_id": pid, "target": target, "segment_ids": two})
+        retry = call(
+            router, "subtitle.translate", {"project_id": pid, "target": target, "segment_ids": two}
+        )
         job_retry = wait_job(service, retry["job"]["id"])
-        check("重试成功", job_retry.get("status") == "succeeded",
-              str(job_retry.get("error_message") or ""))
+        check(
+            "重试成功",
+            job_retry.get("status") == "succeeded",
+            str(job_retry.get("error_message") or ""),
+        )
         after = draft_of(service, pid, target)
         filled = [s for s in (after.get("segments") or []) if str(s.get("translated_text") or "")]
-        check("只重跑指定段，其它段译文没丢", len(filled) == len(original),
-              f"{len(filled)} / {len(original)} 段有译文")
-        check("重译后退回草稿状态（需要重新确认）", after.get("status") == "draft",
-              str(after.get("status")))
+        check(
+            "只重跑指定段，其它段译文没丢",
+            len(filled) == len(original),
+            f"{len(filled)} / {len(original)} 段有译文",
+        )
+        check(
+            "重译后退回草稿状态（需要重新确认）",
+            after.get("status") == "draft",
+            str(after.get("status")),
+        )
     finally:
         service.close()
         server.shutdown()

@@ -83,7 +83,7 @@ def verify(zip_path: Path) -> bool:
                 if label == "bvid":
                     bvids.setdefault(found, set()).add(n)
                     continue
-                hits[label].append(f"{n}: …{text[max(0, m.start()-20):m.end()+10]}…")
+                hits[label].append(f"{n}: …{text[max(0, m.start() - 20) : m.end() + 10]}…")
 
     for label, found in hits.items():
         if label == "bvid":
@@ -94,8 +94,10 @@ def verify(zip_path: Path) -> bool:
         ok &= not found
 
     unexpected = {b: f for b, f in bvids.items() if b not in ALLOWED_BVIDS}
-    print(f"③ bvid：{sorted(bvids) or '无'}"
-          f"{'  ← 有真实视频号！' if unexpected else ' ✓（只剩文档占位号）'}")
+    print(
+        f"③ bvid：{sorted(bvids) or '无'}"
+        f"{'  ← 有真实视频号！' if unexpected else ' ✓（只剩文档占位号）'}"
+    )
     ok &= not unexpected
 
     init = next((n for n in names if n.endswith("/bili_scribe/__init__.py")), None)
@@ -110,7 +112,9 @@ def verify(zip_path: Path) -> bool:
     packed_v = packed.group(1) if packed else "?"
     expect_v = expected.group(1) if expected else "?"
     same = packed_v == expect_v
-    print(f"④ 包内版本 {packed_v} / 工作区版本 {expect_v}：{'一致 ✓' if same else '不一致 ← 有问题！'}")
+    print(
+        f"④ 包内版本 {packed_v} / 工作区版本 {expect_v}：{'一致 ✓' if same else '不一致 ← 有问题！'}"
+    )
     ok &= same
 
     prefix = top[0] if len(top) == 1 else ""

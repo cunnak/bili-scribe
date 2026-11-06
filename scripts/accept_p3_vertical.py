@@ -49,7 +49,9 @@ def wait_job(service: WorkbenchService, job_id: str, timeout: float = 240.0) -> 
 
 def probe_ffmpeg(ffmpeg: str, path: str) -> dict:
     """用 ffprobe 量宽高与时长；ffprobe 不在 PATH 时退回 ffmpeg -i 的 stderr。"""
-    ffprobe = str(Path(ffmpeg).with_name("ffprobe.exe")) if ffmpeg.lower().endswith(".exe") else "ffprobe"
+    ffprobe = (
+        str(Path(ffmpeg).with_name("ffprobe.exe")) if ffmpeg.lower().endswith(".exe") else "ffprobe"
+    )
     if not Path(ffprobe).is_file():
         ffprobe = "ffprobe"
     out = subprocess.run(
@@ -89,7 +91,19 @@ def column_span(ffmpeg: str, video: str, out_png: Path, at_ms: int = 1500) -> tu
     所以这里也用像素量出来，别只靠眼看。
     """
     subprocess.run(
-        [ffmpeg, "-v", "error", "-y", "-ss", f"{at_ms / 1000:.3f}", "-i", video, "-frames:v", "1", str(out_png)],
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-ss",
+            f"{at_ms / 1000:.3f}",
+            "-i",
+            video,
+            "-frames:v",
+            "1",
+            str(out_png),
+        ],
         capture_output=True,
         text=True,
     )
@@ -192,9 +206,19 @@ def main() -> int:
         "居中成片是 1080×1920",
         f"{info.get('width')}×{info.get('height')}",
     )
-    check(result.get("vertical_mode") == "center", "结果记下竖屏模式", str(result.get("vertical_mode")))
-    check(str(result.get("name") or "").find("_9x16") >= 0, "文件名带竖屏标记", str(result.get("name")))
-    check(bool(result.get("src_crop")), "记录了素材黑边裁切", json.dumps(result.get("src_crop") or {}))
+    check(
+        result.get("vertical_mode") == "center",
+        "结果记下竖屏模式",
+        str(result.get("vertical_mode")),
+    )
+    check(
+        str(result.get("name") or "").find("_9x16") >= 0,
+        "文件名带竖屏标记",
+        str(result.get("name")),
+    )
+    check(
+        bool(result.get("src_crop")), "记录了素材黑边裁切", json.dumps(result.get("src_crop") or {})
+    )
 
     # ---- 2. 模糊背景（削边后不该有黑柱）
     job = export(service, project_id, candidate_id, vertical_mode="blur")
@@ -219,13 +243,21 @@ def main() -> int:
     call(service, "clip.focus.save", {"project_id": project_id, "clear": True})
     job = export(service, project_id, candidate_id, vertical_mode="follow")
     result = job.get("result") or {}
-    check(job.get("status") == "succeeded", "无轨迹的跟随也能出片", str(job.get("error_message") or ""))
+    check(
+        job.get("status") == "succeeded",
+        "无轨迹的跟随也能出片",
+        str(job.get("error_message") or ""),
+    )
     check(
         result.get("vertical_mode") == "center",
         "无轨迹时退回居中",
         str(result.get("vertical_mode")),
     )
-    check(int(result.get("focus_points") or 0) == 0, "无轨迹时人脸点数为 0", str(result.get("focus_points")))
+    check(
+        int(result.get("focus_points") or 0) == 0,
+        "无轨迹时人脸点数为 0",
+        str(result.get("focus_points")),
+    )
 
     # ---- 4. 手工关键帧可见可改，再导出就用上了
     saved = call(
@@ -241,7 +273,11 @@ def main() -> int:
     )
     focus = (saved or {}).get("focus") or []
     check(len(focus) == 2, "两个手工关键帧存进去了", str(len(focus)))
-    check(all(point.get("manual") for point in focus), "手工点带 manual 标记", json.dumps(focus, ensure_ascii=False))
+    check(
+        all(point.get("manual") for point in focus),
+        "手工点带 manual 标记",
+        json.dumps(focus, ensure_ascii=False),
+    )
 
     read_back = call(service, "clip.focus", {"project_id": project_id}) or {}
     rows = read_back.get("focus") or []
@@ -259,13 +295,21 @@ def main() -> int:
 
     job = export(service, project_id, candidate_id, vertical_mode="follow")
     result = job.get("result") or {}
-    check(job.get("status") == "succeeded", "有人工轨迹时跟随能出片", str(job.get("error_message") or ""))
+    check(
+        job.get("status") == "succeeded",
+        "有人工轨迹时跟随能出片",
+        str(job.get("error_message") or ""),
+    )
     check(
         result.get("vertical_mode") == "follow",
         "有轨迹时保持跟随模式",
         str(result.get("vertical_mode")),
     )
-    check(int(result.get("focus_points") or 0) == 2, "导出用了 2 个人脸点", str(result.get("focus_points")))
+    check(
+        int(result.get("focus_points") or 0) == 2,
+        "导出用了 2 个人脸点",
+        str(result.get("focus_points")),
+    )
     follow_path = str(result.get("path") or "")
     info = probe_ffmpeg(ffmpeg, follow_path) if follow_path else {}
     check(

@@ -94,20 +94,35 @@ class VisionStub:
         if images:
             title = "后段结论" if "后段" in prompt else "开场铺垫"
             text = json.dumps(
-                {"score": 95 if "后段" in prompt else 25, "title": title,
-                 "reason": f"看到 {images} 张画面"},
+                {
+                    "score": 95 if "后段" in prompt else 25,
+                    "title": title,
+                    "reason": f"看到 {images} 张画面",
+                },
                 ensure_ascii=False,
             )
         else:
             text = json.dumps(
                 {
                     "candidates": [
-                        {"kind": "highlight", "start_hint_ms": 0, "end_hint_ms": 20_000,
-                         "title": "开场铺垫", "reason": "字幕层评分最高",
-                         "quote": "开场先讲一件大家都知道的事", "score": 88},
-                        {"kind": "highlight", "start_hint_ms": 30_000, "end_hint_ms": 50_000,
-                         "title": "后段收束", "reason": "字幕层分低", "quote": "后段才是结论",
-                         "score": 41},
+                        {
+                            "kind": "highlight",
+                            "start_hint_ms": 0,
+                            "end_hint_ms": 20_000,
+                            "title": "开场铺垫",
+                            "reason": "字幕层评分最高",
+                            "quote": "开场先讲一件大家都知道的事",
+                            "score": 88,
+                        },
+                        {
+                            "kind": "highlight",
+                            "start_hint_ms": 30_000,
+                            "end_hint_ms": 50_000,
+                            "title": "后段收束",
+                            "reason": "字幕层分低",
+                            "quote": "后段才是结论",
+                            "score": 41,
+                        },
                     ]
                 },
                 ensure_ascii=False,
@@ -116,8 +131,13 @@ class VisionStub:
             "id": "chatcmpl-vl-stub",
             "object": "chat.completion",
             "model": body.get("model") or "vl-stub",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                         "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
         }
 
@@ -165,17 +185,22 @@ def make_project(service, video: Path, duration_ms: int) -> str:
         stage="transcribed",
     )
     service.repo.asset_upsert(
-        project["id"], kind="source", path=str(video),
+        project["id"],
+        kind="source",
+        path=str(video),
         size=video.stat().st_size if video.exists() else 0,
     )
     segments = [
         {"id": "s1", "start_ms": 0, "end_ms": 20_000, "text": "开场先讲一件大家都知道的事"},
         {"id": "s2", "start_ms": 20_000, "end_ms": 30_000, "text": "中间把过程拆开"},
-        {"id": "s3", "start_ms": 30_000, "end_ms": 50_000, "text": "后段才是结论，落成能照做的步骤"},
+        {
+            "id": "s3",
+            "start_ms": 30_000,
+            "end_ms": 50_000,
+            "text": "后段才是结论，落成能照做的步骤",
+        },
     ]
-    service.repo.transcript_upsert(
-        project["id"], language="zh", model="accept", segments=segments
-    )
+    service.repo.transcript_upsert(project["id"], language="zh", model="accept", segments=segments)
     return project["id"]
 
 
@@ -183,12 +208,24 @@ def seed_candidates(service, pid: str, duration_ms: int) -> None:
     """两条候选：A 字幕更像"金句"所以分高，B 分低。画面若说 B 好，排序必须翻。"""
     service.repo.candidate_clear(pid)
     service.repo.candidate_insert(
-        pid, kind="highlight", start_ms=0, end_ms=20_000, score=88,
-        title="开场铺垫（字幕层评分最高）", reason="开场语境完整", status="draft",
+        pid,
+        kind="highlight",
+        start_ms=0,
+        end_ms=20_000,
+        score=88,
+        title="开场铺垫（字幕层评分最高）",
+        reason="开场语境完整",
+        status="draft",
     )
     service.repo.candidate_insert(
-        pid, kind="highlight", start_ms=30_000, end_ms=50_000, score=41,
-        title="后段收束", reason="结论段，字幕层分低", status="draft",
+        pid,
+        kind="highlight",
+        start_ms=30_000,
+        end_ms=50_000,
+        score=41,
+        title="后段收束",
+        reason="结论段，字幕层分低",
+        status="draft",
     )
 
 
@@ -240,8 +277,9 @@ def main() -> int:
         service.cfg.llm.tasks.vision = "vl-stub"
         service.cfg.llm.tasks.clip_analyze = "stub-text"
         SEEN.clear()
-        job = wait_job(service, call(router, "clip.analyze",
-                                     {"project_id": pid, "count": 2})["job"]["id"])
+        job = wait_job(
+            service, call(router, "clip.analyze", {"project_id": pid, "count": 2})["job"]["id"]
+        )
         check("精析任务成功", job.get("status") == "succeeded", str(job.get("error_message") or ""))
         result = job.get("result") or {}
         check("结果里带 refined 计数", result.get("refined") == 2, str(result.get("refined")))
@@ -249,15 +287,21 @@ def main() -> int:
 
         vision_calls = [s for s in SEEN if s["model"] == "vl-stub"]
         check("vision 端点被调用了", len(vision_calls) >= 2, f"{len(vision_calls)} 次")
-        check("每次请求都带 3 张画面", all(s["images"] == 3 for s in vision_calls),
-              str([s["images"] for s in vision_calls]))
+        check(
+            "每次请求都带 3 张画面",
+            all(s["images"] == 3 for s in vision_calls),
+            str([s["images"] for s in vision_calls]),
+        )
         check("请求里有字幕窗口文本", any("开场先讲" in s["prompt"] for s in vision_calls))
         check("请求里带音频数字", any(re.search(r"dBFS", s["prompt"]) for s in vision_calls))
 
         rows = service.repo.candidate_list(pid)
         top = rows[0]
-        check("排序被画面翻转（低分候选上位）", top["start_ms"] == 30_000,
-              f"top={top['title']}@{top['start_ms']}")
+        check(
+            "排序被画面翻转（低分候选上位）",
+            top["start_ms"] == 30_000,
+            f"top={top['title']}@{top['start_ms']}",
+        )
         check("分数被改写成模型的判断", top["score"] >= 90, str(top["score"]))
         check("标题被重写", top["title"] == "后段结论", top["title"])
         check("起止时间没被模型改掉", (top["start_ms"], top["end_ms"]) == (30_000, 50_000))
@@ -267,29 +311,38 @@ def main() -> int:
         # ---- 2. 清空 vision：必须安静跳过，且不再打端点
         service.cfg.llm.tasks.vision = ""
         SEEN.clear()
-        job2 = wait_job(service, call(router, "clip.analyze",
-                                      {"project_id": pid, "count": 2})["job"]["id"])
+        job2 = wait_job(
+            service, call(router, "clip.analyze", {"project_id": pid, "count": 2})["job"]["id"]
+        )
         res2 = job2.get("result") or {}
         vision2 = [s for s in SEEN if s["model"] == "vl-stub"]
         check("无 vision 时不调端点", not vision2, f"{len(vision2)} 次")
         check("无 vision 时 refined=0", res2.get("refined") == 0, str(res2.get("refined")))
-        check("notes 说明了跳过原因",
-              any("没配 vision" in n for n in (res2.get("notes") or [])),
-              str(res2.get("notes"))[:80])
+        check(
+            "notes 说明了跳过原因",
+            any("没配 vision" in n for n in (res2.get("notes") or [])),
+            str(res2.get("notes"))[:80],
+        )
         check("跳过时候选照常入库", len(service.repo.candidate_list(pid)) >= 2)
 
         # ---- 3. 配了 vision 但这次点名不要：也不能跑
         service.cfg.llm.tasks.vision = "vl-stub"
         SEEN.clear()
-        job3 = wait_job(service, call(router, "clip.analyze",
-                                      {"project_id": pid, "count": 2, "refine": False})["job"]["id"])
+        job3 = wait_job(
+            service,
+            call(router, "clip.analyze", {"project_id": pid, "count": 2, "refine": False})["job"][
+                "id"
+            ],
+        )
         res3 = job3.get("result") or {}
         vision3 = [s for s in SEEN if s["model"] == "vl-stub"]
         check("refine=false 时不调端点", not vision3, f"{len(vision3)} 次")
         check("refine=false 时 refined=0", res3.get("refined") == 0)
-        check("refine=false 时说明了原因",
-              any("按本次请求跳过" in n for n in (res3.get("notes") or [])),
-              str(res3.get("notes"))[:80])
+        check(
+            "refine=false 时说明了原因",
+            any("按本次请求跳过" in n for n in (res3.get("notes") or [])),
+            str(res3.get("notes"))[:80],
+        )
 
         # ---- 4. 源文件缺失：跳过而不是整单失败
         # 用**新项目**而不是把已有项目的资产改坏：asset_upsert 会再插一条 source，
@@ -297,11 +350,15 @@ def main() -> int:
         pid2 = make_project(service, work / "gone.mp4", duration_ms)
         service.repo.project_update(pid2, title="P6-01 源文件缺失用例")
         seed_candidates(service, pid2, duration_ms)
-        job4 = wait_job(service, call(router, "clip.analyze",
-                                      {"project_id": pid2, "count": 2})["job"]["id"])
+        job4 = wait_job(
+            service, call(router, "clip.analyze", {"project_id": pid2, "count": 2})["job"]["id"]
+        )
         res4 = (job4.get("result") or {}).get("notes") or []
-        check("源文件缺失时任务仍成功", job4.get("status") == "succeeded",
-              str(job4.get("error_message") or ""))
+        check(
+            "源文件缺失时任务仍成功",
+            job4.get("status") == "succeeded",
+            str(job4.get("error_message") or ""),
+        )
         check("并说明原因", any("找不到源视频" in n for n in res4), str(res4)[:90])
 
     finally:

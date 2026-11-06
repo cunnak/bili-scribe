@@ -94,12 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     #
     # 注意 `publish.list` 自 P4-06 起只回草稿，用它找"已发布"永远找不到——
     # 必须走 repo（第一版就是这么写的，于是清理静默失效）。
-    for row in (call(service, "publish.list", {"project_id": project["id"]}).get("notes") or []):
+    for row in call(service, "publish.list", {"project_id": project["id"]}).get("notes") or []:
         call(service, "publish.delete", {"id": row["id"]})
     # 自清扫：本组脚本会真的产出 published 行（或上一轮留下的），而 `publish.list`
     # 现在只回 draft —— 用 repo 直接查「已发布且未撤回」，先撤回再断言，
     # 否则频率关会说「这个视频已经发过笔记了」，与脚本要验的东西无关。
-    for stale in service.repo.publish_published(project['bvid']):
+    for stale in service.repo.publish_published(project["bvid"]):
         service.repo.publish_set_status(stale["id"], "withdrawn")
 
     pid = project["id"]
@@ -127,7 +127,12 @@ def main(argv: list[str] | None = None) -> int:
     saved = call(
         service,
         "publish.note",
-        {"id": data.get("id") or "", "project_id": pid, "title": draft_title, "summary": draft_summary},
+        {
+            "id": data.get("id") or "",
+            "project_id": pid,
+            "title": draft_title,
+            "summary": draft_summary,
+        },
     )
     if not saved.get("ok"):
         saved = call(
@@ -139,7 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         service.close()
         return 1
     note_id = saved["data"]["note"]["id"]
-    check("草稿状态是 draft", saved["data"]["note"]["status"] == "draft", str(saved["data"]["note"].get("status")))
+    check(
+        "草稿状态是 draft",
+        saved["data"]["note"]["status"] == "draft",
+        str(saved["data"]["note"].get("status")),
+    )
     check(
         "列表能查到这一条",
         any(r["id"] == note_id for r in call(service, "publish.list", {})["data"]["notes"]),

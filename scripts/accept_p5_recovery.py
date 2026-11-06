@@ -42,7 +42,9 @@ def ffmpeg_pids() -> set[int]:
     try:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq ffmpeg.exe", "/NH"],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True,
+            text=True,
+            timeout=20,
         ).stdout
     except Exception:
         return set()
@@ -71,7 +73,9 @@ def seed_stage_rows(service, media_root: Path) -> tuple[str, str]:
 
     lost = repo.project_create(title="P5-02 缺总结", root_dir=str(lost_root))
     repo.project_update(lost["id"], stage="summarized")
-    repo.summary_insert(lost["id"], content={"one_line": "没了"}, content_md="# 没了", role="standard")
+    repo.summary_insert(
+        lost["id"], content={"one_line": "没了"}, content_md="# 没了", role="standard"
+    )
     # 不写 summary.md：模拟"库里有行、文件没写出来"
     return keep["id"], lost["id"]
 
@@ -131,25 +135,51 @@ def main() -> int:
     try:
         info = service.router.dispatch("app.info", {}, "accept")["data"]
         stats = info.get("recovery") or {}
-        check("R1 app.info 带出 recovery 统计", "jobs" in stats, str({k: stats.get(k) for k in ("jobs", "merges", "projects")}))
-        check("R2 至少收尾了一个中断任务", int(stats.get("jobs") or 0) >= 1, f"jobs={stats.get('jobs')}")
+        check(
+            "R1 app.info 带出 recovery 统计",
+            "jobs" in stats,
+            str({k: stats.get(k) for k in ("jobs", "merges", "projects")}),
+        )
+        check(
+            "R2 至少收尾了一个中断任务",
+            int(stats.get("jobs") or 0) >= 1,
+            f"jobs={stats.get('jobs')}",
+        )
 
         job = service.repo.job_get(job_id)
         check("R3 那个任务不再是 running", job.get("status") == "failed", str(job.get("status")))
-        check("R4 错误码是 INTERRUPTED", job.get("error_code") == "INTERRUPTED", str(job.get("error_code")))
-        check("R5 文案说清了是上次退出导致", "上次退出" in (job.get("error_message") or ""), str(job.get("error_message"))[:40])
+        check(
+            "R4 错误码是 INTERRUPTED",
+            job.get("error_code") == "INTERRUPTED",
+            str(job.get("error_code")),
+        )
+        check(
+            "R5 文案说清了是上次退出导致",
+            "上次退出" in (job.get("error_message") or ""),
+            str(job.get("error_message"))[:40],
+        )
 
         # ------------------------------------------------------------ 3. 阶段回退
         keep_id, lost_id = seed_stage_rows(service, Path(service.cfg.media_root))
         again = WorkbenchService(config_path=args.config)
         try:
-            rolled = (again.router.dispatch("app.info", {}, "accept")["data"].get("recovery") or {}).get("rolled") or []
+            rolled = (
+                again.router.dispatch("app.info", {}, "accept")["data"].get("recovery") or {}
+            ).get("rolled") or []
             from_ids = {row.get("project_id") for row in rolled}
             keep_row = again.repo.project_get(keep_id)
             lost_row = again.repo.project_get(lost_id)
-            check("E1 产物齐全的项目保持 summarized", keep_row["stage"] == "summarized", keep_row["stage"])
+            check(
+                "E1 产物齐全的项目保持 summarized",
+                keep_row["stage"] == "summarized",
+                keep_row["stage"],
+            )
             check("E2 缺产物的项目被回退", lost_row["stage"] != "summarized", lost_row["stage"])
-            check("E3 回退写明了原因", "启动检查" in (lost_row.get("error") or ""), str(lost_row.get("error"))[:40])
+            check(
+                "E3 回退写明了原因",
+                "启动检查" in (lost_row.get("error") or ""),
+                str(lost_row.get("error"))[:40],
+            )
             check("E4 回退记录里能看到这个项目", lost_id in from_ids, str(sorted(from_ids))[:80])
         finally:
             again.close()
@@ -167,10 +197,18 @@ def main() -> int:
                 if final and final.get("status") in {"succeeded", "failed", "canceled"}:
                     break
                 time.sleep(0.5)
-            check("T2 重试跑成功了", (final or {}).get("status") == "succeeded", str((final or {}).get("status")))
+            check(
+                "T2 重试跑成功了",
+                (final or {}).get("status") == "succeeded",
+                str((final or {}).get("status")),
+            )
             result = (final or {}).get("result") or {}
             path = Path(str(result.get("path") or ""))
-            check("T3 重试真的产出了文件", path.is_file() and path.stat().st_size > 0, f"{path.name} {path.stat().st_size if path.is_file() else 0} B")
+            check(
+                "T3 重试真的产出了文件",
+                path.is_file() and path.stat().st_size > 0,
+                f"{path.name} {path.stat().st_size if path.is_file() else 0} B",
+            )
     finally:
         service.close()
 

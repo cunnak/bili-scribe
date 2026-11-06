@@ -9,6 +9,7 @@
 不写用户库、不改配置，只发几次对话请求。
 （读配置是必须的：不读就拿不到 shipped 那条路的 `max_tokens`，见 main 里的注释。）
 """
+
 from __future__ import annotations
 
 import json
@@ -55,7 +56,7 @@ def main() -> int:
         json_mode=True,
         note=notes.append,
     )
-    data = json.loads(text)          # 严格解析：这一步过不去就等于没修好
+    data = json.loads(text)  # 严格解析：这一步过不去就等于没修好
     print("字段:", sorted(data.keys()))
     print("one_line:", str(data.get("one_line"))[:60])
     print("正文行数:", len(str(data.get("summary_md") or "").splitlines()))

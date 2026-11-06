@@ -77,7 +77,7 @@ def main() -> int:
     pid = project["id"]
     print(f"[info] 项目 {pid} · {project.get('title', '')[:40]}")
 
-    for row in (call(service, "publish.list", {}).get("notes") or []):
+    for row in call(service, "publish.list", {}).get("notes") or []:
         if row.get("project_id") == pid:
             call(service, "publish.delete", {"id": row["id"]})
     bvid = str(project.get("bvid") or "")
@@ -87,24 +87,36 @@ def main() -> int:
     for stale in service.repo.publish_published(bvid):
         service.repo.publish_set_status(stale["id"], "withdrawn")
 
-
     # ── 1. 预览：字段齐、字数对
     preview = call(service, "publish.preview", {"project_id": pid})
     draft = preview.get("draft") or preview  # preview 直接返回草稿本体
-    check("预览给出标题/摘要/正文", bool(draft.get("title")) and bool(draft.get("summary"))
-          and bool((draft.get("content_text") or "").strip()),
-          f"title={len(draft.get('title') or '')}字 body={len((draft.get('content_text') or ''))}字")
-    check("摘要不超过 200 字", len(draft.get("summary") or "") <= 200,
-          f"{len(draft.get('summary') or '')} 字")
+    check(
+        "预览给出标题/摘要/正文",
+        bool(draft.get("title"))
+        and bool(draft.get("summary"))
+        and bool((draft.get("content_text") or "").strip()),
+        f"title={len(draft.get('title') or '')}字 body={len((draft.get('content_text') or ''))}字",
+    )
+    check(
+        "摘要不超过 200 字",
+        len(draft.get("summary") or "") <= 200,
+        f"{len(draft.get('summary') or '')} 字",
+    )
 
     # ── 2. 门禁三关都在，未确认时不能发
     gates = preview.get("gates") or {}
     rows = gates.get("gates") or []
-    check("三道门禁都在", [g.get("id") for g in rows] == ["content", "account", "pace"],
-          json.dumps([g.get("id") for g in rows], ensure_ascii=False))
+    check(
+        "三道门禁都在",
+        [g.get("id") for g in rows] == ["content", "account", "pace"],
+        json.dumps([g.get("id") for g in rows], ensure_ascii=False),
+    )
     content = next((g for g in rows if g.get("id") == "content"), {})
-    check("没勾确认时内容关是待确认（不是通过）", content.get("status") == "todo",
-          f"status={content.get('status')} reason={content.get('reason') or '—'}")
+    check(
+        "没勾确认时内容关是待确认（不是通过）",
+        content.get("status") == "todo",
+        f"status={content.get('status')} reason={content.get('reason') or '—'}",
+    )
     check("三关没全绿时 ready=False", gates.get("ready") is False, f"ready={gates.get('ready')}")
 
     # ── 3. 生成草稿 → 改标题 → 保存，updated_at 会动
@@ -113,14 +125,29 @@ def main() -> int:
     first_updated = str(note.get("updated_at") or "")
     time.sleep(1.1)
     mine = "验收改过的标题"
-    saved = call(service, "publish.note", {
-        "project_id": pid, "note_pk": note.get("id"), "title": mine,
-    }).get("note") or {}
+    saved = (
+        call(
+            service,
+            "publish.note",
+            {
+                "project_id": pid,
+                "note_pk": note.get("id"),
+                "title": mine,
+            },
+        ).get("note")
+        or {}
+    )
     check("改标题后保存成功", saved.get("title") == mine, f"title={saved.get('title')}")
-    check("保存后 updated_at 变了", str(saved.get("updated_at") or "") != first_updated,
-          f"{first_updated} → {saved.get('updated_at')}")
-    check("标题字数按码点算", saved.get("title_chars") == len(mine),
-          f"{saved.get('title_chars')} vs {len(mine)}")
+    check(
+        "保存后 updated_at 变了",
+        str(saved.get("updated_at") or "") != first_updated,
+        f"{first_updated} → {saved.get('updated_at')}",
+    )
+    check(
+        "标题字数按码点算",
+        saved.get("title_chars") == len(mine),
+        f"{saved.get('title_chars')} vs {len(mine)}",
+    )
 
     listing = call(service, "publish.list", {"project_id": pid}).get("notes") or []
     hit = next((r for r in listing if r.get("id") == note.get("id")), {})
@@ -133,31 +160,50 @@ def main() -> int:
     regen = call(service, "publish.regenerate", {"id": note.get("id"), "part": "summary"})
     fresh = regen.get("draft") or {}
     check("只重算摘要时标题保留手改值", fresh.get("title") == mine, f"title={fresh.get('title')}")
-    check("只重算摘要时正文不被清空", bool((fresh.get("content_text") or "").strip()),
-          f"body={len(fresh.get('content_text') or '')}字")
+    check(
+        "只重算摘要时正文不被清空",
+        bool((fresh.get("content_text") or "").strip()),
+        f"body={len(fresh.get('content_text') or '')}字",
+    )
     check("重算摘要带门禁状态", bool((regen.get("gates") or {}).get("gates")), "gates 有值")
-    check("重算摘要不写库（草稿仍是旧摘要）",
-          (call(service, "publish.get", {"id": note.get("id")}).get("note") or {}).get("summary")
-          == before_summary, "get 回来的摘要未变")
+    check(
+        "重算摘要不写库（草稿仍是旧摘要）",
+        (call(service, "publish.get", {"id": note.get("id")}).get("note") or {}).get("summary")
+        == before_summary,
+        "get 回来的摘要未变",
+    )
     regen_title = call(service, "publish.regenerate", {"id": note.get("id"), "part": "title"})
-    check("只重算标题时摘要保留",
-          (regen_title.get("draft") or {}).get("summary") == before_summary, "摘要未变")
+    check(
+        "只重算标题时摘要保留",
+        (regen_title.get("draft") or {}).get("summary") == before_summary,
+        "摘要未变",
+    )
 
     # ── 5. 勾了确认 + 已登录：三关全绿
     got = call(service, "publish.get", {"id": note.get("id")})
     gate_ok = service._publish_gates(
-        got.get("note") or {}, project=service.repo.project_get(pid),
-        note=service.repo.publish_get(note.get("id")), confirmed=True,
+        got.get("note") or {},
+        project=service.repo.project_get(pid),
+        note=service.repo.publish_get(note.get("id")),
+        confirmed=True,
         logged_in=True,
     )
-    check("勾确认且已登录时三关全绿", gate_ok.get("ready") is True,
-          json.dumps([(g["id"], g["status"]) for g in gate_ok["gates"]], ensure_ascii=False))
-    check("三关全绿时 content/account 都是 ok",
-          [g["status"] for g in gate_ok["gates"]][:2] == ["ok", "ok"],
-          json.dumps([g["status"] for g in gate_ok["gates"]], ensure_ascii=False))
+    check(
+        "勾确认且已登录时三关全绿",
+        gate_ok.get("ready") is True,
+        json.dumps([(g["id"], g["status"]) for g in gate_ok["gates"]], ensure_ascii=False),
+    )
+    check(
+        "三关全绿时 content/account 都是 ok",
+        [g["status"] for g in gate_ok["gates"]][:2] == ["ok", "ok"],
+        json.dumps([g["status"] for g in gate_ok["gates"]], ensure_ascii=False),
+    )
 
     # ── 6. 删掉
-    check("删除草稿成功", (call(service, "publish.delete", {"id": note.get("id")}) or {}).get("removed") == 1)
+    check(
+        "删除草稿成功",
+        (call(service, "publish.delete", {"id": note.get("id")}) or {}).get("removed") == 1,
+    )
     left = call(service, "publish.list", {"project_id": pid}).get("notes") or []
     check("删完列表里没了", all(r.get("id") != note.get("id") for r in left), f"剩 {len(left)} 条")
     err = error_of(service, "publish.get", {"id": note.get("id")})
@@ -168,7 +214,9 @@ def main() -> int:
     bad = [name for ok, name, _ in results if not ok]
     print()
     if bad:
-        print(f"P4-04 发布草稿验收：{len(results) - len(bad)}/{len(results)} 通过，失败 {len(bad)} 项")
+        print(
+            f"P4-04 发布草稿验收：{len(results) - len(bad)}/{len(results)} 通过，失败 {len(bad)} 项"
+        )
         for name in bad:
             print(f"  - {name}")
         return 1

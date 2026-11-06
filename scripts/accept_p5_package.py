@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -51,12 +49,14 @@ def check_structure(dist: Path) -> None:
     exe = dist / "VideoWorkbench.exe"
     check("exe 存在", exe.exists(), str(exe))
     internal = dist / "_internal"
-    for rel in ("video_workbench/web/index.html",
-                "video_workbench/web/js/pages/onboard.js",
-                "video_workbench/web/css/onboard.css",
-                "video_workbench/web/css/tokens.css",
-                "video_workbench/resources/prompts",
-                "video_workbench/resources/icon.ico"):
+    for rel in (
+        "video_workbench/web/index.html",
+        "video_workbench/web/js/pages/onboard.js",
+        "video_workbench/web/css/onboard.css",
+        "video_workbench/web/css/tokens.css",
+        "video_workbench/resources/prompts",
+        "video_workbench/resources/icon.ico",
+    ):
         path = internal / rel
         check(f"包内资源 {rel}", path.exists(), str(path))
 
@@ -65,8 +65,11 @@ def check_no_forbidden_payload(dist: Path) -> None:
     """方案书 §0：不打包 FFmpeg / 字体 / 语音模型。"""
     files = [p for p in dist.rglob("*") if p.is_file()]
     names = {p.name.lower() for p in files}
-    check("没有把 ffmpeg 打进去", "ffmpeg.exe" not in names and "ffprobe.exe" not in names,
-          "、".join(sorted(n for n in names if n.startswith("ffm"))[:3]))
+    check(
+        "没有把 ffmpeg 打进去",
+        "ffmpeg.exe" not in names and "ffprobe.exe" not in names,
+        "、".join(sorted(n for n in names if n.startswith("ffm"))[:3]),
+    )
 
     model_hits = [p.name for p in files if p.suffix.lower() in {".bin", ".pt", ".onnx"}]
     # onnxruntime 自带的小算子库不算"语音模型"；whisper 的 CTranslate2 权重叫 model.bin
@@ -89,7 +92,9 @@ def run_check(dist: Path, cfg: Path, log: Path) -> tuple[int, str]:
         log.unlink()
     proc = subprocess.run(
         [str(dist / "VideoWorkbench.exe"), "--check", "--config", str(cfg)],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if not out and log.exists():
@@ -128,23 +133,35 @@ def check_runs(dist: Path, tmp: Path) -> None:
             payload = None
     if payload:
         rpc_names = payload.get("rpc") or []
-        check("RPC 表非空且包含关键命名", len(rpc_names) > 60 and "app.onboard" in rpc_names,
-              f"{len(rpc_names)} 个")
+        check(
+            "RPC 表非空且包含关键命名",
+            len(rpc_names) > 60 and "app.onboard" in rpc_names,
+            f"{len(rpc_names)} 个",
+        )
         onboard = payload.get("onboard") or {}
         check("体检五项齐全", onboard.get("total") == 5, str(onboard.get("steps")))
-        check("体检带得出 ready 结论", isinstance(onboard.get("ready"), bool), str(onboard.get("ready")))
+        check(
+            "体检带得出 ready 结论",
+            isinstance(onboard.get("ready"), bool),
+            str(onboard.get("ready")),
+        )
     else:
         check("--check 输出可解析为 JSON", False, out[:160])
 
     check("在干净配置下建了自己的库", (tmp / "wb.db").exists(), str(tmp / "wb.db"))
     user_db = Path.home() / ".bili-scribe" / "bili-scribe.db"
     untouched = (not user_db.exists()) or user_db.stat().st_size == _user_db_size
-    check("没去动用户默认库", untouched,
-          "用户库大小未变" if untouched else f"用户库被动过：{user_db}")
+    check(
+        "没去动用户默认库", untouched, "用户库大小未变" if untouched else f"用户库被动过：{user_db}"
+    )
 
     if log.exists():
         text = log.read_text(encoding="utf-8", errors="replace")
-        check("启动日志没有 Traceback", "Traceback" not in text, text[-200:] if "Traceback" in text else "")
+        check(
+            "启动日志没有 Traceback",
+            "Traceback" not in text,
+            text[-200:] if "Traceback" in text else "",
+        )
     else:
         check("启动日志已生成", False, "找不到 video-workbench.log")
 
@@ -174,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = [item for item in RESULTS if not item[0]]
     print()
     if failed:
-        print(f"P5-05 打包验收：{len(RESULTS) - len(failed)}/{len(RESULTS)} 通过，{len(failed)} 项失败")
+        print(
+            f"P5-05 打包验收：{len(RESULTS) - len(failed)}/{len(RESULTS)} 通过，{len(failed)} 项失败"
+        )
         for _, name, detail in failed:
             print(f"  - {name}：{detail}")
         return 1

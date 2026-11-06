@@ -82,7 +82,10 @@ def main() -> int:
             stage="summarized",
         )
         empty_project = service.repo.project_create(
-            title="还没总结的项目", up_name="验收UP", root_dir=str(root / "empty"), stage="transcribed"
+            title="还没总结的项目",
+            up_name="验收UP",
+            root_dir=str(root / "empty"),
+            stage="transcribed",
         )
         # 反复跑：先清掉上一次的草稿，否则"只有一份草稿"这类断言会假红
         for row in service.repo.publish_list(project["id"]):
@@ -102,32 +105,49 @@ def main() -> int:
 
         # ---- 2) 预览 ----
         draft = data_of(service, "publish.preview", {"project_id": project["id"]})
-        check("预览取到最新一版总结", draft["summary_id"] == record["id"] and draft["version"] == 1,
-              f"{draft.get('summary_id')} v{draft.get('version')}")
+        check(
+            "预览取到最新一版总结",
+            draft["summary_id"] == record["id"] and draft["version"] == 1,
+            f"{draft.get('summary_id')} v{draft.get('version')}",
+        )
         check("标题默认取视频标题", draft["title"] == project["title"], draft["title"])
         check("摘要默认取短评", draft["summary"] == CONTENT["comment_short"], draft["summary"])
-        check("字数门禁与平台一致", draft["limits"] == {"title": 80, "summary": 200},
-              json.dumps(draft["limits"]))
+        check(
+            "字数门禁与平台一致",
+            draft["limits"] == {"title": 80, "summary": 200},
+            json.dumps(draft["limits"]),
+        )
         body = draft["markdown"]
         check("正文有要点分节", "## 要点" in body, body[:80])
         check("正文有时间轴分节", "## 时间轴" in body and "`00:12`" in body)
         check("正文带注意提示", "注意：数字与专有名词建议回视频核对" in body)
         check("正文带 AI 披露", "本总结由 AI 依据视频字幕生成" in body)
         check("内部嘱咐没混进正文", "素材局限" not in body and "采集提示" not in body)
-        check("Delta 里没有 Markdown 标记",
-              "**" not in draft["content_text"] and "## " not in draft["content_text"],
-              draft["content_text"][:80])
+        check(
+            "Delta 里没有 Markdown 标记",
+            "**" not in draft["content_text"] and "## " not in draft["content_text"],
+            draft["content_text"][:80],
+        )
         manual = len("".join(draft["content_text"].split()))
         check("字数与手算一致", draft["chars"] == manual, f"{draft['chars']} vs {manual}")
-        check("预览不带 warning", draft["warnings"] == [], json.dumps(draft["warnings"], ensure_ascii=False))
+        check(
+            "预览不带 warning",
+            draft["warnings"] == [],
+            json.dumps(draft["warnings"], ensure_ascii=False),
+        )
 
         # ---- 3) 保存草稿 ----
         saved = data_of(service, "publish.note", {"project_id": project["id"]})
         note = saved["note"]
         check("草稿状态是 draft", note["status"] == "draft", note["status"])
-        check("草稿带上了 bvid/aid", note["bvid"] == "BV1accept0001" and note["aid"] == 778899,
-              f"{note.get('bvid')}/{note.get('aid')}")
-        check("草稿未标记发布/撤回时间", note["published_at"] is None and note["withdrawn_at"] is None)
+        check(
+            "草稿带上了 bvid/aid",
+            note["bvid"] == "BV1accept0001" and note["aid"] == 778899,
+            f"{note.get('bvid')}/{note.get('aid')}",
+        )
+        check(
+            "草稿未标记发布/撤回时间", note["published_at"] is None and note["withdrawn_at"] is None
+        )
         row = service.repo.publish_for_project(project["id"])
         check("wb_publish_note 里真有这一行", bool(row) and row["status"] == "draft")
 
@@ -135,15 +155,26 @@ def main() -> int:
         listed = data_of(service, "publish.list", {})["notes"]
         mine = [item for item in listed if item["project_id"] == project["id"]]
         check("列表里能看到这份草稿", len(mine) == 1, str(len(mine)))
-        check("列表带项目标题与 UP", mine[0]["project_title"] == project["title"] and mine[0]["up_name"] == "验收UP")
-        check("列表带字数", mine[0]["chars"] == note["chars"], f"{mine[0]['chars']} vs {note['chars']}")
+        check(
+            "列表带项目标题与 UP",
+            mine[0]["project_title"] == project["title"] and mine[0]["up_name"] == "验收UP",
+        )
+        check(
+            "列表带字数",
+            mine[0]["chars"] == note["chars"],
+            f"{mine[0]['chars']} vs {note['chars']}",
+        )
 
         # ---- 5) 编辑：改标题与摘要，同一条更新 ----
-        edited = data_of(service, "publish.note", {
-            "project_id": project["id"],
-            "title": "我自己改的标题",
-            "summary": "我自己改的摘要",
-        })["note"]
+        edited = data_of(
+            service,
+            "publish.note",
+            {
+                "project_id": project["id"],
+                "title": "我自己改的标题",
+                "summary": "我自己改的摘要",
+            },
+        )["note"]
         check("改标题落在同一行", edited["id"] == note["id"], f"{edited['id']} vs {note['id']}")
         check("改标题生效", edited["title"] == "我自己改的标题", edited["title"])
         check("改摘要生效", edited["summary"] == "我自己改的摘要", edited["summary"])
@@ -152,31 +183,50 @@ def main() -> int:
 
         # ---- 6) 手改 Delta 以用户为准 ----
         custom = json.dumps([{"insert": "我自己写的正文\n"}], ensure_ascii=False)
-        manual_row = data_of(service, "publish.note", {
-            "project_id": project["id"], "content": custom
-        })["note"]
+        manual_row = data_of(
+            service, "publish.note", {"project_id": project["id"], "content": custom}
+        )["note"]
         check("手改正文以用户为准", manual_row["content"] == custom, manual_row["content"][:40])
         check("手改正文的字数重算", manual_row["content_text"].startswith("我自己写的正文"))
 
         # ---- 7) 门禁：不截断，直接拒 ----
-        long_title = call(service, "publish.note", {"project_id": project["id"], "title": "标" * 100})
-        check("超长标题被拒", long_title.get("ok") is False and long_title["error"]["code"] == "VALIDATION")
-        check("超长标题的报错说得清", "标题超过 80 字" in long_title["error"]["message"],
-              long_title["error"]["message"])
-        long_summary = call(service, "publish.note", {
-            "project_id": project["id"], "title": "正常标题", "summary": "长" * 260
-        })
-        check("超长摘要被拒", long_summary.get("ok") is False and "摘要超过 200 字" in long_summary["error"]["message"])
+        long_title = call(
+            service, "publish.note", {"project_id": project["id"], "title": "标" * 100}
+        )
+        check(
+            "超长标题被拒",
+            long_title.get("ok") is False and long_title["error"]["code"] == "VALIDATION",
+        )
+        check(
+            "超长标题的报错说得清",
+            "标题超过 80 字" in long_title["error"]["message"],
+            long_title["error"]["message"],
+        )
+        long_summary = call(
+            service,
+            "publish.note",
+            {"project_id": project["id"], "title": "正常标题", "summary": "长" * 260},
+        )
+        check(
+            "超长摘要被拒",
+            long_summary.get("ok") is False
+            and "摘要超过 200 字" in long_summary["error"]["message"],
+        )
         empty_body = call(service, "publish.note", {"project_id": project["id"], "content": "[]"})
-        check("空正文被拒", empty_body.get("ok") is False and empty_body["error"]["code"] == "VALIDATION")
+        check(
+            "空正文被拒",
+            empty_body.get("ok") is False and empty_body["error"]["code"] == "VALIDATION",
+        )
         still = service.repo.publish_for_project(project["id"])
         check("被拒的三次都没改库", still["id"] == note["id"], still["id"])
 
         # ---- 8) 关掉 AI 披露 ----
         service.cfg.publish.disclose_ai = False
         no_disclose = data_of(service, "publish.preview", {"project_id": project["id"]})
-        check("设置里关掉披露后正文不再带它",
-              "本总结由 AI 依据视频字幕生成" not in no_disclose["markdown"])
+        check(
+            "设置里关掉披露后正文不再带它",
+            "本总结由 AI 依据视频字幕生成" not in no_disclose["markdown"],
+        )
         service.cfg.publish.disclose_ai = True
 
         # ---- 9) 持久化：换一个服务实例还能读到 ----
@@ -188,18 +238,27 @@ def main() -> int:
 
         # ---- 10) 撤回如实说 Phase 5 ----
         withdraw = call(service, "publish.withdraw", {"id": note_id})
-        check("撤回明确说 Phase 5 才接",
-              withdraw.get("ok") is False and withdraw["error"]["code"] == "UNSUPPORTED"
-              and "Phase 5" in withdraw["error"]["message"],
-              json.dumps(withdraw.get("error"), ensure_ascii=False))
+        check(
+            "撤回明确说 Phase 5 才接",
+            withdraw.get("ok") is False
+            and withdraw["error"]["code"] == "UNSUPPORTED"
+            and "Phase 5" in withdraw["error"]["message"],
+            json.dumps(withdraw.get("error"), ensure_ascii=False),
+        )
 
         # ---- 11) 删除 ----
         data_of(service, "publish.delete", {"id": note_id})
         gone = call(service, "publish.get", {"id": note_id})
         check("删除后读不到", gone.get("ok") is False and gone["error"]["code"] == "NOT_FOUND")
         twice = call(service, "publish.delete", {"id": note_id})
-        check("重复删除报 NOT_FOUND", twice.get("ok") is False and twice["error"]["code"] == "NOT_FOUND")
-        check("删除后列表空了", data_of(service, "publish.list", {"project_id": project["id"]})["notes"] == [])
+        check(
+            "重复删除报 NOT_FOUND",
+            twice.get("ok") is False and twice["error"]["code"] == "NOT_FOUND",
+        )
+        check(
+            "删除后列表空了",
+            data_of(service, "publish.list", {"project_id": project["id"]})["notes"] == [],
+        )
     finally:
         try:
             service.close()

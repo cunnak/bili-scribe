@@ -72,36 +72,48 @@ def main() -> int:
     )
     project = detail["project"]
     pid = project["id"]
-    print(f"[project] {pid} · {project.get('title','')[:40]}")
+    print(f"[project] {pid} · {project.get('title', '')[:40]}")
 
     # ---- 1. 读字幕
     got = call(router, "subtitle.get", {"project_id": pid})
     segments = got.get("segments") or []
     check("transcript.get 能读到段", len(segments) > 0, f"{len(segments)} 段")
-    check("stats 与段数一致", got["stats"]["count"] == len(segments),
-          f"stats={got['stats']['count']}")
+    check(
+        "stats 与段数一致", got["stats"]["count"] == len(segments), f"stats={got['stats']['count']}"
+    )
     check("qc 是列表", isinstance(got.get("qc"), list), f"{len(got.get('qc') or [])} 条问题")
 
     # ---- 2. 波形数据
     peaks = call(router, "audio.peaks", {"project_id": pid})
-    check("audio.peaks 有峰值", len(peaks.get("peaks") or []) > 0,
-          f"{len(peaks.get('peaks') or [])} 个桶 / duration={peaks.get('duration_ms')}ms")
+    check(
+        "audio.peaks 有峰值",
+        len(peaks.get("peaks") or []) > 0,
+        f"{len(peaks.get('peaks') or [])} 个桶 / duration={peaks.get('duration_ms')}ms",
+    )
     check("峰值与时长对得上", (peaks.get("duration_ms") or 0) > 0)
 
     # ---- 3. 改一句，三处落盘
     first = segments[0]
     original_text = first["text"]
     probe_text = (original_text + "（验收改动）")[:60]
-    updated = call(router, "subtitle.op", {
-        "project_id": pid, "op": "update",
-        "segment_id": first["id"], "text": probe_text,
-    })
+    updated = call(
+        router,
+        "subtitle.op",
+        {
+            "project_id": pid,
+            "op": "update",
+            "segment_id": first["id"],
+            "text": probe_text,
+        },
+    )
     same = [s for s in updated["segments"] if s["id"] == first["id"]][0]
     check("op(update) 回传的段已改", same["text"] == probe_text)
 
     reread = call(router, "subtitle.get", {"project_id": pid})
-    check("再读一次仍是改后的文本",
-          [s for s in reread["segments"] if s["id"] == first["id"]][0]["text"] == probe_text)
+    check(
+        "再读一次仍是改后的文本",
+        [s for s in reread["segments"] if s["id"] == first["id"]][0]["text"] == probe_text,
+    )
 
     root = Path(project["root_dir"])
     json_path = next(iter(root.glob("transcript*.json")), None)
@@ -112,41 +124,72 @@ def main() -> int:
     else:
         check("能找到 transcript*.json", False)
     if srt_path:
-        check(f"{srt_path.name} 里有改动", probe_text[:12] in srt_path.read_text(encoding="utf-8-sig"))
+        check(
+            f"{srt_path.name} 里有改动", probe_text[:12] in srt_path.read_text(encoding="utf-8-sig")
+        )
     else:
         check("能找到 transcript*.srt", False)
 
     # ---- 4. 切一刀
     before = len(reread["segments"])
     mid = (first["start_ms"] + first["end_ms"]) // 2
-    cut = call(router, "subtitle.op", {
-        "project_id": pid, "op": "split", "segment_id": first["id"], "at_ms": mid,
-    })
-    check("op(split) 段数 +1", len(cut["segments"]) == before + 1,
-          f"{before} → {len(cut['segments'])}")
+    cut = call(
+        router,
+        "subtitle.op",
+        {
+            "project_id": pid,
+            "op": "split",
+            "segment_id": first["id"],
+            "at_ms": mid,
+        },
+    )
+    check(
+        "op(split) 段数 +1",
+        len(cut["segments"]) == before + 1,
+        f"{before} → {len(cut['segments'])}",
+    )
     # 按"原始段的时间区间"找这对兄弟：归一化会按 start_ms 重排，索引 0/1 未必是它们
-    pair = [s for s in cut["segments"]
-            if s["start_ms"] >= first["start_ms"] and s["end_ms"] <= first["end_ms"]]
+    pair = [
+        s
+        for s in cut["segments"]
+        if s["start_ms"] >= first["start_ms"] and s["end_ms"] <= first["end_ms"]
+    ]
     left, right = pair[0], pair[1]
     # 切点会吸附到最近的词边界（有词级时间戳时不允许把词劈成两半），
     # 所以边界落在 [start, end] 内即可，不要求正好等于 at_ms。
     boundary = left["end_ms"]
     check("切开后首尾相接", boundary == right["start_ms"], f"{boundary} / {right['start_ms']}")
-    check("切点落在原段内", first["start_ms"] <= boundary <= first["end_ms"],
-          f"boundary={boundary} mid={mid} 原段={first['start_ms']}-{first['end_ms']}")
-    check("两段合起来等于原段",
-          left["start_ms"] == first["start_ms"] and right["end_ms"] == first["end_ms"],
-          f"{left['start_ms']}-{left['end_ms']} + {right['start_ms']}-{right['end_ms']}")
+    check(
+        "切点落在原段内",
+        first["start_ms"] <= boundary <= first["end_ms"],
+        f"boundary={boundary} mid={mid} 原段={first['start_ms']}-{first['end_ms']}",
+    )
+    check(
+        "两段合起来等于原段",
+        left["start_ms"] == first["start_ms"] and right["end_ms"] == first["end_ms"],
+        f"{left['start_ms']}-{left['end_ms']} + {right['start_ms']}-{right['end_ms']}",
+    )
 
     # ---- 5. 还原（合并回去 + 改回原文），验收不能留脏数据
-    merged = call(router, "subtitle.op", {
-        "project_id": pid, "op": "merge",
-        "segment_ids": [left["id"], right["id"]],
-    })
-    restored = call(router, "subtitle.op", {
-        "project_id": pid, "op": "update",
-        "segment_id": merged["segments"][0]["id"], "text": original_text,
-    })
+    merged = call(
+        router,
+        "subtitle.op",
+        {
+            "project_id": pid,
+            "op": "merge",
+            "segment_ids": [left["id"], right["id"]],
+        },
+    )
+    restored = call(
+        router,
+        "subtitle.op",
+        {
+            "project_id": pid,
+            "op": "update",
+            "segment_id": merged["segments"][0]["id"],
+            "text": original_text,
+        },
+    )
     back = [s for s in restored["segments"] if s["id"] == first["id"]]
     check("还原成原文", bool(back) and back[0]["text"] == original_text)
     check("段数回到验收初", len(restored["segments"]) == before, f"{len(restored['segments'])}")

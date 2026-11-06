@@ -80,9 +80,7 @@ def main() -> int:
         pid, bvid="BV1recaccept1", aid=556677, title="失败的那条", summary="摘要", content="[]"
     )
     repo.publish_set_status(failed["id"], "failed", error="[79508] 该视频已存在你创建的笔记")
-    repo._exec(
-        "UPDATE wb_publish_note SET updated_at=? WHERE id=?", (iso(hours=2), failed["id"])
-    )
+    repo._exec("UPDATE wb_publish_note SET updated_at=? WHERE id=?", (iso(hours=2), failed["id"]))
 
     draft = repo.publish_note_upsert(
         pid,
@@ -190,9 +188,17 @@ def main() -> int:
         want("失败后草稿正文没丢", str(row.get("content", "")) != "", "")
 
         # ---------------------------------------------------- 边界
-        want("limit 夹到上限（不报错）", call("publish.records", {"limit": 9999}).get("ok") is True, "")
+        want(
+            "limit 夹到上限（不报错）",
+            call("publish.records", {"limit": 9999}).get("ok") is True,
+            "",
+        )
         bad = call("app.open_url", {"url": "file:///C:/Windows/win.ini"})
-        want("open_url 拒掉非 http", bad.get("ok") is False and bad["error"]["code"] == "VALIDATION", "")
+        want(
+            "open_url 拒掉非 http",
+            bad.get("ok") is False and bad["error"]["code"] == "VALIDATION",
+            "",
+        )
 
     finally:
         for note_pk in (
@@ -208,7 +214,9 @@ def main() -> int:
     print("=" * 72)
     bad = 0
     for name, ok, detail in checks:
-        print(("[ok]   " if ok else "[FAIL] ") + name + ("" if ok or not detail else f" —— {detail}"))
+        print(
+            ("[ok]   " if ok else "[FAIL] ") + name + ("" if ok or not detail else f" —— {detail}")
+        )
         if not ok:
             bad += 1
     print("-" * 72)

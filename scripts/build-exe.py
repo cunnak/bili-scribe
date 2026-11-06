@@ -190,7 +190,12 @@ def build(*, console: bool, onedir: bool) -> int:
         cmd += ["--icon", str(icon)]
 
     print("=" * 70)
-    print(" 打包 " + ("目录版" if onedir else "单文件") + " · " + ("带控制台" if console else "窗口程序"))
+    print(
+        " 打包 "
+        + ("目录版" if onedir else "单文件")
+        + " · "
+        + ("带控制台" if console else "窗口程序")
+    )
     print("=" * 70)
     print(f"  入口     {ROOT / 'bili_scribe' / 'desktop.py'}")
     print(f"  产物     {DIST_DIR / ('bili-scribe' if onedir else 'bili-scribe.exe')}")

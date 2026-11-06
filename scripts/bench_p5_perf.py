@@ -34,7 +34,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import websockets  # noqa: E402
-
 from shoot_wb import PROJ, Cdp, close_tab, find_chrome, free_port, new_tab  # noqa: E402
 
 INDEX = PROJ / "video_workbench" / "web" / "index.html"
@@ -156,7 +155,9 @@ async def measure(count: int, timeout: float) -> dict:
         deadline = loop.time() + timeout
         while loop.time() < deadline:
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1) as resp:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/json/version", timeout=1
+                ) as resp:
                     resp.read()
                 break
             except Exception:
@@ -168,7 +169,9 @@ async def measure(count: int, timeout: float) -> dict:
         url = INDEX.as_uri() + "?mock=1"
         tab = new_tab(port, url)
         tabs.append(tab["id"])
-        async with websockets.connect(tab["webSocketDebuggerUrl"], max_size=8 * 1024 * 1024) as sock:
+        async with websockets.connect(
+            tab["webSocketDebuggerUrl"], max_size=8 * 1024 * 1024
+        ) as sock:
             cdp = Cdp(sock)
             await cdp.cmd("Runtime.enable")
             await cdp.cmd("Page.enable")
@@ -221,7 +224,10 @@ def main() -> int:
 
     avg_all = round(sum(row["avg"] for row in switches) / max(1, len(switches)), 1)
     max_all = round(max((row["max"] for row in switches), default=0), 1)
-    print("[bench] 切页：" + "，".join(f"{row['route']} {row['avg']}/{row['max']}ms" for row in switches))
+    print(
+        "[bench] 切页："
+        + "，".join(f"{row['route']} {row['avg']}/{row['max']}ms" for row in switches)
+    )
     print(f"[bench] 切页总览：均值 {avg_all}ms，最差 {max_all}ms")
     print(
         f"[bench] 字幕 {editor.get('count')} 段：首屏 {editor.get('first')}ms，"
@@ -236,11 +242,21 @@ def main() -> int:
         and float(editor.get("scrollAvg") or 0) < 16.7
         and int(editor.get("rendered") or 0) <= 60
     )
-    payload = {"switch": switches, "switchAvg": avg_all, "switchMax": max_all, "editor": editor, "ok": ok}
+    payload = {
+        "switch": switches,
+        "switchAvg": avg_all,
+        "switchMax": max_all,
+        "editor": editor,
+        "ok": ok,
+    }
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("[bench] " + ("PASS" if ok else "FAIL") + "（切页均值 <200ms、最差 <400ms、首屏 <400ms、滚动 <16.7ms、DOM ≤60 行）")
+    print(
+        "[bench] "
+        + ("PASS" if ok else "FAIL")
+        + "（切页均值 <200ms、最差 <400ms、首屏 <400ms、滚动 <16.7ms、DOM ≤60 行）"
+    )
     return 0 if ok else 1
 
 

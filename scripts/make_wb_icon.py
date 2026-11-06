@@ -18,8 +18,8 @@ from PIL import Image, ImageDraw
 PROJ = Path(__file__).resolve().parents[1]
 OUT = PROJ / "video_workbench" / "resources" / "icon.ico"
 
-VOID = (13, 15, 16, 255)      # --void #0D0F10
-ACID = (216, 242, 75, 255)    # --acid #D8F24B
+VOID = (13, 15, 16, 255)  # --void #0D0F10
+ACID = (216, 242, 75, 255)  # --acid #D8F24B
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
@@ -57,8 +57,9 @@ def draw(size: int) -> Image.Image:
         x0 = side * 0.26
         x1 = side * 0.74
         d.rounded_rectangle([x0, y1, x1, y1 + line_w], radius=line_w // 2, fill=ACID)
-        d.rounded_rectangle([x0, y2, x0 + (x1 - x0) * 0.55, y2 + line_w],
-                            radius=line_w // 2, fill=ACID)
+        d.rounded_rectangle(
+            [x0, y2, x0 + (x1 - x0) * 0.55, y2 + line_w], radius=line_w // 2, fill=ACID
+        )
 
     return img.resize((size, size), Image.LANCZOS)
 

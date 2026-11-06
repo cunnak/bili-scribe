@@ -75,17 +75,25 @@ class StubModel:
                 ids.append((head, line.split("\t", 2)[-1].strip()))
         if self.mode == BAD_REPLY:
             # 一段"看起来像 JSON、其实在扩写"的回复：长度校验必须拦住它
-            text = json.dumps([{"id": i, "text": t + "。" + "而且这句话被模型自己加长了" * 3}
-                               for i, t in ids], ensure_ascii=False)
+            text = json.dumps(
+                [{"id": i, "text": t + "。" + "而且这句话被模型自己加长了" * 3} for i, t in ids],
+                ensure_ascii=False,
+            )
         else:
-            text = json.dumps([{"id": i, "text": t.strip("嗯啊 ") + "。"} for i, t in ids],
-                              ensure_ascii=False)
+            text = json.dumps(
+                [{"id": i, "text": t.strip("嗯啊 ") + "。"} for i, t in ids], ensure_ascii=False
+            )
         return {
             "id": "chatcmpl-stub",
             "object": "chat.completion",
             "model": "stub-model",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                         "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
         }
 
@@ -158,54 +166,83 @@ def main() -> int:
     router = service.router
 
     try:
-        item = (call(router, "library.get", {"id": args.project})["project"]
-                if args.project else first_project_with_transcript(router))
+        item = (
+            call(router, "library.get", {"id": args.project})["project"]
+            if args.project
+            else first_project_with_transcript(router)
+        )
         pid = item["id"]
         root = Path(item["root_dir"])
         original = texts_of(service, pid)
         check("找到一个带字幕的项目", bool(original), f"{pid} · {len(original)} 段")
 
         probe = call(router, "llm.test", {})
-        check("llm.test 连上假模型", probe.get("ok") is True and probe.get("model") == "stub-model",
-              f"{probe.get('latency_ms')}ms")
+        check(
+            "llm.test 连上假模型",
+            probe.get("ok") is True and probe.get("model") == "stub-model",
+            f"{probe.get('latency_ms')}ms",
+        )
 
         submitted = call(router, "subtitle.optimize", {"project_id": pid, "batch_size": 30})
         job = wait_job(service, submitted["job"]["id"])
-        check("优化任务成功结束", job.get("status") == "succeeded", str(job.get("error_message") or ""))
+        check(
+            "优化任务成功结束",
+            job.get("status") == "succeeded",
+            str(job.get("error_message") or ""),
+        )
         result = job.get("result") or {}
         changes = result.get("changes") or []
         check("产出了 diff", len(changes) >= 1, f"{len(changes)} 段有改动")
-        check("diff 只改文本不改时间", all(
-            c["before"] != c["after"] and {"start_ms", "end_ms"} <= set(c) for c in changes))
+        check(
+            "diff 只改文本不改时间",
+            all(c["before"] != c["after"] and {"start_ms", "end_ms"} <= set(c) for c in changes),
+        )
         check("优化阶段没有写库（原文未动）", texts_of(service, pid) == original)
 
         accepted = [c["id"] for c in changes[: max(1, len(changes) // 2)]]
-        applied = call(router, "subtitle.optimize.apply",
-                       {"project_id": pid, "changes": changes, "accepted_ids": accepted})
+        applied = call(
+            router,
+            "subtitle.optimize.apply",
+            {"project_id": pid, "changes": changes, "accepted_ids": accepted},
+        )
         after = texts_of(service, pid)
-        check("只应用了勾选的那些段", applied.get("applied") == len(accepted),
-              f"applied={applied.get('applied')} accepted={len(accepted)}")
+        check(
+            "只应用了勾选的那些段",
+            applied.get("applied") == len(accepted),
+            f"applied={applied.get('applied')} accepted={len(accepted)}",
+        )
         snapshot = root / "transcript.prev.json"
-        check("写了优化前快照", snapshot.is_file() and snapshot.stat().st_size > 0, str(snapshot.name))
+        check(
+            "写了优化前快照", snapshot.is_file() and snapshot.stat().st_size > 0, str(snapshot.name)
+        )
         srt = (root / "transcript.srt").read_text(encoding="utf-8")
         js = (root / "transcript.json").read_text(encoding="utf-8")
         changed_texts = [s["text"] for s in applied["segments"]]
-        check("三处都写到了（库 / json / srt）",
-              after == changed_texts and changed_texts[0][:6] in js and changed_texts[0][:6] in srt)
-        check("时间轴没被改动",
-              [s["start_ms"] for s in applied["segments"]]
-              == [s.get("start_ms") for s in service.repo.transcript_get(pid)["segments"]])
+        check(
+            "三处都写到了（库 / json / srt）",
+            after == changed_texts and changed_texts[0][:6] in js and changed_texts[0][:6] in srt,
+        )
+        check(
+            "时间轴没被改动",
+            [s["start_ms"] for s in applied["segments"]]
+            == [s.get("start_ms") for s in service.repo.transcript_get(pid)["segments"]],
+        )
 
         back = call(router, "subtitle.rollback", {"id": pid})
-        check("回滚回到优化前", texts_of(service, pid) == original,
-              f"{len(back.get('segments') or [])} 段")
+        check(
+            "回滚回到优化前",
+            texts_of(service, pid) == original,
+            f"{len(back.get('segments') or [])} 段",
+        )
 
         # 第四步：模型乱写时必须整批失败、原文不动
         StubModel.mode = BAD_REPLY
         before_bad = texts_of(service, pid)
         sub2 = call(router, "subtitle.optimize", {"project_id": pid, "batch_size": 30})
         job2 = wait_job(service, sub2["job"]["id"])
-        ok2 = job2.get("status") == "failed" and "所有批次都失败了" in str(job2.get("error_message") or "")
+        ok2 = job2.get("status") == "failed" and "所有批次都失败了" in str(
+            job2.get("error_message") or ""
+        )
         check("模型扩写时整批失败并报错", ok2, str(job2.get("error_message") or "")[:60])
         check("失败时原文一字未改", texts_of(service, pid) == before_bad)
         StubModel.mode = GOOD_REPLY

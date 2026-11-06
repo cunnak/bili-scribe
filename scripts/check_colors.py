@@ -44,7 +44,9 @@ SCAN_EXT = {".css", ".html", ".js", ".svg", ".json"}
 
 def iter_files(root: str):
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in {"node_modules", ".git", "__pycache__"})
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in {"node_modules", ".git", "__pycache__"}
+        )
         for name in sorted(filenames):
             path = os.path.join(dirpath, name)
             if os.path.splitext(name)[1].lower() not in SCAN_EXT:
@@ -73,7 +75,9 @@ def check(root: str) -> list[tuple[str, int, str, str]]:
 def main(argv: list[str] | None = None) -> int:
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     parser = argparse.ArgumentParser(description="扫描 web/ 下的硬编码颜色")
-    parser.add_argument("--root", default=os.path.join(here, "video_workbench", "web"), help="要扫描的目录")
+    parser.add_argument(
+        "--root", default=os.path.join(here, "video_workbench", "web"), help="要扫描的目录"
+    )
     parser.add_argument("--list", action="store_true", help="列出每一处命中")
     args = parser.parse_args(argv)
 

@@ -91,9 +91,7 @@ class Stub:
     """OpenAI 兼容端点：总结请求回结构化 JSON，别的请求回一句空话。"""
 
     def payload(self, body: dict) -> dict:
-        prompt = "\n".join(
-            str(m.get("content") or "") for m in (body.get("messages") or [])
-        )
+        prompt = "\n".join(str(m.get("content") or "") for m in (body.get("messages") or []))
         if "one_line" in prompt or "key_points" in prompt or "总结" in prompt:
             text = json.dumps(SUMMARY_JSON, ensure_ascii=False)
         else:
@@ -103,8 +101,11 @@ class Stub:
             "object": "chat.completion",
             "model": "stub-model",
             "choices": [
-                {"index": 0, "message": {"role": "assistant", "content": text},
-                 "finish_reason": "stop"}
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
             ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
         }
@@ -136,6 +137,7 @@ def start_stub() -> tuple[ThreadingHTTPServer, str]:
 
 
 # ---------------------------------------------------------------- 准备
+
 
 def fresh_home(base_url: str, model: str) -> None:
     """造一个「新人第一次打开」的磁盘状态：只有一份配置，库还不存在。"""
@@ -185,10 +187,28 @@ def make_clip(dest: Path, seconds: int = 25) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     for src in sorted((PROJ / "build" / "accept" / "media").rglob("source.mp4")):
         subprocess.run(  # noqa: S603
-            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
-             "-ss", "20", "-t", str(seconds), "-i", str(src),
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-c:a", "aac",
-             str(dest)],
+            [
+                ffmpeg_bin(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                "20",
+                "-t",
+                str(seconds),
+                "-i",
+                str(src),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "28",
+                "-c:a",
+                "aac",
+                str(dest),
+            ],
             check=True,
         )
         return dest
@@ -196,6 +216,7 @@ def make_clip(dest: Path, seconds: int = 25) -> Path:
 
 
 # ---------------------------------------------------------------- 主流程
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -215,18 +236,24 @@ def main() -> int:
         # ── 1. 手册 §起：命令行自检
         out = subprocess.run(  # noqa: S603
             [PY, "-m", "video_workbench.desktop", "--check", "--config", str(CONFIG)],
-            cwd=str(PROJ), capture_output=True, text=True, encoding="utf-8",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
+            cwd=str(PROJ),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            check=False,
         )
         info = {}
         for line in (out.stdout or "").splitlines():
             line = line.strip()
             if line.startswith("{"):
                 info = json.loads(line)
-        check("手册 §起：`--check` 装配自检通过", info.get("ok") is True,
-              f"ok={info.get('ok')} rpc={len(info.get('rpc') or [])} 条")
-        check("手册 §首次启动：库由程序自己建出来", (HOME / "wb.db").is_file(),
-              str(HOME / "wb.db"))
+        check(
+            "手册 §起：`--check` 装配自检通过",
+            info.get("ok") is True,
+            f"ok={info.get('ok')} rpc={len(info.get('rpc') or [])} 条",
+        )
+        check("手册 §首次启动：库由程序自己建出来", (HOME / "wb.db").is_file(), str(HOME / "wb.db"))
 
         from video_workbench.app.service import WorkbenchService
         from video_workbench.infra import models as models_mod
@@ -237,8 +264,11 @@ def main() -> int:
             clip = make_clip(HOME / "incoming" / "manual_clip.mp4")
             imported = call(service, "import.local", {"paths": [str(clip)], "recursive": False})
             items = imported.get("imported") or []
-            check("手册 §二：导入本地文件进了素材库", bool(items),
-                  f"{len(items)} 个 / skipped={len(imported.get('skipped') or [])} / failed={len(imported.get('failed') or [])}")
+            check(
+                "手册 §二：导入本地文件进了素材库",
+                bool(items),
+                f"{len(items)} 个 / skipped={len(imported.get('skipped') or [])} / failed={len(imported.get('failed') or [])}",
+            )
             pid = (items[0] if items else {}).get("project_id") or ""
             if not pid:
                 raise SystemExit("[x] 导入没给出 project_id")
@@ -256,8 +286,11 @@ def main() -> int:
                 started = call(service, "transcribe.start", {"project_ids": [pid]})
                 jobs = started.get("jobs") or []
                 job = wait_job(service, (jobs[0] if jobs else {}).get("id") or "")
-                check("手册 §二：转录跑完并成功", job.get("status") == "succeeded",
-                      f"{job.get('status')} {job.get('error_message') or ''}")
+                check(
+                    "手册 §二：转录跑完并成功",
+                    job.get("status") == "succeeded",
+                    f"{job.get('status')} {job.get('error_message') or ''}",
+                )
                 sub = call(service, "subtitle.get", {"project_id": pid})
                 segs = sub.get("segments") or []
                 check("手册 §三：字幕编辑器读到了段", bool(segs), f"{len(segs)} 段")
@@ -266,23 +299,33 @@ def main() -> int:
 
                 # ── 4. 手册 §三：双击改一行
                 first = segs[0]
-                call(service, "subtitle.save", {
-                    "project_id": pid,
-                    "segments": [{"id": first["id"], "start_ms": first["start_ms"],
-                                  "end_ms": first["end_ms"],
-                                  "text": (first.get("text") or "") + " (manual)"}],
-                })
+                call(
+                    service,
+                    "subtitle.save",
+                    {
+                        "project_id": pid,
+                        "segments": [
+                            {
+                                "id": first["id"],
+                                "start_ms": first["start_ms"],
+                                "end_ms": first["end_ms"],
+                                "text": (first.get("text") or "") + " (manual)",
+                            }
+                        ],
+                    },
+                )
                 again = call(service, "subtitle.get", {"project_id": pid}).get("segments") or []
-                check("手册 §三：改文本落盘了",
-                      bool(again) and "(manual)" in str(again[0].get("text")),
-                      str((again[0] if again else {}).get("text"))[:40])
+                check(
+                    "手册 §三：改文本落盘了",
+                    bool(again) and "(manual)" in str(again[0].get("text")),
+                    str((again[0] if again else {}).get("text"))[:40],
+                )
 
                 # ── 5. 手册 §三：导出字幕
                 exported = call(service, "subtitle.export", {"project_id": pid, "formats": ["srt"]})
                 files = exported.get("files") or []
                 srt = Path(files[0]["path"]) if files else None
-                check("手册 §三：导出的 SRT 在磁盘上", bool(srt and srt.is_file()),
-                      str(srt))
+                check("手册 §三：导出的 SRT 在磁盘上", bool(srt and srt.is_file()), str(srt))
 
             if args.skip_transcribe:
                 print("-" * 72)
@@ -292,8 +335,11 @@ def main() -> int:
             # ── 6. 手册 §四：生成总结
             sjob = call(service, "summary.start", {"project_id": pid})
             done = wait_job(service, (sjob.get("job") or {}).get("id") or "")
-            check("手册 §四：总结生成成功", done.get("status") == "succeeded",
-                  f"{done.get('status')} {done.get('error_message') or ''}")
+            check(
+                "手册 §四：总结生成成功",
+                done.get("status") == "succeeded",
+                f"{done.get('status')} {done.get('error_message') or ''}",
+            )
             # summary.get / clip.candidates 的入参名都是 ``id``（不是 project_id）
             got = call(service, "summary.get", {"id": pid})
             body = (got.get("summary") or {}).get("content") or {}
@@ -303,39 +349,72 @@ def main() -> int:
             check("手册 §四：总结读得有正文", bool(got.get("found")) and bool(md), detail)
 
             # ── 7. 手册 §五：生成候选
-            ajob = call(service, "clip.analyze", {"project_id": pid,
-                                                  "kind": "highlight", "count": 4})
+            ajob = call(
+                service, "clip.analyze", {"project_id": pid, "kind": "highlight", "count": 4}
+            )
             await_ = wait_job(service, (ajob.get("job") or {}).get("id") or "", timeout=300)
             cands = call(service, "clip.candidates", {"id": pid}).get("candidates") or []
-            check("手册 §五：生成候选成功且非空",
-                  await_.get("status") == "succeeded" and bool(cands),
-                  f"{len(cands)} 条")
+            check(
+                "手册 §五：生成候选成功且非空",
+                await_.get("status") == "succeeded" and bool(cands),
+                f"{len(cands)} 条",
+            )
             if not cands:
                 raise SystemExit("[x] 没有候选，后面的导出/合并没法验")
 
             # ── 8. 手册 §五：导出切片（精确）
-            made = call(service, "clip.create", {
-                "project_id": pid, "candidate_id": cands[0]["id"],
-                "start_ms": cands[0]["start_ms"], "end_ms": cands[0]["end_ms"],
-            })
+            made = call(
+                service,
+                "clip.create",
+                {
+                    "project_id": pid,
+                    "candidate_id": cands[0]["id"],
+                    "start_ms": cands[0]["start_ms"],
+                    "end_ms": cands[0]["end_ms"],
+                },
+            )
             cid = (made.get("clip") or {}).get("id") or ""
-            e1 = call(service, "clip.export", {"project_id": pid, "candidate_id": cands[0]["id"],
-                                               "clip_id": cid, "mode": "precise"})
+            e1 = call(
+                service,
+                "clip.export",
+                {
+                    "project_id": pid,
+                    "candidate_id": cands[0]["id"],
+                    "clip_id": cid,
+                    "mode": "precise",
+                },
+            )
             j1 = wait_job(service, (e1.get("job") or {}).get("id") or "", timeout=600)
             clip1 = (j1.get("result") or {}).get("path") or (e1.get("path") or "")
-            check("手册 §五：精确导出产出文件",
-                  j1.get("status") == "succeeded" and bool(clip1) and Path(clip1).is_file(),
-                  str(clip1))
+            check(
+                "手册 §五：精确导出产出文件",
+                j1.get("status") == "succeeded" and bool(clip1) and Path(clip1).is_file(),
+                str(clip1),
+            )
 
             # 第二条（合并要两条）
             second = cands[1] if len(cands) > 1 else cands[0]
-            made2 = call(service, "clip.create", {
-                "project_id": pid, "candidate_id": second["id"],
-                "start_ms": second["start_ms"], "end_ms": second["end_ms"],
-            })
+            made2 = call(
+                service,
+                "clip.create",
+                {
+                    "project_id": pid,
+                    "candidate_id": second["id"],
+                    "start_ms": second["start_ms"],
+                    "end_ms": second["end_ms"],
+                },
+            )
             cid2 = (made2.get("clip") or {}).get("id") or ""
-            e2 = call(service, "clip.export", {"project_id": pid, "candidate_id": second["id"],
-                                               "clip_id": cid2, "mode": "precise"})
+            e2 = call(
+                service,
+                "clip.export",
+                {
+                    "project_id": pid,
+                    "candidate_id": second["id"],
+                    "clip_id": cid2,
+                    "mode": "precise",
+                },
+            )
             j2 = wait_job(service, (e2.get("job") or {}).get("id") or "", timeout=600)
             clip2 = (j2.get("result") or {}).get("path") or (e2.get("path") or "")
             check("手册 §五：第二条也导出了", bool(clip2) and Path(clip2).is_file(), str(clip2))
@@ -343,36 +422,57 @@ def main() -> int:
             # ── 9. 手册 §六：合并
             if clip1 and clip2:
                 pre = call(service, "merge.preflight", {"paths": [clip1, clip2]})
-                check("手册 §六：预检给出每个来源的规格",
-                      len(pre.get("items") or []) == 2,
-                      f"differences={pre.get('differences')}")
-                mjob = call(service, "merge.start", {"paths": [clip1, clip2],
-                                                     "mode": "quick", "out_name": "manual_merge"})
+                check(
+                    "手册 §六：预检给出每个来源的规格",
+                    len(pre.get("items") or []) == 2,
+                    f"differences={pre.get('differences')}",
+                )
+                mjob = call(
+                    service,
+                    "merge.start",
+                    {"paths": [clip1, clip2], "mode": "quick", "out_name": "manual_merge"},
+                )
                 mdone = wait_job(service, (mjob.get("job") or {}).get("id") or "", timeout=600)
                 mpath = (mdone.get("result") or {}).get("path") or (mjob.get("path") or "")
-                check("手册 §六：合并产出文件",
-                      mdone.get("status") == "succeeded" and bool(mpath) and Path(mpath).is_file(),
-                      f"{mpath} fallback={ (mdone.get('result') or {}).get('fallback_used') }")
+                check(
+                    "手册 §六：合并产出文件",
+                    mdone.get("status") == "succeeded" and bool(mpath) and Path(mpath).is_file(),
+                    f"{mpath} fallback={(mdone.get('result') or {}).get('fallback_used')}",
+                )
 
             # ── 10. 手册 §七：草稿 + 三关（不发）
             draft = call(service, "publish.preview", {"project_id": pid})
             body = draft.get("draft") or draft
-            check("手册 §七：草稿有标题与正文",
-                  bool(body.get("title")) and bool(body.get("summary") or body.get("body")),
-                  str(body.get("title"))[:30])
+            check(
+                "手册 §七：草稿有标题与正文",
+                bool(body.get("title")) and bool(body.get("summary") or body.get("body")),
+                str(body.get("title"))[:30],
+            )
             note = call(service, "publish.note", {"project_id": pid}).get("note") or {}
             gates = service._publish_gates(
-                note, project=service.repo.project_get(pid),
-                note=service.repo.publish_get(note.get("id")), confirmed=False, logged_in=False,
+                note,
+                project=service.repo.project_get(pid),
+                note=service.repo.publish_get(note.get("id")),
+                confirmed=False,
+                logged_in=False,
             )
             names = [g["id"] for g in (gates.get("gates") or [])]
-            check("手册 §七：三关都在（内容/账号/频率）",
-                  names == ["content", "account", "pace"], str(names))
-            check("手册 §七：没勾确认就不让发", gates.get("ready") is not True,
-                  f"blockers={gates.get('blockers')}")
+            check(
+                "手册 §七：三关都在（内容/账号/频率）",
+                names == ["content", "account", "pace"],
+                str(names),
+            )
+            check(
+                "手册 §七：没勾确认就不让发",
+                gates.get("ready") is not True,
+                f"blockers={gates.get('blockers')}",
+            )
             statuses = {g["id"]: g["status"] for g in (gates.get("gates") or [])}
-            check("手册 §七：内容关在勾确认前是 todo", statuses.get("content") == "todo",
-                  str(statuses))
+            check(
+                "手册 §七：内容关在勾确认前是 todo",
+                statuses.get("content") == "todo",
+                str(statuses),
+            )
         finally:
             service.close()
     finally:

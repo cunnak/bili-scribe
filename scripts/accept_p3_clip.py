@@ -160,7 +160,9 @@ class StubModel:
                     "quote": picks[0][2] if picks else "",
                 }
             )
-            reply = "```json\n" + json.dumps({"candidates": candidates}, ensure_ascii=False) + "\n```"
+            reply = (
+                "```json\n" + json.dumps({"candidates": candidates}, ensure_ascii=False) + "\n```"
+            )
 
         if self.mode == BAD:
             return self._error("stub 模型 500")
@@ -275,9 +277,7 @@ def main() -> int:
         transcript = service.repo.transcript_get(pid) or {}
         segments = list(transcript.get("segments") or [])
         texts = [str(seg.get("text") or "") for seg in segments]
-        duration = max(
-            [int(seg.get("end_ms") or 0) for seg in segments] or [0]
-        )
+        duration = max([int(seg.get("end_ms") or 0) for seg in segments] or [0])
         check("找到带字幕的项目", len(segments) >= 5, f"{pid} · {len(segments)} 段 · {duration} ms")
 
         client = type(
@@ -391,10 +391,12 @@ def main() -> int:
         check(
             "去重后同类互不重叠",
             all(
-                min(int(a["end_ms"]), int(b["end_ms"])) - max(int(a["start_ms"]), int(b["start_ms"]))
+                min(int(a["end_ms"]), int(b["end_ms"]))
+                - max(int(a["start_ms"]), int(b["start_ms"]))
                 <= 0
                 or (
-                    min(int(a["end_ms"]), int(b["end_ms"])) - max(int(a["start_ms"]), int(b["start_ms"]))
+                    min(int(a["end_ms"]), int(b["end_ms"]))
+                    - max(int(a["start_ms"]), int(b["start_ms"]))
                 )
                 / max(
                     1,
@@ -507,7 +509,11 @@ def main() -> int:
 
         # ---------------- 5. 没有字幕就明确拒绝
         missing_err = error_of(router, "library.get", {"id": "pj_does_not_exist"})
-        check("不存在的项目报 NOT_FOUND", missing_err.get("code") == "NOT_FOUND", str(missing_err.get("code")))
+        check(
+            "不存在的项目报 NOT_FOUND",
+            missing_err.get("code") == "NOT_FOUND",
+            str(missing_err.get("code")),
+        )
 
         try:
             clipper.generate([], client=client)

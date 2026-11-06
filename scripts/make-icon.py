@@ -26,9 +26,9 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "assets" / "bili-scribe.ico"
 
-BG = (13, 15, 16)        # --bg  #0D0F10
-ACID = (216, 242, 75)    # --acid #D8F24B
-INK = (8, 9, 10)         # --void #08090A
+BG = (13, 15, 16)  # --bg  #0D0F10
+ACID = (216, 242, 75)  # --acid #D8F24B
+INK = (8, 9, 10)  # --void #08090A
 
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 
@@ -47,8 +47,8 @@ def draw(size: int) -> Image.Image:
     top = size * 0.14
     bottom = size * 0.86
     x0 = size * 0.16
-    x1 = size * 0.62          # 顶边右端
-    x2 = size * 0.44          # 底边右端（收窄）
+    x1 = size * 0.62  # 顶边右端
+    x2 = size * 0.44  # 底边右端（收窄）
     d.polygon([(x0, top), (x1, top), (x2, bottom), (x0, bottom)], fill=ACID)
 
     # 斜纹：115° 左右，用细平行四边形切黑色。小尺寸少画几条、画粗一点。
@@ -60,7 +60,7 @@ def draw(size: int) -> Image.Image:
     else:
         stripes = 3 if size <= 32 else 4
         gap = (bottom - top) / (stripes * 2)
-        skew = (x1 - x2) * 0.55   # 让条纹跟着块的斜度走
+        skew = (x1 - x2) * 0.55  # 让条纹跟着块的斜度走
         for i in range(stripes):
             y = top + gap * (i * 2 + 0.5)
             d.polygon(
@@ -77,8 +77,15 @@ def draw(size: int) -> Image.Image:
     # 16px 不放：那个尺寸下它抢到的像素和斜切块一样多，看起来像两个色块。
     if size >= 32:
         s = size * 0.11
-        d.rectangle([size - s - size * 0.14, size - s - size * 0.14,
-                     size - size * 0.14, size - size * 0.14], fill=ACID)
+        d.rectangle(
+            [
+                size - s - size * 0.14,
+                size - s - size * 0.14,
+                size - size * 0.14,
+                size - size * 0.14,
+            ],
+            fill=ACID,
+        )
 
     return img
 

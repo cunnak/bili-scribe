@@ -97,37 +97,67 @@ def main() -> int:
         # ---- 玩法与参数门禁
         check(
             "未知导出模式被拦",
-            (error_of(service, "clip.export", {"project_id": pid, "candidate_id": cand["id"],
-                                               "mode": "turbo"}) or {}).get("code")
+            (
+                error_of(
+                    service,
+                    "clip.export",
+                    {"project_id": pid, "candidate_id": cand["id"], "mode": "turbo"},
+                )
+                or {}
+            ).get("code")
             == "VALIDATION",
         )
         # 竖屏在 P3-06 做了（本次矩阵跑出来这条老断言已过时）：改为断言
         # 「画幅/竖屏模式的非法值被拦」，仍然守住"参数校验不会静默放过"。
         check(
             "非法竖屏模式被拦",
-            (error_of(service, "clip.export", {"project_id": pid, "candidate_id": cand["id"],
-                                               "aspect": "9x16",
-                                               "vertical_mode": "swirl"}) or {}).get("code")
+            (
+                error_of(
+                    service,
+                    "clip.export",
+                    {
+                        "project_id": pid,
+                        "candidate_id": cand["id"],
+                        "aspect": "9x16",
+                        "vertical_mode": "swirl",
+                    },
+                )
+                or {}
+            ).get("code")
             == "VALIDATION",
         )
         check(
             "不存在的候选报 NOT_FOUND",
-            (error_of(service, "clip.export", {"project_id": pid, "candidate_id": "cand_nope"})
-             or {}).get("code")
+            (
+                error_of(service, "clip.export", {"project_id": pid, "candidate_id": "cand_nope"})
+                or {}
+            ).get("code")
             == "NOT_FOUND",
         )
 
         # ---- 精确模式
-        precise = call(service, "clip.export", {
-            "project_id": pid, "candidate_id": cand["id"], "mode": "precise",
-        })
+        precise = call(
+            service,
+            "clip.export",
+            {
+                "project_id": pid,
+                "candidate_id": cand["id"],
+                "mode": "precise",
+            },
+        )
         job = wait_job(service, precise["job"]["id"])
-        check("精确导出任务成功", job.get("status") == "succeeded",
-              f"{job.get('status')} {job.get('error_message') or ''}")
+        check(
+            "精确导出任务成功",
+            job.get("status") == "succeeded",
+            f"{job.get('status')} {job.get('error_message') or ''}",
+        )
         result = job.get("result") or {}
         out = Path(str(result.get("path") or ""))
-        check("精确模式产出了文件", out.is_file() and out.stat().st_size > 0,
-              f"{out.name if out.name else '(空)'} {out.stat().st_size if out.is_file() else 0} B")
+        check(
+            "精确模式产出了文件",
+            out.is_file() and out.stat().st_size > 0,
+            f"{out.name if out.name else '(空)'} {out.stat().st_size if out.is_file() else 0} B",
+        )
         info = service._ffmpeg.probe(out) if out.is_file() else None
         actual = int(getattr(info, "duration_ms", 0) or 0)
         check(
@@ -153,12 +183,21 @@ def main() -> int:
         check("文件落在项目 export 目录下", out.parent == root / "export", str(out.parent))
 
         # ---- 快速模式
-        fast = call(service, "clip.export", {
-            "project_id": pid, "candidate_id": cand["id"], "mode": "fast",
-        })
+        fast = call(
+            service,
+            "clip.export",
+            {
+                "project_id": pid,
+                "candidate_id": cand["id"],
+                "mode": "fast",
+            },
+        )
         job2 = wait_job(service, fast["job"]["id"])
-        check("快速导出任务成功", job2.get("status") == "succeeded",
-              f"{job2.get('status')} {job2.get('error_message') or ''}")
+        check(
+            "快速导出任务成功",
+            job2.get("status") == "succeeded",
+            f"{job2.get('status')} {job2.get('error_message') or ''}",
+        )
         result2 = job2.get("result") or {}
         out2 = Path(str(result2.get("path") or ""))
         check("快速模式产出了文件", out2.is_file() and out2.stat().st_size > 0, out2.name)
@@ -185,16 +224,28 @@ def main() -> int:
         # ---- 硬字幕（项目里得有字幕文件）
         subs = [a for a in service.repo.asset_list(pid) if a.get("kind") == "subtitle"]
         if subs:
-            hard = call(service, "clip.export", {
-                "project_id": pid, "candidate_id": cand["id"], "subtitle_mode": "hard",
-            })
+            hard = call(
+                service,
+                "clip.export",
+                {
+                    "project_id": pid,
+                    "candidate_id": cand["id"],
+                    "subtitle_mode": "hard",
+                },
+            )
             job3 = wait_job(service, hard["job"]["id"])
-            check("硬烧字幕任务成功", job3.get("status") == "succeeded",
-                  f"{job3.get('status')} {job3.get('error_message') or ''}")
+            check(
+                "硬烧字幕任务成功",
+                job3.get("status") == "succeeded",
+                f"{job3.get('status')} {job3.get('error_message') or ''}",
+            )
             out3 = Path(str((job3.get("result") or {}).get("path") or ""))
             check("硬烧成片存在", out3.is_file() and out3.stat().st_size > 0, out3.name)
-            check("硬烧与精确模式不同名（不覆盖）", out3.name != out.name,
-                  f"{out3.name} vs {out.name}")
+            check(
+                "硬烧与精确模式不同名（不覆盖）",
+                out3.name != out.name,
+                f"{out3.name} vs {out.name}",
+            )
             info3 = service._ffmpeg.probe(out3) if out3.is_file() else None
             check(
                 "硬烧成片时长也对（多一道滤镜不该改时长）",
@@ -208,13 +259,22 @@ def main() -> int:
         rows = call(service, "clip.exports", {"project_id": pid})["exports"]
         mine = [r for r in rows if r.get("candidate_id") == cand["id"]]
         check("导出队列记下了这几次导出", len(mine) >= 3, f"{len(mine)} 条")
-        check("队列里的文件都在", all(r.get("exists") for r in mine),
-              str([r.get("name") for r in mine if not r.get("exists")]))
-        check("队列区分了模式", {r.get("mode") for r in mine} >= {"precise", "fast"},
-              str(sorted({r.get("mode") for r in mine})))
+        check(
+            "队列里的文件都在",
+            all(r.get("exists") for r in mine),
+            str([r.get("name") for r in mine if not r.get("exists")]),
+        )
+        check(
+            "队列区分了模式",
+            {r.get("mode") for r in mine} >= {"precise", "fast"},
+            str(sorted({r.get("mode") for r in mine})),
+        )
         succeeded = [r for r in mine if r.get("status") == "succeeded"]
-        check("成功的行有时长", all(int(r.get("duration_ms") or 0) > 0 for r in succeeded),
-              str([r.get("duration_ms") for r in succeeded]))
+        check(
+            "成功的行有时长",
+            all(int(r.get("duration_ms") or 0) > 0 for r in succeeded),
+            str([r.get("duration_ms") for r in succeeded]),
+        )
 
         # ---- 任务失败不留半截成功
         check("导出任务类型正确", job.get("type") == "clip.export", str(job.get("type")))

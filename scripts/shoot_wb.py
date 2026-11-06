@@ -12,6 +12,7 @@
 页面清单写死在 SHOTS 里，加页面就加一行——刻意不做"自动遍历路由"：
 路由表里有登录态的 settings 页，自动遍历会把它连同半截渲染一起截进来。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,6 @@ import base64
 import json
 import socket
 import subprocess
-import sys
 import time
 import urllib.parse
 import urllib.request
@@ -110,7 +110,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 竖屏：切到 9:16 + 人脸跟随 + 开安全区，导出面板要能看出这三件事
         "clips-vertical",
@@ -144,7 +143,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 切片文案：选第一条 → 写文案 → 抽 4 帧候选（文案与封面一起入镜）
         "clips-copy",
@@ -166,7 +164,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 批量导出：勾前两条 → 批量导出 → 等队列落地（一条故意失败，抬头写 1 失败）
         "clips-batch",
@@ -189,7 +186,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 合并页：加两条同规格切片（可快速拼接），再反转一次证明顺序会变
         "merge",
@@ -206,7 +202,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 合并页：混入一条 720p 素材 → 差异表出现、快速拼接自动禁用
         "merge-diff",
@@ -231,7 +226,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 合并页：精确合并跑完（规格不一致时快速被禁，只剩精确这一条路）
         "merge-precise",
@@ -263,7 +257,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         # 合并页：点开始合并 → 横幅出现「合并完成」
         "merge-done",
@@ -320,7 +313,6 @@ SHOTS: list[tuple[str, str, str]] = [
         })()
         """,
     ),
-
     (
         "subtitles-qc",
         "#/subtitles?project=p_demo_1",
@@ -719,8 +711,10 @@ async def shoot_one(sock_url: str, skin: str, route: str, action: str, target: P
         # 而 `#skin=` 会和路由抢 hash，所以直接改属性。
         # 走应用自己的换肤函数：直接改属性会让右上角的皮肤切换器停在旧状态，
         # 截图就会出现「浅色页面 + 高亮的深色按钮」这种自相矛盾的证据。
-        await cdp.js(f"(window.WB && WB.applySkin) ? WB.applySkin('{skin}', false)"
-                     f" : document.documentElement.setAttribute('data-skin', '{skin}')")
+        await cdp.js(
+            f"(window.WB && WB.applySkin) ? WB.applySkin('{skin}', false)"
+            f" : document.documentElement.setAttribute('data-skin', '{skin}')"
+        )
         if route:
             # 走 router.go 而不是只写 hash：hash 已存在时宿主可能不派发 hashchange，
             # 截图就会停在上一页（真 app 里表现为"点了没反应"）。

@@ -39,6 +39,7 @@ from accept_p3_clip import (  # noqa: E402
     pick_project,
     start_stub,
 )
+
 from video_workbench.app.service import WorkbenchService  # noqa: E402
 
 FAILS: list[str] = []
@@ -96,10 +97,18 @@ def main() -> int:
             bool(first["project"]["id"]) and duration > 0,
             f"{pid} · {duration} ms",
         )
-        check("没有候选时返回空列表而不是报错", first["candidates"] == [], f"{len(first['candidates'])} 条")
-        check("磁吸边界来自字幕", len(first["boundaries"]) >= 4, f"{len(first['boundaries'])} 个切点")
+        check(
+            "没有候选时返回空列表而不是报错",
+            first["candidates"] == [],
+            f"{len(first['candidates'])} 条",
+        )
+        check(
+            "磁吸边界来自字幕", len(first["boundaries"]) >= 4, f"{len(first['boundaries'])} 个切点"
+        )
         check("带字幕标记为真", first["has_transcript"] is True)
-        check("给了源文件路径（界面要喂 <video>）", bool(first["source_path"]), first["source_path"])
+        check(
+            "给了源文件路径（界面要喂 <video>）", bool(first["source_path"]), first["source_path"]
+        )
 
         # ---------------- 2. 跑一次分析任务
         StubModel.mode = GOOD
@@ -111,7 +120,11 @@ def main() -> int:
         done = wait_job(service, job["id"])
         check("任务成功结束", done.get("status") == "succeeded", str(done.get("status")))
         result = done.get("result") or {}
-        check("模型这条路走通了（source=llm）", result.get("source") == "llm", str(result.get("source")))
+        check(
+            "模型这条路走通了（source=llm）",
+            result.get("source") == "llm",
+            str(result.get("source")),
+        )
 
         listing = call(router, "clip.candidates", {"id": pid})
         rows = listing["candidates"]
@@ -119,15 +132,20 @@ def main() -> int:
         # （P3-02 已确认过的取舍）。所以这里不硬凑 3–8 条，而是验：
         # 去重真的发生了、留下的这批两两不超 50% 重叠。
         check("候选至少留下 1 条", len(rows) >= 1, f"{len(rows)} 条")
-        check("模型给的多条被去重（dropped>0）", int(result.get("dropped") or 0) > 0, str(result.get("dropped")))
+        check(
+            "模型给的多条被去重（dropped>0）",
+            int(result.get("dropped") or 0) > 0,
+            str(result.get("dropped")),
+        )
         check(
             "留下的候选两两重叠不超过 50%",
             all(
                 min(a["end_ms"], b["end_ms"]) - max(a["start_ms"], b["start_ms"]) <= 0
                 or (min(a["end_ms"], b["end_ms"]) - max(a["start_ms"], b["start_ms"]))
-                / min(a["end_ms"] - a["start_ms"], b["end_ms"] - b["start_ms"]) < 0.5
+                / min(a["end_ms"] - a["start_ms"], b["end_ms"] - b["start_ms"])
+                < 0.5
                 for i, a in enumerate(rows)
-                for b in rows[i + 1:]
+                for b in rows[i + 1 :]
             ),
             str([(r["start_ms"], r["end_ms"]) for r in rows]),
         )
@@ -141,7 +159,10 @@ def main() -> int:
             all(0 <= r["start_ms"] < r["end_ms"] <= duration for r in rows),
             str([(r["start_ms"], r["end_ms"]) for r in rows]),
         )
-        check("每条都标了来源 origin=llm", all((r.get("notes") or {}).get("origin") == "llm" for r in rows))
+        check(
+            "每条都标了来源 origin=llm",
+            all((r.get("notes") or {}).get("origin") == "llm" for r in rows),
+        )
         check(
             "每条都留着模型原值（raw_start_ms）",
             all("raw_start_ms" in (r.get("notes") or {}) for r in rows),
@@ -153,11 +174,16 @@ def main() -> int:
                 or bool((r.get("notes") or {}).get("snap_notes"))
                 for r in rows
             ),
-            str([
-                (r["start_ms"] in listing["boundaries"], r["end_ms"] in listing["boundaries"],
-                 (r.get("notes") or {}).get("snap_notes"))
-                for r in rows
-            ]),
+            str(
+                [
+                    (
+                        r["start_ms"] in listing["boundaries"],
+                        r["end_ms"] in listing["boundaries"],
+                        (r.get("notes") or {}).get("snap_notes"),
+                    )
+                    for r in rows
+                ]
+            ),
         )
 
         # ---------------- 3. 改切点
@@ -177,7 +203,9 @@ def main() -> int:
         )
 
         too_short = error_of(
-            router, "clip.update", {"id": target["id"], "start_ms": new_start, "end_ms": new_start + 100}
+            router,
+            "clip.update",
+            {"id": target["id"], "start_ms": new_start, "end_ms": new_start + 100},
         )
         check("切点太短被拦", too_short.get("code") == "VALIDATION", str(too_short.get("message")))
 
@@ -189,7 +217,9 @@ def main() -> int:
         check("终点越界被夹回片长", over["end_ms"] <= duration, f"{over['end_ms']} <= {duration}")
 
         bad_status = error_of(router, "clip.update", {"id": target["id"], "status": "published"})
-        check("非法状态被拦", bad_status.get("code") == "VALIDATION", str(bad_status.get("message")))
+        check(
+            "非法状态被拦", bad_status.get("code") == "VALIDATION", str(bad_status.get("message"))
+        )
 
         # ---------------- 4. 锁定后重跑不被冲掉
         call(router, "clip.update", {"id": target["id"], "status": "locked"})
@@ -197,7 +227,11 @@ def main() -> int:
         StubModel.calls = 0
         job2 = call(router, "clip.analyze", {"project_id": pid})["job"]
         done2 = wait_job(service, job2["id"])
-        check("模型挂了任务仍成功（规则兜底）", done2.get("status") == "succeeded", str(done2.get("status")))
+        check(
+            "模型挂了任务仍成功（规则兜底）",
+            done2.get("status") == "succeeded",
+            str(done2.get("status")),
+        )
         after = call(router, "clip.candidates", {"id": pid})["candidates"]
         locked = [r for r in after if r["id"] == target["id"]]
         check("锁定的候选活下来了", len(locked) == 1 and locked[0]["status"] == "locked")
@@ -207,14 +241,28 @@ def main() -> int:
             f"{locked[0]['start_ms'] if locked else '—'}",
         )
         others = [r for r in after if r["id"] != target["id"]]
-        check("其余候选被替换成规则结果", len(others) >= 1 and all((r.get("notes") or {}).get("origin") == "rule" for r in others))
-        check("规则兜底的候选不再假装有分数含义", all(int(r["score"]) == 0 or r["score"] < 60 for r in others), str([r["score"] for r in others]))
+        check(
+            "其余候选被替换成规则结果",
+            len(others) >= 1
+            and all((r.get("notes") or {}).get("origin") == "rule" for r in others),
+        )
+        check(
+            "规则兜底的候选不再假装有分数含义",
+            all(int(r["score"]) == 0 or r["score"] < 60 for r in others),
+            str([r["score"] for r in others]),
+        )
 
         # ---------------- 5. 手动新建与删除
         manual = call(
             router,
             "clip.create",
-            {"project_id": pid, "kind": "highlight", "start_ms": 1_000, "end_ms": 21_000, "title": "手动切片"},
+            {
+                "project_id": pid,
+                "kind": "highlight",
+                "start_ms": 1_000,
+                "end_ms": 21_000,
+                "title": "手动切片",
+            },
         )["candidate"]
         check("手动新建落库", manual.get("source") == "manual", str(manual.get("id")))
         check("手动候选有默认状态 draft", manual.get("status") == "draft")
@@ -222,7 +270,11 @@ def main() -> int:
         check("手动候选出现在列表里", any(r["id"] == manual["id"] for r in again))
 
         removed = call(router, "clip.delete", {"id": manual["id"]})
-        check("删除成功", removed.get("deleted") == manual["id"], json.dumps(removed, ensure_ascii=False))
+        check(
+            "删除成功",
+            removed.get("deleted") == manual["id"],
+            json.dumps(removed, ensure_ascii=False),
+        )
         rest = call(router, "clip.candidates", {"id": pid})["candidates"]
         check("删除后列表里没了", all(r["id"] != manual["id"] for r in rest))
 

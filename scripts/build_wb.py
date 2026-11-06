@@ -101,10 +101,12 @@ def verify() -> int:
     problems: list[str] = []
     if not EXE.exists():
         problems.append(f"没产出 exe：{EXE}")
-    for rel in ("_internal/video_workbench/web/index.html",
-                "_internal/video_workbench/web/js/app.js",
-                "_internal/video_workbench/web/css/tokens.css",
-                "_internal/video_workbench/resources/icon.ico"):
+    for rel in (
+        "_internal/video_workbench/web/index.html",
+        "_internal/video_workbench/web/js/app.js",
+        "_internal/video_workbench/web/css/tokens.css",
+        "_internal/video_workbench/resources/icon.ico",
+    ):
         _need(DIST / rel, "包内资源", problems, wait_s=20)
 
     # 六份 txt 真源：不止查存在，还查字节——文件名带空格与全角，历史上最容易

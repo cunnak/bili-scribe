@@ -29,9 +29,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import websockets  # noqa: E402
-
-from shoot_wb import PROJ, close_tab, find_chrome, free_port, new_tab  # noqa: E402
-from shoot_wb import Cdp  # noqa: E402
+from shoot_wb import (  # noqa: E402
+    PROJ,
+    Cdp,  # noqa: E402
+    close_tab,
+    find_chrome,
+    free_port,
+    new_tab,
+)
 
 INDEX = PROJ / "video_workbench" / "web" / "index.html"
 
@@ -101,7 +106,9 @@ async def measure(count: int, timeout: float) -> dict:
             try:
                 import urllib.request
 
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1) as resp:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/json/version", timeout=1
+                ) as resp:
                     resp.read()
                 break
             except Exception:
@@ -114,7 +121,9 @@ async def measure(count: int, timeout: float) -> dict:
         url = INDEX.as_uri() + "?mock=1"
         tab = new_tab(port, url)
         tabs.append(tab["id"])
-        async with websockets.connect(tab["webSocketDebuggerUrl"], max_size=8 * 1024 * 1024) as sock:
+        async with websockets.connect(
+            tab["webSocketDebuggerUrl"], max_size=8 * 1024 * 1024
+        ) as sock:
             cdp = Cdp(sock)
             await cdp.cmd("Runtime.enable")
             await cdp.cmd("Page.enable")
@@ -155,15 +164,19 @@ def main() -> int:
     args = parser.parse_args()
 
     data = asyncio.run(measure(args.count, args.timeout))
-    print(f"[bench] {data['count']} 段：首屏 {data['first']}ms，"
-          f"滚动均值 {data['scrollAvg']}ms，最差 {data['scrollMax']}ms，"
-          f"DOM 中实际行数 {data['rendered']}")
+    print(
+        f"[bench] {data['count']} 段：首屏 {data['first']}ms，"
+        f"滚动均值 {data['scrollAvg']}ms，最差 {data['scrollMax']}ms，"
+        f"DOM 中实际行数 {data['rendered']}"
+    )
 
     ok = data["first"] < 400 and data["scrollAvg"] < 16.7 and data["rendered"] <= 60
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("[bench] " + ("PASS" if ok else "FAIL") + "（首屏 <400ms，滚动均值 <16.7ms，DOM 行数 ≤60）")
+    print(
+        "[bench] " + ("PASS" if ok else "FAIL") + "（首屏 <400ms，滚动均值 <16.7ms，DOM 行数 ≤60）"
+    )
     return 0 if ok else 1
 
 
