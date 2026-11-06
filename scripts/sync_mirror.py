@@ -27,11 +27,13 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+List = list                      # 只给上面两个新函数当注解用，不引入 typing 依赖
 
 #: 镜像特有、且必须活过任何一次同步的行——今天被覆盖掉的正是这两行。
 JUNCTION_MARKER = "/bili_scribe"
@@ -46,6 +48,19 @@ SKIP_PREFIXES = ("bili_scribe/", "third_party/")
 #: 这六个是「主仓已删」这一栏第一次就误报的东西（见 git() 里 core.quotepath=false 那条注释）。
 LOCKED_PREFIXES = ("video_workbench/core/summary/", "video_workbench/infra/notecache.py",
                    "video_workbench/resources/prompts/")
+
+#: 「镜像该有、但没有」的新文件只从这几条前缀里自动认领。其余主仓独有路径（我工作树里的
+#: 临时物 `_tiku/`、`_conv_doc.ps1`、根目录那堆一次性脚本）一律不新建 —— 第一版把它当待复制，
+#: 数出 614 项「待同步」，方向整个错了。
+PRODUCT_PREFIXES = ("video_workbench/", "scripts/", "tests/wb/")
+#: docs/ 刻意不在这里：镜像从第一笔起就是「tests/wb + WB 验收脚本 + 决策记录」的发布子集
+#: （首条 commit 原文），docs 只同步**两边原本都跟踪**的那 3 份决策记录。若把 docs 放进来，
+#: 一次同步会把 236 份验收截图/设计稿全搬进发布仓（2026-11-06 实测 275→525 个文件）。
+
+#: 认领 tests/wb 时顺手解析 import，只认 **tests/wb 同目录的兄弟模块**。
+#: 已知边界（如实写，不装作完备）：`wb_parity_tiers.py` 这种共享夹具能跟着判据一起进；
+#: 跨目录的 `from tests.wb.x import` 与动态 import 不解析，那种要靠「搬进去能 collect」那条腿兜。
+_IMPORT_RE = re.compile(r"^[ ]*(?:from|import)[ ]+([A-Za-z_][A-Za-z0-9_.]*)", re.M)
 
 
 def mirror_root() -> Path:
@@ -103,7 +118,59 @@ def junction_shape(mirror: Path) -> tuple[str, list[str]]:
                      f"is_dir={link.is_dir()} is_symlink={link.is_symlink()}"]
 
 
-def preflight(main: Path, mirror: Path) -> tuple[list[str], list[str]]:
+def _expand_imports(main: Path, mirror: Path, seeds: List) -> List:
+    """把 tests/wb 判据的**同目录共享模块**（夹具、档位表）跟着一起认领。
+
+    为什么不按前缀整批搬：`tests/wb/**` 整批搬会把一次性与未收口的东西也带进门面；
+    只解析 seeds 自己 import 的那些，才能「缺了就整代搬」而范围不失控。
+    现场：`tests/wb/test_summary_parity.py:13` 逐字 import wb_parity_tiers as TIERS
+    （`test_summary_truncate.py` 同形），只搬判据不搬 `wb_parity_tiers.py`
+    ⇒ 镜像里 pytest 收集中断，门面**制造**一条 ERROR。
+    """
+    out: List = []
+    queue = list(seeds)
+    seen: set = set()
+    while queue:
+        rel = queue.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        out.append(rel)
+        if not rel.startswith("tests/wb/") or not rel.endswith(".py"):
+            continue
+        blob = head_bytes(main, rel)
+        if blob is None:
+            continue
+        for name in _IMPORT_RE.findall(blob.decode("utf-8", "replace")):
+            sib = "tests/wb/" + name + ".py"
+            if (head_bytes(main, sib) is not None and head_bytes(mirror, sib) is None
+                    and sib not in seen):
+                queue.append(sib)
+    return out
+
+def _new_product_targets(main: Path, mirror: Path, a_set: List, b_all: set) -> List:
+    """主仓 HEAD 里有、镜像从未跟踪过的产品/判据文件 ⇒ 该搬，不是打一行 note 就跳过。
+
+    这是本入口第三个自锁（2026-11-06 实测）：第一次同步报「共同跟踪 272 项，内容不同 1 项」，
+    只搬了 `video_workbench/app/jobs.py`，随后镜像里 `tests/wb/test_job_failure_log.py`
+    → No such file；`comm -3` 同时列出 `test_job_failure_log.py` 与 `test_version_owner.py`
+    ⇒ **镜像带着产品改动、却没有守它的判据，而 pytest tests/wb 在镜像里照样全绿（根本收集不到）**。
+    原实现把这一整类归进「主仓独有」只打一行 note —— 那是把「门面缺牙」实现成设计。
+    锁定面继续硬挡：新增的副本/真源 txt 不许自动进门面。
+    """
+    fresh = [p for p in a_set
+             if p not in b_all and p.startswith(PRODUCT_PREFIXES) and p not in NEVER_SYNC]
+    seeds = [p for p in fresh if p.startswith("tests/wb/")]
+    rest = [p for p in fresh if not p.startswith("tests/wb/")]
+    out: List = []
+    for p in _expand_imports(main, mirror, seeds) + rest:
+        if p.startswith(LOCKED_PREFIXES):
+            print("[x] 镜像缺 " + p + "，但它在逐字节锁定面里 —— 不自动搬，人工判")
+        elif p not in out:
+            out.append(p)
+    return sorted(out)
+
+def preflight(main: Path, mirror: Path, commit_ok: bool = False) -> tuple:
     """返回 (blockers, notes)。blockers 非空即拒绝同步，此时不写任何文件。"""
     blockers: list[str] = []
     notes: list[str] = []
@@ -129,62 +196,90 @@ def preflight(main: Path, mirror: Path) -> tuple[list[str], list[str]]:
         if a_gi.is_file() and a_gi.read_bytes() != m_gi.read_bytes():
             notes.append(f"两侧 .gitignore 不同（预期镜像多出 junction 排除行）；它已从可写集硬排除")
 
+    # 脏面分三类，**不许一刀切放行也不许一律拦**：
+    #   (a) gitlink 自己：上次同步对齐了 checkout 却忘了 commit，本身就是这一笔要提交的东西。
+    #   (b) 其余脏文件：若**逐字节等于主仓 HEAD 那一版**，那是「上一次 --apply 把文件写完了、
+    #       最后才发现缺 -m」留下的中断现场（第①件修之前天天发生）—— 认识它、打 [resume]、
+    #       允许带 -m 补提交；有任何一个不等于 HEAD 版就仍然拒绝。
+    #   (c) submodule 内部脏：单独报，绝不与 (a) 混成一句「放行」。
     dirty = [ln for ln in git(mirror, "status", "--porcelain").splitlines() if ln]
-    # 只放行一种脏：整行就是 submodule gitlink（` M third_party/bili-scribe`），且 submodule
-    # 自己的内容是干净的。那正是「上次同步对齐了 checkout 却忘了 commit」的现场（今天真撞上），
-    # 它本身就是这一笔要提交的东西，不是别人的在途改动。
-    only_gitlink = dirty and all(ln.strip() == "M third_party/bili-scribe" or
-                                 ln.strip().startswith("M third_party/bili-scribe (")
-                                 for ln in dirty)
-    if only_gitlink:
-        inside = [ln for ln in git(mirror, "status", "--porcelain", "--",
-                                   "third_party/bili-scribe").splitlines() if ln]
-        # 上面那行只能证明父仓看见 gitlink 变了；再看 submodule 内部有没有未提交内容。
+    gitlink = [ln for ln in dirty if ln.strip().startswith("M third_party/bili-scribe")]
+    rest = [ln for ln in dirty if ln not in gitlink]
+    if gitlink:
         sm_dirty = [ln for ln in git(mirror / "third_party" / "bili-scribe",
                                      "status", "--porcelain").splitlines() if ln]
         if sm_dirty:
             blockers.append(f"gitlink 变了且 submodule 内部也有 {len(sm_dirty)} 行未提交："
-                            "\n      " + "\n      ".join(sm_dirty[:5]))
+                            + chr(10) + "      ".join(sm_dirty[:5]))
         else:
-            notes.append(f"镜像工作区只有 gitlink 待提交（{len(dirty)} 行）——视为本笔要修的东西，放行")
-    elif dirty:
-        blockers.append(f"镜像工作区不干净（{len(dirty)} 行），先弄清是谁的在途：\n      " +
-                        "\n      ".join(dirty[:5]))
+            notes.append(f"镜像只有 gitlink 待提交（{len(gitlink)} 行）——视为本笔要修的东西")
+    if rest:
+        resumable, not_head = [], []
+        for ln in rest:
+            body = ln[3:]
+            if "->" in body:                       # rename：形状不认识，不敢替你判断
+                not_head.append(body + "（rename，不认识）")
+                continue
+            path = body.strip().strip(chr(34))
+            want = head_bytes(main, path) if path and not path.endswith("/") else None
+            have = (mirror / path).read_bytes() if (mirror / path).is_file() else None
+            (resumable if want is not None and want == have else not_head).append(path)
+        if not not_head and commit_ok:
+            notes.append(f"[resume] 认出上一次同步留下的中断现场：{len(resumable)} 个文件已按主仓 "
+                         "HEAD 写好、内容与 HEAD 逐字节相同 —— 带 -m 即可把这一笔补提交完")
+        elif not not_head:
+            blockers.append(
+                f"镜像脏 {len(resumable)} 行且都等于主仓 HEAD 版，但这次不是提交（缺 -m 或未 --apply）："
+                "要么带 --commit -m 补完这一笔，要么先弄清这是谁的在途")
+        else:
+            blockers.append(
+                f"镜像工作区不干净（{len(rest)} 行），其中 {len(not_head)} 行**不等于**主仓 HEAD 版"
+                "——那是别人的在途或删除，不认作中断现场：" + chr(10) + "      ".join(not_head[:5]))
     return blockers, notes
 
 
 def head_bytes(repo: Path, rel: str) -> bytes | None:
     """取 **HEAD 里**那一版（不是索引、更不是工作区）。None = HEAD 里没有这个路径。
 
-    为什么这条是硬要求（2026-11-05 事故实录，我自己造的）：本入口的 docstring
-    写着「按索引取交集」，但比对与复制用的是 `read_bytes()` / `cp -p` =
-    **工作区字节**。于是只要某个共同跟踪文件在主仓有未提交的在途改动，一次
-    普通 `--apply --commit` 就会把那截未入库内容 `git add` 进镜像并 commit ——
-    正是这张入口本该拦住的事。真发生过：镜像因此拿到 parity 那 36 行未入库改动
-    （那一笔没 push，所以公开镜像至今干净；本地已 reset 回上一笔）。
-    ⇒ 比也按 HEAD 比、写也按 HEAD 写：工作区与索引里有没有在途改动，与门面无关。
-
-    为什么不用 `git cat-file -e` 判在不在（哨兵 L6c 实测推翻我的第一版）：
-    `cat-file -e HEAD:` 这种**空路径**写法返回 **rc=0**（指向 tree 对象，语法合法），
-    拿 rc 当「文件在不在」就会把用法错读成「在」⇒ 下游写空、静默假绿。
-    ⇒ 只认「**能不能读出字节**」：空路径/目录在函数入口就抛，`git show HEAD:<路径>`
-    对目录也必失败（`… is a directory`），只有能明确解释的 128 才读成「没有」。
+    为什么不用 `git cat-file -e` 判在不在，也不用读 stderr 文案（两轮哨兵各推翻一版）：
+      1) rc 语义：`git cat-file -e "HEAD:"` 空路径 **rc=0**（指向根 tree）⇒ 用法错会被读成「在」。
+      2) 文案白名单：旧版只认 `exists on disk`，实测漏了第三种 128 文案
+         `fatal: path 'x' does not exist in 'HEAD'`（路径既不在 HEAD、磁盘上也没有）
+         ⇒ 直接抛 RuntimeError，哨兵 L6b 当场炸。
+      3) 更深一层：`git show HEAD:docs`（目录）**rc=0 并吐 tree 内容**、`git show HEAD:`（空）
+         同样 rc=0 ⇒ 「能读出字节」根本不等价于「是个 blob」。所以这里改用
+         `git cat-file --batch-check` 直接问**对象类型**：blob 才给字节，tree/commit/没有 都给 None。
+    空路径与目录在入口先拦（保留显式报错），其余一律按类型判，不再依赖任何英文文案。
     """
     if not rel or rel.endswith("/"):
         raise RuntimeError(f"--from-head/--adopt 要的是文件路径，不是目录或空路径：{rel!r}")
-    res = subprocess.run(["git", "-c", "core.quotepath=false", "show", f"HEAD:{rel}"],
-                         cwd=str(repo), capture_output=True)
-    if res.returncode == 0:
+    # 用 `-t` 而不是 `--batch-check`：后者要求对象走 stdin，命令行传参会直接
+    # `fatal: batch modes take no arguments`（rc=129）—— 我上一版就死在这。
+    chk = subprocess.run(["git", "-c", "core.quotepath=false", "cat-file", "-t",
+                          f"HEAD:{rel}"], cwd=str(repo), capture_output=True,
+                         text=True, encoding="utf-8", errors="replace")
+    out = (chk.stdout or "").strip()
+    if out == "blob":
+        res = subprocess.run(["git", "-c", "core.quotepath=false", "show", f"HEAD:{rel}"],
+                             cwd=str(repo), capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"HEAD:{rel} 的 batch-check 说是 blob，git show 却 rc={res.returncode}："
+                f"{(res.stderr or b'').decode('utf-8', 'replace')[:200]} —— 不一致，不当成「没有」读")
         return res.stdout
-    err = res.stderr.decode("utf-8", "replace")
-    if res.returncode == 128 and "fatal: path" in err and "exists on disk" in err:
-        return None                       # 「工作区有、HEAD 没有」= 未入库
-    if res.returncode == 128 and ("does not have any" in err or "not a valid object" in err
-                                  or "is a directory" in err or "unknown revision" in err):
-        return None                       # 目录/空路径/不存在 —— 都不是合法的可搬内容
-    raise RuntimeError(
-        f"git show HEAD:{rel} 返回 rc={res.returncode}（不是可解释的 0/128），"
-        f"stderr={err[:200]} —— 用法错，不当成「HEAD 里没有」读")
+    err = chk.stderr or ""
+    # 第三种 128 文案（L4 实测）：路径在磁盘上、但不在 HEAD ——
+    #   fatal: path 'new.py' exists on disk, but not in 'HEAD'
+    # 只认前两种会把「未入库的 adopt」读成「读不懂的形状」并抛 RuntimeError（rc=1），
+    # 而契约是 rc=2 + 零写入。
+    known_missing = (("not a valid object name" in err) or ("does not exist" in err)
+                     or ("but not in" in err))
+    if chk.returncode != 0 and not known_missing:
+        raise RuntimeError(
+            "git cat-file -t HEAD:" + rel + " rc=" + str(chk.returncode) +
+            " out=" + out[:200] + " err=" + err[:200] +
+            " —— 读不懂的形状不当成「HEAD 里没有」读")
+    return None
 
 
 def content_targets(main: Path, mirror: Path) -> dict:
@@ -203,7 +298,12 @@ def content_targets(main: Path, mirror: Path) -> dict:
     b_only = [p for p in b_set if p not in set(a_set) and not p.startswith(SKIP_PREFIXES)]
     # 两边 HEAD 都列过、但主仓 HEAD 已删掉（staged 删除不算）→ 同步删除。
     gone = [p for p in common if head_bytes(main, p) is None]
-    return {"targets": targets, "main_only": a_only, "mirror_only": b_only, "deleted": gone,
+    # 镜像从未跟踪、但主仓 HEAD 已入库的产品/判据文件：以前这里只打一行 note，
+    # 于是「同步成功」与「门面缺牙」同时成立（见 _new_product_targets 的实录）。
+    new_targets = _new_product_targets(main, mirror, a_set, b_all)
+    targets = targets + [p for p in new_targets if p not in targets]
+    a_only = [p for p in a_only if p not in new_targets]
+    return {"targets": targets, "new_targets": new_targets, "main_only": a_only, "mirror_only": b_only, "deleted": gone,
             "common_n": len(common)}
 
 
@@ -222,8 +322,10 @@ def _narrow(cats: dict, exclude: list[str], only: list[str]) -> dict:
             return False
         return True
 
-    cats["dropped_from_sync"] = [p for p in cats["targets"] + cats["deleted"] if not keep(p)]
+    cats["dropped_from_sync"] = [p for p in cats["targets"] + cats.get("new_targets", [])
+                                  + cats["deleted"] if not keep(p)]
     cats["targets"] = [p for p in cats["targets"] if keep(p)]
+    cats["new_targets"] = [p for p in cats.get("new_targets", []) if keep(p)]
     cats["deleted"] = [p for p in cats["deleted"] if keep(p)]
     return cats
 
@@ -274,14 +376,70 @@ def align_gitlink(mirror: Path, main_head: str) -> tuple[bool, str]:
     sm = mirror / "third_party" / "bili-scribe"
     if not (sm / ".git").exists():
         return True, "镜像没挂 submodule，跳过 gitlink"
-    git(sm, "fetch", "-q", "origin")
-    r = subprocess.run(["git", "cat-file", "-t", main_head], cwd=str(sm),
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if (r.stdout or "").strip() != "commit":
+    def local_type() -> str:
+        r = subprocess.run(["git", "cat-file", "-t", main_head], cwd=str(sm),
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return (r.stdout or "").strip()
+
+    # 先问本地有没有这个 commit：有就不 fetch。
+    # 实录（2026-11-06）：真镜像同步卡死 120s，进程停在 git fetch -q origin ——
+    # 目标 commit 5a8373a 早就在 submodule 本地（就在 HEAD 上），这次网络往返纯属多余。
+    # 发布镜像经常在离网/代理不通的机器上同步，fetch 必须有超时且只在本地确实缺对象时才做。
+    if local_type() != "commit":
+        try:
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=str(sm),
+                           capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return False, (f"镜像的 bili-scribe 里没有 {main_head[:8]}，"
+                           "fetch origin 60s 超时——先在能联网的机器上把主仓 push 并同步 submodule")
+    if local_type() != "commit":
         return False, f"镜像的 bili-scribe remote 里找不到主仓 HEAD {main_head[:8]}——先把主仓 push"
     git(sm, "checkout", "-q", main_head)
     return True, f"gitlink -> {main_head[:8]}"
 
+
+def norm_rel(p: str) -> str:
+    """命令行路径归一化成仓库相对 posix 路径（单/双反斜杠同一口径）。"""
+    return p.replace(chr(92), "/").lstrip("./")
+
+
+def early_arg_check(args) -> list:
+    """在任何写入之前把参数层面的错收干净。返回错误清单，空 = 通过。
+
+    为什么单独一个函数（2026-11-06 实测）：旧版把 -m 检查写在文件复制与 gitlink 对齐**之后**，
+    于是 `--apply --commit` 忘带 -m 会把镜像写成「5 个文件已按主仓 HEAD 写好 + gitlink 已动、
+    一笔未 commit」，再跑一次它自己的 preflight 又把这种脏态拒在外头 ——
+    **工具能进入一个它自己不接受的状态、且没有恢复入口**。AGENTS 第六节写死「同步只准走这个入口」，
+    那时只能退回手工 `git add` + `commit`，正是这个入口要消灭的写法。
+    """
+    errs: list = []
+    if (args.adopt or args.from_head) and not args.apply:
+        # 实测形状：这两个参数只在 --apply 分支里被处理；不带 --apply 时它们**不生效**，
+        # 而输出会写「adopt … → 镜像」骗人。
+        errs.append("--adopt/--from-head 必须配 --apply（不带 --apply 不写入）")
+    if args.commit and not args.apply:
+        errs.append("--commit 必须配 --apply（只提交不写入会留下一笔对不上账的 commit）")
+    if args.commit and not args.message.strip():
+        errs.append("--commit 需要 -m 给镜像那一笔的 message —— 现在拒绝，还没写任何文件")
+
+    for p in list(args.adopt) + list(args.from_head):
+        p = norm_rel(p)
+        if not p or p.endswith("/"):
+            errs.append("路径要的是文件，不是目录或空值：" + repr(p))
+            continue
+        if p in NEVER_SYNC or p.startswith(SKIP_PREFIXES):
+            errs.append("拒绝 " + p + "（镜像自己维护 / junction 范围）")
+            continue
+        if p.startswith(LOCKED_PREFIXES):
+            errs.append("拒绝 " + p + "（逐字节锁定面：副本与真源 txt 不归同步管）")
+            continue
+        if not (ROOT / p).is_file():
+            errs.append(p + " 在主仓工作区不存在")
+            continue
+        if head_bytes(ROOT, p) is None:
+            errs.append(p + " 还没进主仓 HEAD —— 本入口只搬已入库内容，未 commit 的一律不进门面"
+                        "（要它进镜像请先在主仓 commit）")
+    return errs
 
 def main() -> int:
     import argparse
@@ -308,7 +466,13 @@ def main() -> int:
     args = ap.parse_args()
 
     mirror = mirror_root()
-    blockers, notes = preflight(ROOT, mirror)
+    # 第①件：参数校验必须在 preflight 与任何写入之前 —— 先验后写，拒绝即零写入。
+    bad = early_arg_check(args)
+    if bad:
+        for b in bad:
+            print("[x] " + b)
+        return 2
+    blockers, notes = preflight(ROOT, mirror, commit_ok=bool(args.commit))
     for n in notes:
         print(f"[note] {n}")
     if blockers:
@@ -352,7 +516,7 @@ def main() -> int:
 
     adopted = []
     for p in args.adopt:
-        p = p.replace("\\", "/").lstrip("./")
+        p = norm_rel(p)
         if p in NEVER_SYNC or p.startswith(SKIP_PREFIXES):
             print(f"[x] --adopt 拒绝 {p}（镜像自己维护 / junction 范围）")
             return 2
@@ -372,7 +536,7 @@ def main() -> int:
 
     heads = []
     for p in args.from_head:
-        p = p.replace("\\\\", "/").lstrip("./")
+        p = norm_rel(p)
         if p in NEVER_SYNC or p.startswith(SKIP_PREFIXES):
             print(f"[x] --from-head 拒绝 {p}（镜像自己维护 / junction 范围）")
             return 2
@@ -396,9 +560,6 @@ def main() -> int:
         return 2
 
     if args.commit:
-        if not args.message.strip():
-            print("[x] --commit 需要 -m 给镜像那一笔的 message")
-            return 2
         rels = []
         for d in done:
             if d.startswith("del "):
