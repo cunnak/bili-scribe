@@ -25,7 +25,9 @@ from typing import Any, Callable, Iterable, Sequence
 from video_workbench.app.errors import WBError
 from video_workbench.infra.jsonfix import parse_json
 
-PROMPT_PATH = Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_candidates.md"
+PROMPT_PATH = (
+    Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_candidates.md"
+)
 
 # 时长区间（方案书 §5.7.1）
 RANGES: dict[str, tuple[int, int]] = {
@@ -36,13 +38,13 @@ KIND_NAMES = {"highlight": "高光短切片", "segment": "长文分段"}
 DEFAULT_COUNT = 12
 PER_KIND_MAX = 8
 HEAT_BONUS_MAX = 10
-MISSING_TEXT_PENALTY = 12      # 缺标题/理由要降权：排序里它就该往后站
-RULE_WINDOW_MS = 30_000        # 规则兜底的窗口长度
+MISSING_TEXT_PENALTY = 12  # 缺标题/理由要降权：排序里它就该往后站
+RULE_WINDOW_MS = 30_000  # 规则兜底的窗口长度
 HEAT_BUCKET_MS = 5_000
 
 # 切点吸附（P3-02）：容差来自方案书 §5.7.2 `clip.snap_tolerance_ms` 默认值
 SNAP_TOLERANCE_MS = 2_000
-OVERLAP_RATIO = 0.5            # 重叠超过较短那段的这个比例，就算重复
+OVERLAP_RATIO = 0.5  # 重叠超过较短那段的这个比例，就算重复
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
@@ -93,9 +95,7 @@ def describe_kinds(kinds: Sequence[str]) -> str:
 # ---------------------------------------------------------------------- 热度
 
 
-def heat_buckets(
-    danmaku: Iterable[Any], *, bucket_ms: int = HEAT_BUCKET_MS
-) -> dict[int, int]:
+def heat_buckets(danmaku: Iterable[Any], *, bucket_ms: int = HEAT_BUCKET_MS) -> dict[int, int]:
     """弹幕 → 时间桶计数。
 
     只认带时间的弹幕（``{"time_ms": 1234}`` 或 ``{"progress_ms": 1234}``）。
@@ -137,9 +137,7 @@ def heat_ratio(
     if not buckets:
         return 0.0
     span_ms = max(1, int(end_ms) - int(start_ms))
-    total = sum(
-        count for slot, count in buckets.items() if int(start_ms) <= slot < int(end_ms)
-    )
+    total = sum(count for slot, count in buckets.items() if int(start_ms) <= slot < int(end_ms))
     if total <= 0:
         return 0.0
     peak_density = (max(buckets.values()) or 1) / max(0.001, bucket_ms / 1000)
@@ -550,6 +548,7 @@ def generate(
 
 # ------------------------------------------------------------------ 切点吸附（P3-02）
 
+
 def _rows(segments: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = [
         {
@@ -598,9 +597,7 @@ def _boundaries(rows: Sequence[dict[str, Any]], mode: str) -> tuple[list[int], l
     return word_starts, word_ends
 
 
-def trim_silence(
-    segments: Sequence[dict[str, Any]], start_ms: int, end_ms: int
-) -> dict[str, Any]:
+def trim_silence(segments: Sequence[dict[str, Any]], start_ms: int, end_ms: int) -> dict[str, Any]:
     """不要用静音开头/结尾。
 
     起止点落在两句话之间的空隙里时，起点往后挪到下一句开头、终点往前挪到上一句结尾。
@@ -706,7 +703,9 @@ def dedupe(
     """
     kept: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
-    for row in sorted(candidates, key=lambda item: (-int(item.get("score") or 0), int(item["start_ms"]))):
+    for row in sorted(
+        candidates, key=lambda item: (-int(item.get("score") or 0), int(item["start_ms"]))
+    ):
         clash = None
         for other in kept:
             if other["kind"] != row["kind"]:

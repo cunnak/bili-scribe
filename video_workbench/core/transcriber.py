@@ -56,8 +56,12 @@ CHUNK = 1 << 20
 class Runner(Protocol):
     """跑一个 ASR 子进程。测试里换成假的，不用真装模型。"""
 
-    def __call__(self, spec: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
-                 cancel: Callable[[], bool]) -> int: ...
+    def __call__(
+        self,
+        spec: dict[str, Any],
+        on_event: Callable[[dict[str, Any]], None],
+        cancel: Callable[[], bool],
+    ) -> int: ...
 
 
 # ----------------------------------------------------------------- 工具
@@ -67,16 +71,27 @@ def audio_path(root: str | os.PathLike[str]) -> Path:
     return Path(root) / AUDIO_NAME
 
 
-def cache_key(audio: str | os.PathLike[str], *, model: str, language: str, vad: bool,
-              word_timestamps: bool = True) -> str:
+def cache_key(
+    audio: str | os.PathLike[str],
+    *,
+    model: str,
+    language: str,
+    vad: bool,
+    word_timestamps: bool = True,
+) -> str:
     """音频内容 + 影响输出的全部参数。参数进键的理由：换了模型结果就是另一份，
     拿旧结果冒充新的比重新算一遍更糟。"""
     digest = hashlib.sha256()
     with open(audio, "rb") as handle:
         for block in iter(lambda: handle.read(CHUNK), b""):
             digest.update(block)
-    parts = [digest.hexdigest(), f"model={model}", f"lang={language or 'auto'}",
-             f"vad={int(bool(vad))}", f"words={int(bool(word_timestamps))}"]
+    parts = [
+        digest.hexdigest(),
+        f"model={model}",
+        f"lang={language or 'auto'}",
+        f"vad={int(bool(vad))}",
+        f"words={int(bool(word_timestamps))}",
+    ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -169,11 +184,18 @@ def _worker_command(spec_path: Path, python: str | None = None) -> list[str]:
 def _default_runner(python: str | None = None) -> Runner:
     """起 ``python -m video_workbench.workers.asr_worker <spec>``，逐行读事件。"""
 
-    def run(spec: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
-            cancel: Callable[[], bool]) -> int:
+    def run(
+        spec: dict[str, Any], on_event: Callable[[dict[str, Any]], None], cancel: Callable[[], bool]
+    ) -> int:
         spec_path = Path(spec["_spec_path"])
-        spec_path.write_text(json.dumps({k: v for k, v in spec.items() if not k.startswith("_")},
-                                        ensure_ascii=False, indent=2), encoding="utf-8")
+        spec_path.write_text(
+            json.dumps(
+                {k: v for k, v in spec.items() if not k.startswith("_")},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         cmd = _worker_command(spec_path, python)
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
@@ -281,9 +303,7 @@ def make_transcribe_handler(
         model_name = str(payload.get("model") or getattr(cfg, "model", models_mod.DEFAULT_MODEL))
         # 这里再做一次归一化：jobs.retry() 会把库里的旧 payload 原样重新提交，
         # 那些记录写于加校验之前。纵深防御，不指望上游一定干净。
-        language = languages.normalize(
-            payload.get("language") or getattr(cfg, "language", "auto")
-        )
+        language = languages.normalize(payload.get("language") or getattr(cfg, "language", "auto"))
         vad = bool(payload.get("vad", getattr(cfg, "vad", True)))
         want_words = bool(payload.get("word_timestamps", getattr(cfg, "word_timestamps", True)))
         device = str(payload.get("device") or getattr(cfg, "device", "auto"))
@@ -300,12 +320,14 @@ def make_transcribe_handler(
                 # 抽不出声轨是常见情况（无声视频、纯音乐封面稿）。这不是"转录失败"，
                 # 是"这集没话说"，需要让用户看到明确的原因。
                 raise WBError("UNSUPPORTED", "这条视频没有可用的音轨", str(video))
-            repo.asset_upsert(project_id, "audio", str(audio),
-                              bytes=audio.stat().st_size, status="ready")
+            repo.asset_upsert(
+                project_id, "audio", str(audio), bytes=audio.stat().st_size, status="ready"
+            )
 
         ctx.progress(0.05, stage="检查缓存")
-        key = cache_key(audio, model=model_name, language=language, vad=vad,
-                        word_timestamps=want_words)
+        key = cache_key(
+            audio, model=model_name, language=language, vad=vad, word_timestamps=want_words
+        )
         cached = read_cache(root)
         json_path = root / TRANSCRIPT_JSON
         if cached.get("cache_key") == key and json_path.is_file():
@@ -315,10 +337,23 @@ def make_transcribe_handler(
             if not srt_path.is_file():
                 srt_path.write_text(format_srt(segments), encoding="utf-8")
             ctx.progress(0.98, stage="命中缓存")
-            _finish(repo, project_id, segments=segments, language=str(data.get("language") or ""),
-                    model=model_name, srt_path=srt_path, audio=audio, stage="transcribed")
-            return {"project_id": project_id, "cached": True, "segments": len(segments),
-                    "language": data.get("language"), "srt": str(srt_path)}
+            _finish(
+                repo,
+                project_id,
+                segments=segments,
+                language=str(data.get("language") or ""),
+                model=model_name,
+                srt_path=srt_path,
+                audio=audio,
+                stage="transcribed",
+            )
+            return {
+                "project_id": project_id,
+                "cached": True,
+                "segments": len(segments),
+                "language": data.get("language"),
+                "srt": str(srt_path),
+            }
 
         resolved = models_mod.resolve_for_use(models_root, model_name)
         ctx.progress(0.08, stage="加载模型")
@@ -381,9 +416,7 @@ def make_transcribe_handler(
                 str(first.get("detail") or "")[:2000],
             )
         if not tmp_json.is_file():
-            raise WBError(
-                "PROCESS_FAILED", "转录进程结束但没有产出 transcript.json", str(tmp_json)
-            )
+            raise WBError("PROCESS_FAILED", "转录进程结束但没有产出 transcript.json", str(tmp_json))
 
         ctx.progress(0.97, stage="写入字幕")
         # 到这一步才动正式文件。os.replace 在同分区上是原子的：不存在
@@ -398,14 +431,36 @@ def make_transcribe_handler(
             os.replace(tmp_srt, srt_path)
         else:  # pragma: no cover - worker 总会写 srt，这里只是不让流程断
             srt_path.write_text(format_srt(segments), encoding="utf-8")
-        write_cache(root, {"cache_key": key, "model": model_name, "language": detected,
-                           "vad": bool(vad), "word_timestamps": bool(want_words),
-                           "created_at": now_iso(), "tool_version": tool_version,
-                           "segments": len(segments)})
-        _finish(repo, project_id, segments=segments, language=detected, model=model_name,
-                srt_path=srt_path, audio=audio, stage="transcribed")
-        return {"project_id": project_id, "cached": False, "segments": len(segments),
-                "language": detected, "srt": str(srt_path)}
+        write_cache(
+            root,
+            {
+                "cache_key": key,
+                "model": model_name,
+                "language": detected,
+                "vad": bool(vad),
+                "word_timestamps": bool(want_words),
+                "created_at": now_iso(),
+                "tool_version": tool_version,
+                "segments": len(segments),
+            },
+        )
+        _finish(
+            repo,
+            project_id,
+            segments=segments,
+            language=detected,
+            model=model_name,
+            srt_path=srt_path,
+            audio=audio,
+            stage="transcribed",
+        )
+        return {
+            "project_id": project_id,
+            "cached": False,
+            "segments": len(segments),
+            "language": detected,
+            "srt": str(srt_path),
+        }
 
     return handler
 
@@ -427,8 +482,17 @@ def _wipe_outputs(root: Path, *, tmp_only: bool = False) -> None:
             pass
 
 
-def _finish(repo: Any, project_id: str, *, segments: list[dict[str, Any]], language: str,
-            model: str, srt_path: Path, audio: Path, stage: str) -> None:
+def _finish(
+    repo: Any,
+    project_id: str,
+    *,
+    segments: list[dict[str, Any]],
+    language: str,
+    model: str,
+    srt_path: Path,
+    audio: Path,
+    stage: str,
+) -> None:
     """入库 + 阶段推进。缓存命中也走这里，保证两条路径的落库行为完全一致。"""
     # 字幕文件要作为资产登记：素材库的"有字幕"筛选、详情页的资产表都按
     # wb_asset.kind == "subtitle" 判断。只写 wb_transcript 的话，转完了界面
@@ -457,10 +521,15 @@ def _finish(repo: Any, project_id: str, *, segments: list[dict[str, Any]], langu
     current = str((repo.project_get(project_id) or {}).get("stage") or "")
     keep = current in _DOWNSTREAM_STAGES
     if segments:
-        repo.project_update(project_id, stage=current if keep else stage,
-                            status="ready", error=None)
+        repo.project_update(
+            project_id, stage=current if keep else stage, status="ready", error=None
+        )
     else:
         # 没识别到语音是"结果为空"，不是失败：方案书 §7 的约定，不自动总结。
-        repo.project_update(project_id, stage=current if keep else "downloaded",
-                            status="ready", error="未识别到语音")
+        repo.project_update(
+            project_id,
+            stage=current if keep else "downloaded",
+            status="ready",
+            error="未识别到语音",
+        )
     _ = audio

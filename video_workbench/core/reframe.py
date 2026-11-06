@@ -148,16 +148,31 @@ def detect_crop(
     start = max(0, int(start_ms))
     span = max(200, int(duration_ms))
     args = [
-        ffmpeg_bin, "-hide_banner", "-nostats", "-loglevel", "info",
-        "-ss", f"{start / 1000:.3f}", "-i", str(source),
-        "-t", f"{span / 1000:.3f}",
-        "-vf", f"cropdetect=limit={int(limit)}:round=2:reset=1",
-        "-f", "null", "-",
+        ffmpeg_bin,
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "info",
+        "-ss",
+        f"{start / 1000:.3f}",
+        "-i",
+        str(source),
+        "-t",
+        f"{span / 1000:.3f}",
+        "-vf",
+        f"cropdetect=limit={int(limit)}:round=2:reset=1",
+        "-f",
+        "null",
+        "-",
     ]
     try:
         proc = subprocess.run(  # noqa: S603 —— 参数为列表，不经 shell
-            args, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout,
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -179,9 +194,7 @@ def same_box(size: tuple[int, int], rect: dict[str, int] | None) -> bool:
     """探测结果是否等于整帧（也就是没黑边）。"""
     if not rect:
         return True
-    return rect["x"] == 0 and rect["y"] == 0 and (
-        rect["w"] >= size[0] or rect["h"] >= size[1]
-    )
+    return rect["x"] == 0 and rect["y"] == 0 and (rect["w"] >= size[0] or rect["h"] >= size[1])
 
 
 def crop_chain(crop_x: float = 0.5, *, src_crop: object = None) -> str:
@@ -191,10 +204,7 @@ def crop_chain(crop_x: float = 0.5, *, src_crop: object = None) -> str:
     传了 `src_crop` 就先削掉素材自带的黑边——不削的话竖条里会留一条黑。
     """
     x = clamp_x(crop_x)
-    return (
-        f"{_crop_prefix(src_crop)}"
-        f"crop=ih*9/16:ih:(iw-ih*9/16)*{x:.4f}:0,scale={WIDTH}:{HEIGHT}"
-    )
+    return f"{_crop_prefix(src_crop)}crop=ih*9/16:ih:(iw-ih*9/16)*{x:.4f}:0,scale={WIDTH}:{HEIGHT}"
 
 
 def follow_chain(
@@ -230,10 +240,7 @@ def blur_graph(subtitle: str = "", *, src_crop: object = None) -> str:
     if subtitle:
         from ..infra.ffmpeg import subtitle_filter
 
-        return (
-            f"{bg};{fg};{overlay}[vblur];"
-            f"[vblur]{subtitle_filter(subtitle)}[vout]"
-        )
+        return f"{bg};{fg};{overlay}[vblur];[vblur]{subtitle_filter(subtitle)}[vout]"
     return f"{bg};{fg};{overlay}[vout]"
 
 
@@ -248,7 +255,9 @@ def point_t(point: dict[str, Any]) -> int:
         return 0
 
 
-def _simplify(points: Sequence[dict[str, Any]], *, step_ms: int = 2_000) -> list[tuple[float, float]]:
+def _simplify(
+    points: Sequence[dict[str, Any]], *, step_ms: int = 2_000
+) -> list[tuple[float, float]]:
     """把轨迹压到"每 step_ms 一个点 + x 变化够大才留"。
 
     为什么要压：FFmpeg 的裁剪表达式是嵌套 `if`，点数直接决定表达式长度。480 秒的
@@ -371,7 +380,9 @@ def limit_step(values: Sequence[float], *, max_step: float) -> list[float]:
     return out
 
 
-def _smooth_chunk(points: Sequence[dict[str, Any]], *, frame_width: int, clip_span_ms: int) -> list[dict[str, Any]]:
+def _smooth_chunk(
+    points: Sequence[dict[str, Any]], *, frame_width: int, clip_span_ms: int
+) -> list[dict[str, Any]]:
     if not points:
         return []
     xs = [point_x(p) for p in points]
@@ -410,7 +421,11 @@ def smooth_track(
     for index in range(len(bounds) - 1):
         low, high = bounds[index], bounds[index + 1]
         last = index == len(bounds) - 2
-        chunk = [p for p in rows if point_t(p) >= low and (point_t(p) < high or (last and point_t(p) <= high))]
+        chunk = [
+            p
+            for p in rows
+            if point_t(p) >= low and (point_t(p) < high or (last and point_t(p) <= high))
+        ]
         out.extend(_smooth_chunk(chunk, frame_width=frame_width, clip_span_ms=clip_span_ms))
     return out
 
@@ -938,7 +953,9 @@ def cluster_faces(
             cluster["last_x"] = center_x
             cluster["frames"] += 1
             cluster["area"] += face_area_ratio(face, width=width, height=height)
-            cluster["track"].append({"t_ms": t_ms, "x": _x_of_center(center_x, width=width, height=height)})
+            cluster["track"].append(
+                {"t_ms": t_ms, "x": _x_of_center(center_x, width=width, height=height)}
+            )
             # 记最大那张脸当"这个人的框"：给界面画缩略图、给 vision 标号都用它
             if face_area_ratio(face, width=width, height=height) >= face_area_ratio(
                 cluster["box"], width=width, height=height
@@ -997,7 +1014,9 @@ def score_subject(subject: dict[str, Any], *, span_ms: int, width: float) -> int
     return int(round(max(0.0, min(1.0, raw)) * 100))
 
 
-def rank_subjects(subjects: Sequence[dict[str, Any]], *, span_ms: int, width: float) -> list[dict[str, Any]]:
+def rank_subjects(
+    subjects: Sequence[dict[str, Any]], *, span_ms: int, width: float
+) -> list[dict[str, Any]]:
     rows = [dict(item) for item in subjects]
     for row in rows:
         row["score"] = score_subject(row, span_ms=span_ms, width=width)
@@ -1023,7 +1042,9 @@ def subject_by_id(subjects: Sequence[dict[str, Any]], subject_id: str) -> dict[s
     return None
 
 
-def cut_times(samples: Sequence[dict[str, Any]], *, threshold: float = CUT_RATIO_THRESHOLD) -> list[int]:
+def cut_times(
+    samples: Sequence[dict[str, Any]], *, threshold: float = CUT_RATIO_THRESHOLD
+) -> list[int]:
     """镜头切换点：相邻采样帧的缩略图平均差超过阈值就记一个切点。
 
     采样间隔 0.5 秒，所以切点精度就是 0.5 秒——够用：这里的目标不是"帧级精确切点"，
@@ -1088,20 +1109,40 @@ def _haar_sampler(
     """
     cv2 = _load_cv2()
     if cv2 is None:
-        return {"samples": [], "detector": "unavailable", "notes": ["没装 opencv，跳过人脸检测，按居中裁切"],
-                "frames": 0, "width": 0, "height": 0, "thumbs": []}
+        return {
+            "samples": [],
+            "detector": "unavailable",
+            "notes": ["没装 opencv，跳过人脸检测，按居中裁切"],
+            "frames": 0,
+            "width": 0,
+            "height": 0,
+            "thumbs": [],
+        }
     try:
         detector_obj, reason = prepare_detector(cv2, models_root, proxy=proxy, log=log)
     except Exception as exc:  # 下载失败不影响导出
         detector_obj, reason = None, f"人脸检测器初始化失败（{exc}）"
     if detector_obj is None:
-        return {"samples": [], "detector": "unavailable",
-                "notes": [reason or "没有可用的人脸检测器，按居中裁切"],
-                "frames": 0, "width": 0, "height": 0, "thumbs": []}
+        return {
+            "samples": [],
+            "detector": "unavailable",
+            "notes": [reason or "没有可用的人脸检测器，按居中裁切"],
+            "frames": 0,
+            "width": 0,
+            "height": 0,
+            "thumbs": [],
+        }
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
-        return {"samples": [], "detector": "unavailable", "notes": ["这个文件读不了，跳过人脸检测，按居中裁切"],
-                "frames": 0, "width": 0, "height": 0, "thumbs": []}
+        return {
+            "samples": [],
+            "detector": "unavailable",
+            "notes": ["这个文件读不了，跳过人脸检测，按居中裁切"],
+            "frames": 0,
+            "width": 0,
+            "height": 0,
+            "thumbs": [],
+        }
     width = float(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     height = float(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0) or float(HEIGHT)
     interval = max(50, int(interval_ms))
@@ -1133,8 +1174,15 @@ def _haar_sampler(
                     thumbs.append({"t_ms": t_ms, "jpeg": buffer.tobytes(), "faces": faces})
     finally:
         capture.release()
-    return {"samples": samples, "detector": detector_obj.kind if samples else "no_face", "notes": [],
-            "frames": frames, "width": width, "height": height, "thumbs": thumbs}
+    return {
+        "samples": samples,
+        "detector": detector_obj.kind if samples else "no_face",
+        "notes": [],
+        "frames": frames,
+        "width": width,
+        "height": height,
+        "thumbs": thumbs,
+    }
 
 
 def detect_subjects(
@@ -1159,11 +1207,23 @@ def detect_subjects(
     span = max(1, int(end_ms) - int(start_ms))
     interval = max(50, int(interval_ms))
     if sampler is None:
-        got = _haar_sampler(source, start_ms=int(start_ms), span_ms=span, interval_ms=interval,
-                            models_root=models_root, proxy=proxy, log=log)
+        got = _haar_sampler(
+            source,
+            start_ms=int(start_ms),
+            span_ms=span,
+            interval_ms=interval,
+            models_root=models_root,
+            proxy=proxy,
+            log=log,
+        )
     else:
-        got = sampler(source, start_ms=int(start_ms), span_ms=span, interval_ms=interval,
-                      models_root=models_root)
+        got = sampler(
+            source,
+            start_ms=int(start_ms),
+            span_ms=span,
+            interval_ms=interval,
+            models_root=models_root,
+        )
     samples = list(got.get("samples") or [])
     notes = list(got.get("notes") or [])
     width = float(got.get("width") or WIDTH)
@@ -1228,8 +1288,9 @@ def rebuild_focus(
     if not track:
         return []
     filled = fill_gaps(track, interval_ms=interval_ms, span_ms=max(1, int(span_ms)))
-    return smooth_track(filled, frame_width=max(1, int(frame_width)), clip_span_ms=max(1, int(span_ms)),
-                        cuts=cuts)
+    return smooth_track(
+        filled, frame_width=max(1, int(frame_width)), clip_span_ms=max(1, int(span_ms)), cuts=cuts
+    )
 
 
 # ---------------------------------------------------------------- vision 选主体
@@ -1356,7 +1417,9 @@ def vision_pick_subject(
         drawn = annotate_frame(shot.get("jpeg") or b"", boxes, labels)
         import base64  # noqa: PLC0415
 
-        items.append({"data_url": "data:image/jpeg;base64," + base64.b64encode(drawn).decode("ascii")})
+        items.append(
+            {"data_url": "data:image/jpeg;base64," + base64.b64encode(drawn).decode("ascii")}
+        )
     if not items:
         return {}
     messages = subject_messages(items, prompt=prompt, subjects=subjects)
@@ -1402,7 +1465,9 @@ def load_focus(path: str | Path) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: item["t_ms"])
 
 
-def save_focus(path: str | Path, focus: Iterable[dict[str, Any]], *, meta: dict[str, Any] | None = None) -> Path:
+def save_focus(
+    path: str | Path, focus: Iterable[dict[str, Any]], *, meta: dict[str, Any] | None = None
+) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     rows = [

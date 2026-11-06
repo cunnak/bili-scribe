@@ -121,7 +121,7 @@ def parse_line(line: str) -> dict[str, Any] | None:
         return None
 
     if text.startswith(_PROGRESS_PREFIX):
-        payload = text[len(_PROGRESS_PREFIX):]
+        payload = text[len(_PROGRESS_PREFIX) :]
         try:
             raw = json.loads(payload)
         except ValueError:
@@ -144,7 +144,7 @@ def parse_line(line: str) -> dict[str, Any] | None:
         }
 
     if text.startswith(_PRINT_PREFIX):
-        body = text[len(_PRINT_PREFIX):]
+        body = text[len(_PRINT_PREFIX) :]
         height, _, rest = body.partition("|")
         fmt_id, _, filepath = rest.partition("|")
         try:
@@ -173,7 +173,12 @@ def classify_failure(text: str) -> WBError:
     tail = "\n".join(detail.splitlines()[-50:])
     for pattern, code, message in _FAILURE_PATTERNS:
         if re.search(pattern, tail, re.IGNORECASE):
-            return WBError(code, message, tail[-4000:], retryable=code in {"NETWORK", "RATE_LIMITED", "PROCESS_FAILED"})
+            return WBError(
+                code,
+                message,
+                tail[-4000:],
+                retryable=code in {"NETWORK", "RATE_LIMITED", "PROCESS_FAILED"},
+            )
     return WBError("PROCESS_FAILED", "yt-dlp 执行失败", tail[-4000:], retryable=True)
 
 
@@ -251,7 +256,14 @@ class DownloadResult:
         """把实际高度翻回人话。yt-dlp 给的是数字，界面要的是 720P/1080P。"""
         if not self.height:
             return ""
-        for label, nominal in (("4K", 2160), ("1440P", 1440), ("1080P", 1080), ("720P", 720), ("480P", 480), ("360P", 360)):
+        for label, nominal in (
+            ("4K", 2160),
+            ("1440P", 1440),
+            ("1080P", 1080),
+            ("720P", 720),
+            ("480P", 480),
+            ("360P", 360),
+        ):
             # B 站偶尔给 1078/1035 这种数，允许 ±3% 的邻近误差，但 1234 不能被说成 1080P
             if abs(self.height - nominal) <= max(8, nominal * 0.03):
                 return label
@@ -312,7 +324,9 @@ def ytdlp_info(configured: str | Path | None = None) -> dict[str, Any]:
         "name": Path(path).name if path else ("yt_dlp（模块）" if module else ""),
         "module": module,
         "configured": str(configured or ""),
-        "hint": "" if found else "缺少 yt-dlp：pip install yt-dlp，或把 yt-dlp.exe 放进 tools/ 目录",
+        "hint": ""
+        if found
+        else "缺少 yt-dlp：pip install yt-dlp，或把 yt-dlp.exe 放进 tools/ 目录",
     }
 
 
@@ -438,7 +452,9 @@ def _resolve_bbdown(bbdown_bin: str | Path | None) -> str:
     return binary
 
 
-def _default_runner(cmd: list[str], cwd: str | None, on_line: Callable[[str], None], cancel: Callable[[], bool]) -> tuple[int, str]:
+def _default_runner(
+    cmd: list[str], cwd: str | None, on_line: Callable[[str], None], cancel: Callable[[], bool]
+) -> tuple[int, str]:
     """起子进程、逐行回调、可取消。返回 ``(returncode, 全部输出)``。"""
     started = time.time()
     proc = subprocess.Popen(  # noqa: S603 —— 参数是列表，不经 shell
@@ -603,7 +619,9 @@ def download(
         produced = _normalize_bbdown_output(home_path, produced)
     if produced is None or not produced.exists():
         # yt-dlp 有时不给 print（老版本），退化成"目录里最大的 mp4"
-        candidates = sorted(home_path.glob("source.*"), key=lambda p: p.stat().st_size, reverse=True)
+        candidates = sorted(
+            home_path.glob("source.*"), key=lambda p: p.stat().st_size, reverse=True
+        )
         produced = candidates[0] if candidates else None
     if produced is None or not produced.exists():
         raise WBError("PROCESS_FAILED", "下载结束但没找到产物文件", output[-2000:])

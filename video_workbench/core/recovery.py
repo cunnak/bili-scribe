@@ -24,7 +24,16 @@ from typing import Any, Iterable
 
 # 项目的正常推进顺序。`subtitle` 是"导入时自带字幕"的分支，排在 downloaded 之后；
 # 回退时它和 transcribed 同级（两者都代表"有可用文本"）。
-STAGE_ORDER = ["new", "downloaded", "subtitle", "transcribed", "summarized", "clipped", "merged", "published"]
+STAGE_ORDER = [
+    "new",
+    "downloaded",
+    "subtitle",
+    "transcribed",
+    "summarized",
+    "clipped",
+    "merged",
+    "published",
+]
 
 #: 每个阶段成立所必需的证据。键是阶段，值是"检查函数名"。
 #: 只检查本地能验证的东西（文件在不在、库里有不有行），不联网、不探测平台。
@@ -107,7 +116,9 @@ def stage_ok(repo: Any, project: dict[str, Any], assets: list[dict[str, Any]]) -
     return True
 
 
-def recover_stage(repo: Any, project: dict[str, Any], assets: list[dict[str, Any]]) -> tuple[str, str]:
+def recover_stage(
+    repo: Any, project: dict[str, Any], assets: list[dict[str, Any]]
+) -> tuple[str, str]:
     """算出应该退回到哪个阶段。
 
     返回 ``(stage, reason)``；不需要回退时 stage 与原值相同、reason 为空串。

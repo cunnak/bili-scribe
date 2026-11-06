@@ -238,7 +238,9 @@ def normalize_copy(
             bag.append("模型没给简介，用切片里的原句顶上")
     tags = normalize_tags(data.get("tags"))
     if len(tags) < TAGS_MIN:
-        extra = keyword_tags(" ".join([raw_desc, squeeze(candidate.get("quote")), squeeze(candidate.get("title"))]))
+        extra = keyword_tags(
+            " ".join([raw_desc, squeeze(candidate.get("quote")), squeeze(candidate.get("title"))])
+        )
         before = len(tags)
         tags = normalize_tags(tags, fallback=extra)
         if len(tags) > before:
@@ -250,7 +252,11 @@ def normalize_copy(
 
 def rule_copy(candidate: dict[str, Any], *, project_title: str = "") -> dict[str, Any]:
     """模型不可用时的兜底：全部来自候选本身，不编内容。"""
-    title = cut(candidate.get("title") or "", TITLE_MAX) or cut(project_title, TITLE_MAX) or "未命名切片"
+    title = (
+        cut(candidate.get("title") or "", TITLE_MAX)
+        or cut(project_title, TITLE_MAX)
+        or "未命名切片"
+    )
     quote = squeeze(candidate.get("quote"))
     reason = squeeze(candidate.get("reason"))
     description = cut(" ".join(part for part in (reason, quote) if part), DESC_MAX)
@@ -280,8 +286,9 @@ def generate(
     界面把 ``source`` 显示出来即可（"兜底文案"）。
     """
     notes: list[str] = []
-    prompt = build_prompt(candidate, segments, project_title=project_title, danmaku=danmaku,
-                          template=prompt_template)
+    prompt = build_prompt(
+        candidate, segments, project_title=project_title, danmaku=danmaku, template=prompt_template
+    )
     system = "你是中文视频编辑，写投稿文案。只输出 JSON，不解释。"
     last_error: Exception | None = None
     attempt = 0

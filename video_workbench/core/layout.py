@@ -44,8 +44,18 @@ SUBDIRS = ("frames", "clips", "export", "logs")
 
 # 侧车文件里必须有这些键，少一个就不算完整（P1-03 验收项）。
 SIDECAR_KEYS = (
-    "bvid", "aid", "cid", "page", "title", "up", "collection",
-    "quality_requested", "quality_actual", "url", "downloaded_at", "tool_version",
+    "bvid",
+    "aid",
+    "cid",
+    "page",
+    "title",
+    "up",
+    "collection",
+    "quality_requested",
+    "quality_actual",
+    "url",
+    "downloaded_at",
+    "tool_version",
 )
 
 
@@ -210,9 +220,7 @@ def find_source(
     hits = [
         item
         for item in sorted(home.iterdir())
-        if item.is_file()
-        and item.suffix.lower() in SOURCE_EXTS
-        and not item.name.startswith(".")
+        if item.is_file() and item.suffix.lower() in SOURCE_EXTS and not item.name.startswith(".")
     ]
     if stem:
         exact = [item for item in hits if item.stem == stem]

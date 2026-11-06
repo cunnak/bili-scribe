@@ -50,6 +50,7 @@ def normalize_aspect(aspect: str) -> str:
         raise ValueError(f"未知画幅：{aspect}（写 16x9 / 9x16，或 16:9 / 9:16 都行）")
     return hit
 
+
 CRF = 18
 PRESET = "medium"
 AUDIO_KBPS = 192
@@ -218,9 +219,14 @@ def build_args(
 
     args = [
         ffmpeg_bin,
-        "-hide_banner", "-loglevel", "error", "-y",
-        "-ss", f"{start / 1000:.3f}",
-        "-i", src,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start / 1000:.3f}",
+        "-i",
+        src,
     ]
     next_input = 1
     if subtitle_mode == "soft":
@@ -284,9 +290,20 @@ def build_args(
 
     if mode == "precise":
         args += [
-            "-c:v", "libx264", "-crf", str(int(crf)), "-preset", preset,
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-ar", str(SAMPLE_RATE),
+            "-c:v",
+            "libx264",
+            "-crf",
+            str(int(crf)),
+            "-preset",
+            preset,
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            f"{AUDIO_KBPS}k",
+            "-ar",
+            str(SAMPLE_RATE),
         ]
         if subtitle_mode == "soft":
             args += ["-c:s", "mov_text", "-metadata:s:s:0", "language=chi"]
@@ -295,9 +312,20 @@ def build_args(
         # 视频/音频是 copy；带滤镜时 copy 会失败，所以竖屏/硬字幕强制走重编码。
         if graph or vf or audio_chains or vfade:
             args += [
-                "-c:v", "libx264", "-crf", str(int(crf)), "-preset", preset,
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-ar", str(SAMPLE_RATE),
+                "-c:v",
+                "libx264",
+                "-crf",
+                str(int(crf)),
+                "-preset",
+                preset,
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                f"{AUDIO_KBPS}k",
+                "-ar",
+                str(SAMPLE_RATE),
             ]
             if subtitle_mode == "soft":
                 args += ["-c:s", "mov_text", "-metadata:s:s:0", "language=chi"]
@@ -327,7 +355,5 @@ def offset_note(mode: str, delta_ms: int) -> str:
     if delta_ms == 0:
         return "快速模式：这次切点正好落在关键帧上，时长与要求一致"
     if delta_ms > 0:
-        return (
-            f"快速模式：成片比要求长 {delta_ms} ms（切点吸到关键帧，开头会多带一点）"
-        )
+        return f"快速模式：成片比要求长 {delta_ms} ms（切点吸到关键帧，开头会多带一点）"
     return f"快速模式：成片比要求短 {-delta_ms} ms（片尾吸到关键帧）"

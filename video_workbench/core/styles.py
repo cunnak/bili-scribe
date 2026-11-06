@@ -250,7 +250,9 @@ def _check_face(face: dict[str, Any], label: str, problems: list[str]) -> None:
         problems.append(f"{label}字间距要在 -20–20，现在是 {spacing}")
 
 
-def validate(style: dict[str, Any], *, allow_warnings: bool = True) -> tuple[dict[str, Any], list[str]]:
+def validate(
+    style: dict[str, Any], *, allow_warnings: bool = True
+) -> tuple[dict[str, Any], list[str]]:
     """返回 ``(样式, 警告)``；硬错误抛 ``VALIDATION`` 并一次列全。
 
     只返回第一条错会让人改一轮跑一轮；这里把所有问题攒起来一起说。
@@ -281,16 +283,21 @@ def validate(style: dict[str, Any], *, allow_warnings: bool = True) -> tuple[dic
     alpha = float(rnd.get("bg_alpha") or 0)
     if not 0.0 <= alpha <= 1.0:
         problems.append(f"背景透明度要在 0–1，现在是 {alpha}")
-    for key, label, low in (("padding_h", "水平内边距", 0), ("padding_v", "垂直内边距", 0),
-                            ("margin_bottom", "底边距", 0)):
+    for key, label, low in (
+        ("padding_h", "水平内边距", 0),
+        ("padding_v", "垂直内边距", 0),
+        ("margin_bottom", "底边距", 0),
+    ):
         value = int(rnd.get(key) or 0)
         if value < low or value > 400:
             problems.append(f"{label}要在 0–400，现在是 {value}")
 
     prev = style.get("preview") or {}
-    for key, allowed, label in (("text_length", TEXT_LENGTHS, "预览文本长度"),
-                                ("orientation", ORIENTATIONS, "预览画幅"),
-                                ("background", BACKGROUNDS, "预览背景")):
+    for key, allowed, label in (
+        ("text_length", TEXT_LENGTHS, "预览文本长度"),
+        ("orientation", ORIENTATIONS, "预览画幅"),
+        ("background", BACKGROUNDS, "预览背景"),
+    ):
         value = str(prev.get(key) or "")
         if value not in allowed:
             problems.append(f"{label}只能是 {' / '.join(allowed)}，现在是 {value!r}")
@@ -354,7 +361,7 @@ def to_ass_style(style: dict[str, Any], *, height: int = BASE_HEIGHT) -> dict[st
         return {
             "font": rnd["font"],
             "size": size,
-            "outline": pad_v,           # BorderStyle=3 时 Outline 就是框的扩边
+            "outline": pad_v,  # BorderStyle=3 时 Outline 就是框的扩边
             "margin_v": max(0, int(round(int(rnd["margin_bottom"]) * factor))),
             "primary": rnd["text_color"],
             "outline_color": rnd["bg_color"],
@@ -391,26 +398,29 @@ def canvas_size(style: dict[str, Any]) -> dict[str, int]:
     return {"width": 1280, "height": 720}
 
 
-def preview_segments(style: dict[str, Any], *, count: int = 3,
-                     texts: list[str] | None = None,
-                     total_ms: int = 3000) -> list[dict[str, Any]]:
+def preview_segments(
+    style: dict[str, Any], *, count: int = 3, texts: list[str] | None = None, total_ms: int = 3000
+) -> list[dict[str, Any]]:
     """造几条预览段。时间不影响静态预览，但 ASS 需要起止时间。"""
     length = str((style.get("preview") or {}).get("text_length") or "medium")
     body = texts or [sample_text(length) for _ in range(max(1, count))]
     step = max(200, int(total_ms / max(1, len(body))))
     out: list[dict[str, Any]] = []
     for index, text in enumerate(body):
-        out.append({
-            "id": f"p{index + 1}",
-            "start_ms": index * step,
-            "end_ms": min(total_ms, (index + 1) * step),
-            "text": text,
-        })
+        out.append(
+            {
+                "id": f"p{index + 1}",
+                "start_ms": index * step,
+                "end_ms": min(total_ms, (index + 1) * step),
+                "text": text,
+            }
+        )
     return out
 
 
-def preview_ass(style: dict[str, Any], *, height: int = BASE_HEIGHT,
-                texts: list[str] | None = None) -> str:
+def preview_ass(
+    style: dict[str, Any], *, height: int = BASE_HEIGHT, texts: list[str] | None = None
+) -> str:
     """预览用的完整 ASS 文本（可直接喂 ffmpeg 的 ``ass`` 滤镜）。"""
     conf = to_ass_style(style, height=height)
     segs = preview_segments(style, texts=texts)

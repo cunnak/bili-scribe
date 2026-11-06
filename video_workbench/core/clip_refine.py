@@ -34,9 +34,7 @@ from typing import Any, Callable, Sequence
 from video_workbench.app.errors import WBError
 from video_workbench.infra.jsonfix import parse_json
 
-PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_refine.md"
-)
+PROMPT_PATH = Path(__file__).resolve().parent.parent / "resources" / "prompts" / "clip_refine.md"
 
 #: 每个候选抽几帧。3 帧（头/中/尾）是性价比拐点：再多，模型也只是在看同一张幻灯片。
 FRAME_COUNT = 3
@@ -66,9 +64,7 @@ def load_prompt() -> str:
     try:
         return PROMPT_PATH.read_text(encoding="utf-8")
     except OSError as exc:  # pragma: no cover - 文件缺失属于装坏了
-        raise WBError(
-            "DEPENDENCY_MISSING", f"缺少提示词文件：{PROMPT_PATH.name}"
-        ) from exc
+        raise WBError("DEPENDENCY_MISSING", f"缺少提示词文件：{PROMPT_PATH.name}") from exc
 
 
 def stamp(ms: int) -> str:
@@ -171,14 +167,23 @@ def extract_audio_snippet(
         ffmpeg.run(
             [
                 ffmpeg_bin,
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-ss", f"{max(0, int(start_ms)) / 1000.0:.3f}",
-                "-t", f"{span:.3f}",
-                "-i", str(source),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{max(0, int(start_ms)) / 1000.0:.3f}",
+                "-t",
+                f"{span:.3f}",
+                "-i",
+                str(source),
                 "-vn",
-                "-ac", "1",
-                "-ar", str(AUDIO_SAMPLE_RATE),
-                "-f", "wav",
+                "-ac",
+                "1",
+                "-ar",
+                str(AUDIO_SAMPLE_RATE),
+                "-f",
+                "wav",
                 str(out),
             ],
             timeout=60,
@@ -402,20 +407,44 @@ def refine_candidates(
     rows = [dict(item) for item in (candidates or [])]
     notes: list[str] = []
     if not rows:
-        return {"candidates": [], "refined": 0, "failed": 0, "notes": notes,
-                "model": model, "audio": 0}
+        return {
+            "candidates": [],
+            "refined": 0,
+            "failed": 0,
+            "notes": notes,
+            "model": model,
+            "audio": 0,
+        }
     if client is None:
         notes.append("没配 vision 模型，跳过画面精析（分数仍按字幕与弹幕热度算）")
-        return {"candidates": rows, "refined": 0, "failed": 0, "notes": notes,
-                "model": "", "audio": 0}
+        return {
+            "candidates": rows,
+            "refined": 0,
+            "failed": 0,
+            "notes": notes,
+            "model": "",
+            "audio": 0,
+        }
     if not str(source_path or "").strip() or not Path(str(source_path)).is_file():
         notes.append("找不到源视频文件，跳过画面精析")
-        return {"candidates": rows, "refined": 0, "failed": 0, "notes": notes,
-                "model": model, "audio": 0}
+        return {
+            "candidates": rows,
+            "refined": 0,
+            "failed": 0,
+            "notes": notes,
+            "model": model,
+            "audio": 0,
+        }
     if ffmpeg is None or not getattr(ffmpeg, "available", False):
         notes.append("FFmpeg 不可用，抽不出画面，跳过精析")
-        return {"candidates": rows, "refined": 0, "failed": 0, "notes": notes,
-                "model": model, "audio": 0}
+        return {
+            "candidates": rows,
+            "refined": 0,
+            "failed": 0,
+            "notes": notes,
+            "model": model,
+            "audio": 0,
+        }
 
     root = Path(work_dir or ".") / "refine"
     picked = min(len(rows), max(1, int(topn)))
@@ -433,8 +462,12 @@ def refine_candidates(
         if on_progress:
             on_progress(f"精析第 {index + 1}/{picked} 个候选：{stamp(start)}–{stamp(end)}")
         frames = extract_frames(
-            ffmpeg, source_path,
-            start_ms=start, end_ms=end, out_dir=root, stem=stem,
+            ffmpeg,
+            source_path,
+            start_ms=start,
+            end_ms=end,
+            out_dir=root,
+            stem=stem,
         )
         images = [url for url in (data_url(path) for path in frames) if url]
         audio: dict[str, float] = {}

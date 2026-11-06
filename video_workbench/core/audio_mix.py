@@ -112,8 +112,7 @@ def build_audio_graph(
             )
         else:
             chains.append(
-                "[0:a][abgm]amix=inputs=2:duration=first:dropout_transition=0"
-                ":normalize=0[amix]"
+                "[0:a][abgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amix]"
             )
         label = "[amix]"
 
@@ -129,8 +128,15 @@ def build_audio_graph(
     return chains, "[aout]"
 
 
-def describe(*, bgm_name: str = "", bgm: bool = False, volume: Any = BGM_VOLUME,
-             duck: bool = True, fade_ms: Any = 0, span_ms: int = 0) -> str:
+def describe(
+    *,
+    bgm_name: str = "",
+    bgm: bool = False,
+    volume: Any = BGM_VOLUME,
+    duck: bool = True,
+    fade_ms: Any = 0,
+    span_ms: int = 0,
+) -> str:
     """给人看的一句说明，写进导出结果与界面，别让人猜"到底混没混进去"。"""
     bits: list[str] = []
     if bgm and bgm_name:

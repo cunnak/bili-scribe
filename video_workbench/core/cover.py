@@ -69,8 +69,14 @@ def copy_image(src: str | Path, dest: str | Path) -> Path:
     return target
 
 
-def grab_frame(ffmpeg: Any, source: str | Path, candidate: dict[str, Any], root: str | Path,
-               *, at_ms: int | None = None) -> dict[str, Any]:
+def grab_frame(
+    ffmpeg: Any,
+    source: str | Path,
+    candidate: dict[str, Any],
+    root: str | Path,
+    *,
+    at_ms: int | None = None,
+) -> dict[str, Any]:
     """抽帧写封面，返回 `{path, at_ms, bytes}`。
 
     `at_ms` 为空时用默认位置（起点 +1s）。抽帧失败由 ffmpeg 层抛 PROCESS_FAILED，
@@ -86,8 +92,9 @@ def grab_frame(ffmpeg: Any, source: str | Path, candidate: dict[str, Any], root:
     return {"path": str(dest), "at_ms": at, "bytes": dest.stat().st_size}
 
 
-def frames_for(ffmpeg: Any, source: str | Path, candidate: dict[str, Any], root: str | Path,
-               *, count: int = 4) -> dict[str, Any]:
+def frames_for(
+    ffmpeg: Any, source: str | Path, candidate: dict[str, Any], root: str | Path, *, count: int = 4
+) -> dict[str, Any]:
     """给界面一排可选帧：区间等分成 count 个候选点各抽一张。
 
     这是「换帧」最省事的做法——不用拖时间轴，直接看图挑。

@@ -182,9 +182,7 @@ def parse_collection(raw: str) -> dict[str, Any]:
 
 def _title_key(text: Any) -> str:
     """标题归一：去掉空白与标点后比较，避免「第 3 集：X」与「第3集:X」对不上。"""
-    return re.sub(
-        r"[\s\-_—·:：,，.。、\"'“”‘’()（）\[\]【】]+", "", str(text or "")
-    ).lower()
+    return re.sub(r"[\s\-_—·:：,，.。、\"'“”‘’()（）\[\]【】]+", "", str(text or "")).lower()
 
 
 def reconcile_collection(

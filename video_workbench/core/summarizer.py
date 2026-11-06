@@ -114,12 +114,10 @@ def _strict_hint(message: str) -> str:
     """
     if not _parity_strict():
         return message
-    return (f"{message} 对账模式（默认）不抢救坏 JSON；"
-            f"需要抢救请设 {PARITY_ENV}=0 后重试。")
+    return f"{message} 对账模式（默认）不抢救坏 JSON；需要抢救请设 {PARITY_ENV}=0 后重试。"
 
 
-def resolve_role(explicit: "str | None",
-                 fallback: "str | None" = None) -> tuple[str, str]:
+def resolve_role(explicit: "str | None", fallback: "str | None" = None) -> tuple[str, str]:
     """取总结角色的**唯一**去处。返回 ``(role_key, notice)``。
 
     优先级是「调用方这次显式传的 > 配置或历史存的 > 默认角色」，但两类来源的
@@ -149,8 +147,9 @@ def resolve_role(explicit: "str | None",
         role_obj = get_role(wanted)
     except UnknownRole as exc:
         if from_fallback and wanted in RETIRED_ROLES:
-            return DEFAULT_ROLE, (f"{exc}；本次按默认角色"
-                                  f"「{summary_pkg.role_label(DEFAULT_ROLE)}」")
+            return DEFAULT_ROLE, (
+                f"{exc}；本次按默认角色「{summary_pkg.role_label(DEFAULT_ROLE)}」"
+            )
         raise WBError("VALIDATION", str(exc)) from exc
     return role_obj.key, ""
 
@@ -170,11 +169,14 @@ def configured_role_issue(role_value: "str | None") -> tuple[str, str]:
     try:
         _key, notice = resolve_role("", value)
     except WBError as exc:
-        return value, (f"配置里的默认角色「{value}」不是可用角色：{exc.message}，"
-                       f"请改成下面列表里的一个")
+        return value, (
+            f"配置里的默认角色「{value}」不是可用角色：{exc.message}，请改成下面列表里的一个"
+        )
     if notice:
-        return value, (f"配置里的默认角色「{value}」已停用，"
-                       f"生成时会自动按「{summary_pkg.role_label(DEFAULT_ROLE)}」走")
+        return value, (
+            f"配置里的默认角色「{value}」已停用，"
+            f"生成时会自动按「{summary_pkg.role_label(DEFAULT_ROLE)}」走"
+        )
     return "", ""
 
 
@@ -269,8 +271,7 @@ class SummaryLLM:
                 self.notes.append("这个模型不认 JSON 模式，已退回普通请求")
                 sink("模型不支持 JSON 模式，改按普通请求重试")
                 self.calls += 1
-                text = self.client.chat(
-                    messages, temperature=temperature, max_tokens=max_tokens)
+                text = self.client.chat(messages, temperature=temperature, max_tokens=max_tokens)
             else:
                 raise
         if json_mode:
@@ -395,8 +396,10 @@ class SummaryLLM:
             return self._finalize(split, messages, sink, temperature, max_tokens)
         hint = ""
         if not tail.endswith("}"):
-            hint = ("（输出看起来被截断了——把「上下文与长素材」里的单次输出上限调大，"
-                    "或换一个更听话的模型）")
+            hint = (
+                "（输出看起来被截断了——把「上下文与长素材」里的单次输出上限调大，"
+                "或换一个更听话的模型）"
+            )
         # 直接抛 WBError：SummarizeError 只在自己这一层的 run() 里被翻译成错误码，
         # 合集总览走的是 core/overview.py 的另一条路，漏出去就成了「内部错误」。
         raise WBError("LLM_BAD_RESPONSE", f"模型连续两次都没有给出可解析的 JSON{hint}：{tail}")
@@ -439,8 +442,12 @@ class SummaryLLM:
             return ""
 
         timeline = self._timeline_reply(
-            messages, body, temperature, max_tokens,
-            _timeline_target(messages, self.duration_ms), sink
+            messages,
+            body,
+            temperature,
+            max_tokens,
+            _timeline_target(messages, self.duration_ms),
+            sink,
         )
         body["timeline"] = timeline
         return json.dumps(body, ensure_ascii=False)
@@ -458,24 +465,28 @@ class SummaryLLM:
         ]
         marks = (self.timeline_index or "").strip()
         if marks:
-            time_messages.append({
+            time_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "这是全片的时间轴索引（每 60 秒取一条，格式「时间 内容」），"
+                        "时间戳请从这些里面挑，覆盖到片尾：\n" + marks
+                    ),
+                }
+            )
+        time_messages.append(
+            {
                 "role": "user",
                 "content": (
-                    "这是全片的时间轴索引（每 60 秒取一条，格式「时间 内容」），"
-                    "时间戳请从这些里面挑，覆盖到片尾：\n" + marks
+                    "只输出时间线，一个 JSON 对象，形如 "
+                    '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
+                    f"{want}、每条不超过 30 字，覆盖全片的关键转折与结论，"
+                    "前后两条之间不要隔太久；"
+                    "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
+                    f"（时间线批次 {_short_nonce()}）"
                 ),
-            })
-        time_messages.append({
-            "role": "user",
-            "content": (
-                "只输出时间线，一个 JSON 对象，形如 "
-                '{"timeline": [{"t": "03:12", "text": "这里讲了什么"}]}。'
-                f"{want}、每条不超过 30 字，覆盖全片的关键转折与结论，"
-                "前后两条之间不要隔太久；"
-                "时间戳只能引用素材里真实出现过的。不要输出其它键，不要解释文字。"
-                f"（时间线批次 {_short_nonce()}）"
-            ),
-        })
+            }
+        )
         try:
             raw = self.client.chat(
                 time_messages,
@@ -505,9 +516,7 @@ class SummaryLLM:
         target = _timeline_target(messages, self.duration_ms)
         if target and len(rows) < max(6, int(target * 0.6)):
             sink(f"时间线只有 {len(rows)} 条，按 {target} 条补一轮")
-            extra = self._timeline_reply(
-                messages, data, temperature, max_tokens, target, sink
-            )
+            extra = self._timeline_reply(messages, data, temperature, max_tokens, target, sink)
             if len(extra) > len(rows):
                 data["timeline"] = extra
                 self.dense_timeline = extra
@@ -623,8 +632,8 @@ def build_bundle(
         up_name=str(project.get("up_name") or ""),
         up_mid=int(project.get("up_mid") or 0),
         # 项目表没有时长列，片长从字幕末条推（见 `_segment_end_ms`）。
-        duration=int(round(_segment_end_ms(segments) / 1000.0)) or int(
-            round(float(project.get("duration_sec") or 0))),
+        duration=int(round(_segment_end_ms(segments) / 1000.0))
+        or int(round(float(project.get("duration_sec") or 0))),
         tname=str(project.get("tname") or ""),
         tags=list(project.get("tags") or []),
         hot_replies=hot,
@@ -644,8 +653,9 @@ def _mmss(ms: int) -> str:
     return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
 
 
-def timeline_marks(segments: list[dict[str, Any]], *, step_ms: int = 60000,
-                   limit: int = 140) -> str:
+def timeline_marks(
+    segments: list[dict[str, Any]], *, step_ms: int = 60000, limit: int = 140
+) -> str:
     """把字幕压成「每 60 秒一条」的时间轴索引，给补写时间线那一步当锚点。
 
     没有这份索引，模型只能从分段摘要里看到开头十几分钟的时间戳，写出来的时间线
@@ -707,8 +717,9 @@ def _clean_dense(rows: list[Any]) -> list[dict[str, str]]:
         text = bs_summarizer._coerce_text(item.get("text") or item.get("content"))
         if not text:
             continue
-        out.append({"t": bs_summarizer._coerce_text(item.get("t") or item.get("time")),
-                    "text": text})
+        out.append(
+            {"t": bs_summarizer._coerce_text(item.get("t") or item.get("time")), "text": text}
+        )
     return out
 
 
@@ -738,8 +749,9 @@ def _apply_dense(summary: Any, llm: "SummaryLLM") -> Any:
     return summary
 
 
-def _attach_timeline(llm: "SummaryLLM", project: dict[str, Any],
-                     segments: list[dict[str, Any]]) -> None:
+def _attach_timeline(
+    llm: "SummaryLLM", project: dict[str, Any], segments: list[dict[str, Any]]
+) -> None:
     """把片长与全片索引接到适配器上（时间线密度靠它称重）。"""
     duration = _segment_end_ms(segments)
     if not duration:
@@ -885,8 +897,7 @@ def run(
     ``extra_prompt`` 覆盖配置里的 ``llm.extra_prompt``（默认关）。它按**请求**生效：
     只有归约那一段被包在开关里，预读不吃它（预读用的是 MAP_SYSTEM，与角色无关）。
     """
-    bundle = build_bundle(project, segments, danmaku=danmaku,
-                          platform_summary=platform_summary)
+    bundle = build_bundle(project, segments, danmaku=danmaku, platform_summary=platform_summary)
     llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
     key, notice = resolve_role(role, getattr(cfg.llm, "role", ""))
@@ -902,8 +913,7 @@ def run(
         # 复用（见 refine()）。缓存的是**笔记版**：body 已被换成分段笔记，素材原文不进来。
         # 传 cache 是为了跨任务复用——同一个视频重开成第二个项目时，这一整段预读直接命中
         # 磁盘、一次模型调用都不发。
-        material = bs_summarizer.prepare_material(
-            bundle, llm, cfg, progress=notify, cache=cache)
+        material = bs_summarizer.prepare_material(bundle, llm, cfg, progress=notify, cache=cache)
         note_bundle = copy.copy(bundle)
         note_bundle.body = material.body
         remember_prepared(task_key, RefineContext(bundle=note_bundle, material=material))
@@ -912,11 +922,12 @@ def run(
         # 上面的预读用的是 MAP_SYSTEM，与角色无关，不该被这个开关影响。
         with prompt_source.use_extra_prompt(extra_prompt_on(cfg, extra_prompt)):
             summary = bs_summarizer.summarize(
-                bundle, llm, cfg, progress=notify, role_key=role_obj.key,
-                prepared=material)
+                bundle, llm, cfg, progress=notify, role_key=role_obj.key, prepared=material
+            )
     except SummarizeError as exc:
-        raise WBError("LLM_BAD_RESPONSE",
-                      _strict_hint(f"模型没给出可用的总结 JSON：{exc}")) from exc
+        raise WBError(
+            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}")
+        ) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
 
@@ -968,9 +979,9 @@ def refine(
     bundle = build_bundle(project, segments, danmaku=danmaku)
     llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
-    key, notice = resolve_role(role,
-                               str(previous.get("role") or "")
-                               or getattr(cfg.llm, "role", ""))
+    key, notice = resolve_role(
+        role, str(previous.get("role") or "") or getattr(cfg.llm, "role", "")
+    )
     if notice:
         # 上一版很可能就是退役角色生成的（历史行里存着 standard）。这里不静默换：
         # 按默认角色重做，同时把「为什么换了角色」写进日志，用户看得见。
@@ -989,7 +1000,8 @@ def refine(
             work_bundle = context.bundle
         else:
             material = bs_summarizer.prepare_material(
-                bundle, llm, cfg, progress=notify, cache=cache)
+                bundle, llm, cfg, progress=notify, cache=cache
+            )
             work_bundle = copy.copy(bundle)
             work_bundle.body = material.body
             remember_prepared(task_key, RefineContext(bundle=work_bundle, material=material))
@@ -1008,8 +1020,9 @@ def refine(
                 ),
             )
     except SummarizeError as exc:
-        raise WBError("LLM_BAD_RESPONSE",
-                      _strict_hint(f"模型没给出可用的总结 JSON：{exc}")) from exc
+        raise WBError(
+            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}")
+        ) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
     # ① 同 run()：补密不受对账模式影响，dense 为空时逐字节原样返回。
@@ -1293,7 +1306,9 @@ def _timeline_target(messages, duration_ms: int = 0) -> int:
     最终那次 JSON 请求里常常只剩分段摘要，时间戳只覆盖开头十几分钟，按它算分母
     会得出"片长 13 分钟、20 条就够"的自洽假象——两小时视频因此永远只有 20 条。
     """
-    minutes = int(duration_ms) // 60000 if int(duration_ms or 0) > 0 else _estimate_minutes(messages)
+    minutes = (
+        int(duration_ms) // 60000 if int(duration_ms or 0) > 0 else _estimate_minutes(messages)
+    )
     if minutes < 10:
         return 0
     return max(20, min(60, int(round(minutes / 2.0))))

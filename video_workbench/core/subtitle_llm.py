@@ -26,9 +26,9 @@ from ..infra.llm import ChatClient, ChatError
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "resources" / "prompts" / "subtitle_optimize.md"
 DEFAULT_BATCH = 30
-MAX_GROWTH = 2.0   # 超过原文两倍＝模型在扩写，直接判失败
-MIN_RATIO = 0.25   # 掉到四分之一以下＝模型在丢内容
-MAX_CHARS = 240    # 单行超过这个长度基本是合并错了段
+MAX_GROWTH = 2.0  # 超过原文两倍＝模型在扩写，直接判失败
+MIN_RATIO = 0.25  # 掉到四分之一以下＝模型在丢内容
+MAX_CHARS = 240  # 单行超过这个长度基本是合并错了段
 
 Change = dict[str, Any]
 
@@ -44,17 +44,19 @@ def build_prompt(segments: Iterable[dict[str, Any]], template: str | None = None
     """把一批分段塞进模板。编号用真实的 segment id，回来才对得上。"""
     items = list(segments)
     lines = "\n".join(
-        f'{seg.get("id")}\t[{int(seg.get("start_ms") or 0)}-{int(seg.get("end_ms") or 0)}]\t{seg.get("text") or ""}'
+        f"{seg.get('id')}\t[{int(seg.get('start_ms') or 0)}-{int(seg.get('end_ms') or 0)}]\t{seg.get('text') or ''}"
         for seg in items
     )
     text = template if template is not None else load_prompt()
     return text.replace("$count", str(len(items))).replace("$lines", lines)
 
 
-def split_batches(segments: Iterable[dict[str, Any]], size: int = DEFAULT_BATCH) -> list[list[dict[str, Any]]]:
+def split_batches(
+    segments: Iterable[dict[str, Any]], size: int = DEFAULT_BATCH
+) -> list[list[dict[str, Any]]]:
     items = list(segments)
     step = max(1, int(size or DEFAULT_BATCH))
-    return [items[i:i + step] for i in range(0, len(items), step)]
+    return [items[i : i + step] for i in range(0, len(items), step)]
 
 
 # ------------------------------------------------------------------ 解析
@@ -75,7 +77,7 @@ def parse_reply(raw: str) -> dict[str, str]:
         start, end = text.find("["), text.rfind("]")
         if start == -1 or end <= start:
             raise ChatError("LLM_BAD_RESPONSE", "模型没有返回 JSON 数组", text[:300])
-        text = text[start:end + 1]
+        text = text[start : end + 1]
     try:
         data = json.loads(text)
     except ValueError as exc:
@@ -101,9 +103,15 @@ def check_batch(before: list[dict[str, Any]], after: dict[str, str]) -> list[str
     missing = [sid for sid in expected if sid not in after]
     extra = [sid for sid in after if sid not in set(expected)]
     if missing:
-        problems.append(f"缺少 {len(missing)} 行（{missing[:3]}…）" if len(missing) > 3 else f"缺少行：{missing}")
+        problems.append(
+            f"缺少 {len(missing)} 行（{missing[:3]}…）"
+            if len(missing) > 3
+            else f"缺少行：{missing}"
+        )
     if extra:
-        problems.append(f"多出 {len(extra)} 行（{extra[:3]}…）" if len(extra) > 3 else f"多出未知行：{extra}")
+        problems.append(
+            f"多出 {len(extra)} 行（{extra[:3]}…）" if len(extra) > 3 else f"多出未知行：{extra}"
+        )
 
     for seg in before:
         sid = str(seg.get("id"))
@@ -178,7 +186,9 @@ def optimize(
 
     for group in groups:
         if cancel is not None and cancel():
-            failed.append({"ids": [str(g.get("id")) for g in group], "code": "CANCELED", "message": "已取消"})
+            failed.append(
+                {"ids": [str(g.get("id")) for g in group], "code": "CANCELED", "message": "已取消"}
+            )
             break
         try:
             raw = client.chat(
@@ -225,7 +235,11 @@ def apply_changes(
     """把（被接受的）改动落到 segments 上。空文本＝并进前一段。"""
     from . import subtitles as sub
 
-    use = {str(c["id"]): str(c.get("after") or "") for c in changes if accepted_ids is None or str(c["id"]) in accepted_ids}
+    use = {
+        str(c["id"]): str(c.get("after") or "")
+        for c in changes
+        if accepted_ids is None or str(c["id"]) in accepted_ids
+    }
     current = sub.normalize(segments)
     if not use:
         return current
@@ -236,7 +250,10 @@ def apply_changes(
         if sid in use and use[sid] == "":
             # 被合并走的行：把它并进上一条（没有上一条就留给下一条，极端情况）
             if merged:
-                merged[-1] = {**merged[-1], "end_ms": int(seg.get("end_ms") or merged[-1]["end_ms"])}
+                merged[-1] = {
+                    **merged[-1],
+                    "end_ms": int(seg.get("end_ms") or merged[-1]["end_ms"]),
+                }
                 continue
             merged.append(seg)
             continue

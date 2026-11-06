@@ -118,7 +118,9 @@ class BiliGateway:
 
     # ------------------------------------------------------------- 调用
 
-    def get_data(self, url: str, params: dict[str, Any] | None = None, action: str = "请求") -> dict[str, Any]:
+    def get_data(
+        self, url: str, params: dict[str, Any] | None = None, action: str = "请求"
+    ) -> dict[str, Any]:
         try:
             data = self.client().get_data(url, params or {})
         except Exception as exc:  # noqa: BLE001

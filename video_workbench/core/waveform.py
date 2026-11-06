@@ -54,7 +54,7 @@ def bucketize(samples: array.array, buckets: int = BUCKETS) -> list[int]:
         start = index * size
         if start >= total:
             break
-        chunk = samples[start:min(total, start + size)]
+        chunk = samples[start : min(total, start + size)]
         peak = 0
         for value in chunk:
             magnitude = value if value >= 0 else -value
@@ -78,8 +78,9 @@ def _spawn(args: list[str], timeout: float) -> tuple[int, bytes, bytes]:
     """
     creation = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                creationflags=creation)
+        proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation
+        )
     except OSError as exc:
         raise RuntimeError(f"找不到 ffmpeg，无法生成波形：{exc}") from exc
     try:
@@ -91,29 +92,53 @@ def _spawn(args: list[str], timeout: float) -> tuple[int, bytes, bytes]:
     return proc.returncode, raw, err
 
 
-def read_peaks(media: str | Path, *, ffmpeg_bin: str | None = None,
-               buckets: int = BUCKETS, timeout: float = 300.0) -> list[int]:
+def read_peaks(
+    media: str | Path,
+    *,
+    ffmpeg_bin: str | None = None,
+    buckets: int = BUCKETS,
+    timeout: float = 300.0,
+) -> list[int]:
     """解码音频算峰值。ffmpeg 不在或解码失败时抛 ``RuntimeError``。"""
     binary = ffmpeg_bin or _ffmpeg_binary()
     if not binary:
         raise RuntimeError("找不到 ffmpeg，无法生成波形")
-    args = [binary, "-v", "error", "-i", str(media), "-vn", "-ac", "1",
-            "-ar", str(SAMPLE_RATE), "-f", "s16le", "-"]
+    args = [
+        binary,
+        "-v",
+        "error",
+        "-i",
+        str(media),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-f",
+        "s16le",
+        "-",
+    ]
     code, raw, err = _spawn(args, timeout)
     if code != 0:
         message = err.decode("utf-8", "replace").strip().splitlines()
         raise RuntimeError(f"ffmpeg 解码失败：{message[-1] if message else code}")
 
     samples = array.array("h")
-    samples.frombytes(raw[:len(raw) - (len(raw) % 2)])
+    samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
     if sys.byteorder == "big":  # pragma: no cover - Windows/Linux x86 都是小端
         samples.byteswap()
     return bucketize(samples, buckets)
 
 
-def get_peaks(root: str | Path, media: str | Path, *, ffmpeg_bin: str | None = None,
-              buckets: int = BUCKETS, refresh: bool = False,
-              duration_ms: int | None = None) -> dict[str, Any]:
+def get_peaks(
+    root: str | Path,
+    media: str | Path,
+    *,
+    ffmpeg_bin: str | None = None,
+    buckets: int = BUCKETS,
+    refresh: bool = False,
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
     """给界面用的入口：先看缓存，没有才解码。
 
     返回 ``{"peaks": [...], "buckets": 1200, "duration_ms": int, "cached": bool}``。
@@ -129,21 +154,38 @@ def get_peaks(root: str | Path, media: str | Path, *, ffmpeg_bin: str | None = N
             cached = json.loads(cache_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             cached = None
-        if (cached and cached.get("version") == CACHE_VERSION
-                and cached.get("buckets") == buckets
-                and cached.get("stat") == key
-                and isinstance(cached.get("peaks"), list)):
-            return {"peaks": cached["peaks"], "buckets": buckets,
-                    "duration_ms": int(cached.get("duration_ms") or 0), "cached": True}
+        if (
+            cached
+            and cached.get("version") == CACHE_VERSION
+            and cached.get("buckets") == buckets
+            and cached.get("stat") == key
+            and isinstance(cached.get("peaks"), list)
+        ):
+            return {
+                "peaks": cached["peaks"],
+                "buckets": buckets,
+                "duration_ms": int(cached.get("duration_ms") or 0),
+                "cached": True,
+            }
 
     try:
         peaks = read_peaks(media_path, ffmpeg_bin=ffmpeg_bin, buckets=buckets)
     except (RuntimeError, OSError) as exc:
-        return {"peaks": [], "buckets": buckets, "duration_ms": int(duration_ms or 0),
-                "cached": False, "error": str(exc)}
+        return {
+            "peaks": [],
+            "buckets": buckets,
+            "duration_ms": int(duration_ms or 0),
+            "cached": False,
+            "error": str(exc),
+        }
 
-    payload = {"version": CACHE_VERSION, "buckets": buckets, "stat": key,
-               "duration_ms": int(duration_ms or 0), "peaks": peaks}
+    payload = {
+        "version": CACHE_VERSION,
+        "buckets": buckets,
+        "stat": key,
+        "duration_ms": int(duration_ms or 0),
+        "peaks": peaks,
+    }
     try:
         root_path.mkdir(parents=True, exist_ok=True)
         tmp = cache_file.with_suffix(".tmp")
@@ -151,5 +193,9 @@ def get_peaks(root: str | Path, media: str | Path, *, ffmpeg_bin: str | None = N
         os.replace(tmp, cache_file)
     except OSError:  # pragma: no cover - 权限/磁盘问题
         pass
-    return {"peaks": peaks, "buckets": buckets, "duration_ms": int(duration_ms or 0),
-            "cached": False}
+    return {
+        "peaks": peaks,
+        "buckets": buckets,
+        "duration_ms": int(duration_ms or 0),
+        "cached": False,
+    }

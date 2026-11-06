@@ -54,7 +54,10 @@ def webview2_version() -> str:
     except Exception:  # pragma: no cover - 非 Windows
         return ""
     candidates = [
-        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}",
+        ),
         (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
         (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
     ]
@@ -66,8 +69,10 @@ def webview2_version() -> str:
                     return str(value)
         except OSError:
             continue
-    for base in (r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
-                 r"C:\Program Files\Microsoft\EdgeWebView\Application"):
+    for base in (
+        r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+        r"C:\Program Files\Microsoft\EdgeWebView\Application",
+    ):
         folder = Path(base)
         if folder.is_dir():
             versions = sorted((p.name for p in folder.iterdir() if p.is_dir()), reverse=True)
@@ -102,8 +107,14 @@ def model_state(cfg: Any) -> dict[str, Any]:
         "name": want,
         "downloaded": bool(row and row.get("downloaded")),
         "bytes": int((row or {}).get("bytes") or 0),
-        "models": [{"name": item.get("name"), "downloaded": bool(item.get("downloaded")),
-                    "bytes": int(item.get("bytes") or 0)} for item in rows],
+        "models": [
+            {
+                "name": item.get("name"),
+                "downloaded": bool(item.get("downloaded")),
+                "bytes": int(item.get("bytes") or 0),
+            }
+            for item in rows
+        ],
     }
 
 
@@ -141,10 +152,23 @@ def llm_state(cfg: Any) -> dict[str, Any]:
 # ============================================================ 汇总
 
 
-def _step(step_id: str, title: str, status: str, detail: str, *, hint: str = "",
-          action: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {"id": step_id, "title": title, "status": status, "detail": detail,
-            "hint": hint, "action": action}
+def _step(
+    step_id: str,
+    title: str,
+    status: str,
+    detail: str,
+    *,
+    hint: str = "",
+    action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": step_id,
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "hint": hint,
+        "action": action,
+    }
 
 
 def report(*, cfg: Any, gateway: Any, command_line: str = "") -> dict[str, Any]:
@@ -156,58 +180,91 @@ def report(*, cfg: Any, gateway: Any, command_line: str = "") -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
 
     version = webview2_version()
-    steps.append(_step(
-        "webview2", "窗口运行库（WebView2）",
-        "ok" if version else "missing",
-        f"已装 WebView2 {version}" if version else "没找到 WebView2 运行库",
-        hint="" if version else "不装它窗口是白的。装完重启本程序即可，设置不用动。",
-        action=None if version else {"kind": "url", "url": WEBVIEW2_URL, "label": "去下载"},
-    ))
+    steps.append(
+        _step(
+            "webview2",
+            "窗口运行库（WebView2）",
+            "ok" if version else "missing",
+            f"已装 WebView2 {version}" if version else "没找到 WebView2 运行库",
+            hint="" if version else "不装它窗口是白的。装完重启本程序即可，设置不用动。",
+            action=None if version else {"kind": "url", "url": WEBVIEW2_URL, "label": "去下载"},
+        )
+    )
 
     ffmpeg = ffmpeg_path(cfg)
-    steps.append(_step(
-        "ffmpeg", "FFmpeg",
-        "ok" if ffmpeg else "missing",
-        ffmpeg or "PATH 里没有 ffmpeg，配置里也没指目录",
-        hint="" if ffmpeg else "下载解压后，在「设置 · 素材与缓存」里把目录指到 bin 文件夹。"
-                              "我们不随包分发 FFmpeg（许可与体积），只调用你本机这一份。",
-        action=None if ffmpeg else {"kind": "url", "url": FFMPEG_URL, "label": "去下载"},
-    ))
+    steps.append(
+        _step(
+            "ffmpeg",
+            "FFmpeg",
+            "ok" if ffmpeg else "missing",
+            ffmpeg or "PATH 里没有 ffmpeg，配置里也没指目录",
+            hint=""
+            if ffmpeg
+            else "下载解压后，在「设置 · 素材与缓存」里把目录指到 bin 文件夹。"
+            "我们不随包分发 FFmpeg（许可与体积），只调用你本机这一份。",
+            action=None if ffmpeg else {"kind": "url", "url": FFMPEG_URL, "label": "去下载"},
+        )
+    )
 
     model = model_state(cfg)
-    size_text = f"{model['bytes'] / (1024 ** 3):.1f} GB" if model["bytes"] else "约 1.6 GB"
-    steps.append(_step(
-        "model", "语音模型",
-        "ok" if model["downloaded"] else "todo",
-        f"{model['name']} 已就绪" if model["downloaded"] else f"{model['name']} 还没下（{size_text}）",
-        hint="" if model["downloaded"] else "下载在后台跑，可以先去别的页面。下完不用重启。",
-        action=None if model["downloaded"] else {
-            "kind": "rpc", "method": "transcribe.model.download",
-            "params": {"name": model["name"]}, "label": "开始下载",
-        },
-    ))
+    size_text = f"{model['bytes'] / (1024**3):.1f} GB" if model["bytes"] else "约 1.6 GB"
+    steps.append(
+        _step(
+            "model",
+            "语音模型",
+            "ok" if model["downloaded"] else "todo",
+            f"{model['name']} 已就绪"
+            if model["downloaded"]
+            else f"{model['name']} 还没下（{size_text}）",
+            hint="" if model["downloaded"] else "下载在后台跑，可以先去别的页面。下完不用重启。",
+            action=None
+            if model["downloaded"]
+            else {
+                "kind": "rpc",
+                "method": "transcribe.model.download",
+                "params": {"name": model["name"]},
+                "label": "开始下载",
+            },
+        )
+    )
 
     bili = bili_state(gateway)
-    steps.append(_step(
-        "bili", "B 站登录",
-        "ok" if bili["logged_in"] else "missing",
-        (f"已登录{'：' + bili['who'] if bili['who'] else ''}") if bili["logged_in"] else "没有可用的登录态",
-        hint="" if bili["logged_in"] else
-        "我们是复用 bili-scribe 的登录态（同一台机器上登录一次就行）。"
-        "没登录也能用：把本地视频拖进素材库即可。",
-        action=None if bili["logged_in"] else {"kind": "note", "label": "知道了"},
-    ))
+    steps.append(
+        _step(
+            "bili",
+            "B 站登录",
+            "ok" if bili["logged_in"] else "missing",
+            (f"已登录{'：' + bili['who'] if bili['who'] else ''}")
+            if bili["logged_in"]
+            else "没有可用的登录态",
+            hint=""
+            if bili["logged_in"]
+            else "我们是复用 bili-scribe 的登录态（同一台机器上登录一次就行）。"
+            "没登录也能用：把本地视频拖进素材库即可。",
+            action=None if bili["logged_in"] else {"kind": "note", "label": "知道了"},
+        )
+    )
 
     llm = llm_state(cfg)
-    steps.append(_step(
-        "llm", "大模型",
-        "ok" if llm["configured"] else "todo",
-        f"{llm['model']} · key 已配置" if llm["configured"] else "还没填 API key",
-        hint="" if llm["configured"] else "不填也能用：总结/翻译/切片提示会退回规则兜底，只是质量差一截。",
-        action=None if llm["configured"] else {
-            "kind": "route", "route": "settings", "params": {"section": "llm"}, "label": "去填写",
-        },
-    ))
+    steps.append(
+        _step(
+            "llm",
+            "大模型",
+            "ok" if llm["configured"] else "todo",
+            f"{llm['model']} · key 已配置" if llm["configured"] else "还没填 API key",
+            hint=""
+            if llm["configured"]
+            else "不填也能用：总结/翻译/切片提示会退回规则兜底，只是质量差一截。",
+            action=None
+            if llm["configured"]
+            else {
+                "kind": "route",
+                "route": "settings",
+                "params": {"section": "llm"},
+                "label": "去填写",
+            },
+        )
+    )
 
     ok_count = sum(1 for item in steps if item["status"] == "ok")
     missing = [item["id"] for item in steps if item["status"] == "missing"]
@@ -226,5 +283,5 @@ def report(*, cfg: Any, gateway: Any, command_line: str = "") -> dict[str, Any]:
         "done": bool(getattr(getattr(cfg, "ui", None), "onboarded", False)),
         "command_line": command_line,
         "platform": f"{sys.platform} / python {sys.version.split()[0]}"
-                    + ("（打包版）" if getattr(sys, "frozen", False) else "（源码运行）"),
+        + ("（打包版）" if getattr(sys, "frozen", False) else "（源码运行）"),
     }

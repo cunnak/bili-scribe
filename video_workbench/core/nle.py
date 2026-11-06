@@ -496,9 +496,7 @@ def write_jianying(
     content_path.write_text(
         json.dumps(content, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
-    meta_path.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return {
         "dir": str(folder),
         "files": [str(content_path), str(meta_path)],
@@ -560,9 +558,7 @@ def otio_document(
     }
     track = {
         "OTIO_SCHEMA": "Track.1",
-        "metadata": {
-            "video_workbench": {"width": int(width), "height": int(height)}
-        },
+        "metadata": {"video_workbench": {"width": int(width), "height": int(height)}},
         "name": "V1",
         "source_range": None,
         "effects": [],
@@ -599,9 +595,7 @@ def otio_document(
 def write_otio(path: Path, doc: dict[str, Any]) -> dict[str, Any]:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"path": str(path), "bytes": path.stat().st_size}
 
 

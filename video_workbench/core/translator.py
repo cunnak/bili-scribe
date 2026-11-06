@@ -33,9 +33,9 @@ from ..infra.llm import ChatClient, ChatError
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "resources" / "prompts" / "translate.md"
 
 DEFAULT_BATCH = 10
-CONTEXT_WINDOW = 2      # ±2 条：方案书指定值。再多上下文会稀释小模型，更少会丢指代
-MAX_MISSING = 0.2       # 缺行超过两成就整批判失败：宁可重跑，不要一份半翻译
-MIN_TARGET = 2          # 少于 2 个字符基本是"翻译失败回了个标点"
+CONTEXT_WINDOW = 2  # ±2 条：方案书指定值。再多上下文会稀释小模型，更少会丢指代
+MAX_MISSING = 0.2  # 缺行超过两成就整批判失败：宁可重跑，不要一份半翻译
+MIN_TARGET = 2  # 少于 2 个字符基本是"翻译失败回了个标点"
 
 # 语言码 → 中文提示名（进 prompt）与显示名（进界面）。
 LANG_NAMES: dict[str, str] = {
@@ -118,7 +118,7 @@ def parse_glossary(entries: Iterable[Any] | None) -> list[tuple[str, str]]:
             src, dst = parts[0].strip(), parts[1].strip()
         if not src or not dst or src == dst:
             continue
-        if src in seen:          # 后写的覆盖先写的：取最后一次
+        if src in seen:  # 后写的覆盖先写的：取最后一次
             pairs = [p for p in pairs if p[0] != src]
         seen.add(src)
         pairs.append((src, dst))
@@ -152,9 +152,9 @@ def load_prompt() -> str:
 
 def _line(seg: dict[str, Any]) -> str:
     return (
-        f'{seg.get("id")}\t'
-        f'[{int(seg.get("start_ms") or 0)}-{int(seg.get("end_ms") or 0)}]\t'
-        f'{seg.get("text") or ""}'
+        f"{seg.get('id')}\t"
+        f"[{int(seg.get('start_ms') or 0)}-{int(seg.get('end_ms') or 0)}]\t"
+        f"{seg.get('text') or ''}"
     )
 
 
@@ -174,7 +174,7 @@ def build_prompt(
     text = template if template is not None else load_prompt()
     first = context.index(batch[0]) if context and batch[0] in context else -1
     before = context[:first] if first > 0 else []
-    after = context[first + len(batch):] if first >= 0 else []
+    after = context[first + len(batch) :] if first >= 0 else []
     before = before[-CONTEXT_WINDOW:]
     after = after[:CONTEXT_WINDOW]
     return (
@@ -186,10 +186,12 @@ def build_prompt(
     )
 
 
-def split_batches(segments: Iterable[dict[str, Any]], size: int = DEFAULT_BATCH) -> list[list[dict[str, Any]]]:
+def split_batches(
+    segments: Iterable[dict[str, Any]], size: int = DEFAULT_BATCH
+) -> list[list[dict[str, Any]]]:
     items = list(segments)
     step = max(1, int(size or DEFAULT_BATCH))
-    return [items[i:i + step] for i in range(0, len(items), step)]
+    return [items[i : i + step] for i in range(0, len(items), step)]
 
 
 # ------------------------------------------------------------------ 解析与校验
@@ -207,7 +209,7 @@ def parse_reply(raw: str) -> dict[str, str]:
         start, end = text.find("["), text.rfind("]")
         if start == -1 or end <= start:
             raise ChatError("LLM_BAD_RESPONSE", "模型没有返回 JSON 数组", text[:300])
-        text = text[start:end + 1]
+        text = text[start : end + 1]
     try:
         data = json.loads(text)
     except ValueError as exc:
@@ -241,8 +243,9 @@ def check_batch(batch: list[dict[str, Any]], after: dict[str, str]) -> list[str]
     expected = [str(seg.get("id")) for seg in batch]
     missing = [sid for sid in expected if sid not in after]
     if missing and len(missing) > len(expected) * MAX_MISSING:
-        problems.append(f"漏了 {len(missing)} 行（{missing[:3]}…）" if len(missing) > 3
-                        else f"漏行：{missing}")
+        problems.append(
+            f"漏了 {len(missing)} 行（{missing[:3]}…）" if len(missing) > 3 else f"漏行：{missing}"
+        )
     for seg in batch:
         sid = str(seg.get("id"))
         got = after.get(sid)
@@ -305,11 +308,14 @@ def translate(
 
     for group in groups:
         if cancel is not None and cancel():
-            failed.append({"ids": [str(g.get("id")) for g in group], "code": "CANCELED", "message": "已取消"})
+            failed.append(
+                {"ids": [str(g.get("id")) for g in group], "code": "CANCELED", "message": "已取消"}
+            )
             break
         try:
-            prompt = build_prompt(group, target=target, context=items,
-                                  glossary=pairs, template=template)
+            prompt = build_prompt(
+                group, target=target, context=items, glossary=pairs, template=template
+            )
             raw = client.chat(
                 [
                     {"role": "system", "content": "你只输出 JSON 数组，不输出任何解释。"},
@@ -330,12 +336,14 @@ def translate(
                 fresh.add(sid)
         except ChatError as exc:
             # 一段/一批失败不碰别的段：已有译文保持，界面给重试入口
-            failed.append({
-                "ids": [str(g.get("id")) for g in group],
-                "code": exc.code,
-                "message": getattr(exc, "message", str(exc)),
-                "detail": getattr(exc, "detail", "")[:300],
-            })
+            failed.append(
+                {
+                    "ids": [str(g.get("id")) for g in group],
+                    "code": exc.code,
+                    "message": getattr(exc, "message", str(exc)),
+                    "detail": getattr(exc, "detail", "")[:300],
+                }
+            )
         done += 1
         if on_progress is not None:
             on_progress(done, len(groups))
@@ -346,7 +354,8 @@ def translate(
     #   （库里还留着上次的译文，一加就是 19）。
     # - ``filled``＝全量里有译文的段数，界面显示"已译 19/19"要用它。
     translated = sum(
-        1 for seg in items
+        1
+        for seg in items
         if str(seg.get("id")) in fresh and str(seg.get("translated_text") or "").strip()
     )
     filled = sum(1 for seg in items if str(seg.get("translated_text") or "").strip())
@@ -397,13 +406,15 @@ def merge_bilingual(
         lines = bilingual_lines(seg, mode)
         if not lines:
             continue
-        out.append({
-            "id": str(seg.get("id")),
-            "start_ms": int(seg.get("start_ms") or 0),
-            "end_ms": int(seg.get("end_ms") or 0),
-            "text": "\n".join(lines),
-            "lines": lines,
-            "source_text": str(seg.get("text") or ""),
-            "translated_text": str(seg.get("translated_text") or ""),
-        })
+        out.append(
+            {
+                "id": str(seg.get("id")),
+                "start_ms": int(seg.get("start_ms") or 0),
+                "end_ms": int(seg.get("end_ms") or 0),
+                "text": "\n".join(lines),
+                "lines": lines,
+                "source_text": str(seg.get("text") or ""),
+                "translated_text": str(seg.get("translated_text") or ""),
+            }
+        )
     return out

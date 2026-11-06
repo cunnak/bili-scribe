@@ -22,7 +22,7 @@ from typing import Any, Iterable
 MAX_CHARS_PER_LINE = 22
 MAX_SEGMENT_MS = 12_000
 MIN_SEGMENT_MS = 400
-GAP_WARN_MS = 30      # 相邻段之间的小缝不报，人耳听不出来
+GAP_WARN_MS = 30  # 相邻段之间的小缝不报，人耳听不出来
 OVERLAP_WARN_MS = 50  # 重叠超过这个值基本是编辑事故
 
 
@@ -53,8 +53,7 @@ def normalize(segments: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def window(segments: list[dict[str, Any]], start_ms: int,
-            end_ms: int = 0) -> list[dict[str, Any]]:
+def window(segments: list[dict[str, Any]], start_ms: int, end_ms: int = 0) -> list[dict[str, Any]]:
     """裁出源视频 ``[start_ms, end_ms]`` 这段的字幕，并把时间平移成以 0 起算。
 
     切片烧录用。整批平移**不能**复用 `shift()`：那个函数为了不出负数时间码，会把
@@ -115,8 +114,9 @@ def update_text(segments: list[dict[str, Any]], seg_id: str, text: str) -> list[
     return out
 
 
-def shift(segments: list[dict[str, Any]], offset_ms: int,
-          ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
+def shift(
+    segments: list[dict[str, Any]], offset_ms: int, ids: Iterable[str] | None = None
+) -> list[dict[str, Any]]:
     """整体（或选中若干段）平移时间。
 
     允许平移出负数吗？不允许——负数时间码在 SRT 里是非法的，很多播放器会直接
@@ -158,7 +158,9 @@ def split(segments: list[dict[str, Any]], seg_id: str, at_ms: int) -> list[dict[
     if words:
         # 切点落在词中间时，按"最近词边界"落刀：找第一个开始时间 ≥ at 的词，
         # 它之前的都归前段。这样不会出现"前段吞掉整句、后段空着"。
-        cut_index = next((i for i, w in enumerate(words) if int(w.get("start_ms") or 0) >= at), None)
+        cut_index = next(
+            (i for i, w in enumerate(words) if int(w.get("start_ms") or 0) >= at), None
+        )
         if cut_index in (None, 0):
             # at 落在最后一个词里（或第一个词之前）：把这个词按字符比例拆开
             target = 0 if cut_index == 0 else len(words) - 1
@@ -171,7 +173,9 @@ def split(segments: list[dict[str, Any]], seg_id: str, at_ms: int) -> list[dict[
                 cut = min(len(text), cut + 1)
             head = dict(word, text=text[:cut], end_ms=at)
             tail = dict(word, text=text[cut:], start_ms=at)
-            words = words[:target] + [head] + ([tail] if cut < len(text) else []) + words[target + 1:]
+            words = (
+                words[:target] + [head] + ([tail] if cut < len(text) else []) + words[target + 1 :]
+            )
             cut_index = target + 1
         before, after = words[:cut_index], words[cut_index:]
         left_text = "".join(str(w.get("text") or "") for w in before).strip()
@@ -189,11 +193,21 @@ def split(segments: list[dict[str, Any]], seg_id: str, at_ms: int) -> list[dict[
     if not left_text or not right_text:
         raise ValueError("切点落在空白处，切出来会有一半是空句")
 
-    left = {"id": seg["id"], "start_ms": seg["start_ms"], "end_ms": max(seg["start_ms"] + 1, left_end),
-            "text": left_text, "words": before}
-    right = {"id": f"{seg['id']}b", "start_ms": min(max(seg["start_ms"] + 1, right_start), seg["end_ms"] - 1),
-             "end_ms": seg["end_ms"], "text": right_text, "words": after}
-    out[index:index + 1] = [left, right]
+    left = {
+        "id": seg["id"],
+        "start_ms": seg["start_ms"],
+        "end_ms": max(seg["start_ms"] + 1, left_end),
+        "text": left_text,
+        "words": before,
+    }
+    right = {
+        "id": f"{seg['id']}b",
+        "start_ms": min(max(seg["start_ms"] + 1, right_start), seg["end_ms"] - 1),
+        "end_ms": seg["end_ms"],
+        "text": right_text,
+        "words": after,
+    }
+    out[index : index + 1] = [left, right]
     return renumber(normalize(out))
 
 
@@ -211,7 +225,7 @@ def merge(segments: list[dict[str, Any]], ids: Iterable[str]) -> list[dict[str, 
     if indexes[-1] - indexes[0] != len(indexes) - 1:
         raise ValueError("只能合并相邻的段")
 
-    block = out[indexes[0]:indexes[-1] + 1]
+    block = out[indexes[0] : indexes[-1] + 1]
     words: list[dict[str, Any]] = []
     pieces: list[str] = []
     for seg in block:
@@ -226,13 +240,19 @@ def merge(segments: list[dict[str, Any]], ids: Iterable[str]) -> list[dict[str, 
         "text": _join_text(pieces),
         "words": words,
     }
-    out[indexes[0]:indexes[-1] + 1] = [merged]
+    out[indexes[0] : indexes[-1] + 1] = [merged]
     return renumber(normalize(out))
 
 
-def replace_text(segments: list[dict[str, Any]], pattern: str, replacement: str,
-                 *, regex: bool = False, ids: Iterable[str] | None = None,
-                 case_sensitive: bool = True) -> tuple[list[dict[str, Any]], int]:
+def replace_text(
+    segments: list[dict[str, Any]],
+    pattern: str,
+    replacement: str,
+    *,
+    regex: bool = False,
+    ids: Iterable[str] | None = None,
+    case_sensitive: bool = True,
+) -> tuple[list[dict[str, Any]], int]:
     """批量替换，返回 (新段表, 命中条数)。
 
     没有命中就原样返回，且**不改**任何东西——否则一次误操作也会把整份字幕重排。
@@ -288,20 +308,33 @@ def qc(segments: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         if seg["end_ms"] <= seg["start_ms"]:
             issues.append(_issue("negative", "error", [seg["id"]], "结束时间不大于开始时间"))
         elif span < MIN_SEGMENT_MS:
-            issues.append(_issue("too_short", "warn", [seg["id"]], f"时长只有 {span}ms，一眼看不清"))
+            issues.append(
+                _issue("too_short", "warn", [seg["id"]], f"时长只有 {span}ms，一眼看不清")
+            )
         elif span > MAX_SEGMENT_MS:
-            issues.append(_issue("too_long", "warn", [seg["id"]], f"时长 {span / 1000:.1f}s，建议分割"))
+            issues.append(
+                _issue("too_long", "warn", [seg["id"]], f"时长 {span / 1000:.1f}s，建议分割")
+            )
         if len(text) > MAX_CHARS_PER_LINE * 2:
-            issues.append(_issue("too_many_chars", "warn", [seg["id"]], f"{len(text)} 字，一行放不下"))
+            issues.append(
+                _issue("too_many_chars", "warn", [seg["id"]], f"{len(text)} 字，一行放不下")
+            )
         if index:
             prev = items[index - 1]
             gap = seg["start_ms"] - prev["end_ms"]
             if gap < -OVERLAP_WARN_MS:
-                issues.append(_issue("overlap", "error", [prev["id"], seg["id"]],
-                                     f"与上一条重叠 {-gap}ms"))
+                issues.append(
+                    _issue("overlap", "error", [prev["id"], seg["id"]], f"与上一条重叠 {-gap}ms")
+                )
             elif gap > 60_000:
-                issues.append(_issue("big_gap", "info", [prev["id"], seg["id"]],
-                                     f"中间空了 {gap / 1000:.0f}s，可能有漏句"))
+                issues.append(
+                    _issue(
+                        "big_gap",
+                        "info",
+                        [prev["id"], seg["id"]],
+                        f"中间空了 {gap / 1000:.0f}s，可能有漏句",
+                    )
+                )
     return issues
 
 
@@ -404,7 +437,7 @@ def ass_color_alpha(value: Any, fallback: str = "#FFFFFF", opacity: float = 0.0)
     if len(text) != 6:
         text = str(fallback).lstrip("#")
     try:
-        r, g, b = (int(text[i:i + 2], 16) for i in (0, 2, 4))
+        r, g, b = (int(text[i : i + 2], 16) for i in (0, 2, 4))
     except ValueError:
         r, g, b = 255, 255, 255
     alpha = max(0.0, min(1.0, float(opacity if opacity == opacity else 0.0)))
@@ -437,30 +470,36 @@ def style_to_ass(style: dict[str, Any] | None) -> dict[str, Any]:
     mode = str(src.get("mode") or "").strip().lower()
     if rnd and (mode == "rounded" or face is None):
         # 圆角条：libass 没有圆角，用 BorderStyle=3 的实心框近似（框色 = OutlineColour）
-        conf.update({
-            "font": rnd.get("font") or conf["font"],
-            "size": rnd.get("size") or conf["size"],
-            "outline": rnd.get("padding_v") or 0,
-            "margin_v": rnd.get("margin_bottom") or conf["margin_v"],
-            "primary": rnd.get("text_color") or conf["primary"],
-            "outline_color": rnd.get("bg_color") or conf["outline_color"],
-            "shadow": 0,
-            "bold": False,
-            "border_style": 3,
-            "spacing": rnd.get("letter_spacing") or 0,
-            "back_alpha": round(1.0 - float(rnd.get("bg_alpha") or 0), 3),
-        })
+        conf.update(
+            {
+                "font": rnd.get("font") or conf["font"],
+                "size": rnd.get("size") or conf["size"],
+                "outline": rnd.get("padding_v") or 0,
+                "margin_v": rnd.get("margin_bottom") or conf["margin_v"],
+                "primary": rnd.get("text_color") or conf["primary"],
+                "outline_color": rnd.get("bg_color") or conf["outline_color"],
+                "shadow": 0,
+                "bold": False,
+                "border_style": 3,
+                "spacing": rnd.get("letter_spacing") or 0,
+                "back_alpha": round(1.0 - float(rnd.get("bg_alpha") or 0), 3),
+            }
+        )
         return conf
     if face:
-        conf.update({
-            "font": face.get("font") or conf["font"],
-            "size": face.get("size") or conf["size"],
-            "outline": face.get("outline_width") if face.get("outline_width") is not None else conf["outline"],
-            "primary": face.get("color") or conf["primary"],
-            "outline_color": face.get("outline_color") or conf["outline_color"],
-            "bold": bool(face.get("bold")),
-            "spacing": face.get("spacing") or 0,
-        })
+        conf.update(
+            {
+                "font": face.get("font") or conf["font"],
+                "size": face.get("size") or conf["size"],
+                "outline": face.get("outline_width")
+                if face.get("outline_width") is not None
+                else conf["outline"],
+                "primary": face.get("color") or conf["primary"],
+                "outline_color": face.get("outline_color") or conf["outline_color"],
+                "bold": bool(face.get("bold")),
+                "spacing": face.get("spacing") or 0,
+            }
+        )
 
     for key, names in (
         ("font", ("font", "font_name", "fontname")),
@@ -550,8 +589,9 @@ def format_ass(
     # 圆角条（BorderStyle=3）的底色吃 OutlineColour；BackColour 只在含阴影时可见，
     # 这里仍给同一个颜色，免得播放器把阴影画成纯黑边。
     back_alpha = float(conf.get("back_alpha") if conf.get("back_alpha") is not None else 0.5)
-    back = ass_color_alpha(conf.get("outline_color") if border_style == 3 else "#000000",
-                           "#000000", back_alpha)
+    back = ass_color_alpha(
+        conf.get("outline_color") if border_style == 3 else "#000000", "#000000", back_alpha
+    )
     header = ASS_HEADER.format(
         font=_ass_escape(conf["font"]),
         size=int(conf["size"]),

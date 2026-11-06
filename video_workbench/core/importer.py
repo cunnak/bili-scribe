@@ -42,7 +42,9 @@ def resolve_inputs(paths: Iterable[str | Path], recursive: bool = True) -> list[
     seen: set[str] = set()
     for raw in paths:
         item = Path(str(raw))
-        candidates = scan_folder(item, recursive) if item.is_dir() else ([item] if is_video(item) else [])
+        candidates = (
+            scan_folder(item, recursive) if item.is_dir() else ([item] if is_video(item) else [])
+        )
         for path in candidates:
             key = str(path.resolve()).lower()
             if key not in seen:

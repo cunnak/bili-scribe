@@ -59,7 +59,9 @@ def summary_from_content(content: dict[str, Any]) -> Summary:
     timeline = []
     for item in content.get("timeline") or []:
         if isinstance(item, dict):
-            timeline.append({"t": str(item.get("t", "") or ""), "text": str(item.get("text", "") or "")})
+            timeline.append(
+                {"t": str(item.get("t", "") or ""), "text": str(item.get("text", "") or "")}
+            )
         elif isinstance(item, (list, tuple)) and len(item) >= 2:
             timeline.append({"t": str(item[0]), "text": str(item[1])})
     points = [str(p) for p in (content.get("key_points") or []) if str(p).strip()]
@@ -224,6 +226,7 @@ def row_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 # --------------------------------------------------------------- 三道门禁（P4-04）
 
+
 def _parse_time(value: Any) -> Any:
     """ISO 字符串 → datetime；解析不了就当没有（宁可少拦，不要误拦）。"""
     text = str(value or "").strip()
@@ -288,8 +291,15 @@ def gate_report(
     title = str(draft.get("title", "") or "").strip()
     summary = str(draft.get("summary", "") or "").strip()
     body = str(draft.get("content_text", "") or "").strip()
-    items.append({"text": f"标题 {len(title)} / {TITLE_MAX} 字", "ok": bool(title) and len(title) <= TITLE_MAX})
-    items.append({"text": f"摘要 {len(summary)} / {summary_limit} 字", "ok": len(summary) <= summary_limit})
+    items.append(
+        {
+            "text": f"标题 {len(title)} / {TITLE_MAX} 字",
+            "ok": bool(title) and len(title) <= TITLE_MAX,
+        }
+    )
+    items.append(
+        {"text": f"摘要 {len(summary)} / {summary_limit} 字", "ok": len(summary) <= summary_limit}
+    )
     items.append({"text": f"正文 {len(''.join(body.split()))} 字", "ok": bool(body)})
     items.append({"text": "已阅读并确认标题/摘要/正文", "ok": bool(confirmed)})
     over = [item["text"] for item in items[:2] if not item["ok"]]
@@ -301,13 +311,15 @@ def gate_report(
         content_status, content_reason = "todo", "发布前要勾一下「我已阅读并确认」"
     else:
         content_status, content_reason = "ok", ""
-    gates.append({
-        "id": "content",
-        "label": "内容确认",
-        "status": content_status,
-        "reason": content_reason,
-        "items": items,
-    })
+    gates.append(
+        {
+            "id": "content",
+            "label": "内容确认",
+            "status": content_status,
+            "reason": content_reason,
+            "items": items,
+        }
+    )
 
     # ---- 第二关：账号与视频
     items = []
@@ -319,10 +331,13 @@ def gate_report(
     # ruff 按 py310 判 invalid-syntax，3.10/3.11 上则直接 import 失败。
     items.append({"text": f"视频 BV 号 {project_bvid or '（没有）'}", "ok": bool(project_bvid)})
     items.append({"text": "草稿指向的是同一个视频", "ok": same})
-    items.append({
-        "text": "登录状态：" + ("已登录" if logged_in else ("未登录" if logged_in is False else "发布时再确认")),
-        "ok": logged_in is not False,
-    })
+    items.append(
+        {
+            "text": "登录状态："
+            + ("已登录" if logged_in else ("未登录" if logged_in is False else "发布时再确认")),
+            "ok": logged_in is not False,
+        }
+    )
     if not project_bvid:
         account_status, account_reason = "blocked", "这个项目没有 BV 号，发不了笔记"
     elif not same:
@@ -333,13 +348,15 @@ def gate_report(
         account_status, account_reason = "todo", "发布时会再核一次登录态与视频可访问性"
     else:
         account_status, account_reason = "ok", ""
-    gates.append({
-        "id": "account",
-        "label": "账号与视频",
-        "status": account_status,
-        "reason": account_reason,
-        "items": items,
-    })
+    gates.append(
+        {
+            "id": "account",
+            "label": "账号与视频",
+            "status": account_status,
+            "reason": account_reason,
+            "items": items,
+        }
+    )
 
     # ---- 第三关：频率与重复
     items = []
@@ -347,31 +364,40 @@ def gate_report(
     remain = 0
     if last_publish_at and waited is not None:
         remain = max(0, int(min_interval_seconds) - int(waited))
-    items.append({
-        "text": ("距上次发布 %d 秒" % waited) if waited is not None else "距上次发布：还没发过",
-        "ok": remain == 0,
-    })
+    items.append(
+        {
+            "text": ("距上次发布 %d 秒" % waited) if waited is not None else "距上次发布：还没发过",
+            "ok": remain == 0,
+        }
+    )
     duplicate = bool(published_note) and str(published_note.get("status", "")) == "published"
     if duplicate:
         note_id = str(published_note.get("note_id", "") or "")
-        items.append({"text": "同一视频已有笔记" + (f"（{note_id}）" if note_id else ""), "ok": False})
+        items.append(
+            {"text": "同一视频已有笔记" + (f"（{note_id}）" if note_id else ""), "ok": False}
+        )
     else:
         items.append({"text": "同一视频没有未撤回的笔记", "ok": True})
     if duplicate:
         pace_status, pace_reason = "blocked", "这个视频已经发过笔记了，要重发先去 B站 删掉旧的"
     elif remain > 0:
-        pace_status, pace_reason = "blocked", f"还要等 {remain} 秒才能再发（限流 {min_interval_seconds} 秒）"
+        pace_status, pace_reason = (
+            "blocked",
+            f"还要等 {remain} 秒才能再发（限流 {min_interval_seconds} 秒）",
+        )
     elif not body:
         pace_status, pace_reason = "blocked", "正文是空的"
     else:
         pace_status, pace_reason = "ok", ""
-    gates.append({
-        "id": "pace",
-        "label": "频率与重复",
-        "status": pace_status,
-        "reason": pace_reason,
-        "items": items,
-    })
+    gates.append(
+        {
+            "id": "pace",
+            "label": "频率与重复",
+            "status": pace_status,
+            "reason": pace_reason,
+            "items": items,
+        }
+    )
 
     ready = all(gate["status"] == "ok" for gate in gates)
     return {
@@ -384,6 +410,7 @@ def gate_report(
         # 界面算就要拿 published_at 与本地时钟相减，用户改一下系统时间就骗过去了。
         "wait_seconds": int(remain),
     }
+
 
 # ------------------------------------------------------------------ 发布
 

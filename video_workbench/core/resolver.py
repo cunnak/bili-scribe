@@ -71,7 +71,7 @@ def normalize_cover(url: Any) -> str:
         return text
     if not text.startswith("http://"):
         return ""
-    rest = text[len("http://"):]
+    rest = text[len("http://") :]
     host = rest.split("/", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0].lower()
     if any(host == domain or host.endswith("." + domain) for domain in COVER_HOSTS):
         return "https://" + rest
@@ -319,7 +319,9 @@ def _from_season(data: dict[str, Any], ep_id: int | None, raw: str) -> Resolutio
             )
         )
     if not items:
-        raise WBError("NOT_FOUND", "这个番剧没有可下载的剧集", detail=str(data.get("season_id") or ""))
+        raise WBError(
+            "NOT_FOUND", "这个番剧没有可下载的剧集", detail=str(data.get("season_id") or "")
+        )
     if ep_id is not None:
         # episodes[i] 与 items[i] 一一对应（items 就是按同一顺序建的）。
         picked = [it for it, ep in zip(items, episodes) if str(ep.get("id")) == str(ep_id)]
@@ -351,7 +353,9 @@ class Resolver:
             try:
                 text = self.gw.client().expand_short_link(text)
             except Exception as exc:  # noqa: BLE001
-                raise WBError("BILI_ERROR", f"b23.tv 短链展开失败：{exc}", str(exc), retryable=True) from exc
+                raise WBError(
+                    "BILI_ERROR", f"b23.tv 短链展开失败：{exc}", str(exc), retryable=True
+                ) from exc
 
         cache_key = f"resolve::{text.lower()}"
         cached = self.gw.cache.get(cache_key)
@@ -366,8 +370,10 @@ class Resolver:
             view = self.gw.get_data(VIDEO_VIEW, {"aid": int(value)}, action="查询稿件")
             result = _from_view(view, page, raw)
         elif kind in ("ep", "ss", "md"):
-            param = {"ep_id": int(value)} if kind == "ep" else (
-                {"season_id": int(value)} if kind == "ss" else {"media_id": int(value)}
+            param = (
+                {"ep_id": int(value)}
+                if kind == "ep"
+                else ({"season_id": int(value)} if kind == "ss" else {"media_id": int(value)})
             )
             data = self.gw.get_data(PGC_SEASON, param, action="查询番剧")
             result = _from_season(data, int(value) if kind == "ep" else None, raw)
