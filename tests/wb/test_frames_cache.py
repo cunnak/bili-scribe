@@ -66,6 +66,32 @@ def test_two_concurrent_collects_do_not_delete_each_others_files(tmp_path: Path,
     assert (cache / "0.jpg").is_file() and (cache / "1.jpg").is_file()
 
 
+def test_a_transient_replace_denial_does_not_break_the_collect(tmp_path: Path, monkeypatch):
+    """Windows 上并发写同一格会抛 WinError 5：一次失败不该让整次抽帧失败。
+
+    这条是并发用例的确定性版本。那条靠两个线程抢同一个 `0.jpg`，实测约 2/5 会红、
+    单跑又常常绿——红的时候看到的是 `PermissionError: [WinError 5] 拒绝访问`
+    （目标位置上其实已经有一份完整内容）。这里把「抢输」这件事直接注入，
+    逼着 `_replace_into_place` 的重试腿必须存在。
+    """
+    cache = tmp_path / "frames" / "123456"
+    real = frames_core.os.replace
+    calls = {"n": 0}
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise PermissionError(5, "拒绝访问", str(dst))
+        return real(src, dst)
+
+    monkeypatch.setattr(frames_core.os, "replace", flaky)
+
+    result = frames_core.collect_from_api(
+        FakeGateway(sprite_meta()), FakeFetch(jpeg_bytes()), 123, cfg2(), cache_dir=cache
+    )
+
+    assert len(result.frames) == 2, "重试腿没接住一次拒绝，整次抽帧白跑了"
+    assert (cache / "0.jpg").is_file() and (cache / "1.jpg").is_file()
 def test_collect_from_api_cache_hit_keeps_all_cells(tmp_path: Path):
     cache = tmp_path / "frames" / "BV1cache"
     gateway = FakeGateway(sprite_meta())

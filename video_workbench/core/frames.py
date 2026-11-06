@@ -210,6 +210,31 @@ def fetch_sprite(
             close()
 
 
+def _replace_into_place(tmp: Path, path: Path) -> None:
+    """把临时文件换成目标名，Windows 上并发写同一格时要能容错。
+
+    实测（tests/wb/test_frames_cache.py 的并发用例，约 2/5 概率）：两个线程同时
+    `os.replace` 到同一个 `0.jpg`，其中一个会抛 `PermissionError: [WinError 5] 拒绝访问`。
+    这不是数据坏了——目标位置上已经有另一份完整内容（同一 aid 同一格，字节等价）。
+    所以先重试几次；仍拿不到独占时，只要目标已存在且非空就按成功处理。
+    """
+    last: OSError | None = None
+    for attempt in range(8):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.002 * (attempt + 1))
+    try:
+        ok = path.is_file() and path.stat().st_size > 0
+    except OSError:
+        ok = False
+    if ok:
+        return
+    raise last if last is not None else OSError("抽帧缓存写入失败")
+
+
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """同目录临时名 + os.replace：并发读者只会看到完整的旧文件或新文件。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +244,7 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        _replace_into_place(tmp, path)
     finally:
         try:
             if tmp.exists():
