@@ -15,6 +15,7 @@ faster-whisper），我们做的只是"起进程 + 读 stderr + 汇报进度"—
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import threading
@@ -26,9 +27,11 @@ from typing import Any, Callable
 from video_workbench.app.errors import WBError
 from video_workbench.app.events import EventBus
 from video_workbench.infra.db import now_iso
-from video_workbench.infra.repo import Repo, new_id
+from video_workbench.infra.repo import Repo, RepoClosed, new_id
 
 Handler = Callable[["JobContext", dict[str, Any]], Any]
+
+_LOGGER = logging.getLogger(__name__)
 
 #: 写进 ``wb_job.error_message`` 那一列的文本怎么拼。**只有一个出处**。
 #:
@@ -226,7 +229,12 @@ class JobManager:
 
         job_id = new_id("job")
         body = payload or {}
-        job = self.repo.job_create(job_id, job_type, project_id, body)
+        try:
+            job = self.repo.job_create(job_id, job_type, project_id, body)
+        except RepoClosed:
+            # 与上面那个 _closed 检查是同一条竞态的另一半：检查通过之后、写库之前
+            # 连接被关掉。对界面来说两种情况都是「程序正在退出」。
+            raise WBError("CONFLICT", "程序正在退出，不再接受新任务") from None
         self._cancel[job_id] = threading.Event()
         self.events.emit_now("job.created", {"job": job})
 
@@ -285,7 +293,18 @@ class JobManager:
                 self._finish(job_id, "canceled", {"code": "CANCELED", "message": "任务已取消"})
                 return
 
-            self.repo.job_update(job_id, status="running", started_at=now_iso(), error_code=None)
+            try:
+                self.repo.job_update(
+                    job_id, status="running", started_at=now_iso(), error_code=None
+                )
+            except RepoClosed:
+                # 连接已关（退出竞态）：这条任务不会再跑了，收尾那一腿自己会跳过写库。
+                self._finish(
+                    job_id,
+                    "canceled",
+                    {"code": "CANCELED", "message": "程序正在退出，任务没有开始"},
+                )
+                return
             self.events.emit_now(
                 "job.updated",
                 {"id": job_id, "status": "running", "stage": None, "progress": 0},
@@ -360,8 +379,31 @@ class JobManager:
         }
         if status == "succeeded":
             payload["progress"] = 1.0
-        self.repo.job_update(job_id, **payload)
-        job = self.repo.job_get(job_id) or {}
+        # 退出竞态：shutdown() 的 join 有超时，超时后连接可能已经被关。此时写库必然抛
+        # sqlite3.ProgrammingError: Cannot operate on a closed database，而那个异常会把整个
+        # 任务线程带着 traceback 打死（全量回归里表现为一条 PytestUnhandledThreadException
+        # Warning，真正的损失是「失败原因没写进库」）。跳过写库，把没写成的那件事写进日志。
+        # 库里那一行留在 running，下次开机由 job_mark_interrupted 标成 INTERRUPTED——
+        # 那本来就是「上次退出时没跑完」的既定语义，不需要第二条 owner。
+        job: dict[str, Any] = {}
+        try:
+            self.repo.job_update(job_id, **payload)
+            job = self.repo.job_get(job_id) or {}
+        except RepoClosed:
+            if self._logger is not None:
+                try:
+                    self._logger(
+                        f"{job_log_prefix(job_id)}收尾没写进库（程序正在退出）："
+                        f"status={status} code={(error or {}).get('code') or '-'}"
+                    )
+                except Exception:  # noqa: BLE001 - 日志不能反过来把退出路径搞挂
+                    pass
+            _LOGGER.warning(
+                "任务 %s 收尾时数据库已关闭，状态没写进库（status=%s code=%s）",
+                job_id,
+                status,
+                (error or {}).get("code"),
+            )
         # 完成是状态跃迁，必须立即发，不节流
         self._clean_tmp(job_id)
         self.events.emit_now(
@@ -401,7 +443,12 @@ class JobManager:
         if stage is not None:
             fields["stage"] = stage
         if fields:
-            self.repo.job_update(job_id, **fields)
+            try:
+                self.repo.job_update(job_id, **fields)
+            except RepoClosed:
+                # 进度是可丢的（真值在事件里），不值得为一个正在退出的进程抛出去；
+                # 抛出去会变成 handler 的 INTERNAL 失败，比丢一条进度更误导。
+                return
         self.events.emit(
             "job.updated",
             {
@@ -502,11 +549,21 @@ class JobManager:
         return self.repo.job_list(statuses, limit)
 
     def shutdown(self) -> None:
+        """停止接受新任务，并给在跑的任务一点时间收尾。
+
+        **光置 cancel event 是不够的**：handler 常卡在 `for line in proc.stdout` 上，
+        要等子进程出口才醒——而子进程正是那个要跑十分钟的东西。所以这里和 `cancel()`
+        一样要把子进程杀掉，否则下面那个 join 每次都会超时，连接随后被关掉，
+        收尾那一腿就撞上「closed database」。
+        """
         self._closed = True
         with self._lock:
             for event in self._cancel.values():
                 event.set()
             threads = list(self._threads.values())
+            job_ids = list(self._threads)
+        for job_id in job_ids:
+            self._kill_processes(job_id)
         # 给 handler 一点时间走完 except/finally，避免退出时把库写坏
         for thread in threads:
             thread.join(timeout=2.0)

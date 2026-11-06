@@ -61,6 +61,17 @@ def _merge_row(row: Any) -> dict[str, Any]:
     return data
 
 
+class RepoClosed(RuntimeError):
+    """连接已经关掉之后还来写库。
+
+    只在一个地方真的会出现：退出竞态——`JobManager.shutdown()` 的 join 有超时，
+    超时后仍活着的任务线程走到 `_finish` 时，`WorkbenchService.close()` 已经把连接关了。
+    这时抛 sqlite3.ProgrammingError: Cannot operate on a closed database 会把整个线程
+    带着 traceback 打死，而真正的损失是**失败原因没写进库**。所以这里给一个自己的异常，
+    让调用方按「退出中」这一支处理。
+    """
+
+
 class Repo:
     """薄封装。每个方法一个 SQL，不做 ORM。
 
@@ -70,13 +81,35 @@ class Repo:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self._closed = False
 
     # ------------------------------------------------------------- 通用
+
+    def close(self) -> None:
+        """关连接。**与写入同一把锁**：close 撞上正在执行的 SQL 会让游标半途失效。"""
+        with DB_LOCK:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self.conn.close()
+            except Exception:  # noqa: BLE001 - 已经关过/底层已释放，退出路径上不值得抛
+                pass
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _guard(self) -> None:
+        """所有 SQL 的共同前置检查（必须在 DB_LOCK 里调）。"""
+        if self._closed:
+            raise RepoClosed("数据库连接已关闭（程序正在退出）")
 
     def _exec(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
         # 全部 SQL 从这一个口子出去，因此锁加在这里就够——
         # 不用在每个方法里各写一遍 with（漏一处就是偶发的 locked）。
         with DB_LOCK:
+            self._guard()
             return self.conn.execute(sql, tuple(params))
 
     def _one(self, sql: str, params: Sequence[Any] = ()) -> dict[str, Any] | None:
@@ -84,11 +117,13 @@ class Repo:
         # 被别的线程在同一条连接上顶掉——表现为刚插入的行查不到（偶发 NOT_FOUND），
         # 极端情况下直接抛 sqlite3.InterfaceError: bad parameter or other API misuse。
         with DB_LOCK:
+            self._guard()
             row = self.conn.execute(sql, tuple(params)).fetchone()
         return dict(row) if row else None
 
     def _all(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
         with DB_LOCK:
+            self._guard()
             rows = self.conn.execute(sql, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 

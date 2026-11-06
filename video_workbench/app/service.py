@@ -6134,12 +6134,16 @@ class WorkbenchService:
     # ------------------------------------------------------- 退出
 
     def close(self) -> None:
+        """退出：先让任务线程停手，再关事件线程，最后关库。
+
+        顺序不能换。`shutdown()` 会杀掉在跑任务的子进程并等它们收尾（有超时）；
+        超时后仍活着的线程走到收尾那一腿时，库必须**还在**——否则它连「为什么失败」
+        都写不进去。所以关库放在最后，并且走 `Repo.close()`：它与所有写入共用同一把
+        `DB_LOCK`，不会把正在执行的游标关在半途。
+        """
         self.jobs.shutdown()
         self.events.close()
-        try:
-            self.conn.close()
-        except Exception:  # pragma: no cover
-            pass
+        self.repo.close()
 
 
 class _PickParams(BaseModel):
