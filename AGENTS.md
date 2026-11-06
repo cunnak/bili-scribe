@@ -185,6 +185,11 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   ⑥ **端点会吐不合法的 JSON，别把「解析失败」直接当「数据坏了」。** `json_mode=true` 发了 `response_format=json_object`，端点照样可以返回带裸引号的字符串；对账档（`WB_SUMMARY_PARITY_STRICT` 没设就是默认档）不抢救，所以用户看到的是报错，而 `video_workbench/infra/jsonfix.parse_json` 能在同一份 raw 上零成本还原全部键。报这类失败时必须同时给出「能不能抢救」的读数。
 - `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
+- **归因没跑同形对照之前，不许落成文案或修复。** 实录（task-70 坏 JSON）：带帧那一发失败在 char 121，我据此写成「大概是帧把输出带偏了，关掉截帧能躲过」，并准备把这句话写进产品报错；用户放行 1 次真调用跑无帧同形对照，**同样坏 JSON**（char 141）——锅在端点不遵守 `response_format=json_object` 的转义，跟帧无关。差别只是那一次我手里只有 n=1。⇒ 凡是「A 之后出现了 B」型判断，动手改文案/改行为之前先跑一次**只差 A** 的同形对照；跑不了真调用就跑离线孪生（`tests/wb/test_summary_bad_json_copy.py` 那条 parametrize 有帧/无帧就是干这个的）。顺带一条口径：token 成本必须写明**哪个端点、哪种计数**——本机实测 12 帧 +7818 prompt（≈651/帧），而 `bili_scribe/core/frames.py` 文档记的 122 image_tokens/帧是 magpie 端点的另一把尺，两个数不能混着报。
+- **界面/文案里凡是「关掉 X 就不出问题」这类否定式承诺，必须配一条形状锁。** 拦住的做法不是禁词，而是把句子形状钉死：提到「截帧」的那一句必须同时带「不解决」。这条比字面量禁令耐改——未来有人重写文案，只要还想把截帧说成办法，判据就红（`test_the_sentence_mentioning_the_frames_switch_denies_it`）。
+- **窗口探针只准测自己创建的窗。** 实录：`FindWindowW(None, title)` 抓到桌上一扇同名**最小化**残留窗（读数 `initial 160x28 @ (-32000,-32000)`），三条尺寸判据全红在别人的窗上，看着像产品坏了。正解：建窗前先快照同名 hwnd，建完只取「新出现 ∩ IsWindowVisible ∩ showCmd∉{0,2}」，并优先从 pywebview 对象拿句柄。另外**别在窗口的 UI 线程回调里 EnumWindows 全桌面**：实测把 pywebview 炸穿到 `maximum recursion depth exceeded`（`window.native.AccessibilityObject.Bounds.Empty` 一路刷），进程挂住不退还占着日志文件。
+- **牙齿/哨兵驱动起子进程时只覆盖需要的环境变量，别手写一份「干净 env」。** 实录：`env = {"PYTHONIOENCODING": ..., "PATH": ...}` 让四个变体**全部** `rc=3`、逐字 `OSError: [WinError 10106] 无法加载或初始化请求的服务提供程序`（`import _overlapped`），读数长得像「判据没牙」。正解 `env = dict(os.environ)` 再改一两个键；而 `rc ∉ (0,1)` 一律按「没跑起来」报，不许记成红或不红。
+
 ## 七、规则表
 
 | 规则 | 由什么拦住 |

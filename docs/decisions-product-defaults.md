@@ -214,6 +214,22 @@
 - **但这一发在产品默认档里是失败的**（新立的口子，见下面「带帧后的坏 JSON」）：模型返回的 JSON 不合法，
   副本在默认对账档不抢救 ⇒ `WBError: [LLM_BAD_RESPONSE] 模型没给出可用的总结 JSON…Expecting ',' delimiter: line 1 column 122 (char 121)`。
 
+#### 归因改判（2026-11-06 21:2x，无帧同形对照实测，calls=1）
+
+上一节写「等对照」的那条现在有读数了，结论是**我原来的怀疑方向错了**：
+
+- 无帧那一发：calls=1、prompt **5149**、completion 1534、61.8s；请求形状一条、user 是纯文本 4046 字、image_blocks=0。
+- 失败点逐字：`Expecting ',' delimiter: line 3 column 94 (char 141)` —— **无帧也坏 JSON**。带帧那次是 char 121，位置不同、同一类错（中文引述里嵌裸 ASCII 双引号）。
+- ⇒ 坏 JSON **不是画面帧导致的**，是 `qoder-cn/qfmodel` 这家端点在长 JSON 输出里不遵守 `response_format=json_object` 的转义。上一条里「关掉截帧就能躲过」这个假设**否证**，不许写进任何面向用户的文案。
+- 顺带把成本口径钉死，两边不能混报：**本机这家**测到 12 帧让 prompt 从 5149 涨到 12967（**+7818 ≈ 651 tokens/帧**）；`bili_scribe/core/frames.py` 文档里那句「12 帧 1,464 image_tokens、单帧 122」是 **magpie 端点的 image_tokens 计数**，不是同一把尺。报数必须写明是哪个端点、哪个口径。
+
+#### 路线②落地（不偏离 bs，只把文案改对）
+
+- 行为没动：默认档（对账档）仍然**不抢救**坏 JSON，一次请求就失败，与 bili-scribe 同形（`tests/wb/test_summary_parity.py` 那条钉形状的判据照旧绿）。
+- 文案改对一处：`video_workbench/core/summarizer.py` 的 `_strict_hint` 在「念开关」那句**之前**插一句实测事实 ——「这与画面帧无关：无帧同形对照实测同样失败，关掉「设置 → 采集 → 截帧」不解决。」插在前面是因为已有判据要求开关句必须在末尾（`test_default_tier_malformed_json_names_the_switch_and_keeps_the_old_prefix`）：最后一句永远回答「下一步动手的是什么」。
+- 新常驻判据：`tests/wb/test_summary_bad_json_copy.py` 五条（含两条端到端：有帧/无帧两条腿都必须带这句；还有一条形状锁 —— 文案里凡是提到「截帧」的那一句必须同时带「不解决」，拦的就是未来有人把它改回「关掉截帧试试」）。
+- 牙齿读数（`C:/Users/b1596/AppData/Local/Temp/wb_teeth_copy.py`，Temp 副本树）：控制组 `72 passed` rc=0；V1 撤掉那句 → 3 failed；V2 改成「关掉截帧就能躲过」→ 2 failed（点名的形状锁红）；V3 让宽松档也追加建议 → 1 failed（只红宽松档那条）。
+- 还没做的：给这条失败配**设置页里能点的**开关（现在只有环境变量，桌面用户够不着）。那是新债，不在路线②范围内。
 #### 带帧后的坏 JSON（P1，等拍板）
 
 - 现场：`raw` 2,173 字符，第 121 个字符起是未转义的 ASCII 双引号 —— 逐字
