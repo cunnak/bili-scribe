@@ -141,14 +141,14 @@
     {
       key: "collect",
       title: "采集",
-      hint: "字幕、弹幕、截帧。省流量就把截帧关掉。",
+      hint: "字幕、弹幕、截帧。",
       fields: [
         { path: "collect.prefer_subtitle_lang", label: "优先字幕语言", type: "list", help: "逗号分隔，按顺序命中。全部落空才转录音频。" },
         { path: "collect.include_platform_summary", label: "收集平台简介", type: "switch" },
         { path: "collect.danmaku.enabled", label: "采集弹幕", type: "switch" },
         { path: "collect.danmaku.max_items", label: "弹幕上限", type: "number" },
         { path: "collect.frames.enabled", label: "截帧", type: "switch", help: "总结时附上画面：PPT、图表、代码里的字能进正文。关掉省图片 token，也少一次本地抽帧。" },
-        { path: "collect.frames.max_frames", label: "每稿最多截帧", type: "number", help: "按视频时长等距抽取。帧会作为图片发给模型，越多越贵。" }
+        { path: "collect.frames.max_frames", label: "每稿最多截帧", type: "number", help: "按视频时长等距抽取，越多越贵。" }
       ]
     },
     {
