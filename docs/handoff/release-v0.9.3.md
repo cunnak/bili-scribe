@@ -30,7 +30,7 @@
 - 窗口下限（100% 缩放）：`scripts/accept_window_min_size.py` 四条全 PASS（`min_track == MIN_SIZE`、往小拽有闸、往大放行）。
 - 冻结包：`scripts/accept_frozen_package.py` **9/9 PASS**——exe 在、六个提示词字节一致、包内 settings.js 是改了文案的那一代、`video_workbench.core.frames` 在 PYZ toc 里、`--check`/`--roles` 退出码 0、包内自显示版本 == 仓库版本、三份真实配置验收前后一字未动。
 - 同步入口常驻哨兵：`scripts/sync_mirror_sentinel.py` 40 腿 `ok=40 red=0`（拿上一版实现做 A/B 会红在那条自证腿上，说明新腿有牙）。
-- 全量回归：`.venv/Scripts/python.exe -m pytest tests/wb -q` → **1722 passed, 1 skipped in 794.66s (0:13:14)**，退出码 0（上一版基线 1717，这一版多 5 条坏 JSON 判据）。
+- 全量回归：`.venv/Scripts/python.exe -m pytest tests/wb -q` → **1722 passed, 1 skipped in 794.66s (0:13:14)**，退出码 0（发布后复跑一遍同样 1722 passed、只多一条间歇性 warning，见下面「验证到什么程度」最后一条）（上一版基线 1717，这一版多 5 条坏 JSON 判据）。
 
 ## 验证到什么程度（未测/未做的，说清）
 
@@ -40,6 +40,7 @@
 - **端点转义这件事我们治不了**，只把文案改对。还欠一个「设置页里能点的抢救开关」——今天抢救 JSON 要用户自己设环境变量，那不是产品该有的样子。
 - 服务端抽帧接口（`aid` 那条腿）没做：`wb_project.aid` 现有 32 行全是空的，而 bili-scribe 那个下载器跟重定向、不设 host 白名单、不限字节，WB 不继承它。
 - 帧没有磁盘缓存（采完即删，只在内存里发一次），也没有按「截帧保留天数」清理这一步。
+- **全量里有一条间歇性报警（不在本版修，另开单）**：本版发布后又跑了一遍全量 → `1722 passed, 1 skipped, 1 warning in 833.23s (0:13:53)`，退出码 0（日志 `<Temp>/wb_full12.log`）。那条 warning 是作业线程里的**第二次**异常：`test_clip_batch.py::test_skip_exported_avoids_duplicates` 的 `wb-job-clip.export-*` 先拿到一条真实失败 `WBError: [PROCESS_FAILED] ffmpeg.EXE 执行失败（exit 3199971767）`，随后 `app/jobs.py` 的失败收尾去写库报 `sqlite3.ProgrammingError: Cannot operate on a closed database`（`infra/repo.py` 的 `_exec`）。单独重跑该文件两次都不复现 ⇒ 全量节奏下的竞态。含义要说准：坏的是「失败原因没写进去」，不是「导出坏了」——正好是 task-63 那条失败收尾腿的薄弱点（写库前不检查连接是否还开着）。
 
 ## 兼容性与装机
 
