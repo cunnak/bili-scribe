@@ -82,6 +82,17 @@
           group: "advanced",
           help: "打开后把「大概率管用 .txt」全文接在当前角色的 txt 真源之后、输出契约之前。与 JSON 契约正面冲突，默认关。"
         },
+        {
+          // 坏 JSON 抢救（task-5）：以前只能靠环境变量 WB_SUMMARY_PARITY_STRICT=0
+          // 放行，而那个开关连输出预算兜底一起放行，开一下就是两件事。
+          // 这个开关只放行修复与重问（修 JSON → 截断续写 → 正文/时间线分批 → 严格重问），
+          // 预算闸不跟着开；判定与止损都在 core/summarizer.py，这里只是一个开关。
+          path: "llm.rescue_json",
+          label: "坏 JSON 抢救",
+          type: "switch",
+          group: "advanced",
+          help: "默认关：模型输出不是合法 JSON 时直接报错，不重试。打开后会尝试修复它、截断了接着写、正文与时间线分两次要、或换严格要求重问一次；抢救失败就停手，不会反复重试烧钱。不改变输出预算。"
+        },
         { path: "llm.temperature", label: "温度", type: "number", group: "advanced", help: "0–2。总结建议 0.2–0.4。" },
         { path: "llm.max_tokens", label: "单次最大输出", type: "number", group: "advanced" },
         // 下面三项后端早就在用（ChatClient 与分块摘要都读），界面一直没暴露，

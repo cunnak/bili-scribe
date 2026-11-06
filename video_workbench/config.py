@@ -560,6 +560,14 @@ class LlmConfig(_LlmConfig):
     # 产出。要不要吃它交给人决定；生效方式与拼接顺序见 core/prompt_source.py
     # （按请求走 contextvar，不在绑定时烘死，并发任务互不影响）。
     extra_prompt: bool = False
+    # 坏 JSON 抢救：严格档（默认）里一次调用只发一次请求，模型给的东西读不懂就
+    # 直接失败——那是与 bili-scribe 逐请求对账的形状，一个字都不能被动。所以这个开关
+    # **默认关**，关着等于今天的线上行为。
+    # 打开后只放行「修 JSON」这一件事：repair -> 截断续写 -> 正文/时间线分批 -> 严格重问。
+    # 两道闸留着（见 core/summarizer.py 的 _json_budget 与 _json_or_retry 的重入护栏）：
+    # 补救请求的输出预算仍按配置原样、不抬到 12288 也不翻倍；同一次打磨里阶梯已经
+    # 发过请求就不再重入阶梯，所以真实请求数被钉在 1 主 + 若干补救，不会滚成十几发。
+    rescue_json: bool = False
     tasks: LlmTasksConfig = field(default_factory=LlmTasksConfig)
     # 服务商列表。空列表在 load()/apply() 里会由扁平字段合成一条（见
     # ``WorkbenchConfig.sync_providers``），所以运行期永远至少有一条。

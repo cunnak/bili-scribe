@@ -533,7 +533,14 @@ def test_the_danger_line_is_readable_on_both_skins_with_a_real_backend(
         apply_skin(page, skin)
         page.evaluate("() => window.WB.router.go('settings', {section: 'general'})")
         page.evaluate("() => window.WB.router.go('settings', {section: 'llm'})")
-        page.wait_for_timeout(300)
+        # 等那一行真的挂出来，不用固定 300ms：全量套件里这条曾经因为机器忙、
+        # 重绘还没到就断言可见性而红过一次（单跑 3/3、本文件 3 轮全绿，只有
+        # 774s 的全量里红）。等元素出现不改变判据——"看不见"仍然会红，只是不再
+        # 把"还没画完"当成"画不出来"。
+        try:
+            page.wait_for_selector(".warn-line", timeout=15000)
+        except PlaywrightTimeoutError:
+            pass  # 真没有这一行时，下面的 count==1 才是那条判据要报的错
 
         info = real_service.call("summary.roles")
         assert info["configured_unrecognized"] == "standard", info["configured_unrecognized"]

@@ -118,22 +118,65 @@ FRAMES_INNOCENCE_CLAUSE = (
 )
 
 
-def _strict_hint(message: str) -> str:
-    """严格档（默认）里坏 JSON 直接失败，得告诉用户是谁关掉了抢救。
+RESCUE_UI_PATH = "设置 → 模型 → 坏 JSON 抢救"
 
-    前半句是既有用例钉着的文案，一个字不动，只在末尾追加可操作提示。宽松档里这条
-    失败是整套阶梯都用尽之后的结果，再提开关就是误导，所以不追加。
 
+def _rescue_json_on(cfg: Any = None) -> bool:
+    """坏 JSON 抢救开不开：每次现读配置，不缓存到 import（与 ``_parity_strict`` 同族理由）。
+
+    ``cfg`` 为 None（探针、老调用方、没拿到配置对象的入口）一律按默认档 False ——
+    也就是今天的行为：不抢救，严格档一次调用只发一次请求。
+    """
+    return bool(getattr(getattr(cfg, "llm", None), "rescue_json", False))
+
+
+# 严格档 + 抢救关着时的末句。两条路都点名，因为它们不等价：设置页那个开关只放行
+# 「修 JSON」（repair → 续写 → 分批 → 严格重问），补救请求的输出预算仍按配置原样；
+# 环境变量那条路连「补救预算兜底」一起放行。文案里不写清差别，下一个人就会把它们
+# 当成同一个旋钮的两种叫法，然后拿 {PARITY_ENV}=0 去验证设置页的行为。
+# 语序不是风格问题：既有闸钉死了末句必须以 `WB_SUMMARY_PARITY_STRICT=0 后重试。`
+# 收尾（test_summary_parity.py 的 B3）——「下一步动手什么」必须落在最后一句，所以设置页那句只能插在它前面。
+RESCUE_OFF_SENTENCE = (
+    "对账模式（默认）不抢救坏 JSON；"
+    f"要抢救请打开「{RESCUE_UI_PATH}」"
+    f"（只放行修复与重问，不改输出预算；环境变量那条连预算兜底一起放行），"
+    f"或设 {PARITY_ENV}=0 后重试。"
+)
+
+
+def _rescue_exhausted_hint(text: str) -> str:
+    """抢救止损拦住第二轮阶梯时说什么。
+
+    为什么单独一句：这里抛的不是「模型没给 JSON」，是「上一轮已经抢救过且没救回来，
+    这一轮不再重跑」。混成一句，下一个人会再花一轮真调用去验一个已经验过的结论，
+    还会以为开关没生效（它生效了，只是止损先到）。
+    """
+    tail = (text or "").strip()[-40:]
+    return (
+        f"上一轮抢救已经把阶梯跑完仍未拿到合法 JSON，这一轮不再重跑（止损）；"
+        f"要回到「一次请求、坏了直接报错」请关掉「{RESCUE_UI_PATH}」，"
+        f"或者换更听话的模型、把「单次最大输出」调大。{tail}"
+    )
+
+
+def _strict_hint(message: str, cfg: Any = None) -> str:
+    """坏 JSON 失败文案的三态，别把它读成两态。
+
+    1. 宽松档：原样返回。这条失败是整套阶梯用尽之后的结果，再提开关就是误导。
+    2. 严格档 + 抢救关（默认）：追加「是谁关掉了抢救」，两条路都点名并写清差别。
+    3. 严格档 + 抢救开：阶梯已经在 ``chat()`` 里跑过了，这里再教用户去开一个
+       已经打开的开关就是假承诺，所以只报「试过一轮仍未救回」。
+
+    前半句是既有用例钉着的文案，一个字不动，只在末尾追加可操作提示。
     追加顺序有判据管着：开关句必须留在**末尾**（
     ``test_default_tier_malformed_json_names_the_switch_and_keeps_the_old_prefix``），
     所以撇清画面帧那句只能插在它前面——「下一步动手什么」永远是最后一句。
     """
     if not _parity_strict():
         return message
-    return (
-        f"{message} {FRAMES_INNOCENCE_CLAUSE} "
-        f"对账模式（默认）不抢救坏 JSON；需要抢救请设 {PARITY_ENV}=0 后重试。"
-    )
+    if _rescue_json_on(cfg):
+        return f"{message} {FRAMES_INNOCENCE_CLAUSE} 已按「{RESCUE_UI_PATH}」试过一轮仍未救回。"
+    return f"{message} {FRAMES_INNOCENCE_CLAUSE} {RESCUE_OFF_SENTENCE}"
 
 
 def resolve_role(explicit: "str | None", fallback: "str | None" = None) -> tuple[str, str]:
@@ -235,6 +278,12 @@ class SummaryLLM:
         self.app_cfg = cfg
         self.notes: list[str] = []
         self.calls = 0
+        # 坏 JSON 抢救的止损状态（task-5）。判「同一批总结里还要不要再跑阶梯」看的是上一次
+        # 抢救的**结果**，不是次数：救回来过就允许后面的请求再试（预读抢救成功不该让生成
+        # 失去抢救资格）；上一次跑满阶梯仍失败，这一轮直接止损——模型系统性产不出合法
+        # JSON 时，每一轮都跑满阶梯会把一次三分多钟的失败拖成十几倍请求。
+        self.rescue_runs = 0
+        self.rescue_last_ok = False
         # 计时从建 llm 起算：总结的耗时几乎全在模型上，
         # 而这里正是「这批请求开始」的位置。
         self.started_at = time.monotonic()
@@ -274,6 +323,27 @@ class SummaryLLM:
                 # 只读地数一遍这次回复里到底有几条时间线，然后原样交出正文。
                 # 多发一个请求都没有，逐请求一致一个字都没破。
                 self._capture_dense(reply)
+                # 坏 JSON 抢救（设置 → 模型 → 坏 JSON 抢救）默认关；关着就是上面那两行
+                # 的原样。打开才走阶梯，而且只在「这份回复读不出 dict」时走 —— 读得出的
+                # 一个字都不动，所以这个开关不会把默认路径的零额外请求性质污染掉。
+                # 预算闸不跟着开：_json_or_retry 里每个补救请求仍然走 _json_budget，
+                # 严格档下它恒等于入参，所以开的只是「再问一次」，不是「多给预算」。
+                if _rescue_json_on(self.app_cfg) and not _loads_object(reply):
+                    # 止损：上一轮阶梯已经跑满仍失败，就不再跑第二轮（理由见 __init__）。
+                    if self.rescue_runs and not self.rescue_last_ok:
+                        raise WBError(
+                            "LLM_BAD_RESPONSE", _rescue_exhausted_hint(reply)
+                        )
+                    self.rescue_runs += 1
+                    try:
+                        saved = self._json_or_retry(
+                            reply, messages, sink, temperature, max_tokens
+                        )
+                    except BaseException:
+                        self.rescue_last_ok = False
+                        raise
+                    self.rescue_last_ok = True
+                    return saved
             return reply
         try:
             text = self.client.chat(
@@ -353,8 +423,10 @@ class SummaryLLM:
         少 20480**，反而更容易再被截断。task-53 给 ``_json_budget`` 加的下界救不了
         这条路，因为传进去的 base 是 None 而不是配置值。
         只在**这一个入口**解析：主请求不动（它照旧按 None 走 ``ChatClient`` 自己的
-        配置兜底），严格档更是不进这个函数（``chat()`` 在对账分支就 return 了），
-        所以改动面只有「宽松档的补救请求」这一格。
+        配置兜底）。严格档默认也不进这个函数（``chat()`` 在对账分支就 return 了）；
+        打开「设置 → 模型 → 坏 JSON 抢救」之后才进来，而**跑几轮由 ``chat()`` 的
+        ``rescue_runs`` / ``rescue_last_ok`` 决定**，这里不再自己数次数，免得两处止损
+        各说一套。所以改动面是「宽松档的补救请求」+「严格档的抢救请求」两格。
         """
         if max_tokens is None:
             max_tokens = _request_max_tokens(self.app_cfg)
@@ -963,7 +1035,7 @@ def run(
             )
     except SummarizeError as exc:
         raise WBError(
-            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}")
+            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}", cfg)
         ) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc
@@ -1065,7 +1137,7 @@ def refine(
             )
     except SummarizeError as exc:
         raise WBError(
-            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}")
+            "LLM_BAD_RESPONSE", _strict_hint(f"模型没给出可用的总结 JSON：{exc}", cfg)
         ) from exc
     except ChatError as exc:
         raise WBError(exc.code, exc.message, exc.detail) from exc

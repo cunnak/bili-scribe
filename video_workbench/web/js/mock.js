@@ -36,6 +36,10 @@
       role: "wengao",
       // 附加提示词开关（与后端 config.LlmConfig.extra_prompt 同形状，默认关）。
       extra_prompt: false,
+      // 坏 JSON 抢救开关（与后端 config.LlmConfig.rescue_json 同形状，默认关）。
+      // 只放行「修 JSON」那条阶梯，不改输出预算。
+      // 只在 SETTINGS.llm 这一份；summary.roles 那份载荷里没有这个键，别跟着加。
+      rescue_json: false,
       user_agent: "",
       extra_headers: {},
       // 服务商列表：跟后端 config.LlmProviderConfig 同形状。mock 里给两家，
