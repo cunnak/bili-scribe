@@ -314,7 +314,10 @@ def gate_report(
     project_bvid = str(project.get("bvid", "") or "")
     note_bvid = str(note.get("bvid", "") or draft.get("bvid", "") or "")
     same = bool(project_bvid) and (not note_bvid or note_bvid == project_bvid)
-    items.append({"text": f"视频 BV 号 {project_bvid or "（没有）"}", "ok": bool(project_bvid)})
+    # 内层引号必须是单引号：同一个 f-string 里复用外层引号是 Python 3.12 才允许的语法，
+    # 而本项目最低运行时是 3.10（README.md「需要 Python 3.10+」）。写成双引号时
+    # ruff 按 py310 判 invalid-syntax，3.10/3.11 上则直接 import 失败。
+    items.append({"text": f"视频 BV 号 {project_bvid or '（没有）'}", "ok": bool(project_bvid)})
     items.append({"text": "草稿指向的是同一个视频", "ok": same})
     items.append({
         "text": "登录状态：" + ("已登录" if logged_in else ("未登录" if logged_in is False else "发布时再确认")),
