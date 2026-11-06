@@ -181,6 +181,8 @@ WB 没有 HTTP 服务模式：`run.py` 是 **bili-scribe** 的 uvicorn + webbrow
   ② **单张卡真实调用上限 3 次**，超过要先拿到 lead 显式放行（lead 拿去问用户）。
   ③ **桩不算真调用**：像 task-59 那种只记「真发出去的 `max_tokens`」的 `StubClient`（不联网、不建库、不改 HOME 之外）可以放开跑；**不要为了让读数像端到端而给它接真网络**。
   ④ **真跑过必须报 `calls=N`**，不许只写「跑通了」。只报结论不报次数，下一轮没人在预算里。
+  ⑤ **预估调用次数只准量 `len(build_bundle(...).body)`，不许拿字幕字符数当数。** 副本 `prepare_material` 的门槛比的是 `bundle.body`（加了时间戳行）与 `cfg.llm.max_input_chars`：2026-11-06 那发我按 transcript 17,036 字判「不会预读」，实际 `bundle.body` 是 31,138 字 ⇒ 真发出 6 次预读调用，而我的桩把预读答成固定文本，**带帧那发的文本腿被自己喂成 1,086 字的桩笔记**——次数还是 1 次，但那次的输入不是真素材。判「会不会预读」用 `video_workbench.core.summarizer.build_bundle(...).body` 现量；端到端脚本里对非目标请求一律抛，不要回桩文本。
+  ⑥ **端点会吐不合法的 JSON，别把「解析失败」直接当「数据坏了」。** `json_mode=true` 发了 `response_format=json_object`，端点照样可以返回带裸引号的字符串；对账档（`WB_SUMMARY_PARITY_STRICT` 没设就是默认档）不抢救，所以用户看到的是报错，而 `video_workbench/infra/jsonfix.parse_json` 能在同一份 raw 上零成本还原全部键。报这类失败时必须同时给出「能不能抢救」的读数。
 - `roles` 载荷里 `retired`（裸 key，前端 `summary.js` 用 `indexOf`）与 `retired_labels`（`{key, display}`，CLI 用）**并存是有意差异，不许合并、不许前端改吃 `display`**。两字段必须**同序**——断言要写成 `list == list`，写成集合相等就白钉（两边各自 `sorted()`，同序本来只是巧合）。
 
 ## 七、规则表
