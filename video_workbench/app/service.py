@@ -58,6 +58,7 @@ from video_workbench.core import (
     waveform,
 )
 from video_workbench.core import cover as cover_core
+from video_workbench.core import frames as frames_core
 from video_workbench.core import downloader as downloader_mod
 from video_workbench.core import onboard as onboard_core
 from video_workbench.core import overview as overview_core
@@ -5331,6 +5332,52 @@ class WorkbenchService:
             )
         return client
 
+    def _summary_frameset(self, ctx: JobContext, project_id: str) -> Any:
+        """给总结抽一组画面帧；抽不出来就返回 None，整条总结照旧跑。
+
+        **为什么失败不抛**：画面是加分项（bs 的 `collect_frames` 也只在 `except FrameError`
+        里追加一条 warning）。用户按下"生成总结"要的是文字稿，不是"因为 ffmpeg 抽帧失败所以
+        这条视频不能总结"。
+
+        **为什么每次都要重抽**：refine 走的是同一段代码，而修订版如果不带画面，上一版里
+        那些只有画面才有的信息（PPT、图表上的字）会悄悄丢掉——见 `summarizer.refine` 的
+        docstring。所以这里不做"上一版采过就复用"的优化。
+
+        **临时目录用项目的 `frames/`**：`Layout` 本来就有这个子目录。`frames_core.collect`
+        在里面再开一个独占子目录、抽完只删那一个——不能删父目录，`frames/thumb.jpg`（封面）
+        就住在里面。
+        """
+        cfg = self.cfg.collect.frames
+        if not bool(getattr(cfg, "enabled", False)):
+            ctx.log("画面帧已关（设置 → 采集 → 截帧），这次不附画面")
+            return None
+        project = self.repo.project_get(project_id) or {}
+        sources = [a for a in self.repo.asset_list(project_id) if a.get("kind") == "source"]
+        if not sources:
+            # 不走 self._source_file：那句文案是给封面写的（"封面抽不了帧"），
+            # 从这里冒出去会让用户以为总结因为封面失败。
+            ctx.log("未附画面：这个项目还没有源视频，先下载或导入")
+            return None
+        source = str(sources[0]["path"])
+        duration_ms = int(sources[0].get("duration_ms") or 0)
+        out_dir = Path(str(project.get("root_dir") or "")) / "frames"
+        try:
+            ctx.progress(0.03, "抽画面帧")
+            frameset = frames_core.collect(
+                self._ffmpeg,
+                source,
+                cfg,
+                out_dir=out_dir,
+                duration_ms=duration_ms,
+                progress=ctx.log,
+            )
+        except frames_core.FrameError as exc:
+            ctx.log(f"未附画面：{exc}")
+            return None
+        for note in frameset.notes:
+            ctx.log(f"画面：{note}")
+        return frameset
+
     def _summary_job(self, ctx: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
         project_id = str(payload.get("project_id") or "")
         project = self.repo.project_get(project_id)
@@ -5356,6 +5403,9 @@ class WorkbenchService:
         if notice:
             ctx.log(notice)
         ctx.log(f"用 {client.model} 生成总结（角色：{role}）")
+        # 画面帧是加分项：抽不出来就是 None，总结照跑（失败原因已经在 ctx.log 里）。
+        # 放在分支之前，是因为 refine 也要重抽一次——理由见 summarizer.refine 的 docstring。
+        frameset = self._summary_frameset(ctx, project_id)
 
         if str(payload.get("kind")) == "refine":
             previous = self.repo.summary_get(str(payload.get("previous_id") or ""))
@@ -5377,6 +5427,7 @@ class WorkbenchService:
                 model=client.model,
                 cache=self.notes,
                 task_key=project_id,
+                frameset=frameset,
             )
         else:
             result = summarizer.run(
@@ -5390,6 +5441,7 @@ class WorkbenchService:
                 model=client.model,
                 cache=self.notes,
                 task_key=project_id,
+                frameset=frameset,
             )
         ctx.check_cancel()
         content = dict(result["summary"])

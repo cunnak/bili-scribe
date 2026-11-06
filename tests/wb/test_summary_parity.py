@@ -430,19 +430,21 @@ PLAN_A_NOTE = (
     "公开面里无源的那些角色两侧必须仍逐字相同（副本层的名单见 SHARED_ROLE_KEYS 的注释）。"
 )
 
-#: 「一致」这句话的**适用范围**（lead 2026-11-05 采纳的表述，不是缺陷登记）。
+#: 「一致」这句话的**适用范围**（lead 2026-11-05 采纳的表述，2026-11-06 task-70 更新）。
 #:
 #: 为什么要单独登记：bs 真产品路径**是**附画面帧的——`bili_scribe/app/service.py` 里
 #: `collect_frames(...)` 产帧后把 `frameset=` 传进 `summarizer.summarize`（`FramesConfig`
-#: 默认 `enabled=True`、`max_frames=12`）；而 WB 适配层 `video_workbench/core/summarizer.py`
-#: 的 `run`/`refine` 两处调用**都不带 `frameset=``（现读：`grep -rn "collect_frames"
-#: video_workbench/ --include=*.py` 除 `video_workbench/config.py` 里
-#: `collect.frames.max_frames/quality` 两行校验外 **0 个调用点**）。
+#: 默认 `enabled=True`、`max_frames=12`）。**WB 现在也接了**（task-70）：适配层
+#: `video_workbench/core/summarizer.py` 的 `run`/`refine` 各有 `frameset` 参数，
+#: 服务层 `_summary_job` 每次生成/修订都调 `_summary_frameset` 现抽一组传下去
+#: （本地 ffmpeg 腿，见 `video_workbench/core/frames.py`）。
 #: 副本里帧进入请求的唯一入口是 `summarize()` 里那句 `as_content_blocks(frameset)`，
 #: 帧一旦进来，user 消息的 `content` 就从 `str` 变成块列表。
-#: ⇒ 本文件所有「一致」的声称，真实覆盖范围是下面这句；差异不在输出字段，在**输入侧**
-#: （bs 最多 12 个 image block，WB 恒 0）。「WB 到底接不接帧」归 vendor 定方向、归用户拍，
-#: 本文件只对**口径边界**负责——`_normalized()` 里那条 isinstance 守卫就是拦这个的。
+#: ⇒ 本文件所有「一致」的声称，真实覆盖范围是下面这句——**本文件的用例一律不传 `frameset`
+#: （不传就是老行为，一次请求都不带图）。带帧那条路的判据在
+#: `tests/wb/test_summary_frames.py`（帧只进最终归约那一次、补救腿不带图、抽不到就降级）。
+#: 差异不在输出字段，在**输入侧**；本文件只对**口径边界**负责——`_normalized()` 里那条
+#: isinstance 守卫就是拦「悄悄把帧塞进这条对账路径」的。
 FRAMES_PRECONDITION_NOTE = (
     "本文件的『逐请求一致』= **无画面帧输入**下、除角色 system 正文外的逐请求一致"
 )
@@ -1735,9 +1737,11 @@ def test_the_parity_scope_is_text_only_and_says_so():
 
     这条不是「再确认一遍一致」，是把**比较发生的前提**钉住：两侧都没喂画面帧，
     所以 `FRAMES_PRECONDITION_NOTE` 那句适用范围今天成立。
-    适配层那一侧同样要过——它才是用户真正跑的那条路（`run`/`refine` 不传 `frameset`），
+    适配层那一侧同样要过——`run`/`refine` **不传 `frameset` 时**必须与 bs 逐请求同形，
     而且 **run 与 refine 两条都要过**：帧的落点是最终归约那一次调用（副本 `:479`），
-    只钉 run 就等于放过「将来只在 refine 接帧」这条最可能的接法。
+    只钉 run 就等于放过「只在 refine 接帧」这条最可能的接法。
+    （带帧那条路今天真的会走：服务层 `_summary_job` 每次都传 `frameset`。它的判据在
+    `tests/wb/test_summary_frames.py`——本文件只负责「不传的时候仍然一致」。）
     """
     from video_workbench.core import summarizer as adapter
 

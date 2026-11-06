@@ -339,6 +339,11 @@ class SummaryLLM:
         """
         if max_tokens is None:
             max_tokens = _request_max_tokens(self.app_cfg)
+        # 四条补救腿（重问 / 续写 / 分批 / 补时间线）都从这里往下发，而它们全是
+        # `list(messages) + [...]` 的形状：主请求带的画面块会被再传一遍。
+        # 在这一处降成纯文本，四条腿一起干净——画面只属于"这次讲了什么"，
+        # 补救腿要的是"JSON 形状对不对"，用不上图。见 `_text_only`。
+        messages = _text_only(messages)
         fixed = repair_json(text)
         if fixed:
             return self._finalize(fixed, messages, sink, temperature, max_tokens)
@@ -887,6 +892,7 @@ def run(
     cache: Any = None,
     task_key: str = "",
     extra_prompt: "bool | None" = None,
+    frameset: Any = None,
 ) -> dict[str, Any]:
     """跑一次总结。返回 ``{summary, usage, model, role, calls, notes, chars}``。
 
@@ -896,6 +902,12 @@ def run(
 
     ``extra_prompt`` 覆盖配置里的 ``llm.extra_prompt``（默认关）。它按**请求**生效：
     只有归约那一段被包在开关里，预读不吃它（预读用的是 MAP_SYSTEM，与角色无关）。
+
+    ``frameset`` 是画面帧（``bili_scribe.core.frames.FrameSet`` 形状，由
+    ``video_workbench.core.frames.collect`` 用本地 ffmpeg 抽出来）。**只有它一路透到副本**：
+    副本把它接在最终归约那一次请求上（见 ``core/summary/summarizer.py` 里
+    ``as_content_blocks(frameset)`` 那句，以及它上面那段"为什么只接归约"的注释）。
+    这里不传就是老行为——一次请求都不带图，parity 的"逐请求一致"照旧成立。
     """
     bundle = build_bundle(project, segments, danmaku=danmaku, platform_summary=platform_summary)
     llm = SummaryLLM(client, model=model, cfg=cfg)
@@ -922,7 +934,13 @@ def run(
         # 上面的预读用的是 MAP_SYSTEM，与角色无关，不该被这个开关影响。
         with prompt_source.use_extra_prompt(extra_prompt_on(cfg, extra_prompt)):
             summary = bs_summarizer.summarize(
-                bundle, llm, cfg, progress=notify, role_key=role_obj.key, prepared=material
+                bundle,
+                llm,
+                cfg,
+                progress=notify,
+                role_key=role_obj.key,
+                prepared=material,
+                frameset=frameset,
             )
     except SummarizeError as exc:
         raise WBError(
@@ -963,6 +981,7 @@ def refine(
     cache: Any = None,
     task_key: str = "",
     extra_prompt: "bool | None" = None,
+    frameset: Any = None,
 ) -> dict[str, Any]:
     """按用户的话改一版。素材**仍然带着**——只给上一版会像传话游戏一样越改越远。
 
@@ -970,6 +989,11 @@ def refine(
     「不重新采集、不重新预读——素材笔记直接从 ctx 拿」）。这就是迭代打磨的全部意义：
     同一份素材改很多版，只付一次预读的钱（4 小时视频省下 32,663 tokens，占一次总结
     输入的 38%）。没命中就看磁盘缓存 ``cache``，还没有才真的重跑一次预读。
+
+    ``frameset`` 要**重新采一次**，不能复用上一版那次采的：上一版里那些只有画面才有的
+    信息（PPT、图表上的字）如果不重新给，修订版会悄悄丢掉它们——这条与 bs 的
+    ``run_refine`` 里重新调 ``collect_frames`` 同一个理由。采集本身不在这里做
+    （要 ffmpeg 与源视频路径，那两样在服务层），这里只负责把它透到副本。
     """
     demand = (requirement or "").strip()
     if len(demand) < 4:
@@ -1018,6 +1042,7 @@ def refine(
                     requirement=demand,
                     previous=_json(previous),
                 ),
+                frameset=frameset,
             )
     except SummarizeError as exc:
         raise WBError(
@@ -1267,6 +1292,41 @@ def _loads_timeline(text: str) -> list[dict[str, str]]:
         if at and text_value:
             rows.append({"t": at, "text": text_value})
     return rows
+
+
+def _text_only(messages: Any) -> Any:
+    """把带画面块的消息降成纯文本版，专给「补救腿」用。
+
+    为什么需要这一步：副本只把帧放进**最终归约那一次**请求（`frameset` 接缝，见
+    `core/summary/summarizer.py` 里那句 `as_content_blocks(frameset)`），而适配器的四条补救腿
+    （`_json_or_retry` / `_split_reply` / `_continue` / `_timeline_reply`）全都是
+    `list(messages) + [...]` 再发一次——照原样发，同一批图会**再传一遍**。
+    12 帧 ≈ 1,464 image_tokens（见 `bili_scribe/core/frames.py` 模块注释），翻倍就是白烧。
+
+    补救腿要做的事是「把 JSON 形状修对」「补几条时间线」，用不上画面：画面只对
+    「这一次到底讲了什么」有用，而那是主请求的活。所以主请求带帧、补救腿不带。
+
+    只做一件事：块列表里 `type == "text"` 的片段拼回一条字符串，`image_url` 块丢掉。
+    `content` 本来就是字符串的消息原样返回——那条路一个字节都不改。
+    """
+    if not isinstance(messages, list):
+        return messages
+    out: list[Any] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        content = item.get("content")
+        if isinstance(content, list):
+            texts = [
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            out.append({**item, "content": "\n".join(text for text in texts if text)})
+        else:
+            out.append(item)
+    return out
 
 
 def _plain(text: str) -> str:

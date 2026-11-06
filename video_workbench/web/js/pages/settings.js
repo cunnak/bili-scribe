@@ -147,8 +147,8 @@
         { path: "collect.include_platform_summary", label: "收集平台简介", type: "switch" },
         { path: "collect.danmaku.enabled", label: "采集弹幕", type: "switch" },
         { path: "collect.danmaku.max_items", label: "弹幕上限", type: "number" },
-        { path: "collect.frames.enabled", label: "截帧", type: "switch", help: "给总结配图用；关掉可明显提速。" },
-        { path: "collect.frames.max_frames", label: "每稿最多截帧", type: "number" }
+        { path: "collect.frames.enabled", label: "截帧", type: "switch", help: "总结时附上画面：PPT、图表、代码里的字能进正文。关掉省图片 token，也少一次本地抽帧。" },
+        { path: "collect.frames.max_frames", label: "每稿最多截帧", type: "number", help: "按视频时长等距抽取。帧会作为图片发给模型，越多越贵。" }
       ]
     },
     {
