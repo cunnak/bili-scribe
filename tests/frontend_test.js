@@ -877,6 +877,58 @@ test("保存设置把收集到的对象原样交给后端", async () => {
   } finally { p.close(); }
 });
 
+/* 真实 bug（v0.5.0 起）：设置页重写时把弹幕的两个配额控件删了，而
+   bili_scribe/app/service.py 的 DanmakuPatch 五个字段全必填、没有默认值。
+   collectSettings() 只遍历 [data-path]，于是保存时永远缺 hot_items /
+   sample_items，Pydantic 直接 422「Field required」，任何设置都存不进去。
+   修法是把控件补回表单（不是给后端加默认值 —— model_dump() 会把默认的
+   200 写回，悄悄覆盖用户已配的值，跟 llm.role 那个坑同族）。 */
+test("保存设置时弹幕配额五项都在载荷里，不再 422", async () => {
+  const be = makeBackend();
+  /* 真后端 settings_view() 的 collect.danmaku 有全部五项。假后端默认只给
+     llm 段，这里补齐并用非默认值，证明交上去的是回填值、不是前端硬编码的 200。 */
+  be.state.settings.values = Object.assign({}, be.state.settings.values, {
+    collect: {
+      danmaku: {
+        enabled: true, also_with_subtitle: false, max_items: 800,
+        hot_items: 250, sample_items: 120,
+      },
+      frames: { enabled: false, max_frames: 12, quality: 85 },
+    },
+  });
+  const p = await loadPage({ backend: be });
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    p.win.saveSettings();
+    await wait(90);
+    const c = p.backend.calls.find((x) => x.name === "save_settings");
+    assert(G6, "调了 save_settings", !!c, "没调用");
+    const dm = c ? c.args[0].collect.danmaku : null;
+    eq(G6, "hot_items 是回填值", dm && dm.hot_items, 250);
+    eq(G6, "sample_items 是回填值", dm && dm.sample_items, 120);
+    eq(G6, "弹幕配额五项齐全", dm ? Object.keys(dm).sort() : null,
+      ["also_with_subtitle", "enabled", "hot_items", "max_items", "sample_items"]);
+  } finally { p.close(); }
+});
+
+test("DanmakuPatch 每个必填字段在设置页都有 data-path 控件", async () => {
+  /* 字段清单来自 bili_scribe/app/service.py 的 DanmakuPatch（五个字段全必填）。
+     这是维护性形状锁：后端以后加一个必填字段而表单没跟上，这条会点名缺哪个。
+     行为锁在上面那条（回填 → 保存 → 载荷），两条不共用同一个观测点。 */
+  const required = ["enabled", "also_with_subtitle", "max_items", "hot_items", "sample_items"];
+  const prefix = "collect.danmaku.";
+  const p = await loadPage();
+  try {
+    const paths = Array.from(p.doc.querySelectorAll("[data-path^='" + prefix + "']"))
+      .map((el) => el.dataset.path.slice(prefix.length));
+    for (const key of required) {
+      assert(G6, "有 " + key + " 控件", paths.indexOf(key) !== -1,
+        "缺 data-path=\"" + prefix + key + "\"，保存时 Pydantic 会报 Field required");
+    }
+  } finally { p.close(); }
+});
+
 test("测试连通性发的是 llm 那一段本身，不再多包一层", async () => {  // 这条来自一个真实 bug：原来是 `call("test_llm", {llm: <那一段>})`，多包了一层。
   // 后端的 `LlmPatch` 收的就是那一段本身，于是校验报"缺 base_url 与 model"，
   // 而错误信息指着字段名、不指着多出来的壳，看着像配置写错了。

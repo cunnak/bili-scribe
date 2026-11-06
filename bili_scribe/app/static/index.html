@@ -995,6 +995,10 @@ textarea:disabled{opacity:.45;cursor:not-allowed}
         <label class="sw"><input type="checkbox" data-path="collect.danmaku.also_with_subtitle"><span class="tb"></span><span class="tx">补充语气与反应</span></label>
       </div></div>
       <div class="f"><label>弹幕条数</label><div class="i"><input type="number" data-path="collect.danmaku.max_items" data-kind="number" min="1" step="100"></div></div>
+      <!-- hot_items / sample_items 是 DanmakuPatch 的必填项，collectSettings() 只收
+           [data-path] 控件。少一个输入框，保存时整份设置都会 422「Field required」。 -->
+      <div class="f"><label>高频弹幕</label><div class="i"><input type="number" data-path="collect.danmaku.hot_items" data-kind="number" min="1" step="50"><span class="u">条 · 观众情绪高点</span></div></div>
+      <div class="f"><label>均匀采样</label><div class="i"><input type="number" data-path="collect.danmaku.sample_items" data-kind="number" min="1" step="50"><span class="u">条 · 保留叙事推进</span></div></div>
       <div class="f"><label>画面帧</label><div class="i">
         <label class="sw"><input type="checkbox" data-path="collect.frames.enabled" id="s-frames"><span class="tb"></span><span class="tx">抽取关键画面（PPT、图表上的字只有它有）</span></label>
       </div></div>
