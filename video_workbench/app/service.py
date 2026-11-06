@@ -58,8 +58,8 @@ from video_workbench.core import (
     waveform,
 )
 from video_workbench.core import cover as cover_core
-from video_workbench.core import frames as frames_core
 from video_workbench.core import downloader as downloader_mod
+from video_workbench.core import frames as frames_core
 from video_workbench.core import onboard as onboard_core
 from video_workbench.core import overview as overview_core
 from video_workbench.core import publisher as publisher_core
