@@ -45,6 +45,12 @@ NEVER_SYNC = {".gitignore"}
 #: 比对时跳过的主仓顶层前缀：bili_scribe 在镜像里是 junction + submodule。
 SKIP_PREFIXES = ("bili_scribe/", "third_party/")
 
+#: 只有这两面允许**自动删除**（主仓 HEAD 删掉 ⇒ 镜像跟着删）。
+#: 为什么比 PRODUCT_PREFIXES 窄：scripts/ 里住着镜像自有的 link_bili_scribe.py，
+#: docs/ 整体不在产品面上；把它们算进删除面，第一次同步就会去删发布仓自己的工具
+#: （那正是 _new_product_targets 那笔事故的反向版本）。这两面是 100% 主仓作者区。
+DELETE_PREFIXES = ("video_workbench/", "tests/wb/")
+
 #: 逐字节 vendored 副本 + 6 个真源 txt——同步脚本永远不许删、不许覆盖。
 #: 这六个是「主仓已删」这一栏第一次就误报的东西（见 git() 里 core.quotepath=false 那条注释）。
 LOCKED_PREFIXES = (
@@ -431,10 +437,27 @@ def content_targets(main: Path, mirror: Path) -> dict:
     ]
     # 主仓独有：只报数，不新建。
     a_only = [p for p in a_set if p not in b_all and not p.startswith(SKIP_PREFIXES)]
-    # 镜像独有（非 junction / 非 submodule 挂载点）：算漂移，人工判。
-    b_only = [p for p in b_set if p not in set(a_set) and not p.startswith(SKIP_PREFIXES)]
-    # 两边 HEAD 都列过、但主仓 HEAD 已删掉（staged 删除不算）→ 同步删除。
-    gone = [p for p in common if head_bytes(main, p) is None]
+    # 删除传播（2026-11-06 重写，评审 R73-1）。
+    # 旧写法是**死分支**：gone 从 common 里挑，而 common 的成员来自
+    # tracked_lines(main) = `git ls-tree -r HEAD`，主仓 HEAD 已经删掉的路径根本不在
+    # a_set 里 ⇒ head_bytes(main, p) is None 这一支永远取不到东西 ⇒ 主仓删的文件在
+    # 镜像里永久留着（决定档改名那次就是这么漏的，镜像留着旧名那份）。
+    # 正解反过来取「镜像 HEAD 有、主仓 HEAD 没有」，且只限 DELETE_PREFIXES 两面。
+    a_head = set(a_set)
+    gone = [
+        p
+        for p in b_set
+        if p not in a_head
+        and p.startswith(DELETE_PREFIXES)
+        and not p.startswith(SKIP_PREFIXES)
+        and not p.startswith(LOCKED_PREFIXES)
+        and p not in NEVER_SYNC
+    ]
+    # 其余「镜像 HEAD 有、主仓 HEAD 没有」的路径（scripts/、docs/、根目录）：
+    # 分不清是上游删除还是发布仓自有 ⇒ 只报漂移，人工判，绝不动手。
+    b_only = [
+        p for p in b_set if p not in a_head and not p.startswith(SKIP_PREFIXES) and p not in gone
+    ]
     # 镜像从未跟踪、但主仓 HEAD 已入库的产品/判据文件：以前这里只打一行 note，
     # 于是「同步成功」与「门面缺牙」同时成立（见 _new_product_targets 的实录）。
     new_targets = _new_product_targets(main, mirror, a_set, b_all)

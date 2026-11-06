@@ -27,6 +27,11 @@ $env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe -u scripts/sync_mirror_s
 $env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe -u scripts/sync_mirror_sentinel.py scripts/sync_mirror.py C:/tmp/wb-sync-mirror-sentinel-run2
 ```
 退出码：0 = 全绿；1 = 有红腿（明细逐行打印）。**rc 不在 (0,1) 里就是跑不起来**，那种读数不许当「没红」。
+
+被测脚本自己的退出码约定（腿位按这个断，别凭想象）：**2 = early_arg_check 在 preflight
+之前就把参数问倒**（未入库的 --adopt/--from-head、缺 -m、落点越界）；**1 = preflight 返回
+blockers**（junction 形状不对、镜像 .gitignore 缺排除行或被改脏、镜像工作区不等于 HEAD 版）。
+两类都必须零写入。
 """
 
 import shutil
@@ -458,26 +463,38 @@ def main():
     sh(m, "git", "add", "--", "a.py")
     sh(m, "git", "commit", "-q", "-m", "l15 v2")
     gi = mi / ".gitignore"
-    gi.write_bytes(b"/_bs_real" + bytes([10]) + b"__pycache__/" + bytes([10]) + b"*.pyc" + bytes([10]))
+    gi.write_bytes(
+        b"/_bs_real" + bytes([10]) + b"__pycache__/" + bytes([10]) + b"*.pyc" + bytes([10])
+    )
+    # 退出码契约（本轮现读 sync_mirror.py 定死，别再凭想象写 2）：
+    #   2 = early_arg_check 在 preflight **之前**就把参数问倒（L4/L5/L7/L13c 那些）
+    #   1 = preflight 返回 blockers，拒绝同步
+    # 这两类都必须是零写入，但红在哪一条腿上要能区分「参数没验」和「盘面不干净」。
     r = run_tool(m, mi, ["--apply", "--commit", "-m", "sync"])
     check(
-        "L15a junction 排除行被删 -> rc=2 且产品文件一个字节没动",
-        r.returncode == 2
+        "L15a junction 排除行被删 -> preflight 拒绝（rc=1）且产品文件一个字节没动",
+        r.returncode == 1
         and (mi / "a.py").read_bytes() == b"line1" + bytes([10])
         and "缺 '/bili_scribe'" in r.stdout,
         f"rc={r.returncode} got={(mi / 'a.py').read_bytes()!r} out={r.stdout[-300:]}",
     )
     gi.write_bytes(
-        b"/bili_scribe" + bytes([10])
-        + b"/_bs_real" + bytes([10])
-        + b"__pycache__/" + bytes([10])
-        + b"*.pyc" + bytes([10])
-        + b"a.py" + bytes([10])
+        b"/bili_scribe"
+        + bytes([10])
+        + b"/_bs_real"
+        + bytes([10])
+        + b"__pycache__/"
+        + bytes([10])
+        + b"*.pyc"
+        + bytes([10])
+        + b"a.py"
+        + bytes([10])
     )
     r = run_tool(m, mi, ["--apply", "--commit", "-m", "sync"])
+    l15b = r
     check(
-        "L15b 排除行还在但这份被改过（多吞 a.py）-> 仍然 rc=2",
-        r.returncode == 2 and (mi / "a.py").read_bytes() == b"line1" + bytes([10]),
+        "L15b 排除行还在但这份被改过（多吞 a.py）-> 同样被 preflight 拒（rc=1）",
+        r.returncode == 1 and (mi / "a.py").read_bytes() == b"line1" + bytes([10]),
         f"rc={r.returncode} out={r.stdout[-300:]}",
     )
     sh(mi, "git", "checkout", "--", ".gitignore")
@@ -491,10 +508,73 @@ def main():
 
     # L15a/L15b 之所以红得对，靠的是 preflight 后面那段脏面判据：.gitignore 一旦不等于
     # 主仓 HEAD 版就落进 not_head。这里钉住「不是靠 junction 那一行单独兜住第二种形状」。
+    # 原写法是 `... or True`——恒真腿等于没腿（本仓纪律：一条从来没红过的检查不算检查），
+    # 现在改成拿 L15b 自己的读数比两半：脏面那条必须在，junction 那条必须不在。
     check(
         "L15d 第二种形状的拦截理由写的是脏面，不是 junction 行",
-        "不等于" in r.stdout or True,
-        "仅记录：L15b 的读数在 r.stdout 里",
+        l15b.returncode == 1
+        and "不等于" in l15b.stdout
+        and "缺 '/bili_scribe'" not in l15b.stdout
+        and "没有 bili_scribe 入口" not in l15b.stdout,
+        f"rc={l15b.returncode} out={l15b.stdout[-400:]}",
+    )
+
+    say("== L16 主仓删除必须传播（评审 R73-1：旧 gone 是死分支）==")
+    d16 = {
+        "keep.txt": b"same" + bytes([10]),
+        "video_workbench/x.py": b"X" + bytes([10]),
+        "video_workbench/y.py": b"Y" + bytes([10]),
+        "tests/wb/test_z.py": b"Z" + bytes([10]),
+        "scripts/link_bili_scribe.py": b"L" + bytes([10]),
+    }
+    m = new_repo(BASE / "l16" / "main", d16)
+    mi = new_repo(BASE / "l16" / "mirror", d16)
+    sh(m, "git", "rm", "-q", "--", "video_workbench/x.py")
+    sh(m, "git", "commit", "-q", "-m", "main 删掉产品面一个文件")
+    r = run_tool(m, mi, ["--apply", "--commit", "-m", "sync-del"])
+    check(
+        "L16a 主仓 HEAD 删掉 video_workbench/x.py -> 镜像跟着删、rc=0",
+        r.returncode == 0 and not (mi / "video_workbench/x.py").exists(),
+        f"rc={r.returncode} out={r.stdout[-400:]}{r.stderr[-200:]}",
+    )
+    check(
+        "L16b 这笔提交里真的含删除（镜像 HEAD 不再跟踪它）",
+        "video_workbench/x.py" not in sh(mi, "git", "ls-tree", "-r", "--name-only", "HEAD").stdout,
+        sh(mi, "git", "ls-tree", "-r", "--name-only", "HEAD").stdout[-400:],
+    )
+
+    # 删除面**必须**比产品认领面窄：scripts/ 里住着发布仓自有的 link_bili_scribe.py。
+    # 它没被主仓删，当然该在；主仓真删它时也只许报漂移、不许动手。
+    check(
+        "L16c 镜像自有工具没被误删（主仓侧它还在 HEAD）",
+        (mi / "scripts/link_bili_scribe.py").exists(),
+        f"out={r.stdout[-300:]}",
+    )
+    sh(m, "git", "rm", "-q", "--", "scripts/link_bili_scribe.py")
+    sh(m, "git", "commit", "-q", "-m", "main 删掉 scripts 面一个文件")
+    r = run_tool(m, mi, ["--apply"])
+    check(
+        "L16d 非删除面前缀（scripts/）不自动删，只按镜像独有报出来",
+        (mi / "scripts/link_bili_scribe.py").exists() and "link_bili_scribe.py" in r.stdout,
+        f"rc={r.returncode} out={r.stdout[-500:]}",
+    )
+
+    # 面只认 HEAD：只 staged、未 commit 的删除不许搬（与 L3 同一族，反方向）。
+    sh(m, "git", "rm", "-q", "--", "video_workbench/y.py")
+    r = run_tool(m, mi, ["--apply"])
+    check(
+        "L16e 只 staged 的删除不许传播（镜像那份必须还在）",
+        (mi / "video_workbench/y.py").exists(),
+        f"rc={r.returncode} out={r.stdout[-500:]}",
+    )
+    # L16e 只证明「staged 不搬」。少了这条对照，恒真的解释有两种：
+    # 面只认 HEAD，或者删除根本没实现。把同一笔删除 commit 掉，必须立刻搬。
+    sh(m, "git", "commit", "-q", "-m", "把 y.py 的删除入库")
+    r = run_tool(m, mi, ["--apply", "--commit", "-m", "sync-del2"])
+    check(
+        "L16f 反向对照：同一笔删除 commit 之后立刻传播",
+        r.returncode == 0 and not (mi / "video_workbench/y.py").exists(),
+        f"rc={r.returncode} out={r.stdout[-400:]}{r.stderr[-200:]}",
     )
 
     say(f"ok={ok} red={len(red)}")
