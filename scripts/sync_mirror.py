@@ -170,7 +170,8 @@ def _new_product_targets(main: Path, mirror: Path, a_set: List, b_all: set) -> L
             out.append(p)
     return sorted(out)
 
-def preflight(main: Path, mirror: Path, commit_ok: bool = False) -> tuple:
+def preflight(main: Path, mirror: Path, commit_ok: bool = False,
+              applying: bool = False) -> tuple:
     """返回 (blockers, notes)。blockers 非空即拒绝同步，此时不写任何文件。"""
     blockers: list[str] = []
     notes: list[str] = []
@@ -203,7 +204,15 @@ def preflight(main: Path, mirror: Path, commit_ok: bool = False) -> tuple:
     #       允许带 -m 补提交；有任何一个不等于 HEAD 版就仍然拒绝。
     #   (c) submodule 内部脏：单独报，绝不与 (a) 混成一句「放行」。
     dirty = [ln for ln in git(mirror, "status", "--porcelain").splitlines() if ln]
-    gitlink = [ln for ln in dirty if ln.strip().startswith("M third_party/bili-scribe")]
+
+    # porcelain v1 是**两列**状态（X=索引侧、Y=工作区侧）。旧版写 startswith("M ")
+    # 只看工作区那一位：`MM`（索引与工作区都改过）、`A `、` D` 全都不匹配，
+    # 于是 gitlink 掉进 rest 被当「不等于 HEAD 的文件」，报错信息完全误导。
+    # 实测形状（本轮哨兵）：M  / M M / MM / A  /  D 五种都要认得。
+    def _split(ln: str) -> tuple[str, str]:
+        return (ln[:2], ln[3:])
+
+    gitlink = [ln for ln in dirty if _split(ln)[1] == "third_party/bili-scribe"]
     rest = [ln for ln in dirty if ln not in gitlink]
     if gitlink:
         sm_dirty = [ln for ln in git(mirror / "third_party" / "bili-scribe",
@@ -216,21 +225,44 @@ def preflight(main: Path, mirror: Path, commit_ok: bool = False) -> tuple:
     if rest:
         resumable, not_head = [], []
         for ln in rest:
-            body = ln[3:]
+            code, body = _split(ln)
             if "->" in body:                       # rename：形状不认识，不敢替你判断
                 not_head.append(body + "（rename，不认识）")
                 continue
             path = body.strip().strip(chr(34))
-            want = head_bytes(main, path) if path and not path.endswith("/") else None
-            have = (mirror / path).read_bytes() if (mirror / path).is_file() else None
-            (resumable if want is not None and want == have else not_head).append(path)
+            if path.endswith("/"):
+                # 未跟踪目录（`?? dir/`）：里面是什么我们不知道，不认作中断现场。
+                not_head.append(path + "（未跟踪目录，不认识）")
+                continue
+            want = head_bytes(main, path)
+            work = (mirror / path).read_bytes() if (mirror / path).is_file() else None
+            # 这里**只比工作区**，不比索引。理由是本入口在提交前一定会
+            # `git add -A -- <本次 paths>`：add 会把工作区内容写进索引，所以
+            # 「工作区 == 主仓 HEAD 版」才是这一笔最终会提交进去的内容。
+            # 我第一版在这加了索引比较，哨兵 L8 当场把它证伪 —— 一个完全合法的
+            # resume 现场（工作区已按 HEAD 写好、索引还是旧的）被读成
+            # 「索引不等于 HEAD 版」而拒掉。索引是否真的对齐，改在 add **之后**
+            # 校验（见 main 的 `idx_check`），那里才是真正决定提交内容的时刻。
+            if want is None:
+                not_head.append(path + "（主仓 HEAD 里没有，是删除或未入库）")
+            elif work != want:
+                not_head.append(path + f"（工作区不等于主仓 HEAD 版，状态 {code}）")
+            else:
+                resumable.append(path)
         if not not_head and commit_ok:
-            notes.append(f"[resume] 认出上一次同步留下的中断现场：{len(resumable)} 个文件已按主仓 "
-                         "HEAD 写好、内容与 HEAD 逐字节相同 —— 带 -m 即可把这一笔补提交完")
-        elif not not_head:
+            notes.append(f"[resume] 认出上一次同步留下的中断现场：{len(resumable)} 个文件在工作区与索引里"
+                         "都已按主仓 HEAD 写好 —— 带 -m 即可把这一笔补提交完")
+        elif not not_head and applying:
             blockers.append(
-                f"镜像脏 {len(resumable)} 行且都等于主仓 HEAD 版，但这次不是提交（缺 -m 或未 --apply）："
+                f"镜像脏 {len(resumable)} 行且都等于主仓 HEAD 版，但这次不是提交（缺 -m）："
                 "要么带 --commit -m 补完这一笔，要么先弄清这是谁的在途")
+        elif not not_head:
+            # 纯 dry-run：这不是「拒绝同步」，是「要提交才能清掉」。报成 note，
+            # 否则在全部 resumable 的镜像上跑无 --apply 会被挡在 preflight 里，
+            # 看起来像工具死锁（评审 B-08）。
+            notes.append(
+                f"[resume] 镜像有 {len(resumable)} 个文件已按主仓 HEAD 写好但未提交："
+                "带 --apply --commit -m 可补完这一笔；这次只看计划，不写入")
         else:
             blockers.append(
                 f"镜像工作区不干净（{len(rest)} 行），其中 {len(not_head)} 行**不等于**主仓 HEAD 版"
@@ -279,6 +311,40 @@ def head_bytes(repo: Path, rel: str) -> bytes | None:
             "git cat-file -t HEAD:" + rel + " rc=" + str(chk.returncode) +
             " out=" + out[:200] + " err=" + err[:200] +
             " —— 读不懂的形状不当成「HEAD 里没有」读")
+    return None
+
+
+def index_bytes(repo: Path, rel: str) -> bytes | None:
+    """取**索引里**那一版（暂存区）。None = 索引里没有这个路径。
+
+    为什么 resume 判据必须读索引而不只读工作区（本轮评审 B-01 实测形状）：
+    `git commit -- <path>` 提交的是**索引内容**，不是工作区内容。若镜像里那个文件
+    处于 `M `（工作区改了、索引还是旧的）或 `MM`（两边都改过），只比工作区字节
+    会看到「等于主仓 HEAD 版」于是放行，而实际提交进去的是索引里的旧版 ——
+    这一笔提交自己就造出一个新的对不上账现场。
+    """
+    if not rel or rel.endswith("/"):
+        raise RuntimeError(f"索引读取要的是文件路径，不是目录或空路径：{rel!r}")
+    chk = subprocess.run(["git", "-c", "core.quotepath=false", "cat-file", "-t", f":{rel}"],
+                         cwd=str(repo), capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
+    out = (chk.stdout or "").strip()
+    if out == "blob":
+        res = subprocess.run(["git", "-c", "core.quotepath=false", "show", f":{rel}"],
+                             cwd=str(repo), capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f":{rel} 的 cat-file 说是 blob，git show 却 rc={res.returncode}："
+                f"{(res.stderr or b'').decode('utf-8', 'replace')[:200]} —— 不一致，不当成「索引里没有」读")
+        return res.stdout
+    if chk.returncode != 0 and ("not a valid object name" in (chk.stderr or "")
+                                or "does not exist" in (chk.stderr or "")
+                                or "but not in" in (chk.stderr or "")):
+        return None
+    if chk.returncode != 0:
+        raise RuntimeError(
+            f"git cat-file -t :{rel} rc={chk.returncode} out={out[:200]} "
+            f"err={(chk.stderr or '')[:200]} —— 读不懂的形状不当成「索引里没有」读")
     return None
 
 
@@ -472,7 +538,8 @@ def main() -> int:
         for b in bad:
             print("[x] " + b)
         return 2
-    blockers, notes = preflight(ROOT, mirror, commit_ok=bool(args.commit))
+    blockers, notes = preflight(ROOT, mirror, commit_ok=bool(args.commit),
+                                applying=bool(args.apply))
     for n in notes:
         print(f"[note] {n}")
     if blockers:
@@ -568,23 +635,56 @@ def main() -> int:
                 rels.append(d[6:])
             else:
                 rels.append(d)
-        paths = sorted({p for p in rels if (mirror / p).exists() or (ROOT / p).exists()} |
+        # **删除也必须进 pathspec**。旧版用 `(mirror/p).exists() or (ROOT/p).exists()` 过滤：
+        # 同步删除的文件两处都不存在 ⇒ 被过滤掉 ⇒ `git add` 不含它 ⇒ 提交里没有这次删除，
+        # 镜像工作区留下一个 D，下一次 preflight 就把自己永久挡在外面（评审 R73-1）。
+        # 判据改成「本次 done 里出现过这个路径」——done 是这一笔真的动过的东西，不靠猜存在性。
+        touched = set(rels)
+        paths = sorted(touched |
                        {p for p in ("third_party/bili-scribe", ".gitmodules") if (mirror / p).exists()})
         if not paths:
             print("[ok] 没有需要提交的东西（镜像已与主仓一致）")
             return 0
-        git(mirror, "add", "--", *paths)          # 显式 pathspec，绝不 -A
-        staged = [ln for ln in git(mirror, "diff", "--cached", "--name-only").splitlines() if ln]
-        under = [p for p in staged if p.startswith("bili_scribe/")]
-        if under:
-            git(mirror, "restore", "--staged", "bili_scribe")
-            print(f"[x] 暂存面出现 bili_scribe/ 下 {len(under)} 个文件，已退回，不提交")
+        git(mirror, "add", "-A", "--", *paths)     # 显式 pathspec，绝不裸 -A
+        # **只提交这一笔动过的路径**，不提交整个暂存面。旧版拿
+        # `git diff --cached --name-only` 的全仓暂存列表去 commit，会把镜像里别人
+        # 预先 staged 的文件一起吸进这笔提交（评审 R73-2）。这里以 paths 为准，
+        # 并且发现 bili_scribe/ 条目时**只退它自己**，不再 `restore --staged bili_scribe`
+        # 把别人的暂存一起退掉。
+        staged_all = [ln for ln in git(mirror, "diff", "--cached", "--name-only").splitlines() if ln]
+        ours = [p for p in paths if p in set(staged_all)]
+        # add 之后、commit 之前，**再核一次索引内容**：`git commit -- <path>` 提交的是
+        # 索引那一版，而 add 刚把它写成工作区版。若此时索引仍不等于主仓 HEAD 版
+        # （路径被 .gitignore 挡住、或工作区在 add 与 commit 之间被改过），
+        # 提交进去的就是一份对不上账的内容 —— 那正是本入口要消灭的现场。
+        # 这一步放在 add 之后，是因为在 add 之前索引本来就可能旧（合法的 resume 现场），
+        # 那时比索引会误判（哨兵 L8 已证伪我第一版写法）。
+        # ⚠️ 顺序：`ours` 必须先算出来，这段才能用 —— 我第一版把它写在 `ours` 赋值之前，
+        # 直接 NameError，于是 `--commit` 块整个没跑，哨兵 L2b/L8/L11b 三处一起红。
+        idx_bad = []
+        for rel in ours:
+            want = head_bytes(ROOT, rel)
+            if want is None:
+                continue                    # 本次删除：索引里没有才是对的
+            if index_bytes(mirror, rel) != want:
+                idx_bad.append(rel)
+        if idx_bad:
+            print(f"[x] 暂存后索引仍不等于主仓 HEAD 版：{'、'.join(idx_bad[:5])}"
+                  "（多半被 .gitignore 挡住或 add 后被改动）——不提交")
             return 2
-        if not staged:
+        under = [p for p in ours if p.startswith("bili_scribe/")]
+        if under:
+            git(mirror, "restore", "--staged", "--", *under)
+            print(f"[x] 本次要提交的路径里出现 bili_scribe/ 下 {len(under)} 个文件，已退回它们，不提交")
+            return 2
+        foreign = [p for p in staged_all if p not in set(paths)]
+        if foreign:
+            print(f"[note] 镜像暂存面另有 {len(foreign)} 个文件不属于本次同步，保持原样（不提交、不退）")
+        if not ours:
             print("[ok] 没有需要提交的东西（镜像已与主仓一致）")
             return 0
-        git(mirror, "commit", "-q", "-m", args.message.strip(), "--", *staged)
-        print(f"[ok] 镜像 commit {git(mirror, 'rev-parse', '--short', 'HEAD').strip()}，含 {len(staged)} 个文件")
+        git(mirror, "commit", "-q", "-m", args.message.strip(), "--", *ours)
+        print(f"[ok] 镜像 commit {git(mirror, 'rev-parse', '--short', 'HEAD').strip()}，含 {len(ours)} 个文件")
     return 0
 
 
