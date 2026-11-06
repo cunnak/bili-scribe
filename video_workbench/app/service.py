@@ -815,6 +815,13 @@ class WorkbenchService:
         # 上次崩/被杀留下的临时目录在这里清掉（`JobManager` 已把残留任务标失败，
         # 所以此刻 cache/tmp 里的一切都是垃圾）
         self.tmp_swept = self._sweep_tmp()
+        # 服务端抽帧的磁盘缓存也在开机时清一次：正常路径的本地腿自己收尾，但服务端腿
+        # 的缓存要跨任务复用，不能任务结束就删（并发采集会互删）。frames_days <= 0
+        # 表示不自动清理，语义与配置 retention 的文案一致。
+        self.frames_swept = frames_core.purge_stale_frames(
+            Path(str(self.cfg.cache_root)) / "frames",
+            int(getattr(self.cfg.storage.retention, "frames_days", 0) or 0),
+        )
         # 重启恢复：任务标 interrupted、合并记录收尾、项目阶段按产物回退。
         # 放在这里而不是后台线程里跑——它是"打开窗口"的一部分，
         # 界面第一眼看到的阶段必须是收敛后的结果。
@@ -5335,17 +5342,16 @@ class WorkbenchService:
     def _summary_frameset(self, ctx: JobContext, project_id: str) -> Any:
         """给总结抽一组画面帧；抽不出来就返回 None，整条总结照旧跑。
 
-        **为什么失败不抛**：画面是加分项（bs 的 `collect_frames` 也只在 `except FrameError`
-        里追加一条 warning）。用户按下"生成总结"要的是文字稿，不是"因为 ffmpeg 抽帧失败所以
+        **两条腿的优先级**：源视频在盘上且本地 ffmpeg 成功 -> 本地腿（零回归、不出网）；
+        否则走服务端 videoshot 腿（需要 bvid 解 aid），服务端腿有磁盘缓存。两条都失败
+        只记日志并返回 None——画面是加分项，不许让总结失败。
+
+        **为什么失败不抛**：用户按下"生成总结"要的是文字稿，不是"因为 ffmpeg 抽帧失败所以
         这条视频不能总结"。
 
-        **为什么每次都要重抽**：refine 走的是同一段代码，而修订版如果不带画面，上一版里
-        那些只有画面才有的信息（PPT、图表上的字）会悄悄丢掉——见 `summarizer.refine` 的
-        docstring。所以这里不做"上一版采过就复用"的优化。
-
-        **临时目录用项目的 `frames/`**：`Layout` 本来就有这个子目录。`frames_core.collect`
-        在里面再开一个独占子目录、抽完只删那一个——不能删父目录，`frames/thumb.jpg`（封面）
-        就住在里面。
+        **为什么本地腿每次重抽、服务端腿可缓存**：本地腿在项目 `frames/` 下开独占子目录、
+        抽完只删那一个，不碰父目录的 `thumb.jpg`；服务端腿按 `cache_root/frames/<bvid>`
+        共享缓存，写入原子替换，任务收尾绝不 rmtree 共享目录（并发采集会互删）。
         """
         cfg = self.cfg.collect.frames
         if not bool(getattr(cfg, "enabled", False)):
@@ -5353,26 +5359,68 @@ class WorkbenchService:
             return None
         project = self.repo.project_get(project_id) or {}
         sources = [a for a in self.repo.asset_list(project_id) if a.get("kind") == "source"]
-        if not sources:
+        local_error = ""
+        if sources:
+            source = str(sources[0]["path"])
+            duration_ms = int(sources[0].get("duration_ms") or 0)
+            out_dir = Path(str(project.get("root_dir") or "")) / "frames"
+            try:
+                ctx.progress(0.03, "抽画面帧")
+                frameset = frames_core.collect(
+                    self._ffmpeg,
+                    source,
+                    cfg,
+                    out_dir=out_dir,
+                    duration_ms=duration_ms,
+                    progress=ctx.log,
+                )
+            except frames_core.FrameError as exc:
+                local_error = str(exc)
+                ctx.log(f"本地抽帧失败，改用服务端抽帧：{exc}")
+            except Exception as exc:  # noqa: BLE001 - 画面腿任何异常都只降级
+                local_error = str(exc)
+                ctx.log(f"本地抽帧失败，改用服务端抽帧：{exc}")
+            else:
+                for note in frameset.notes:
+                    ctx.log(f"画面：{note}")
+                return frameset
+        else:
             # 不走 self._source_file：那句文案是给封面写的（"封面抽不了帧"），
             # 从这里冒出去会让用户以为总结因为封面失败。
-            ctx.log("未附画面：这个项目还没有源视频，先下载或导入")
+            local_error = "这个项目还没有源视频，先下载或导入"
+
+        bvid = str(project.get("bvid") or "").strip()
+        if not bvid:
+            ctx.log(f"未附画面：{local_error}；服务端抽帧缺少 bvid")
             return None
-        source = str(sources[0]["path"])
-        duration_ms = int(sources[0].get("duration_ms") or 0)
-        out_dir = Path(str(project.get("root_dir") or "")) / "frames"
+        aid = project.get("aid")
+        if not aid:
+            try:
+                resolution = self._resolver.resolve(bvid)
+                items = list(getattr(resolution, "items", []) or [])
+                aid = getattr(items[0], "aid", None) if items else None
+            except Exception as exc:  # noqa: BLE001 - 解析失败也只降级
+                ctx.log(f"未附画面：{local_error}；服务端抽帧 bvid 解析 aid 失败：{exc}")
+                return None
+        if not aid:
+            ctx.log(f"未附画面：{local_error}；服务端抽帧没有解析出 aid")
+            return None
+        cache_dir = Path(str(self.cfg.cache_root)) / "frames" / bvid
         try:
             ctx.progress(0.03, "抽画面帧")
-            frameset = frames_core.collect(
-                self._ffmpeg,
-                source,
+            frameset = frames_core.collect_from_api(
+                self._gateway,
+                frames_core.fetch_sprite,
+                aid,
                 cfg,
-                out_dir=out_dir,
-                duration_ms=duration_ms,
+                cache_dir=cache_dir,
                 progress=ctx.log,
             )
         except frames_core.FrameError as exc:
-            ctx.log(f"未附画面：{exc}")
+            ctx.log(f"未附画面：{local_error}；服务端抽帧失败：{exc}")
+            return None
+        except Exception as exc:  # noqa: BLE001 - 服务端腿任何异常都只降级
+            ctx.log(f"未附画面：{local_error}；服务端抽帧失败：{exc}")
             return None
         for note in frameset.notes:
             ctx.log(f"画面：{note}")
