@@ -17,7 +17,14 @@
 #   钉到「产品码 + 常驻测试」，历史债另开单还；不在此文件里假装已清。
 
 line-length = 100
-target-version = "py314"
+# 最低运行时是 Python 3.10（README.md 写「需要 Python 3.10+」，仓库里没有 pyproject
+# 声明，那就以 README 为准）。这里**不能**写 py314：本机 venv 是 3.14，写成 py314 时
+# `ruff format` 会把 `except (A, B):` 改写成 PEP 758 的 `except A, B:`——
+# 那是 3.14 才合法的语法，3.10–3.13 上直接 SyntaxError。
+# 实测（2026-11-06）：py314 下 `ruff format --check --diff video_workbench` 的
+# diff 里有 15+ 处 `+ except TypeError, ValueError:`；改成 py310 后同样的命令
+# 一处都不再出现。
+target-version = "py310"
 
 # 默认只开「错到会影响正确性」的一族。每加一族都要先跑一次看新增多少条，
 # 不许一次选 `select = ["ALL"]`——那等于把 1272 条直接变成永久红灯。
