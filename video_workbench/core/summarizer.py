@@ -106,15 +106,34 @@ def extra_prompt_on(cfg: Any, explicit: "bool | None" = None) -> bool:
     return bool(getattr(getattr(cfg, "llm", None), "extra_prompt", False))
 
 
+# 坏 JSON 文案的第二句：把实测到的「与画面帧无关」写在失败本身上。
+#
+# 理由不是文案洁癖：带帧那一发失败在 char 121、无帧同形对照失败在 char 141，两边都是
+# 中文引述里嵌裸 ASCII 双引号（端点不遵守 response_format=json_object 的转义）。用户此刻
+# 手上唯一的旋钮是设置页里那个「截帧」开关，而关掉它不解决——不写这一句，下一个排查的人
+# （包括用户自己）会先去关截帧，发现还坏，再回头怀疑画面帧这条路本身。归因读数出处：
+# docs/decisions-product-defaults.md「真模型一发」一节。
+FRAMES_INNOCENCE_CLAUSE = (
+    "这与画面帧无关：无帧同形对照实测同样失败，关掉「设置 → 采集 → 截帧」不解决。"
+)
+
+
 def _strict_hint(message: str) -> str:
     """严格档（默认）里坏 JSON 直接失败，得告诉用户是谁关掉了抢救。
 
     前半句是既有用例钉着的文案，一个字不动，只在末尾追加可操作提示。宽松档里这条
     失败是整套阶梯都用尽之后的结果，再提开关就是误导，所以不追加。
+
+    追加顺序有判据管着：开关句必须留在**末尾**（
+    ``test_default_tier_malformed_json_names_the_switch_and_keeps_the_old_prefix``），
+    所以撇清画面帧那句只能插在它前面——「下一步动手什么」永远是最后一句。
     """
     if not _parity_strict():
         return message
-    return f"{message} 对账模式（默认）不抢救坏 JSON；需要抢救请设 {PARITY_ENV}=0 后重试。"
+    return (
+        f"{message} {FRAMES_INNOCENCE_CLAUSE} "
+        f"对账模式（默认）不抢救坏 JSON；需要抢救请设 {PARITY_ENV}=0 后重试。"
+    )
 
 
 def resolve_role(explicit: "str | None", fallback: "str | None" = None) -> tuple[str, str]:
