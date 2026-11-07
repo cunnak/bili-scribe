@@ -70,7 +70,16 @@
     optBusy: false,
     transJob: "",       // 正在跑的翻译任务
     trans: null,        // {target, layout, segments, accepted:{id:true}, overrides:{}, failed:[]}
-    transBusy: false
+    transBusy: false,
+    // 项目条（左栏入口化之后字幕页自带项目选择；列表数据跨项目共用）
+    projects: [],
+    projectTotal: 0,
+    projectQuery: "",
+    projectLoading: false,
+    // 请求代次：load/peaks/save 各一条，回调只认最新一次（规划 §4.6）
+    loadSeq: 0,
+    peaksSeq: 0,
+    saveSeq: 0
   };
 
   var nodes = {};       // 复用 DOM 引用
@@ -78,6 +87,14 @@
   var video = null;
   var saveTimer = 0;
   var rafPending = false;
+  // 字幕页是一级入口后，只有"当前这一次进入"的异步回调才允许写界面。
+  // pageToken 每次 render()/destroy() 自增：旧页面挂着的请求回来时，
+  // 页面可能已经换了项目甚至换了路由，一律丢弃（规划 §4.6）。
+  var pageToken = 0;
+  var resizeHandler = null;
+  var videoProjectId = "";
+  var saveChain = Promise.resolve();
+  var notice = null;    // {kind, text}：空态/错误卡片（带行动按钮的那类提示）
 
   // ------------------------------------------------------------ 数据
 
@@ -122,44 +139,59 @@
     updateToolbar();
   }
 
-  function load() {
+  function load(token) {
     if (!state.projectId) return;
+    var pid = state.projectId;
+    var seq = ++state.loadSeq;
     state.loading = true;
+    state.error = "";
+    showNotice(null);
     paint();
     Promise.all([
-      call("subtitle.get", { project_id: state.projectId }),
-      call("library.get", { id: state.projectId }).catch(function () { return null; })
+      call("subtitle.get", { project_id: pid }),
+      call("library.get", { id: pid })
     ])
       .then(function (results) {
+        // 旧请求守护：页已销毁 / 已切项目 / 更新的一轮已发出，都不写（规划 §4.6）
+        if (!samePage(token) || seq !== state.loadSeq || pid !== state.projectId) return;
         var data = results[0] || {};
         applyPayload(data);
-        var detail = results[1];
-        state.project = detail && detail.project ? detail.project : state.project;
+        state.project = (results[1] && results[1].project) || state.project;
         state.loading = false;
         state.error = data.has_transcript ? "" : "还没有字幕，先回素材库转录";
         paint();
         mountMedia();
-        loadPeaks();
+        loadPeaks(pid, token);
         if (state.segments.length && !state.activeId) {
           setActive(state.segments[0].id, false);
           renderRows(true);
         }
       })
       .catch(function (err) {
+        if (!samePage(token) || seq !== state.loadSeq || pid !== state.projectId) return;
         state.loading = false;
-        state.error = (err && err.message) || String(err);
+        if (err && err.code === "NOT_FOUND") {
+          // URL 里带来的项目已经不在库里：给一条可行动的错误，不静默换项目
+          showNotice({ kind: "project-missing", text: "项目不存在或已删除" });
+        } else {
+          state.error = (err && err.message) || String(err);
+        }
         paint();
       });
   }
 
-  function loadPeaks() {
+  function loadPeaks(pid, token) {
     if (!wave) return;
-    call("audio.peaks", { project_id: state.projectId })
+    var seq = ++state.peaksSeq;
+    var target = pid || state.projectId;
+    call("audio.peaks", { project_id: target })
       .then(function (data) {
+        if (!samePage(token) || target !== state.projectId || seq !== state.peaksSeq) return;
         wave.setPeaks(data.peaks || [], data.duration_ms || 0);
         wave.setSegments(state.segments, data.duration_ms || 0);
       })
       .catch(function () {
+        if (!samePage(token) || target !== state.projectId || seq !== state.peaksSeq) return;
         wave.setSegments(state.segments, 0);
       });
   }
@@ -175,11 +207,21 @@
 
   function save() {
     if (!state.dirty) return;
+    var pid = state.projectId;
+    var token = pageToken;
+    var seq = ++state.saveSeq;
+    var payload = { project_id: pid, segments: snapshot().segments };
     state.saving = true;
     state.dirty = false;
     updateStatus();
-    call("subtitle.save", { project_id: state.projectId, segments: state.segments })
+    // 保存串行：同一时刻最多一个 subtitle.save 在飞，旧快照不许后到覆盖新快照（规划 §5.2.5）。
+    // 响应回来时已切项目/已销毁：服务端写成功了就不动 UI；失败则 toast，用户在别的页面也要知道。
+    state.savePromise = saveChain.then(function () {
+      return call("subtitle.save", payload);
+    });
+    state.savePromise
       .then(function (data) {
+        if (pid !== state.projectId || seq !== state.saveSeq || !samePage(token)) return data;
         state.saving = false;
         state.savedAt = new Date().toLocaleTimeString();
         var qc = indexQc(data.qc || []);
@@ -189,13 +231,43 @@
         state.error = "";
         updateStatus();
         renderRows(true);
+        return data;
       })
       .catch(function (err) {
+        if (pid !== state.projectId || !samePage(token)) {
+          ui.toast("字幕保存失败：" + ((err && err.message) || err), "error");
+          return undefined;
+        }
         state.saving = false;
         state.dirty = true;
         state.error = "保存失败：" + ((err && err.message) || err);
         updateStatus();
+        return undefined;
       });
+    saveChain = state.savePromise.then(function () {}, function () {});
+  }
+
+  /**
+   * 把当前草稿落盘再返回。切换项目 / 离开页面之前调用：
+   * 有在飞的保存先等它结束；等完仍有 dirty 就立即补一次保存；
+   * 保存失败（dirty 仍为真）reject，调用方负责阻断切换，绝不静默丢草稿。
+   */
+  function flushDraft() {
+    function waitInflight() {
+      var flight = state.savePromise;
+      if (!flight) return Promise.resolve();
+      return flight.catch(function () { /* 失败由下面的 dirty 分支接住 */ });
+    }
+    return waitInflight().then(function () {
+      if (!state.dirty) return undefined;
+      save();
+      return waitInflight().then(function () {
+        if (state.dirty) {
+          throw new Error(String(state.error || "").replace(/^保存失败：/, "") || "字幕还没保存成功");
+        }
+        return undefined;
+      });
+    });
   }
 
   /** 走服务端语义操作。成功后整体替换段表与质检。 */
@@ -204,9 +276,13 @@
     if (!opts.skipUndo) pushUndo();
     state.pending += 1;
     updateStatus();
-    return call("subtitle.op", Object.assign({ project_id: state.projectId }, params))
+    var pid = state.projectId;
+    var token = pageToken;
+    return call("subtitle.op", Object.assign({ project_id: pid }, params))
       .then(function (data) {
         state.pending -= 1;
+        // 已切项目/已销毁：数据交还调用方，但不再写当前页面（规划 §5.2.6）
+        if (pid !== state.projectId || !samePage(token)) return data;
         applyPayload(data);
         if (opts.select) {
           state.selected = {};
@@ -224,7 +300,7 @@
       .catch(function (err) {
         state.pending -= 1;
         ui.toast("操作失败：" + ((err && err.message) || err), "error");
-        updateStatus();
+        if (pid === state.projectId && samePage(token)) updateStatus();
         throw err;
       });
   }
@@ -299,15 +375,32 @@
     }
   }
 
-  // ------------------------------------------------------------ 渲染：外壳
+  // ------------------------------------------------ 项目条与页面生命周期（一级入口改造）
 
-  function render(ctx) {
-    state.projectId = (ctx && ctx.params && ctx.params.project) || "";
+  function samePage(token) {
+    return token === pageToken;
+  }
+
+  /** 项目级状态整体重置；projects/projectTotal/projectQuery 是列表数据，跨项目共用。 */
+  function resetForProject() {
+    state.project = null;
     state.segments = [];
+    state.qc = {};
+    state.issues = 0;
+    state.stats = null;
     state.selected = {};
+    state.activeId = "";
+    state.editingId = "";
     state.undo = [];
     state.redo = [];
     state.dirty = false;
+    state.saving = false;
+    state.savedAt = "";
+    state.scrollTop = 0;
+    state.follow = true;
+    state.loading = false;
+    state.error = "";
+    state.pending = 0;
     state.optJob = "";
     state.opt = null;
     state.optBusy = false;
@@ -316,7 +409,277 @@
     state.transBusy = false;
     state.expJob = "";
     state.expBusy = false;
-    state.error = state.projectId ? "" : "没指定项目。从素材库点开一条视频再进这里。";
+    state.expResult = null;
+    state.transLayout = "";
+  }
+
+  /** 播放器与波形随页面走：离开/重进/换项目都重建，不允许出现"没有播放器"（规划 §4.7）。 */
+  function disposeMedia() {
+    if (video) {
+      try {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      } catch (err) {
+        /* 元素已分离时这些调用可能抛，清引用即可 */
+      }
+    }
+    video = null;
+    videoProjectId = "";
+    wave = null;
+  }
+
+  function detachResize() {
+    if (resizeHandler) {
+      window.removeEventListener("resize", resizeHandler);
+      resizeHandler = null;
+    }
+  }
+
+  function showNotice(next) {
+    notice = next || null;
+  }
+
+  /** 空态/错误卡片：带行动按钮的三种提示；普通错误走 state.error 的纯文本分支。 */
+  function paintNotice() {
+    var host = document.getElementById("sub-notice");
+    if (!host) return;
+    host.textContent = "";
+    var grid = host.parentElement ? host.parentElement.querySelector(".sub-grid") : null;
+    if (!notice) {
+      if (grid) grid.style.display = "";
+      return;
+    }
+    if (grid && notice.kind === "no-projects") grid.style.display = "none";
+    var card = h("div", { class: "callout callout--warn" }, [h("span", { text: notice.text })]);
+    if (notice.kind === "no-projects") {
+      card.appendChild(h("button", {
+        class: "btn btn--ghost", type: "button", text: "去素材库",
+        onclick: function () { WB.router.go("library"); }
+      }));
+    } else if (notice.kind === "projects-failed") {
+      card.appendChild(h("button", {
+        class: "btn btn--ghost", type: "button", text: "重试",
+        onclick: function () { showNotice(null); init(pageToken); }
+      }));
+    } else if (notice.kind === "project-missing") {
+      card.appendChild(h("button", {
+        class: "btn btn--ghost", type: "button", text: "回素材库",
+        onclick: function () { WB.router.go("library"); }
+      }));
+    }
+    host.appendChild(card);
+  }
+
+  function projectLabel(item) {
+    var label = (item && item.title) || (item && item.id) || "";
+    if (item && item.has_transcript === false) label += "（无字幕）";
+    return label;
+  }
+
+  function paintProjectBar() {
+    var selectEl = nodes.projectSelect || document.getElementById("sub-project-select");
+    var countEl = nodes.projectCount || document.getElementById("sub-project-count");
+    var revealBtn = nodes.reveal || document.getElementById("sub-reveal");
+    if (selectEl) {
+      selectEl.textContent = "";
+      var titles = {};
+      state.projects.forEach(function (item) {
+        var key = item.title || "";
+        titles[key] = (titles[key] || 0) + 1;
+      });
+      state.projects.forEach(function (item) {
+        var label = projectLabel(item);
+        // 同名标题用 id 后 4 位消歧，用户才知道选的是哪一条
+        if (titles[item.title || ""] > 1) label += " · " + String(item.id || "").slice(-4);
+        selectEl.appendChild(h("option", {
+          value: item.id,
+          text: label,
+          selected: item.id === state.projectId ? "selected" : null
+        }));
+      });
+      if (state.projectId && !state.projects.some(function (item) { return item.id === state.projectId; })) {
+        // 当前项目在搜索词/分页外：补一个占位 option 保持选中，不静默换项目
+        var fallback = (state.project && state.project.title) || state.projectId;
+        selectEl.appendChild(h("option", {
+          value: state.projectId,
+          text: fallback,
+          selected: "selected"
+        }));
+      }
+      selectEl.disabled = state.projectLoading || !state.projects.length;
+    }
+    if (countEl) {
+      if (state.projectLoading) countEl.textContent = "读取项目列表…";
+      else if (!state.projectTotal) countEl.textContent = "";
+      else if (state.projectTotal > state.projects.length) {
+        countEl.textContent = "共 " + state.projectTotal + " 个，输入关键词搜索";
+      } else {
+        countEl.textContent = "共 " + state.projectTotal + " 个项目";
+      }
+    }
+    if (revealBtn) {
+      var root = state.project && state.project.root_dir;
+      revealBtn.disabled = !root;
+      revealBtn.title = root ? "在资源管理器里打开这个项目的根目录" : "这个项目没有记录根目录";
+    }
+  }
+
+  /** 搜索（防抖后）只重建 options，不动输入框——否则焦点会丢（规划 §4.2）。 */
+  function loadProjectOptions(query, token) {
+    state.projectQuery = query || "";
+    state.projectLoading = true;
+    paintProjectBar();
+    call("library.list", { query: state.projectQuery, limit: 50, offset: 0 })
+      .then(function (data) {
+        if (!samePage(token)) return;
+        state.projectLoading = false;
+        state.projects = (data && data.items) || [];
+        state.projectTotal = (data && data.total) || state.projects.length;
+        paintProjectBar();
+        if (state.projectId && !state.projects.some(function (item) { return item.id === state.projectId; })) {
+          // 当前项目在搜索词外：单独拉它的资料插回首位，保持选中
+          call("library.get", { id: state.projectId })
+            .then(function (detail) {
+              if (!samePage(token) || state.projectQuery !== (query || "")) return;
+              var project = detail && detail.project;
+              if (project && !state.projects.some(function (item) { return item.id === project.id; })) {
+                state.projects.unshift(project);
+                paintProjectBar();
+              }
+            })
+            .catch(function () {
+              /* 拉不回详情就靠 paintProjectBar 的占位 option 兜底，不打断搜索 */
+            });
+        }
+      })
+      .catch(function (err) {
+        if (!samePage(token)) return;
+        state.projectLoading = false;
+        showNotice({ text: "项目列表搜索失败：" + ((err && err.message) || err) });
+        paintNotice();
+        paintProjectBar();
+      });
+  }
+
+  function defaultProjectId(items) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].has_transcript === true) return items[i].id;
+    }
+    return items.length ? items[0].id : "";
+  }
+
+  /** 切换项目：先落盘旧草稿，失败阻断并回弹；成功走 replace，不产生历史条目（规划 §4.5）。 */
+  function switchProject(nextId) {
+    var selectEl = nodes.projectSelect || document.getElementById("sub-project-select");
+    if (!nextId || nextId === state.projectId) {
+      if (selectEl) selectEl.value = state.projectId;
+      return;
+    }
+    var oldId = state.projectId;
+    var searchEl = nodes.projectSearch || document.getElementById("sub-project-search");
+    var revealBtn = nodes.reveal || document.getElementById("sub-reveal");
+    if (selectEl) selectEl.disabled = true;
+    if (searchEl) searchEl.disabled = true;
+    if (revealBtn) revealBtn.disabled = true;
+    if (nodes.status) nodes.status.textContent = "保存中…";
+    flushDraft()
+      .then(function () {
+        if (!samePage(pageToken)) return;
+        WB.router.replace("subtitles", { project: nextId });
+      })
+      .catch(function (err) {
+        if (!samePage(pageToken)) return;
+        // 外壳里的 error 文案只在 render 时评估，paint() 不重建外壳——
+        // 切换失败这种"页中途出现"的提示必须走 notice 容器（paintNotice 会重画）。
+        showNotice({
+          kind: "switch-failed",
+          text: "切换失败：字幕还没保存成功（" + ((err && err.message) || err) + "）"
+        });
+        if (selectEl) {
+          selectEl.disabled = false;
+          selectEl.value = oldId;
+        }
+        if (searchEl) searchEl.disabled = false;
+        paintNotice();
+        paintProjectBar();
+        paint();
+      });
+  }
+
+  /** 「在文件夹中显示」：只传 root_dir；失败让 WB.rpc 默认 toast 后端原话（规划 §4.4）。 */
+  function revealProject() {
+    var root = state.project && state.project.root_dir;
+    if (!root) return;
+    WB.rpc("fs.reveal", { path: root }).catch(function () { /* 默认已 toast */ });
+  }
+
+  /** 进入页面后的总入口：先拿项目列表，再决定进哪个项目（规划 §4.3）。 */
+  function init(token) {
+    state.projectLoading = true;
+    paintProjectBar();
+    call("library.list", { query: state.projectQuery, limit: 50, offset: 0 })
+      .then(function (data) {
+        if (!samePage(token)) return;
+        state.projectLoading = false;
+        state.projects = (data && data.items) || [];
+        state.projectTotal = (data && data.total) || state.projects.length;
+        if (!state.projects.length) {
+          showNotice({
+            kind: "no-projects",
+            text: "还没有项目。先去「新建任务」下载，或在「素材库」导入本地视频。"
+          });
+          paint();
+          return;
+        }
+        if (!state.projectId) {
+          var first = defaultProjectId(state.projects);
+          if (first) {
+            // 无参数进入：自动选默认项目并替换当前历史条目，由路由重渲染完整页面
+            WB.router.replace("subtitles", { project: first });
+            return;
+          }
+        }
+        paint();
+        load(token);
+      })
+      .catch(function (err) {
+        if (!samePage(token)) return;
+        state.projectLoading = false;
+        showNotice({ kind: "projects-failed", text: "项目列表加载失败：" + ((err && err.message) || err) });
+        paint();
+      });
+  }
+
+  /** 离开页面：停定时器、补存草稿、拆播放器与 resize 监听（规划 §4.8）。 */
+  function destroy() {
+    pageToken += 1;
+    window.clearTimeout(saveTimer);
+    if (state.dirty && state.projectId) {
+      var payload = { project_id: state.projectId, segments: snapshot().segments };
+      state.dirty = false;
+      saveChain = saveChain
+        .then(function () { return call("subtitle.save", payload); })
+        .then(function () {}, function (err) {
+          ui.toast("字幕保存失败：" + ((err && err.message) || err), "error");
+        });
+    }
+    disposeMedia();
+    detachResize();
+  }
+
+  // ------------------------------------------------------------ 渲染：外壳
+
+  function render(ctx) {
+    pageToken += 1;
+    var token = pageToken;
+    showNotice(null);
+    disposeMedia();
+    detachResize();
+    window.clearTimeout(saveTimer);
+    resetForProject();
+    nodes = {};
+    state.projectId = (ctx && ctx.params && ctx.params.project) || "";
 
     var page = h("div", { class: "page page--subtitles" }, [
       h("header", { class: "page__head" }, [
@@ -326,7 +689,25 @@
         ]),
         h("div", { class: "page__actions sub-toolbar" }, toolbar())
       ]),
-      state.error ? h("p", { class: "callout callout--warn", text: state.error }) : null,
+      h("div", { class: "sub-projects" }, [
+        h("label", { class: "sum-fld sub-projects__pick" }, [
+          h("span", { class: "k", text: "PROJECT" }),
+          h("select", { id: "sub-project-select" })
+        ]),
+        h("label", { class: "sum-fld sub-projects__search" }, [
+          h("span", { class: "k", text: "搜索" }),
+          h("input", { id: "sub-project-search", type: "search", placeholder: "标题 / UP / BV 号" })
+        ]),
+        h("button", {
+          id: "sub-reveal",
+          class: "sum-ghost",
+          type: "button",
+          text: "在文件夹中显示",
+          onclick: revealProject
+        }),
+        h("span", { id: "sub-project-count", class: "muted", text: "" })
+      ]),
+      h("div", { id: "sub-notice" }),
       h("div", { class: "sub-grid" }, [
         h("section", { class: "card card--flat sub-stage" }, [
           h("div", { class: "sub-stage__video", id: "sub-video" }),
@@ -362,16 +743,23 @@
 
     nodes.page = page;
     window.setTimeout(function () {
+      if (!samePage(token)) return;
       nodes.listScroll = document.getElementById("sub-scroll");
       nodes.listBody = document.getElementById("sub-inner");
       nodes.status = document.getElementById("sub-status-text");
       nodes.stats = document.getElementById("sub-stats");
       nodes.time = document.getElementById("sub-time");
       nodes.note = document.getElementById("sub-note");
+      nodes.projectSelect = document.getElementById("sub-project-select");
+      nodes.projectSearch = document.getElementById("sub-project-search");
+      nodes.projectCount = document.getElementById("sub-project-count");
+      nodes.reveal = document.getElementById("sub-reveal");
       var canvas = document.getElementById("sub-wave");
       if (canvas && WB.waveform) {
         wave = WB.waveform.mount(canvas, { onSeek: function (value) { seekTo(value); } });
-        window.addEventListener("resize", function () { wave && wave.resize(); });
+        // 保存 handler 引用，离开页面时拆掉；旧写法每次进入都挂一个新的，从不移除
+        resizeHandler = function () { wave && wave.resize(); };
+        window.addEventListener("resize", resizeHandler);
       }
       if (nodes.listScroll) {
         nodes.listScroll.addEventListener("scroll", function () {
@@ -380,9 +768,23 @@
         });
         nodes.listScroll.addEventListener("keydown", onKeyDown);
       }
+      if (nodes.projectSelect) {
+        nodes.projectSelect.addEventListener("change", function () {
+          switchProject(nodes.projectSelect.value);
+        });
+      }
+      if (nodes.projectSearch) {
+        var searchTimer = 0;
+        nodes.projectSearch.addEventListener("input", function () {
+          window.clearTimeout(searchTimer);
+          searchTimer = window.setTimeout(function () {
+            loadProjectOptions(nodes.projectSearch.value.trim(), token);
+          }, 250);
+        });
+      }
       mountTicks();
       paint();
-      load();
+      init(token);
     }, 0);
 
     return page;
@@ -450,11 +852,19 @@
     return (err && err.message) || "优化失败";
   }
 
-  function pollOpt(tries) {
+  function pollOpt(tries, pid, token) {
     if (!state.optJob) return;
+    pid = pid || state.projectId;
+    token = (token === undefined) ? pageToken : token;
     WB.rpc("job.get", { id: state.optJob }, { silent: true })
       .then(function (job) {
         var status = (job && job.status) || "";
+        if (!samePage(token) || pid !== state.projectId) {
+          // 已换项目/已销毁：只清自己的任务状态，不写界面（服务端任务不中断）
+          state.optBusy = false;
+          state.optJob = "";
+          return undefined;
+        }
         if (status === "succeeded") {
           state.optBusy = false;
           setStatus("就绪");
@@ -486,10 +896,11 @@
           paintOpt({ phase: "error", message: "等太久了，任务还没结束。可以去任务面板看看。" });
           return;
         }
-        window.setTimeout(function () { pollOpt(tries + 1); }, 700);
+        window.setTimeout(function () { pollOpt(tries + 1, pid, token); }, 700);
       })
       .catch(function (err) {
         state.optBusy = false;
+        if (!samePage(token) || pid !== state.projectId) return;
         paintOpt({ phase: "error", message: (err && err.message) || "查不到任务状态" });
       });
   }
@@ -714,15 +1125,23 @@
       });
   }
 
-  function pollTrans(tries) {
+  function pollTrans(tries, pid, token) {
     if (!state.transJob) return;
+    pid = pid || state.projectId;
+    token = (token === undefined) ? pageToken : token;
     WB.rpc("job.get", { id: state.transJob }, { silent: true })
       .then(function (job) {
         var status = (job && job.status) || "";
+        if (!samePage(token) || pid !== state.projectId) {
+          // 已换项目/已销毁：只清自己的任务状态，不写界面（服务端任务不中断）
+          state.transBusy = false;
+          state.transJob = "";
+          return undefined;
+        }
         if (status === "succeeded") {
           var result = (job && job.result) || {};
           return call("subtitle.translation", {
-            project_id: state.projectId, target: result.target || ""
+            project_id: pid, target: result.target || ""
           }).then(function (data) {
             state.transBusy = false;
             setStatus("就绪");
@@ -749,11 +1168,12 @@
           paintTrans({ phase: "error", message: "等太久了，任务还没结束。可以去任务面板看看。" });
           return undefined;
         }
-        window.setTimeout(function () { pollTrans(tries + 1); }, 700);
+        window.setTimeout(function () { pollTrans(tries + 1, pid, token); }, 700);
         return undefined;
       })
       .catch(function (err) {
         state.transBusy = false;
+        if (!samePage(token) || pid !== state.projectId) return;
         paintTrans({ phase: "error", message: (err && err.message) || "查不到任务状态" });
       });
   }
@@ -1121,11 +1541,19 @@
       });
   }
 
-  function pollExport(tries) {
+  function pollExport(tries, pid, token) {
     if (!state.expJob) return;
+    pid = pid || state.projectId;
+    token = (token === undefined) ? pageToken : token;
     WB.rpc("job.get", { id: state.expJob }, { silent: true })
       .then(function (job) {
         var status = (job && job.status) || "";
+        if (!samePage(token) || pid !== state.projectId) {
+          // 已换项目/已销毁：只清自己的任务状态，不写界面（服务端任务不中断）
+          state.expBusy = false;
+          state.expJob = "";
+          return undefined;
+        }
         if (status === "succeeded") {
           state.expBusy = false;
           setStatus("就绪");
@@ -1155,11 +1583,12 @@
           paintExport({ phase: "error", message: "等太久了，任务还没结束。可以去任务面板看看。" });
           return undefined;
         }
-        window.setTimeout(function () { pollExport(tries + 1); }, 900);
+        window.setTimeout(function () { pollExport(tries + 1, pid, token); }, 900);
         return undefined;
       })
       .catch(function (err) {
         state.expBusy = false;
+        if (!samePage(token) || pid !== state.projectId) return;
         paintExport({ phase: "error", message: (err && err.message) || "查不到任务状态" });
       });
   }
@@ -1242,7 +1671,9 @@
         } else {
           state.selected = {};
           if (state.activeId === seg.id) {
-            // 再点一次当前行 = 放行给双击编辑
+            // 再点一次当前行 = 放行给双击编辑；此处不重建行：
+            // mousedown 里同步重建会 detach 目标，真实指针序列下 Chromium 不再合成 click/dblclick
+            return;
           } else {
             state.selected[seg.id] = true;
             setActive(seg.id);
@@ -1527,6 +1958,7 @@
   function mountMedia() {
     var host = document.getElementById("sub-video");
     if (!host || !state.project) return;
+    host.innerHTML = "";
     var source = null;
     (state.project.assets || []).forEach(function (asset) {
       if (asset.kind === "source") source = asset;
@@ -1535,10 +1967,12 @@
       host.appendChild(h("p", { class: "muted", text: "找不到源文件，只能编辑文本" }));
       return;
     }
-    if (video) {
-      // 同一个项目重复进入时不重建播放器，保留播放位置
+    if (video && videoProjectId === state.projectId) {
+      // 同一项目同页重挂：复用播放器，保留播放位置
+      host.appendChild(video);
       return;
     }
+    if (video) disposeMedia();
     video = h("video", {
       class: "sub-video",
       src: WB.mediaUrl(source.path),
@@ -1567,7 +2001,7 @@
         if (nodes.note) nodes.note.textContent = "浏览器无法直接播放这个文件（编码不支持），时间轴仍可用";
       }
     });
-    host.innerHTML = "";
+    videoProjectId = state.projectId;
     host.appendChild(video);
   }
 
@@ -1591,6 +2025,8 @@
 
   function paint() {
     if (!nodes.page) return;
+    paintProjectBar();
+    paintNotice();
     updateToolbar();
     updateStatus();
     renderRows(true);
@@ -1638,7 +2074,11 @@
       selectRange: selectRange,
       rowHeight: ROW_HEIGHT,
       doExport: doExport,
-      startExport: startExport
+      startExport: startExport,
+      flushDraft: flushDraft,
+      switchProject: switchProject,
+      defaultProjectId: defaultProjectId,
+      disposeMedia: disposeMedia
     }
   };
 
@@ -1646,7 +2086,8 @@
     title: "字幕",
     crumb: "转录文本",
     icon: "subtitles",
-    nav: false,
-    render: render
+    nav: true,
+    render: render,
+    destroy: destroy
   });
 })();

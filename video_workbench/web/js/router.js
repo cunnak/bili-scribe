@@ -91,6 +91,34 @@
       renderRoute({ route: route, params: params || {}, hash: next });
     },
 
+    /**
+     * 与 go 相同的渲染，但用 history.replaceState 写地址——**不产生历史条目**。
+     * 字幕页用它做「无参数进入自动选默认项目」和「切换项目」：后退键从字幕页
+     * 回到进入前的页面，而不是在项目之间倒退（规划 §2 决策 4）。
+     */
+    replace: function (route, params) {
+      var query = params
+        ? Object.keys(params)
+            .map(function (key) {
+              return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
+            })
+            .join("&")
+        : "";
+      var next = "#/" + route + (query ? "?" + query : "");
+      // file:// 下 replaceState 一般可用；宿主拒了就退回 location.replace，
+      // 两者都不写历史条目，渲染本身不依赖地址写入是否成功。
+      try {
+        history.replaceState(null, "", next);
+      } catch (err) {
+        try {
+          location.replace(next);
+        } catch (err2) {
+          /* 渲染不依赖地址 */
+        }
+      }
+      renderRoute({ route: route, params: params || {}, hash: next });
+    },
+
     /** 首次进入的默认路由。 */
     start: function (fallback) {
       // 监听器**无条件**挂一次。早先写成 `if (onChange === null)`，意思是
@@ -143,6 +171,16 @@
     var definition = routes[name];
     var view = document.getElementById("view");
     if (!view) return;
+    // 上一页的清理钩子：先于视图清空调用，页面自己停定时器/补存草稿。
+    // destroy 抛异常只 console.warn，不阻断路由（规划 §4.8）。
+    var previous = current && routes[current.route];
+    if (previous && typeof previous.destroy === "function") {
+      try {
+        previous.destroy();
+      } catch (err) {
+        console.warn("router: 上一页 destroy 失败（" + current.route + "）", err);
+      }
+    }
     current = { route: name, params: parsed.params };
     view.textContent = "";
     var node = definition.render({ params: parsed.params, route: name });
@@ -174,6 +212,8 @@
             dataset: { route: item.route },
             title: item.title,
             onclick: function () {
+              // 已在本页再点自己：不重渲染，否则丢未保存草稿、重挂播放器（规划 §4.1）
+              if (current && current.route === item.route) return;
               router.go(item.route);
             }
           },

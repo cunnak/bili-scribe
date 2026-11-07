@@ -121,13 +121,14 @@ async function main() {
     assert.ok(WB.isMock(), "没进 mock 模式：mock=1 的检测逻辑失效了");
   });
 
-  await check("左栏渲染出 6 个入口且顺序稳定", () => {
+  await check("左栏渲染出 7 个入口且顺序稳定", () => {
     const items = [...window.document.querySelectorAll("#rail-nav .rail__item, #rail-nav button, #rail-nav a")];
-    assert.strictEqual(items.length, 6, `左栏条目 ${items.length} 个，应为 6`);
+    assert.strictEqual(items.length, 7, `左栏条目 ${items.length} 个，应为 7`);
     // 顺序也是契约：用户靠肌肉记忆点左栏，插一个入口不该把别的挤走。
     // 「发布」2026-11-02 并进总结页：路由还在（nav:false，兼容老链接），入口不再有。
+    // 「字幕」2026-11-07 升成一级入口（plan-subtitles-entry §2 决策 1）：不必再从素材库点进。
     const labels = items.map((item) => item.textContent.trim().replace(/\s+/g, ""));
-    const order = ["新建任务", "素材库", "总结", "切片台", "合并", "设置"];
+    const order = ["新建任务", "素材库", "字幕", "总结", "切片台", "合并", "设置"];
     order.forEach((name, index) => {
       assert.ok(labels[index] && labels[index].indexOf(name) >= 0,
         `第 ${index + 1} 个入口应该是「${name}」，实际是「${labels[index]}」`);
@@ -389,6 +390,172 @@ async function main() {
 
     // 复位，后面的用例还要用这份演示数据
     await WB.rpc("subtitle.save", { project_id: "p_demo_1", segments: before.segments });
+  });
+
+  // ---- 字幕页一级入口（plan-subtitles-entry §5.5）----
+
+  await check("字幕一级入口：无参数进入自动选默认项目", async () => {
+    WB.router.go("subtitles");
+    await until(() => {
+      const params = WB.router.current().params || {};
+      return params.project === "p_demo_1";
+    }, "无参数进入后默认项目落位（应为第一个有字幕的项目）");
+    await tick(200);
+    const select = window.document.getElementById("sub-project-select");
+    assert.ok(select, "字幕页没有项目下拉（#sub-project-select 缺失）");
+    assert.strictEqual(select.value, "p_demo_1", "项目下拉没选中 p_demo_1");
+    // 不钉第一行原文：前序编辑用例会改 p_demo_1 第一行，这里只验"行真的渲染出来了"
+    assert.ok(window.document.querySelectorAll(".sub-row").length > 0,
+      "行列表没渲染出 p_demo_1 的字幕行");
+  });
+
+  await check("项目条切换项目用 replace：地址更新但历史不增长", async () => {
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => (WB.router.current().params || {}).project === "p_demo_1", "进入 p_demo_1");
+    await tick(150);
+    const before = window.history.length;
+    const select = window.document.getElementById("sub-project-select");
+    assert.ok(select, "没有项目下拉");
+    select.value = "p_demo_2";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await until(() => (WB.router.current().params || {}).project === "p_demo_2", "切换到 p_demo_2");
+    await tick(150);
+    assert.ok(window.location.hash.indexOf("project=p_demo_2") >= 0,
+      "hash 没带上 project=p_demo_2");
+    assert.strictEqual(window.history.length, before,
+      "项目切换不该产生历史条目（后退应回进入字幕页之前的页面）");
+  });
+
+  await check("切换项目会先保存旧项目的未保存草稿", async () => {
+    const before = await WB.rpc("subtitle.get", { project_id: "p_demo_1" });
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => window.document.querySelectorAll(".sub-row").length > 0
+      && (WB.router.current().params || {}).project === "p_demo_1", "进入 p_demo_1 并渲染行");
+    await tick(150);
+    const first = window.document.querySelectorAll(".sub-row")[0];
+    first.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    await tick(30);
+    const input = window.document.querySelector(".sub-row__input");
+    assert.ok(input, "双击没进入编辑态");
+    input.value = "切换前保存测试";
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick(50);
+    const select = window.document.getElementById("sub-project-select");
+    select.value = "p_demo_2";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await tick(500);
+    const saved = await WB.rpc("subtitle.get", { project_id: "p_demo_1" });
+    const texts = (saved.segments || []).map((s) => s.text);
+    assert.ok(texts.indexOf("切换前保存测试") >= 0, "切走之后旧项目的草稿丢了（flush 没生效）");
+    // 切回 p_demo_1，列表里要真的出现这句
+    const back = window.document.getElementById("sub-project-select");
+    back.value = "p_demo_1";
+    back.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await until(() => (WB.router.current().params || {}).project === "p_demo_1"
+      && window.document.querySelectorAll(".sub-row").length > 0, "切回 p_demo_1");
+    await tick(150);
+    assert.ok($("#view").textContent.indexOf("切换前保存测试") >= 0, "切回后列表没显示保存过的文本");
+    await WB.rpc("subtitle.save", { project_id: "p_demo_1", segments: before.segments });
+  });
+
+  await check("保存失败时阻断切换：留在原项目、下拉回弹、给出提示", async () => {
+    const before = await WB.rpc("subtitle.get", { project_id: "p_demo_1" });
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => window.document.querySelectorAll(".sub-row").length > 0
+      && (WB.router.current().params || {}).project === "p_demo_1", "进入 p_demo_1");
+    await tick(150);
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, options) {
+      if (method === "subtitle.save") {
+        return Promise.reject(new WB.RpcError("PROCESS_FAILED", "模拟保存失败"));
+      }
+      return realRpc(method, params, options);
+    };
+    try {
+      const first = window.document.querySelectorAll(".sub-row")[0];
+      first.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+      await tick(30);
+      const input = window.document.querySelector(".sub-row__input");
+      input.value = "阻断切换测试";
+      input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await tick(50);
+      const select = window.document.getElementById("sub-project-select");
+      select.value = "p_demo_2";
+      select.dispatchEvent(new window.Event("change", { bubbles: true }));
+      await tick(400);
+      assert.strictEqual((WB.router.current().params || {}).project, "p_demo_1",
+        "保存失败还把项目切走了");
+      assert.strictEqual(select.value, "p_demo_1", "下拉没回弹到 p_demo_1");
+      assert.ok(window.document.getElementById("sub-notice").textContent.indexOf("切换失败") >= 0,
+        "页面上没有「切换失败」提示");
+    } finally {
+      WB.rpc = realRpc;
+      await WB.rpc("subtitle.save", { project_id: "p_demo_1", segments: before.segments });
+    }
+  });
+
+  await check("离开字幕页会先把未保存草稿落盘", async () => {
+    const before = await WB.rpc("subtitle.get", { project_id: "p_demo_1" });
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => window.document.querySelectorAll(".sub-row").length > 0, "进入 p_demo_1");
+    await tick(150);
+    const first = window.document.querySelectorAll(".sub-row")[0];
+    first.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+    await tick(30);
+    const input = window.document.querySelector(".sub-row__input");
+    input.value = "离页保存测试";
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick(50);
+    WB.router.go("library");
+    await tick(300);
+    assert.strictEqual(WB.router.current().route, "library");
+    const saved = await WB.rpc("subtitle.get", { project_id: "p_demo_1" });
+    const texts = (saved.segments || []).map((s) => s.text);
+    assert.ok(texts.indexOf("离页保存测试") >= 0, "离开字幕页时草稿丢了");
+    await WB.rpc("subtitle.save", { project_id: "p_demo_1", segments: before.segments });
+  });
+
+  await check("重复进入字幕页播放器不消失", async () => {
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => (WB.router.current().params || {}).project === "p_demo_1", "进入 p_demo_1");
+    await tick(250);
+    assert.strictEqual(window.document.querySelectorAll("#sub-video video").length, 1,
+      "首次进入没挂上播放器");
+    WB.router.go("library");
+    await tick(150);
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => (WB.router.current().params || {}).project === "p_demo_1", "再次进入 p_demo_1");
+    await tick(250);
+    assert.strictEqual(window.document.querySelectorAll("#sub-video video").length, 1,
+      "离开再回来播放器消失了（旧实现 video 非空直接 return）");
+  });
+
+  await check("「在文件夹中显示」传 root_dir，不带 project_id", async () => {
+    const list = await WB.rpc("library.list", { query: "", limit: 50, offset: 0 });
+    const demo = (list.items || []).find((row) => row.id === "p_demo_1");
+    assert.ok(demo && demo.root_dir, "mock 里 p_demo_1 没有 root_dir");
+    WB.router.go("subtitles", { project: "p_demo_1" });
+    await until(() => (WB.router.current().params || {}).project === "p_demo_1", "进入 p_demo_1");
+    await tick(200);
+    const calls = [];
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, options) {
+      if (method === "fs.reveal") calls.push(params);
+      return realRpc(method, params, options);
+    };
+    try {
+      const btn = window.document.getElementById("sub-reveal");
+      assert.ok(btn, "字幕页没有「在文件夹中显示」按钮");
+      assert.strictEqual(btn.disabled, false, "有 root_dir 时按钮不该是灰的");
+      btn.click();
+      await tick(80);
+      assert.strictEqual(calls.length, 1, "fs.reveal 应该恰好被调一次");
+      assert.strictEqual(calls[0].path, demo.root_dir, "fs.reveal 的 path 不是 root_dir");
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(calls[0], "project_id"), false,
+        "fs.reveal 不该带 project_id");
+    } finally {
+      WB.rpc = realRpc;
+    }
   });
 
   await check("未知路由回落到素材库而不是白屏", async () => {

@@ -1577,6 +1577,31 @@ select,
   flex-wrap: wrap;
 }
 
+/* 字幕页顶部项目条（一级入口改造，规划 §5.4） */
+.sub-projects {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--gap-2);
+}
+
+.sub-projects .sum-fld {
+  height: 38px;
+}
+
+.sub-projects__pick {
+  flex: 1 1 320px;
+}
+
+.sub-projects__search {
+  flex: 0 1 260px;
+}
+
+.sub-projects > .muted {
+  font-size: 12px;
+}
+
 /* ---------------------------------------------------------------- AI 优化面板（P2-04）
    固定在编辑器底部：它是个"临时工作区"，不该挤掉列表的滚动高度，
    又必须和列表同时可见——否则用户没法对着原文判断改动该不该接受。 */

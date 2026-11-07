@@ -40,7 +40,7 @@ python -m video_workbench.desktop --check         # 只体检，打一行 JSON �
 python -m video_workbench.desktop --config D:\x\config.yaml   # 指定配置文件
 ```
 
-窗口 1360×860（最小 1100×720）。左栏五项：新建任务 / 素材库 / 总结 / 切片台 / 合并 / 发布，
+窗口 1360×860（最小 1100×720）。左栏六项：新建任务 / 素材库 / 字幕 / 总结 / 切片台 / 合并 / 发布，
 底部「设置」；左栏可折叠成 56px 图标条，状态记在 `ui.rail_collapsed`。
 
 ## 首次启动会体检五件事

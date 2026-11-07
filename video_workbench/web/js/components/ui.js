@@ -77,6 +77,7 @@
     check: '<path d="M3 8.5l3.2 3.2L13 5" stroke-linecap="round" stroke-linejoin="round"/>',
     alert: '<path d="M8 3l5.5 10h-11z" stroke-linejoin="round"/><path d="M8 6.6v2.6M8 11.2v.6" stroke-linecap="round"/>',
     film: '<rect x="2" y="3.5" width="12" height="9" rx="1.2"/><path d="M5 3.5v9M11 3.5v9M2 7h12" stroke-linecap="round"/>',
+    subtitles: '<rect x="2" y="3" width="12" height="10" rx="1.2"/><path d="M4.5 6.5h7M4.5 9.5h4.5" stroke-linecap="round"/>',
     note: '<path d="M4 2.4h5.2L13 6.2v7.4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3.4a1 1 0 0 1 1-1z" stroke-linejoin="round"/><path d="M9 2.6v3.8h3.8M5.4 9h5.2M5.4 11.4h3.4" stroke-linecap="round"/>',
     trash:
       '<path d="M3.4 4.8h9.2M6.4 4.8V3.4h3.2v1.4M4.8 4.8l.4 7.8a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0 .9-.8l.4-7.8M6.6 7v4M9.4 7v4" stroke-linecap="round" stroke-linejoin="round"/>'
