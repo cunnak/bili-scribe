@@ -15,8 +15,12 @@
 字数口径（界面上要显示，所以必须写清楚）：
 - **正文字数** = Delta 里所有 insert 文本去掉空白后的字符数。B站 的限制按字符算，
   而中文正文里的换行与缩进对限制没有贡献，算进去只会让人以为超了。
-- 标题 ≤ 80、摘要 ≤ `publish.max_summary_chars`（默认 400）：这两条是
-  接口硬限制，超了发不出去，所以在**存草稿之前**就报出来。
+- 标题 ≤ 80：接口硬限制，超了发不出去，所以在**存草稿之前**就报出来。
+
+**摘要字段已下线（2026-11-07）**：笔记接口的 `summary` 会被 `auto_comment`
+自动发成评论区评论，而同一段话在正文里已经有了。界面上不再给这个输入框，
+库里老行存的那份也不再认。接口里那个位置仍然要填（文档标的是"必要"），
+填的是**正文开头**（`note_preview`），`auto_comment` 恒关。
 """
 
 from __future__ import annotations
@@ -81,18 +85,23 @@ def summary_from_content(content: dict[str, Any]) -> Summary:
 
 
 def build_markdown(content: dict[str, Any], *, disclose: bool = True) -> str:
-    """生成要发出去的正文（Markdown，只允许加粗）。"""
+    """生成要发出去的正文（Markdown，只允许加粗）。
+
+    **正文里只放读者要看的内容。** 三样东西被明确排除：
+
+    - `caution`（"注意：素材为机器转录……"）：那是给操作者核对用的提醒，
+      贴进正文会让读者第一眼看到一段自我否定，正文也从 2000 字涨到 2800 字。
+    - `comment_short`（评论区短版）：它属于评论区，不属于正文；
+      `composer.build_publish_document` 本来就不拼它，这里再写一句，
+      免得以后有人觉得"正文太短，把短版补进去"。
+    - 素材局限 / 采集提示：`_is_internal` 逐行滤掉。
+    """
     summary = summary_from_content(content)
     body = composer.build_publish_document(summary)
     lines = [line for line in body.splitlines() if not _is_internal(line)]
     body = "\n".join(lines).strip()
-    extra = []
-    if summary.caution:
-        extra.append("注意：" + summary.caution.strip())
     if disclose:
-        extra.append(DISCLOSURE)
-    if extra:
-        body = body + "\n\n" + "\n".join(extra)
+        body = body + "\n\n" + DISCLOSURE
     return body
 
 
@@ -137,19 +146,15 @@ def default_title(project: dict[str, Any]) -> str:
 
 
 def default_summary(content: dict[str, Any]) -> str:
-    """摘要默认取「短评」，没有就退回一句话。
+    """摘要字段已下线（2026-11-07），恒返回空串。
 
-    短评是专门为"评论区卡片"写过的 120 字左右的版本，语气与长度都比一句话更合适；
-    一句话经常是标题的复读，直接拿它当摘要等于把标题在卡片里再说一遍。
+    原来这里默认取 `comment_short`（评论区短版）——268 字的卡片文案被当成笔记摘要
+    发出去，而 B站 笔记摘要的口径是「约 200 字」，超了直接 12025 发不出去；
+    而且这段文字与正文里的主体高度重复，用户看到的是"同一段话出现两次"。
 
-    **同样不截断**：摘要超上限要被看见（warning 拦在存库前），
-    偷偷切掉一半会让用户以为"平台显示的就是全部内容"。
+    函数保留、签名不变：`build_draft` 与历史草稿行仍在读这个键，
+    删掉它会让 `KeyError` 变成下一个 bug。参数 `content` 有意不再使用。
     """
-    content = content or {}
-    for key in ("comment_short", "one_line"):
-        value = str(content.get(key, "") or "").strip()
-        if value:
-            return value
     return ""
 
 
@@ -164,22 +169,23 @@ def build_draft(
 ) -> dict[str, Any]:
     """生成一份草稿的完整载荷（不落库）。
 
-    title / summary_text 非空时用它们（"重新生成"会保留用户已经改过的标题），
+    title 非空时用它（"重新生成"会保留用户已经改过的标题），
     这样界面上不会出现「改了个标题，点重新生成又被打回原标题」。
+
+    `max_summary_chars` 与 `summary_text` 保留只为兼容老调用方与历史草稿行；
+    摘要字段已下线（2026-11-07），两者都不再参与任何计算，`summary` 恒为空串。
     """
     markdown = build_markdown(content, disclose=disclose)
     delta = to_delta(markdown)
     text = plain_text(delta)
     draft_title = (title or default_title(project)).strip()
-    draft_summary = (summary_text or default_summary(content)).strip()
+    draft_summary = ""
 
     warnings: list[str] = []
     if not draft_title:
         warnings.append("标题是空的")
     if len(draft_title) > TITLE_MAX:
         warnings.append(f"标题超过 {TITLE_MAX} 字（现在 {len(draft_title)} 字）")
-    if len(draft_summary) > max_summary_chars:
-        warnings.append(f"摘要超过 {max_summary_chars} 字（现在 {len(draft_summary)} 字）")
     if not text.strip():
         warnings.append("正文是空的")
 
@@ -194,7 +200,7 @@ def build_draft(
         "chars": count_chars(text),
         "title_chars": len(draft_title),
         "summary_chars": len(draft_summary),
-        "limits": {"title": TITLE_MAX, "summary": max_summary_chars},
+        "limits": {"title": TITLE_MAX},
         "warnings": warnings,
     }
 
@@ -211,12 +217,101 @@ def check_draft(draft: dict[str, Any]) -> None:
         raise WBError("VALIDATION", "；".join(hard))
 
 
+# 正文里这些行是**给操作者看的工作信息**，不该出现在发出去的笔记里。
+# 老草稿（2026-11-07 之前存的）把 caution 直接拼进了正文——实测
+# draft_8dfe01d36c95 里那一段是 742 字（占正文 27%），开头就是
+# 「注意：素材为机器转录，错字错词极多且密集……」；draft_587f000022eb 里
+# 也有一段「注意：素材为AI语音转录……」。用户明确要求这类内容不要进正文。
+# 库里没有清零路径（老行不会自己变干净），所以在**出口这一处**统一洗：
+# 读出来显示时洗、发出去之前洗——一处改动覆盖所有老行，不需要数据迁移。
+_CAUTION_PREFIX = "注意："
+_CAUTION_MARKERS = ("转录", "素材局限", "采集提示", "素材未确认")
+
+
+def _is_caution_line(text: str) -> bool:
+    """这一行是不是那段"素材有问题"的自我说明。
+
+    必须同时满足「以注意：开头」与「带转录/素材局限这类标记」。
+    **不能按"注意"两个字一刀切**：实测另一份草稿里有
+    "流量注意力vs存量思维" 这种正文句子，那是内容本身。
+    """
+    stripped = text.strip()
+    if not stripped.startswith(_CAUTION_PREFIX):
+        return False
+    return any(marker in stripped for marker in _CAUTION_MARKERS)
+
+
+def strip_caution_lines(delta_json: str) -> str:
+    """把正文里那段「注意：素材为机器转录……」整行拿掉，其余原样保留。
+
+    按行处理是为了保住加粗属性：Delta 的 op 是「一段文字 + 属性」的序列，
+    段落分隔靠 insert 里的换行符。这里先切成行、丢掉命中的整行、再拼回去，
+    所以非命中行的 attributes 一个字都不动。
+    """
+    try:
+        ops = json.loads(delta_json) if delta_json else []
+    except (TypeError, ValueError):
+        return delta_json or ""
+    if not isinstance(ops, list):
+        return delta_json or ""
+
+    lines: list[list[dict[str, Any]]] = [[]]
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        insert = op.get("insert")
+        if not isinstance(insert, str):
+            lines[-1].append(op)
+            continue
+        attrs = op.get("attributes")
+        parts = insert.split("\n")
+        for index, part in enumerate(parts):
+            if part:
+                seg: dict[str, Any] = {"insert": part}
+                if attrs:
+                    seg["attributes"] = attrs
+                lines[-1].append(seg)
+            if index < len(parts) - 1:
+                lines.append([])
+
+    kept: list[list[dict[str, Any]]] = []
+    dropped = 0
+    for line in lines:
+        text = "".join(s.get("insert", "") for s in line if isinstance(s.get("insert"), str))
+        if _is_caution_line(text):
+            dropped += 1
+            continue
+        if not line and kept and not kept[-1]:
+            continue  # 连续空行压成一行：拿掉整段之后不该留一个更大的洞
+        kept.append(line)
+
+    if not dropped:
+        # 一个字都没删就把原文原样还回去：重新序列化会改掉空格与键序，
+        # 而"用户手改过的正文以他的为准"这条要求逐字相同（test_service_publish
+        # 的 test_edited_delta_wins_over_regenerated_markdown 就是拿字符串比）。
+        return delta_json
+
+    while kept and not kept[-1]:
+        kept.pop()
+
+    out: list[dict[str, Any]] = []
+    for line in kept:
+        out.extend(line)
+        out.append({"insert": "\n"})
+    while out and out[-1].get("insert") == "\n":
+        out.pop()
+    return json.dumps(out, ensure_ascii=False)
+
+
 def row_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     """草稿行的对外形状（附带字数，界面不用自己算）。"""
     if not row:
         return None
     view = dict(row)
-    text = plain_text(view.get("content") or "")
+    # 老草稿的正文里还留着那段「注意：素材为机器转录……」：读出来就洗掉，
+    # 免得界面上字数、预览、复制三处都把它算进去（发布前还会再洗一次）。
+    view["content"] = strip_caution_lines(view.get("content") or "")
+    text = plain_text(view["content"])
     view["content_text"] = text
     view["chars"] = count_chars(text)
     view["title_chars"] = len(str(view.get("title", "") or ""))
@@ -264,7 +359,7 @@ def gate_report(
     note: dict[str, Any] | None = None,
     published_note: dict[str, Any] | None = None,
     last_publish_at: str = "",
-    summary_limit: int = 400,
+    summary_limit: int = 400,  # 摘要已下线，保留只为兼容老调用方；不参与判定
     min_interval_seconds: int = GATE_INTERVAL_SECONDS,
     confirmed: bool = False,
     logged_in: bool | None = None,
@@ -289,7 +384,6 @@ def gate_report(
     # ---- 第一关：内容确认（能算的都算，勾选要用户来做）
     items: list[dict[str, Any]] = []
     title = str(draft.get("title", "") or "").strip()
-    summary = str(draft.get("summary", "") or "").strip()
     body = str(draft.get("content_text", "") or "").strip()
     items.append(
         {
@@ -297,12 +391,10 @@ def gate_report(
             "ok": bool(title) and len(title) <= TITLE_MAX,
         }
     )
-    items.append(
-        {"text": f"摘要 {len(summary)} / {summary_limit} 字", "ok": len(summary) <= summary_limit}
-    )
     items.append({"text": f"正文 {len(''.join(body.split()))} 字", "ok": bool(body)})
-    items.append({"text": "已阅读并确认标题/摘要/正文", "ok": bool(confirmed)})
-    over = [item["text"] for item in items[:2] if not item["ok"]]
+    items.append({"text": "已阅读并确认标题与正文", "ok": bool(confirmed)})
+    # 只有标题这一项会「超限」，正文那一项是"有没有内容"，不参与 over。
+    over = [items[0]["text"]] if not items[0]["ok"] else []
     if not title or not body:
         content_status, content_reason = "blocked", "标题或正文是空的"
     elif over:
@@ -330,6 +422,22 @@ def gate_report(
     # 而本项目最低运行时是 3.10（README.md「需要 Python 3.10+」）。写成双引号时
     # ruff 按 py310 判 invalid-syntax，3.10/3.11 上则直接 import 失败。
     items.append({"text": f"视频 BV 号 {project_bvid or '（没有）'}", "ok": bool(project_bvid)})
+    # aid（av 号）是发布笔记的必填参数，库里历史行大多是空的（2026-11-07 之前
+    # 下载落库时根本没记）。发布那一刻会自动补（项目目录的 sidecar → 视频信息），
+    # 补不到才报错 —— 所以这里只如实标"现在没有"，不能因此把整关判成 blocked：
+    # 那会让按钮永久灰着，而它其实发得出去。反过来，一个绿关配一个坏点也不行，
+    # 用户点下去撞 CONFLICT 就是白跑一趟，所以要在关卡的说明里提前讲清楚。
+    project_aid = project.get("aid") or note.get("aid") or draft.get("aid")
+    items.append(
+        {
+            "text": (
+                f"视频 aid（av 号）{project_aid}"
+                if project_aid
+                else "视频 aid（av 号）：库里没有，发布时自动补"
+            ),
+            "ok": bool(project_aid),
+        }
+    )
     items.append({"text": "草稿指向的是同一个视频", "ok": same})
     items.append(
         {
@@ -348,6 +456,9 @@ def gate_report(
         account_status, account_reason = "todo", "发布时会再核一次登录态与视频可访问性"
     else:
         account_status, account_reason = "ok", ""
+        if not project_aid:
+            # 过了，但有一项现在还没有：把补法写出来，别让人以为这一关是凭空绿的
+            account_reason = "库里没有 av 号（aid），发布时会自动补；补不到就发不了"
     gates.append(
         {
             "id": "account",
@@ -403,7 +514,10 @@ def gate_report(
     return {
         "gates": gates,
         "ready": ready,
-        "limits": {"summary": summary_limit, "interval": int(min_interval_seconds)},
+        # 只有「字数上限」这一种东西走 limits：它是界面渲染输入框计数器的依据。
+        # 限流不在这里 —— 那是 wait_seconds，两处都写会让界面不知道该信哪个
+        # （2026-11-07 统一，此前 gate_report / build_draft / _publish_limits 三处不同形）。
+        "limits": {"title": TITLE_MAX},
         # 还被卡住的门（按顺序），界面照这个顺序列"先处理这几项"
         "blockers": [gate["id"] for gate in gates if gate["status"] != "ok"],
         # 限流还要等多久：0 表示没在等。放在这里而不是让界面自己算——
@@ -415,15 +529,15 @@ def gate_report(
 # ------------------------------------------------------------------ 发布
 
 NOTE_TITLE_MAX = TITLE_MAX
-# 平台侧记的是 200（方案书 §756）；本机上限由 publish.max_summary_chars 决定（默认 400）。
-# 这个常量只作参考，不参与判定——真撞了 12025 就把配置调回 200。
+# 摘要字段已下线（2026-11-07）：WB 不再往笔记里塞摘要，payload 里那个键固定发空串。
+# 平台侧对摘要的口径是「约 200 字」，这个常量留着只作参考，不参与任何判定。
 NOTE_SUMMARY_MAX = 200
 NOTE_ATTEMPTS = 3
 
 _NOTE_HINTS = {
     12015: "需要过验证码。这类拦截本应用不做绕过，请到网页端手动处理后再试。",
     12016: "内容被判成敏感信息，改一下措辞再发。",
-    12025: "内容超长。平台对笔记标题（80 字）与摘要（约 200 字）有上限，先把摘要压短再试。",
+    12025: "内容超长。平台对笔记标题有 80 字上限，正文也有长度限制，先把正文压短再试。",
     12035: "你被这位 UP 主加入了黑名单，在这个视频下发不了笔记。",
     12051: "平台判成重复内容。同一视频重复发会被风控，先撤回旧的那条。",
     12052: "这个视频的评论区已关闭。",
@@ -486,21 +600,60 @@ def record_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return view
 
 
+NOTE_PREVIEW_CHARS = 200
+
+
+def note_preview(content_delta: str, limit: int = NOTE_PREVIEW_CHARS) -> str:
+    """笔记接口那个 `summary` 位置发什么：**正文开头的纯文本**，不是用户删掉的摘要。
+
+    接口文档把这个字段标成"必要"，而它的原用途是笔记列表里的预览文本
+    （`auto_comment=1` 时还会被拿去发一条评论区评论——本应用恒关）。
+
+    发空串的风险：平台可能按"必填留空"直接 -400，用户看到的就是"点了发布发不出去"，
+    而且这类失败本应用拿不到真站回执去验证，赌不起。
+    发老草稿里那份的风险：那是用户已经在界面上删掉的摘要，发出去等于没删。
+
+    两头都躲开的做法是**从正文现算**：正文就是用户确认过的那一份，前 200 字
+    天然是它的开头，既不为空，也不多出任何用户没见过的话。
+    """
+    text = " ".join(plain_text(content_delta).split())
+    return text[:limit]
+
+
 def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
-    """按笔记接口的形状组 payload（不截断标题/摘要：超长要在发之前被拦）。"""
+    """按笔记接口的形状组 payload（标题不截断：超长要在发之前被拦）。
+
+    摘要字段已下线（2026-11-07）。`summary` 这个键仍要发——接口文档把它标成
+    "必要"，而它的原用途是笔记列表里的预览文本（`auto_comment=1` 时还会被拿去
+    发一条评论区评论，本应用恒关）。发什么见 `note_preview`：**正文开头**，
+    既不空着（必填位留空可能直接 -400），也不多出用户没见过的话。
+
+    注意这里**故意不读 `draft["summary"]`**：老草稿行里还留着下线前算好的那份，
+    认它等于把用户已经删掉的摘要又发出去。调用方传什么都不影响结果。
+    """
     draft = draft or {}
+    # **不读 draft["summary"]。** 摘要在 2026-11-07 下线了，但老草稿行里还留着
+    # 当年算好的那一份（实测 draft_8dfe01d36c95 里是 268 字，与 comment_short 同源）。
+    # 只要这里还认它，发老草稿时就会把它塞进 payload 并把 auto_comment 打开，
+    # 等于用户明明已经把摘要删掉了，发出去还是多一条评论——库里没清零路径，
+    # 只能在出口这一处不认它（一处改动覆盖所有老行，不需要数据迁移）。
+    content = strip_caution_lines(str(draft.get("content") or ""))
     return {
         "oid": draft.get("aid"),
         "oid_type": 0,
         "title": str(draft.get("title") or "视频笔记"),
-        "summary": str(draft.get("summary") or "").strip(),
-        "content": draft.get("content") or "",
+        # 摘要键**必须发**（接口文档标的是"必要"），但发的是**正文开头**，不是老草稿
+        # 里存的那份：那份是用户已经在界面上删掉的，认它等于把删掉的东西又发出去。
+        # 之所以不干脆发空串：空串在接口里是"必填字段留空"，平台很可能直接 -400，
+        # 而那正是"点了发布发不出去"的一种死法——本应用拿不到真站回执来赌这一把。
+        # auto_comment 恒 0 ⇒ 这段预览只出现在笔记列表的预览位，不会被发成评论。
+        "summary": note_preview(content),
+        "content": content,
         "cls": 1,
         "from": "save",
         "platform": "web",
         "publish": 1,
-        # 让摘要以评论卡形态出现在评论区——这正是"笔记"相对普通评论的意义
-        "auto_comment": 1,
+        "auto_comment": 0,
     }
 
 

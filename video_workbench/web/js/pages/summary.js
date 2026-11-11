@@ -72,6 +72,8 @@
     return null;
   }
 
+  // chars 仍然导出在 _internals 里（前端用例拿它算字数），所以别删——
+  // 删了会让页面在加载期 ReferenceError，整页白屏。
   function chars(text) {
     return String(text || "").replace(/\s+/g, "").length;
   }
@@ -956,23 +958,9 @@
     var caution = String(data.caution || "");
     if (caution) section("注意", [ui.h("p", { class: "sum-tx", text: caution })]);
 
-    var short = String(data.comment_short || "");
-    if (short) {
-      var box = ui.h("div", { class: "sum-short" });
-      box.appendChild(ui.h("p", { class: "sum-short__text", text: short }));
-      box.appendChild(ui.h("div", { class: "row row--end" }, [
-        ui.h("span", { class: "muted", text: chars(short) + " 字" }),
-        ui.h("button", {
-          class: "btn btn--ghost btn--sm",
-          text: "复制",
-          onclick: function () {
-            if (navigator.clipboard) navigator.clipboard.writeText(short);
-            WB.toast("复制了");
-          }
-        })
-      ]));
-      section("评论区短版", [box]);
-    }
+    // 「评论区短版」这一节 2026-11-07 下线：它和发布卡原来的「摘要」是同一段文字
+    // （摘要默认就取 comment_short），两处显示同一份 268 字只会让人以为有两版。
+    // 数据还在（模型照旧产出 comment_short），只是不再渲染——要恢复就把这一节加回来。
 
     var ver = (state.summary && state.summary.version) || 1;
     return ui.h("div", { class: "sum-card", id: "sum-body" }, [

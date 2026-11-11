@@ -57,6 +57,96 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/shoot_wb.py --skin ark
    `"C:\mock\export\merge"` 即运行时单反斜杠，是等宽字体对 `\` 的渲染视觉，
    不是数据 bug。
 
+## 一之二、输出目录可改 + 打开输出目录（2026-11-07 新增）
+
+范围：合并页右栏「输出目录」从只读输入框改成按钮；旁边新增「打开输出目录」。
+
+### 跑法
+
+```bash
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m pytest tests/wb/test_merge_output_dir.py -q
+node tests/wb/frontend_test.js
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -u Temp/accept_merge_outdir.py
+```
+
+### 断言表（后端 15 项 + 前端 6 项 + 真 ffmpeg 1 项）
+
+| # | 断言 | 实测 |
+|---|---|---|
+| 1 | 选文件夹会记住这个目录 | `fs.pick {kind:"dir"}` 之后 `_picked_dirs` 有它 |
+| 2 | 选文件不记（那是素材，不是写盘目标） | `kind:"file"` 之后名单不变 |
+| 3 | 名单最多 32 个，超出丢最旧 | 第 33 个进来后长度 32、头部是第 2 个 |
+| 4 | 手填工作区外的目录被拒 | `VALIDATION` + 「选择输出目录」 |
+| 5 | 对话框选过的外部目录可以用 | `merge.start` 提交成功 |
+| 6 | 把文件当目录用被拒 | 「指向的是一个文件，不是文件夹」 |
+| 7 | 不存在的盘符报 VALIDATION 而不是 INTERNAL | `Z:\definitely\missing` → `VALIDATION` |
+| 8 | 相对路径被拒 | 「输出目录要给绝对路径」 |
+| 9 | 默认目录（没手选）会被建出来 | `<media>/merge/` 存在 |
+| 10 | 打开输出目录按 merge_id 定位到成片父目录 | `{"path": ...}` == 成片 `.parent` |
+| 11 | 未知 merge_id 报 NOT_FOUND | 「找不到这次合并记录」 |
+| 12 | 空 merge_id 报 VALIDATION | 「要先有一次合并」 |
+| 13 | 接口不收路径（`fs.reveal` 白名单不放开） | dispatch 传多余 `path` 键被忽略 |
+| 14 | 成片和父目录都不在时报 NOT_FOUND | 「成片和它所在的目录都不在了」 |
+| 15 | `merge.reveal_output` 已注册到路由 | `app.bootstrap` 的 rpc 名单里有 |
+| 16 | 路径按钮是 BUTTON、空态写「选择输出目录」 | `tagName=BUTTON`、文案一致 |
+| 17 | 点按钮按 `kind:"dir"` 要路径，选完显示完整路径 | `fs.pick` 收到 `{kind:"dir"}`、`title` == 路径 |
+| 18 | 手选之后预检不再把目录盖回默认 | 再加一段，仍显示手选目录 |
+| 19 | 取消选择不改原值、不报错 | 仍是原目录，错误条为空 |
+| 20 | 合并成功前「打开输出目录」禁用，成功后可用且只传 merge_id | 参数里没有 `path` 键 |
+| 21 | 打开失败有可见错误，不静默吞 | `.merge-flash--error` 含「不在了」 |
+| 22 | 清空列表把输出目录与打开按钮一起复位 | 回占位文案、`outDirManual=false`、按钮禁用 |
+| 23 | 切页再回来手选目录还在（会话内保留） | 去 library 再回 merge 仍是原路径 |
+| 24 | 真 ffmpeg：手选外部目录能出片，reveal 指到它 | 12,318,915 B / 30.700s / 720×1280 20fps 48kHz 2ch |
+
+第 24 项现场读数（`Temp/accept_merge_outdir.py`，2 个真实 flv）：
+
+```
+picked_dirs ['c:\\未明子录播\\wb_out_test']
+start ok, job_942e6c0643b9, merge_id mg_54b7d4c5754f
+job status succeeded
+result path C:\未明子录播\wb_out_test\outdir_probe.mp4, bytes 12318915, duration_ms 30700
+reveal {"path": "C:\\未明子录播\\wb_out_test"}
+```
+
+### 顺带修掉的问题
+
+1. **`merge.start` 收任意 `out_dir` 不校验**（改动前是 `Path(out_dir)` 直接用）。
+   现在四条判据：绝对路径 / 非设备路径 / 是已存在目录 / 在工作区内或被对话框选过。
+2. **默认目录没人建**。`ensure_free_space` 会往上找已存在祖先，但 ffmpeg 自己不会建父目录，
+   快速拼接要到收尾才失败。现在 `merge_start` 里 `mkdir(parents=True, exist_ok=True)`。
+3. **盘符不存在时抛 INTERNAL**。`shutil.disk_usage` 的 `FileNotFoundError` 现在转成 `IO`。
+4. **`fs_pick` 的 kind 未归一化**：`"DIR"` / 带空格会走进非 dir 分支。现在 `strip().lower()`。
+
+### 第 25 项：真窗口里的原生对话框（2026-11-07 补）
+
+上面 24 项里，前端第 17 项用的是注入的假 picker——它证明「点按钮会去要路径」，
+证明不了「弹出来的是文件夹框而不是文件框」。历史缺陷正好出在这一层（合并页
+`kind:"files"` 掉进 FOLDER_DIALOG 分支），所以补一条真窗口腿。
+
+常驻脚本 `scripts/accept_folder_picker.py`：起一扇真 pywebview 窗，在线程里调
+产品自己的 `_make_picker()`，另一个线程操作那个 `#32770` 原生窗（`WM_SETTEXT`
+填编辑框、`BM_CLICK` 点按钮），再比对返回值。读数落 `%TEMP%/wb-picker-accept.json`。
+
+现读读数（`PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -u scripts/accept_folder_picker.py`，exit 0）：
+
+| 腿 | 传的 kind | 弹出窗口标题 | 返回值 |
+|---|---|---|---|
+| dir | `dir` | 选择文件夹 | `…\wb-picker-accept-fixture\out` |
+| file | `file` | 打开 | `…\wb-picker-accept-fixture\a.mp4` |
+| files | `files` | 打开 | `…\a.mp4` + `|` + `…\b.mp4` |
+
+三条 `ok` 全 true。顺带钉住一个坑：对话框里含 "Edit" 字样的子窗有两个——地址栏是
+`ToolbarWindow32`、搜索框是 `SearchEditBoxWrapperClass`，**只有类名恰好 `Edit` 的那个**
+才是「文件夹:」栏。按子串匹配会填进搜索框：填完读回来是自己写的值，但对话框实际选中项没变，
+返回的仍是上一次的目录（第一版探针就是这么假绿的）。
+
+### 仍未验证
+
+- 输出目录在网络盘 / 只读盘上的表现。
+- 一次合并写多个目录（不支持，一次只有一个输出目录）。
+- 真窗口里「添加本地文件」多选之后合并页的顺序表内容（第 25 项验到 picker 的返回字符串
+  形状为止，页面侧由前端第 1 条用例覆盖）。
+
 ## 二、P4-02 预检与快速拼接（真 ffmpeg 验收）
 
 ### 跑法
@@ -208,8 +298,8 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/accept_p4_publish.py  
 
 | # | 断言 | 实测 |
 |---|---|---|
-| 1 | 预览给出标题 / 摘要 / 正文 | 15 字 / 17 字 / 150 字 |
-| 2 | 摘要不超过 200 字 | 17 ≤ 200 |
+| 1 | 预览给出标题与正文 | 15 字 / 132 字 |
+| 2 | 摘要不再出现在预览里 | `""`（字段已下线） |
 | 3 | 三道门禁都在，顺序固定 | `content, account, pace` |
 | 4 | 没勾确认时内容关是 todo 不是 ok | todo ·「发布前要勾一下」 |
 | 5 | 三关没全绿时 `ready=False` | False |
@@ -220,11 +310,11 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/accept_p4_publish.py  
 | 10 | 列表带 UP 名 | 验收UP |
 | 11 | 列表带更新时间 | 同上 |
 | 12 | 列表带状态 | draft |
-| 13 | 只重算摘要时标题保留手改值 | 标题未变 |
-| 14 | 只重算摘要时正文不被清空 | 150 字 |
-| 15 | 重算结果带门禁状态 | gates 有值 |
-| 16 | 重算摘要不写库 | `publish.get` 摘要未变 |
-| 17 | 只重算标题时摘要保留 | 摘要未变 |
+| 13 | 只重算标题时标题被换掉 | 换成最新一版总结的标题 |
+| 14 | 只重算标题时正文不被清空 | 132 字 |
+| 15 | 只重算标题时正文就是库里那一份 | 逐字相同 |
+| 16 | 重算结果带门禁状态 | gates 有值 |
+| 17 | 重算不写库 | `publish.get` 标题未变 |
 | 18 | 勾确认且已登录时三关全绿 | `ok/ok/ok`，`ready=True` |
 | 19 | 前两关状态都是 ok | `["ok","ok"]` |
 | 20 | 删除草稿成功 | `removed=1` |
@@ -307,7 +397,7 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/accept_p4_publish_do.p
    改成摘 `overlay`。
 2. **`publishRow` 在未保存草稿时整块不出现**：门禁卡写着「还不能发」，编辑器下面
    却没有任何发布入口，用户不知道该干什么。补一条
-   「先点「保存草稿」：发布会用库里这一版的标题、摘要与正文」。
+   「先点「保存草稿」：发布会用库里这一版的标题与正文」。
 3. **mock 的门禁永远停在「发布时再确认」**：mock 没有登录流程，账号关恒 todo →
    `ready` 恒 false，界面里发布按钮永远点不动（截图里就成了假缺陷）。
    mock 加 `MOCK_LOGGED_IN = true` 并在三处调用点传入。

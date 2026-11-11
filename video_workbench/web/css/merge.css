@@ -59,6 +59,24 @@
   max-height: none;
 }
 
+/* 输出目录一行：路径按钮吃掉剩余宽度，过窄时省略，完整路径放 title。 */
+.merge-outdir-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.merge-outdir-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--mono);
+}
+
 /* ------------------------------------------------------------ 来源 */
 
 .merge-srcs {

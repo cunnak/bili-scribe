@@ -1731,7 +1731,7 @@ async function main() {
     assert.ok(chars, "保存后详情卡不见了");
   });
 
-  await check("总结页发布卡：列表带 UP 与更新时间，详情亮三道门禁，重新生成只换摘要", async () => {
+  await check("总结页发布卡：列表带 UP 与更新时间，详情亮三道门禁，重新生成只换标题", async () => {
     // 上一条用例已经存了一份草稿，这里接着用同一份
     const view = $("#view");
     const row = view.querySelector(".pb-row");
@@ -1750,27 +1750,30 @@ async function main() {
     assert.strictEqual(card.getAttribute("data-ready"), "0", "还没勾确认，不该显示三关都过");
     assert.ok(card.textContent.indexOf("还不能发") >= 0, "门禁卡抬头没说清现在不能发");
 
-    // 重新生成摘要：标题是用户手改的，不能被冲掉
-    const before = view.querySelector("#pb-title").value;
-    const oldSummary = view.querySelector("#pb-summary").value;
+    // 摘要字段已下线（2026-11-07）：界面上不该再有摘要输入框
+    assert.strictEqual(view.querySelector("#pb-summary"), null,
+      "摘要字段已经下线，不该还有输入框");
+    assert.ok(view.textContent.indexOf("摘要") < 0,
+      "界面上还有「摘要」字样：" + view.textContent.slice(0, 120));
+
+    // 重新生成标题：正文是用户可能改过的东西，不能被冲掉
+    const beforeBody = view.querySelector("#pb-body").textContent;
     const regen = [...view.querySelectorAll("button")]
-      .find((b) => b.textContent.trim() === "重新生成摘要");
-    assert.ok(regen, "没有「重新生成摘要」按钮");
+      .find((b) => b.textContent.trim() === "重新生成标题");
+    assert.ok(regen, "没有「重新生成标题」按钮");
     regen.click();
     await tick(420);
     const after = $("#view");
-    assert.strictEqual(after.querySelector("#pb-title").value, before,
-      "只重算摘要时标题被打回原样了");
-    assert.ok(after.querySelector("#pb-summary").value.length > 0, "摘要被清空了");
-    assert.ok(after.querySelector("#pb-summary").value !== undefined);
-    assert.ok(oldSummary !== null || oldSummary === null);
+    assert.ok(after.querySelector("#pb-title").value.length > 0, "标题被清空了");
+    assert.strictEqual(after.querySelector("#pb-body").textContent, beforeBody,
+      "只重算标题时正文被打回原样了");
   });
 
   await check("总结页发布卡：没勾确认发布按钮点不动，勾了能发出去、也能撤回", async () => {
     // 接上一项：库里已经有一份草稿，详情卡在右栏
     const view = $("#view");
 
-    // 上一步刚重新生成过摘要 → 屏幕上是还没落库的预览，发布会用库里旧的那一版，
+    // 上一步刚重新生成过标题 → 屏幕上是还没落库的预览，发布会用库里旧的那一版，
     // 所以这里必须先拦住并说清原因（S1：双真相源）。
     assert.ok(view.textContent.indexOf("先点「保存草稿」") >= 0,
       "没提示「先保存」：" + view.textContent.slice(-90));
@@ -1813,6 +1816,27 @@ async function main() {
     st.confirmedFor = mine;
     WB.pages.publish._internals.paint();
     assert.strictEqual($("#view").querySelector("#pb-confirm").checked, true, "还原后勾该回来");
+
+    // 事故现场（2026-11-07）：确认框只给两个按钮 resolve，用户按 ESC 或点遮罩关掉时
+    // Promise 永远悬着 ⇒ state.publishing 停在 true ⇒ 按钮永久显示「发布中…」且点不动，
+    // 后端日志里连一条发布请求都没有。onClose 兜底之后，ESC 必须等价于「再想想」。
+    publishBtn().click();
+    await tick(60);
+    assert.ok(window.document.getElementById("modal-root").querySelector(".modal"),
+      "点发布没有弹出确认框");
+    window.document.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+    await tick(300);
+    assert.strictEqual(window.document.querySelector(".modal"), null, "ESC 没关掉确认框");
+    const afterEsc = $("#view");
+    const stillBtn = [...afterEsc.querySelectorAll("button")]
+      .find((b) => b.textContent.trim().startsWith("发布"));
+    assert.ok(stillBtn, "ESC 之后发布按钮不见了");
+    assert.ok(stillBtn.textContent.indexOf("发布中") < 0,
+      "ESC 关掉确认框之后按钮卡在「发布中…」：" + stillBtn.textContent);
+    assert.strictEqual(stillBtn.disabled, false, "ESC 之后按钮该还能再点");
+    assert.strictEqual(WB.pages.publish.state.publishing, false, "ESC 之后 publishing 该复位");
 
     // 点发布 → 弹确认框 → 确认
     publishBtn().click();
@@ -1898,6 +1922,154 @@ async function main() {
       "点「查看详情」之后右栏该是这条记录的内容");
   });
 
+
+
+  await check("总结页发布卡：标题改了没保存，发布按钮不该能点（发出去的会是旧标题）", async () => {
+    // 自造一份"能发"的状态，不去碰 mock 里的草稿（后面的用例还要用它）：
+    // 这条判的是 publishReady() 的第五个条件，与数据来源无关。
+    const st = WB.pages.publish.state;
+    const keep = {
+      current: st.current, editTitle: st.editTitle, confirmedFor: st.confirmedFor,
+      gates: st.gates, draft: st.draft
+    };
+    st.current = { id: "draft_probe_title", title: "库里的标题", status: "draft",
+      project_id: "pj_probe", content: '[{"insert":"x\\n"}]', content_text: "x" };
+    st.editTitle = "库里的标题";
+    st.draft = null;
+    st.confirmedFor = "draft_probe_title";
+    st.gates = { ready: true, gates: [] };
+    assert.strictEqual(WB.pages.publish._internals.publishReady(), true,
+      "前提没成立：这份草稿本来就该能发");
+
+    // 改标题但不保存：发布读的是库里那一行，发出去的会是旧标题，
+    // 而勾选框写的正是「确认标题与正文都要发出去」（2026-11-07 补）
+    st.editTitle = "库里的标题（改了没存）";
+    assert.strictEqual(WB.pages.publish._internals.publishReady(), false,
+      "标题改过还没保存，发布按钮不该能点");
+    assert.ok(WB.pages.publish._internals.gateBlockedText().indexOf("标题改过还没保存") >= 0,
+      "没告诉用户为什么不能发：" + WB.pages.publish._internals.gateBlockedText());
+    st.editTitle = "库里的标题";
+    assert.strictEqual(WB.pages.publish._internals.publishReady(), true,
+      "把标题改回去之后按钮该恢复");
+
+    st.current = keep.current;
+    st.editTitle = keep.editTitle;
+    st.confirmedFor = keep.confirmedFor;
+    st.gates = keep.gates;
+    st.draft = keep.draft;
+  });
+
+  await check("总结页发布卡：发布收尾那一步失败，按钮也要复位（不能卡在「发布中…」）", async () => {
+    const st = WB.pages.publish.state;
+    const keep = {
+      current: st.current, editTitle: st.editTitle, confirmedFor: st.confirmedFor,
+      gates: st.gates, draft: st.draft, notes: st.notes, records: st.records
+    };
+    st.current = { id: "draft_probe_reset", title: "探针草稿", status: "draft",
+      project_id: "pj_probe", content: '[{"insert":"x\\n"}]', content_text: "x" };
+    st.editTitle = "探针草稿";
+    st.draft = null;
+    st.confirmedFor = "draft_probe_reset";
+    st.gates = { ready: true, gates: [] };
+    assert.strictEqual(WB.pages.publish._internals.publishReady(), true, "前提没成立");
+
+    // 事故现场：发布成功后要 Promise.all([loadNotes, loadRecords]) 收尾，
+    // 以前复位写在那个 all 的 .then 里 ⇒ 只要列表接口失败，复位整段被跳过，
+    // 按钮永久「发布中…」且点不动，而后端其实已经发出去了。
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "publish.list") return Promise.reject(new Error("列表接口挂了"));
+      if (method === "publish.publish") {
+        return Promise.resolve({ note: { id: "draft_probe_reset", status: "published",
+          title: "探针草稿", note_id: "note_probe", project_id: "pj_probe",
+          content: '[{"insert":"x\\n"}]', content_text: "x" } });
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    const run = WB.pages.publish._internals.publishNow();
+    await tick(80);
+    const root = window.document.getElementById("modal-root");
+    const confirmBtn = [...root.querySelectorAll("button")]
+      .find((b) => b.textContent.trim() === "发布");
+    assert.ok(confirmBtn, "点发布没有弹出确认框");
+    confirmBtn.click();
+    await tick(600);
+    WB.rpc = realRpc;
+    await run;
+
+    assert.strictEqual(st.publishing, false,
+      "收尾那步失败之后 publishing 没复位 ⇒ 按钮永久「发布中…」");
+
+    st.current = keep.current;
+    st.editTitle = keep.editTitle;
+    st.confirmedFor = keep.confirmedFor;
+    st.gates = keep.gates;
+    st.draft = keep.draft;
+    st.notes = keep.notes;
+    st.records = keep.records;
+  });
+  await check("总结页发布卡：弹窗挂载点缺失时也不许把 Promise 悬住", async () => {
+    // 和 ESC 那条同一个形状：ui.modal 在没有 #modal-root 时返回一个空 close()，
+    // 谁拿它兜底（ui.confirm / 发布确认框）就永远等不到 resolve。
+    // 这里把挂载点临时摘掉，走完一次「点发布」，按钮必须自己复位。
+    const st = WB.pages.publish.state;
+    const keep = {
+      current: st.current, editTitle: st.editTitle, confirmedFor: st.confirmedFor,
+      gates: st.gates, draft: st.draft
+    };
+    st.current = { id: "draft_probe_noroot", title: "探针草稿", status: "draft",
+      project_id: "pj_probe", content: '[{"insert":"x\\n"}]', content_text: "x" };
+    st.editTitle = "探针草稿";
+    st.draft = null;
+    st.confirmedFor = "draft_probe_noroot";
+    st.gates = { ready: true, gates: [] };
+
+    const mount = window.document.getElementById("modal-root");
+    const holder = window.document.createElement("div");
+    mount.parentNode.replaceChild(holder, mount);
+    try {
+      const run = WB.pages.publish._internals.publishNow();
+      await tick(200);
+      assert.strictEqual(st.publishing, false,
+        "挂载点缺失时 publishing 卡在 true ⇒ 按钮永久「发布中…」");
+      await run;
+    } finally {
+      holder.parentNode.replaceChild(mount, holder);
+      st.current = keep.current;
+      st.editTitle = keep.editTitle;
+      st.confirmedFor = keep.confirmedFor;
+      st.gates = keep.gates;
+      st.draft = keep.draft;
+    }
+  });
+  await check("全局提示：后端发的 app.toast 能真的弹出来（名字与字段都要对）", async () => {
+    // 后端两处都在发 app.toast（events.toast 与发布重试回调），而 app.js 以前只认
+    // toast ⇒ 所有后端提示从来没显示过。名字与字段各收两种。
+    const host = window.document.getElementById("toasts");
+    assert.ok(host, "页面没有 toast 容器");
+    host.textContent = "";
+    window.__wbEvent("app.toast", JSON.stringify({ level: "info", message: "后端提示·message" }));
+    await tick(80);
+    assert.ok(host.textContent.indexOf("后端提示·message") >= 0,
+      "app.toast 没弹出来：" + host.textContent);
+    host.textContent = "";
+    window.__wbEvent("app.toast", JSON.stringify({ level: "info", text: "后端提示·text" }));
+    await tick(80);
+    assert.ok(host.textContent.indexOf("后端提示·text") >= 0,
+      "app.toast 的 text 字段没被认：" + host.textContent);
+  });
+
+  await check("事件总线：页面订阅走的是 WB.events.on，别再让它静默失效", async () => {
+    assert.strictEqual(typeof window.WB.events, "object", "WB.events 不存在");
+    assert.strictEqual(window.WB.events.on, window.WB.on,
+      "WB.events.on 与 WB.on 必须是同一根总线，不能是第二份监听表");
+    let hit = 0;
+    const off = window.WB.events.on("probe.events", function () { hit += 1; });
+    window.__wbEvent("probe.events", JSON.stringify({}));
+    await tick(60);
+    off();
+    assert.strictEqual(hit, 1, "通过 WB.events.on 订阅收不到事件");
+  });
   await check("样式页：两个内置预设、改字号能存成新样式、真实渲染出图", async () => {
     WB.router.go("styles", {});
     await tick(420);
@@ -2154,6 +2326,372 @@ async function main() {
     // 输出文件名要跟着段数走，不能勾了两段还挂着"合并_1段"
     const nameInput = [...view.querySelectorAll("input")].find((i) => (i.value || "").indexOf("合并_") === 0);
     assert.ok(nameInput && nameInput.value.indexOf("2段") >= 0, "文件名没跟上段数：" + (nameInput && nameInput.value));
+  });
+
+  await check("合并页：添加本地文件支持一次多选，按 | 拆开后全部进顺序表", async () => {
+    WB.router.go("merge");
+    await tick(400);
+    const view = $("#view");
+    const clear = [...view.querySelectorAll("button")].find((b) => b.textContent === "清空");
+    if (clear) { clear.click(); await tick(200); }
+
+    const realRpc = WB.rpc;
+    const calls = [];
+    WB.rpc = function (method, params, opts) {
+      if (method === "fs.pick") {
+        calls.push(params || {});
+        return Promise.resolve({ path: "C:/local/a.mp4|C:/local/b.mp4" });
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "添加本地文件").click();
+    await tick(800);
+    WB.rpc = realRpc;
+
+    assert.equal(calls.length, 1, "没有发起 fs.pick");
+    assert.equal(calls[0].kind, "files", "合并页应该按多文件语义要路径：" + JSON.stringify(calls[0]));
+    const names = [...view.querySelectorAll(".merge-row__name")].map((n) => n.textContent);
+    assert.deepStrictEqual(names, ["a.mp4", "b.mp4"], "多选回来的路径没有全部进顺序表：" + names.join("|"));
+  });
+
+  await check("合并页：选过的分辨率和帧率会随提交传给后端", async () => {
+    WB.router.go("merge");
+    await tick(400);
+    const view = $("#view");
+    const clear = [...view.querySelectorAll("button")].find((b) => b.textContent === "清空");
+    if (clear) { clear.click(); await tick(200); }
+
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "fs.pick") return Promise.resolve({ path: "C:/local/a.mp4|C:/local/b.mp4" });
+      return realRpc.call(WB, method, params, opts);
+    };
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "添加本地文件").click();
+    await tick(800);
+    WB.rpc = realRpc;
+
+    const selects = [...view.querySelectorAll("select")];
+    assert.ok(selects.length >= 2, "没有分辨率和帧率下拉");
+    selects[0].value = "1080";
+    selects[0].dispatchEvent(new dom.window.Event("change"));
+    selects[1].value = "30";
+    selects[1].dispatchEvent(new dom.window.Event("change"));
+    await tick(800);
+
+    let started = null;
+    const beforeStart = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "merge.start") { started = params || {}; }
+      return beforeStart.call(WB, method, params, opts);
+    };
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "开始合并").click();
+    await tick(80);
+    WB.rpc = beforeStart;
+
+    assert.ok(started, "没有提交 merge.start");
+    assert.equal(started.width, 1080, "宽度没传：" + JSON.stringify(started));
+    assert.equal(started.height, 608, "高度没按 16:9 推：" + JSON.stringify(started));
+    assert.equal(started.fps, 30, "帧率没传：" + JSON.stringify(started));
+  });
+
+  await check("合并页：有缺失文件时开始按钮禁用并提示先移出列表", async () => {
+    WB.router.go("merge");
+    await tick(400);
+    const view = $("#view");
+    const clear = [...view.querySelectorAll("button")].find((b) => b.textContent === "清空");
+    if (clear) { clear.click(); await tick(200); }
+
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "fs.pick") return Promise.resolve({ path: "C:/local/a.mp4|C:/local/b.mp4" });
+      if (method === "merge.preflight") {
+        return realRpc.call(WB, method, params, opts).then(function (data) {
+          data.missing = [{ path: "C:/local/gone.mp4", name: "gone.mp4" }];
+          return data;
+        });
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "添加本地文件").click();
+    await tick(900);
+    WB.rpc = realRpc;
+
+    const table = view.querySelector(".merge-table").textContent;
+    assert.ok(table.indexOf("1 个不在") >= 0, "预检没显示缺失数：" + table.slice(0, 160));
+    const start = [...view.querySelectorAll("button")].find((b) => b.textContent === "开始合并");
+    assert.ok(start && start.disabled, "有缺失文件时开始按钮应该禁用");
+    assert.ok((start.title || "").indexOf("标红") >= 0, "禁用原因没写在 title：" + start.title);
+  });
+
+  await check("合并页：输出目录路径按钮能选文件夹，预检不再把手选目录盖回默认", async () => {
+    WB.router.go("merge");
+    await tick(400);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    // 模块级 state 跨用例保留：显式清干净，别让上一个用例的目录漏进来
+    st.order = []; st.preflight = null; st.outDir = ""; st.outDirManual = false;
+    st.lastMergeId = ""; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const pathBtn = () => view.querySelector(".merge-outdir-path");
+    assert.ok(pathBtn(), "输出目录没有做成按钮");
+    assert.equal(pathBtn().tagName, "BUTTON", "输出目录应该是按钮而不是只读输入框");
+    assert.ok(pathBtn().textContent.indexOf("选择输出目录") >= 0,
+      "空态没有可点的占位文案：" + pathBtn().textContent);
+
+    // 加两段，预检给出默认目录
+    const srcs = [...view.querySelectorAll(".merge-src")];
+    srcs[0].click();
+    srcs[1].click();
+    await tick(700);
+    assert.ok(pathBtn().textContent.indexOf("merge") >= 0,
+      "预检后没显示默认输出目录：" + pathBtn().textContent);
+
+    // 点路径按钮：走 fs.pick 的 dir 语义
+    const calls = [];
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "fs.pick") {
+        calls.push(params || {});
+        return Promise.resolve({ path: "D:/chosen/out" });
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    pathBtn().click();
+    await tick(300);
+    WB.rpc = realRpc;
+
+    assert.equal(calls.length, 1, "没有发起 fs.pick");
+    assert.equal(calls[0].kind, "dir", "选输出目录要按 dir 语义要路径：" + JSON.stringify(calls[0]));
+    assert.equal(pathBtn().textContent, "D:/chosen/out", "选完路径没显示出来");
+    assert.equal(pathBtn().title, "D:/chosen/out", "完整路径没放进 title");
+
+    // 再加一段触发预检：手选目录不能被默认值盖回去
+    [...view.querySelectorAll(".merge-src")][2].click();
+    await tick(800);
+    assert.equal(pathBtn().textContent, "D:/chosen/out", "预检把手选的输出目录盖回去了");
+
+    // 提交时传的就是手选目录
+    let started = null;
+    const beforeStart = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "merge.start") started = params || {};
+      return beforeStart.call(WB, method, params, opts);
+    };
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "开始合并").click();
+    await tick(120);
+    WB.rpc = beforeStart;
+    assert.ok(started, "没有提交 merge.start");
+    assert.equal(started.out_dir, "D:/chosen/out", "提交的 out_dir 不是手选目录：" + JSON.stringify(started));
+    await tick(1400);
+  });
+
+  await check("合并页：取消选择输出目录不改原值，也不报错", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    st.order = []; st.preflight = null; st.outDir = "D:/keep/me"; st.outDirManual = true;
+    st.lastMergeId = ""; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const pathBtn = view.querySelector(".merge-outdir-path");
+    assert.equal(pathBtn.textContent, "D:/keep/me");
+
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "fs.pick") return Promise.resolve({ path: null });
+      return realRpc.call(WB, method, params, opts);
+    };
+    pathBtn.click();
+    await tick(300);
+    WB.rpc = realRpc;
+
+    assert.equal(pathBtn.textContent, "D:/keep/me", "取消选择把已选目录清掉了");
+    const err = view.querySelector(".merge-flash--error");
+    assert.ok(!err || err.style.display === "none" || !err.textContent,
+      "取消选择不该报错：" + (err && err.textContent));
+  });
+
+  await check("合并页：合并成功后才能打开输出目录，且按 merge_id 打开", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    st.order = []; st.preflight = null; st.outDir = ""; st.outDirManual = false;
+    st.lastMergeId = ""; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const openBtn = () => [...view.querySelectorAll("button")]
+      .find((b) => b.textContent === "打开输出目录");
+    assert.ok(openBtn(), "没有「打开输出目录」按钮");
+    assert.ok(openBtn().disabled, "还没合并，打开按钮不该可点");
+
+    const srcs = [...view.querySelectorAll(".merge-src")];
+    srcs[0].click();
+    srcs[1].click();
+    await tick(700);
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "开始合并").click();
+    await tick(1600);
+
+    assert.ok(!openBtn().disabled, "合并成功了，打开按钮还是禁用");
+
+    const opened = [];
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "merge.reveal_output") {
+        opened.push(params || {});
+        return Promise.resolve({ path: "C:/mock/export/merge" });
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    openBtn().click();
+    await tick(200);
+    WB.rpc = realRpc;
+
+    assert.equal(opened.length, 1, "没有调用 merge.reveal_output");
+    assert.ok(opened[0].merge_id, "打开时没带 merge_id：" + JSON.stringify(opened[0]));
+    assert.ok(!("path" in opened[0]), "不该把路径递给后端：" + JSON.stringify(opened[0]));
+  });
+
+  await check("合并页：打开输出目录失败时错误可见，不静默吞掉", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    st.order = []; st.preflight = null; st.lastMergeId = "mg_mock_999"; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const openBtn = [...view.querySelectorAll("button")]
+      .find((b) => b.textContent === "打开输出目录");
+    assert.ok(openBtn && !openBtn.disabled, "有上次合并记录时打开按钮应可点");
+
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "merge.reveal_output") {
+        const err = new Error("成片和它所在的目录都不在了");
+        err.code = "NOT_FOUND";
+        return Promise.reject(err);
+      }
+      return realRpc.call(WB, method, params, opts);
+    };
+    openBtn.click();
+    await tick(200);
+    WB.rpc = realRpc;
+
+    const flash = view.querySelector(".merge-flash--error");
+    assert.ok(flash && flash.style.display !== "none" && flash.textContent.indexOf("不在了") >= 0,
+      "打开失败没有可见错误：" + (flash && flash.textContent));
+  });
+
+  await check("合并页：清空列表把输出目录和打开按钮一起复位", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    st.order = []; st.preflight = null; st.outDir = ""; st.outDirManual = false;
+    st.lastMergeId = ""; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const srcs = [...view.querySelectorAll(".merge-src")];
+    srcs[0].click();
+    await tick(600);
+    const st2 = WB.pages.merge._internals.state;
+    st2.outDir = "D:/hand/picked";
+    st2.outDirManual = true;
+    st2.lastMergeId = "mg_mock_1";
+    WB.pages.merge._internals.refreshPreflight();
+    await tick(600);
+
+    const pathBtn = view.querySelector(".merge-outdir-path");
+    assert.equal(pathBtn.textContent, "D:/hand/picked");
+
+    [...view.querySelectorAll("button")].find((b) => b.textContent === "清空").click();
+    await tick(300);
+
+    assert.ok(pathBtn.textContent.indexOf("选择输出目录") >= 0,
+      "清空后输出目录没复位：" + pathBtn.textContent);
+    assert.equal(WB.pages.merge._internals.state.outDirManual, false, "清空后手选标记没复位");
+    assert.equal(WB.pages.merge._internals.state.lastMergeId, "", "清空后还留着上次合并 id");
+    const openBtn = [...view.querySelectorAll("button")]
+      .find((b) => b.textContent === "打开输出目录");
+    assert.ok(openBtn && openBtn.disabled, "清空后打开按钮应该禁用");
+  });
+
+  await check("合并页：切到别的页再回来，手选输出目录还在", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const st = WB.pages.merge._internals.state;
+    st.order = []; st.preflight = null; st.outDir = ""; st.outDirManual = false;
+    st.lastMergeId = ""; st.lastOutput = "";
+    WB.router.go("merge");
+    await tick(300);
+
+    const view = $("#view");
+    [...view.querySelectorAll(".merge-src")][0].click();
+    await tick(500);
+    const st2 = WB.pages.merge._internals.state;
+    st2.outDir = "E:/keep/across-pages";
+    st2.outDirManual = true;
+
+    WB.router.go("library");
+    await tick(300);
+    WB.router.go("merge");
+    await tick(400);
+
+    const pathBtn = $("#view").querySelector(".merge-outdir-path");
+    assert.equal(pathBtn.textContent, "E:/keep/across-pages",
+      "切页回来手选目录丢了：" + pathBtn.textContent);
+  });
+
+  await check("合并页：长任务不会在 12 分钟假装失败", async () => {
+    // 现场 bug：轮询到 900 次（12 分钟）就静默停下，按钮永远显示「合并中…」，
+    // 而那次合并实际跑了 20 分钟才成功。
+    const poll = WB._mergePoll;
+    assert.ok(poll, "没暴露轮询策略（WB._mergePoll）");
+    assert.ok(poll.limit > 0 && poll.hard > poll.limit, "阈值不合理");
+    assert.equal(poll.gaveUp(poll.limit + 1), false, "刚到 12 分钟就放弃了");
+    assert.equal(poll.gaveUp(poll.limit + 200), false, "还在正常区间就放弃了");
+    assert.equal(poll.gaveUp(poll.hard + 1), true, "到了硬上限也不放手");
+    assert.ok(poll.delay(1) < poll.slow, "正常阶段不该已经是慢速");
+    assert.equal(poll.delay(poll.limit + 1), poll.slow, "过了 12 分钟没有放慢节奏");
+  });
+
+  await check("合并页：任务结束事件能把界面收尾（轮询兜底）", async () => {
+    WB.router.go("merge");
+    await tick(300);
+    const view = $("#view");
+    const st = WB.pages.merge._internals.state;
+    const api = WB.pages.merge._internals;
+
+    st.order = []; st.preflight = null;
+    st.lastMergeId = ""; st.lastOutput = "";
+    st.running = true; st.jobId = "job_merge_event"; st.progress = 0.4;
+    api.watchJob("job_merge_event");
+
+    window.__wbEvent("job.finished", JSON.stringify({
+      id: "job_merge_event",
+      status: "succeeded",
+      result: { merge_id: "mg_event", path: "C:/mock/out/x.mp4", name: "x.mp4", count: 2 },
+      error: null,
+      job: { id: "job_merge_event", type: "merge.run", status: "succeeded", progress: 1 }
+    }));
+    await tick(120);
+
+    assert.equal(st.running, false, "任务结束了页面还在「合并中」");
+    assert.equal(st.jobId, "", "任务结束后还留着 jobId");
+    assert.equal(st.lastMergeId, "mg_event", "事件里的 merge_id 没写进页面");
+    assert.ok(view.textContent.indexOf("合并完成：x.mp4（2 段）") >= 0,
+      "完成提示没出现：" + view.textContent);
+    const openBtn = [...view.querySelectorAll("button")]
+      .find((b) => b.textContent === "打开输出目录");
+    assert.ok(openBtn && !openBtn.disabled, "事件收尾后打开按钮仍禁用");
+    api.unwatchJob();
   });
 
   // 44/45 号之后：关于页的日志与诊断包

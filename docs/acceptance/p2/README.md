@@ -414,35 +414,37 @@ python scripts/accept_p2_translate.py --config build/accept/p2.yaml
 | --- | --- | --- |
 | 素材 | 没总结的项目被拦下 | `CONFLICT`「这个项目还没有总结，先去「总结」页出一版」 |
 | 素材 | 预览取到最新一版 | `summary_id`/`version` 与插入的那版一致 |
-| 正文 | 标题默认取视频标题；摘要默认取短评 | 逐字相等 |
-| 正文 | 有 `## 要点`、`## 时间轴`（带 `` `00:12` ``）、注意提示、AI 披露 | 正文逐段比对 |
+| 正文 | 标题默认取视频标题；摘要字段已下线（恒空串） | 逐字相等 |
+| 正文 | 有 `## 要点`、`## 时间轴`（带 `` `00:12` ``）、AI 披露 | 正文逐段比对 |
+| 正文 | **「注意：素材为机器转录…」不进正文** | 该串不出现 |
 | 正文 | **内部嘱咐不进正文** | 「素材局限」「采集提示」不出现 |
 | 正文 | Delta 转纯文本后没有 `**` / `## ` | — |
-| 字数 | 门禁常数与平台一致 | `limits == {title:80, summary:200}` |
+| 字数 | 门禁常数只剩标题 | `limits == {title:80}` |
 | 字数 | 字数与手算一致 | `len("".join(text.split()))` |
 | 存库 | 存成 `status=draft`，带 `bvid`/`aid`，未填发布/撤回时间 | 行字段 |
 | 存库 | 库里真有这一行 | `repo.publish_for_project` |
 | 列表 | 能看到草稿，带项目标题/UP/字数 | `publish.list` |
-| 编辑 | 改标题、改摘要都生效，且**落在同一行** | 行 id 不变 |
+| 编辑 | 改标题生效、改摘要不再生效（字段已下线），且**落在同一行** | 行 id 不变 |
 | 编辑 | 重复保存不堆积 | 列表恒为 1 |
 | 编辑 | 手改 Delta 以用户为准，并重算字数 | 正文逐字相等 |
 | 门禁 | 100 字标题被拒 | `VALIDATION`「标题超过 80 字」 |
-| 门禁 | 260 字摘要被拒 | `VALIDATION`「摘要超过 200 字」 |
+| 门禁 | 260 字摘要参数被忽略而不是被拒 | 存下来仍是空串 |
 | 门禁 | 空正文（`[]`）被拒 | `VALIDATION` |
 | 门禁 | 被拒的三次**都没改库** | 行 id 没变 |
 | 设置 | 关掉 `disclose_ai` 后正文不再带披露 | — |
 | 持久化 | 换一个服务实例仍读得到草稿 | 重开 `WorkbenchService` |
-| 边界 | 撤回明确说 Phase 5 才接 | `UNSUPPORTED`「发布与撤回在 Phase 5 接上」 |
+| 边界 | 草稿撤回说清楚只有已发布的才能撤 | `CONFLICT`「只有已发布的笔记才能撤回」 |
 | 删除 | 删后读不到、重复删除 `NOT_FOUND`、列表为空 | — |
 
 ### 这一轮修掉的问题（都是我自己写的 bug，被测试抓住）
 
-1. **标题/摘要被静默截断**：`default_title()` 原来 `[:80]`、`default_summary()` 原来 `[:limit]`。
+1. **标题被静默截断**：`default_title()` 原来 `[:80]`。
    后果是"超长"这件事从界面上消失了——用户看到一个刚好 80 字的标题，
-   发出去却被平台拒，而平台拒的理由他永远看不到。修法：两条都不截断，
+   发出去却被平台拒，而平台拒的理由他永远看不到。修法：不截断，
    超长如实保留并报 warning，`check_draft()` 在存库前拦下。
-   回归：`test_draft_warns_instead_of_silently_truncating_over_limit`、
-   `test_default_summary_is_not_silently_cut`。
+   回归：`test_draft_warns_instead_of_silently_truncating_over_limit`。
+   （摘要那半条已随字段下线一起退场，对应用例改名成
+   `test_an_over_long_summary_no_longer_warns`。）
 2. **mock 缺 `projectById`**：新加的分支调了一个不存在的函数，前端测试直接崩在
    `state.projects.map`——这类"mock 自己写的代码没有 mock"只有真跑一遍才发现。
 3. **列表行元信息折行**：`.pb-row__meta` 没有 `nowrap`，窄栏里「351 字」被拆成两行，

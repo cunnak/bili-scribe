@@ -155,24 +155,51 @@ def _make_picker() -> Callable[[str], str | None]:
     为什么放在桌面层：`create_file_dialog` 是窗口的方法，service 不该知道窗口存在。
     调试模式下 service.picker 是 None，`fs.pick` 会明确报 UNSUPPORTED，而不是
     抛一个 AttributeError 让前端猜。
+
+    `kind` 的语义（所有调用点共用这一份约定）：
+
+    - `file` / `audio`：选单个文件，返回一个路径；
+    - `files`：选多个文件，返回用 `|` 拼起来的路径串（Windows 文件名不能含 `|`，
+      旧调用点也是按这个分隔符拆的）；
+    - 其它（默认 `dir`）：选文件夹。
+
+    以前只认 `"file"`，而合并页等调用点传的是 `"files"`，于是全落进文件夹对话框——
+    用户选完文件夹被当成一个视频文件，预检只会说「文件不在了」。
     """
+
+    def _dialog(kind: str):
+        file_dialog = getattr(webview, "FileDialog", None)
+        if kind == "dir":
+            value = getattr(webview, "FOLDER_DIALOG", None)
+            if value is None:
+                value = getattr(file_dialog, "FOLDER", None)
+            return value
+        value = getattr(webview, "OPEN_DIALOG", None)
+        if value is None:
+            value = getattr(file_dialog, "OPEN", None)
+        return value
 
     def pick(kind: str = "dir") -> str | None:
         windows = getattr(webview, "windows", None) or []
         if not windows:
             return None
         window = windows[0]
-        if str(kind) == "file":
-            dialog = getattr(webview, "OPEN_DIALOG", None) or getattr(webview, "FileDialog", None)
-            result = window.create_file_dialog(dialog, allow_multiple=False)
+        normalized = str(kind or "dir")
+        if normalized in ("file", "files", "audio"):
+            dialog = _dialog("file")
+            result = window.create_file_dialog(dialog, allow_multiple=normalized == "files")
         else:
-            dialog = getattr(webview, "FOLDER_DIALOG", None) or getattr(webview, "FileDialog", None)
-            result = window.create_file_dialog(dialog)
+            dialog = _dialog("dir")
+            result = window.create_file_dialog(dialog, allow_multiple=False)
         if not result:
             return None
-        if isinstance(result, (list, tuple)):
-            return str(result[0]) if result else None
-        return str(result)
+        paths = (
+            [str(item) for item in result] if isinstance(result, (list, tuple)) else [str(result)]
+        )
+        paths = [path for path in paths if path]
+        if not paths:
+            return None
+        return "|".join(paths) if normalized == "files" else paths[0]
 
     return pick
 

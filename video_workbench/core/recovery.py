@@ -22,18 +22,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
-# 项目的正常推进顺序。`subtitle` 是"导入时自带字幕"的分支，排在 downloaded 之后；
-# 回退时它和 transcribed 同级（两者都代表"有可用文本"）。
-STAGE_ORDER = [
-    "new",
-    "downloaded",
-    "subtitle",
-    "transcribed",
-    "summarized",
-    "clipped",
-    "merged",
-    "published",
-]
+from .stages import STAGE_ORDER
+
+# 阶段顺序的唯一 owner 在 `core/stages.py`：这里**只 import，不复制第二份**。
+# 保留本模块的同名属性是因为 `recover()` / `recover_stage()` 一直从模块全局取它，
+# 而且测试会 patch `recovery.STAGE_ORDER` 来模拟"阶段表变了"——名字换了那些用例就失效。
 
 #: 每个阶段成立所必需的证据。键是阶段，值是"检查函数名"。
 #: 只检查本地能验证的东西（文件在不在、库里有不有行），不联网、不探测平台。

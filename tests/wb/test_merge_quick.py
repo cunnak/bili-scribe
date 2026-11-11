@@ -70,6 +70,18 @@ def make_files(tmp_path: Path, names: list[str]) -> list[str]:
     return paths
 
 
+def out_dir_of(tmp_path: Path) -> Path:
+    """一个**已存在**、且落在 media_root 内的输出目录。
+
+    显式传 `out_dir` 走的是「用户手选目录」那条路，服务端会校验它存在且在允许根内
+    （或本次进程里被对话框选过）。以前这些用例传的是不存在的 `tmp_path/"out"`，
+    靠的正是"不校验"那个宽松行为——补上校验后它们集体变红，说明旧断言在依赖缺陷。
+    """
+    target = tmp_path / "media" / "out"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 def wait_job(service, job_id, timeout=8.0):
     """轮询到终态。后台线程写状态，断言前必须等，否则读到 running 就假红。"""
     import time
@@ -143,6 +155,17 @@ def test_block_reason_empty_for_precise_mode():
     assert merger.block_reason({"count": 0}, "precise") == ""
 
 
+def test_block_reason_reports_missing_even_for_precise_mode():
+    # 精确重编码能兜规格不一致，兜不住"文件不在"；precise 静默丢段必须被拦。
+    result = {"count": 2, "missing": [{"name": "gone.mp4"}], "broken": []}
+    assert "不在了" in merger.block_reason(result, "precise")
+
+
+def test_block_reason_reports_broken_even_for_precise_mode():
+    result = {"count": 2, "missing": [], "broken": [{"name": "bad.mp4"}]}
+    assert "读不出视频流" in merger.block_reason(result, "precise")
+
+
 def test_difference_text_empty_when_consistent():
     assert merger.difference_text({"differences": []}) == ""
 
@@ -181,7 +204,7 @@ def test_precise_mode_is_submitted_with_its_own_payload(service, tmp_path, monke
 
     monkeypatch.setattr(fake, "merge_precise", fake_precise, raising=False)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    data = service.merge_start(paths=paths, mode="precise", out_dir=str(tmp_path / "out"))
+    data = service.merge_start(paths=paths, mode="precise", out_dir=str(out_dir_of(tmp_path)))
     job = wait_job(service, data["job"]["id"])
     assert job["status"] == "succeeded", json.dumps(job, ensure_ascii=False)
     assert job["payload"]["mode"] == "precise"
@@ -195,7 +218,7 @@ def test_inconsistent_specs_block_before_any_job(service, tmp_path, monkeypatch)
     paths = make_files(tmp_path, ["a.mp4", "narrow.mp4"])
 
     with pytest.raises(WBError) as exc:
-        service.merge_start(paths=paths, out_dir=str(tmp_path / "out"))
+        service.merge_start(paths=paths, out_dir=str(out_dir_of(tmp_path)))
 
     assert exc.value.code == "CONFLICT"
     assert "规格不一致" in exc.value.message
@@ -211,7 +234,7 @@ def test_quick_merge_runs_and_records(service, tmp_path, monkeypatch):
     fake = FakeFFmpeg(duration_ms=6000)
     monkeypatch.setattr(service, "_ffmpeg", fake)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    out_dir = tmp_path / "out"
+    out_dir = out_dir_of(tmp_path)
 
     data = service.merge_start(paths=paths, out_dir=str(out_dir))
     job = data["job"]
@@ -241,7 +264,7 @@ def test_merge_list_reports_exists_after_file_removed(service, tmp_path, monkeyp
     fake = FakeFFmpeg()
     monkeypatch.setattr(service, "_ffmpeg", fake)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    data = service.merge_start(paths=paths, out_dir=str(tmp_path / "out"))
+    data = service.merge_start(paths=paths, out_dir=str(out_dir_of(tmp_path)))
     wait_job(service, data["job"]["id"])
 
     row = service.merge_list()["items"][0]
@@ -254,7 +277,7 @@ def test_second_merge_with_same_name_does_not_overwrite(service, tmp_path, monke
     fake = FakeFFmpeg()
     monkeypatch.setattr(service, "_ffmpeg", fake)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    out_dir = tmp_path / "out"
+    out_dir = out_dir_of(tmp_path)
 
     first = service.merge_start(paths=paths, out_dir=str(out_dir), out_name="同一条")
     wait_job(service, first["job"]["id"])
@@ -277,7 +300,7 @@ def test_disk_guard_blocks_before_creating_record(service, tmp_path, monkeypatch
     monkeypatch.setattr(service_module, "ensure_free_space", boom)
 
     with pytest.raises(WBError) as exc:
-        service.merge_start(paths=paths, out_dir=str(tmp_path / "out"))
+        service.merge_start(paths=paths, out_dir=str(out_dir_of(tmp_path)))
     assert exc.value.code == "DISK_FULL"
     assert service.repo.merge_list() == []
 
@@ -289,10 +312,25 @@ def test_missing_file_is_listed_not_merged(service, tmp_path, monkeypatch):
     gone = str(tmp_path / "gone.mp4")
 
     with pytest.raises(WBError) as exc:
-        service.merge_start(paths=good + [gone], out_dir=str(tmp_path / "out"))
+        service.merge_start(paths=good + [gone], out_dir=str(out_dir_of(tmp_path)))
     assert exc.value.code == "CONFLICT"
     assert "不在了" in exc.value.message
     assert fake.calls == []
+
+
+def test_precise_also_rejects_missing_file_instead_of_dropping_it(service, tmp_path, monkeypatch):
+    # 这一条守的是"静默丢段"：precise 不能只挑可用子集合，把列表里的坏段悄悄漏掉。
+    fake = FakeFFmpeg()
+    monkeypatch.setattr(service, "_ffmpeg", fake)
+    good = make_files(tmp_path, ["a.mp4", "b.mp4"])
+    gone = str(tmp_path / "gone.mp4")
+
+    with pytest.raises(WBError) as exc:
+        service.merge_start(paths=good + [gone], mode="precise", out_dir=str(out_dir_of(tmp_path)))
+    assert exc.value.code == "CONFLICT"
+    assert "不在了" in exc.value.message
+    assert fake.calls == []
+    assert service.repo.merge_list() == []
 
 
 def test_failed_merge_marks_record_failed(service, tmp_path, monkeypatch):
@@ -312,7 +350,7 @@ def test_failed_merge_marks_record_failed(service, tmp_path, monkeypatch):
     # P4-03 起快速失败会自动切精确，所以两条路都要断才算真失败
     monkeypatch.setattr(fake, "merge_precise", boom_precise, raising=False)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    data = service.merge_start(paths=paths, out_dir=str(tmp_path / "out"))
+    data = service.merge_start(paths=paths, out_dir=str(out_dir_of(tmp_path)))
     wait_job(service, data["job"]["id"])
 
     final = service.jobs.get(data["job"]["id"])
@@ -326,7 +364,7 @@ def test_merge_update_rejects_unknown_field(service, tmp_path, monkeypatch):
     fake = FakeFFmpeg()
     monkeypatch.setattr(service, "_ffmpeg", fake)
     paths = make_files(tmp_path, ["a.mp4", "b.mp4"])
-    data = service.merge_start(paths=paths, out_dir=str(tmp_path / "out"))
+    data = service.merge_start(paths=paths, out_dir=str(out_dir_of(tmp_path)))
     row = service.repo.merge_update(data["merge_id"], nope="x")
     assert "nope" not in row
     assert row["id"] == data["merge_id"]

@@ -121,7 +121,13 @@
   ui.modal = function (options) {
     var opts = options || {};
     var root = document.getElementById("modal-root");
-    if (!root) return { close: function () {}, body: null };
+    if (!root) {
+      // 没有挂载点（页面结构被改坏、或某个用例少铺了容器）时，弹窗根本弹不出来。
+      // 这时**必须**把 onClose 跑一次：靠它兜底的调用方（ui.confirm / 发布确认框）
+      // 否则会等一个永远不会来的 resolve —— 和 ESC 那条事故是同一个形状。
+      if (typeof opts.onClose === "function") opts.onClose();
+      return { close: function () {}, body: null };
+    }
     var body = h("div", { class: "modal__body" }, opts.body || null);
     var foot = opts.footer || null;
     var closed = false;

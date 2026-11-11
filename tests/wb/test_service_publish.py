@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 SUMMARY_CONTENT = {
@@ -62,11 +63,11 @@ def test_preview_builds_body_from_latest_summary(service, tmp_path):
     record = with_summary(service, project)
     data = call(service, "publish.preview", {"project_id": project["id"]})["data"]
     assert data["title"] == "标题"
-    assert data["summary"] == SUMMARY_CONTENT["comment_short"]
+    # 摘要字段已下线（2026-11-07）：素材里有 comment_short 也不再拿它当摘要
+    assert data["summary"] == ""
     assert "## 要点" in data["markdown"] and "时间轴" in data["markdown"]
     assert data["chars"] > 20
-    # 摘要上限 2026-11-02 从 200 上调到 400（config.publish.max_summary_chars 默认值）
-    assert data["limits"] == {"title": 80, "summary": 400}
+    assert data["limits"] == {"title": 80}
     assert data["warnings"] == []
     assert data["summary_id"] == record["id"] and data["version"] == 1
     # 还没存过草稿
@@ -110,23 +111,34 @@ def test_note_is_saved_as_draft(service, tmp_path):
     assert row["id"] == note["id"]
 
 
-def test_edited_title_and_summary_are_kept(service, tmp_path):
+def test_edited_title_is_kept(service, tmp_path):
     project = make_project(service, tmp_path)
     with_summary(service, project)
     data = call(
         service,
         "publish.note",
-        {
-            "project_id": project["id"],
-            "title": "我自己改的标题",
-            "summary": "我自己改的摘要",
-        },
+        {"project_id": project["id"], "title": "我自己改的标题"},
     )["data"]
     assert data["note"]["title"] == "我自己改的标题"
-    assert data["note"]["summary"] == "我自己改的摘要"
     # 再预览一次，草稿仍在（不会被重新生成打回原位）
     again = call(service, "publish.preview", {"project_id": project["id"]})["data"]
     assert again["note"]["title"] == "我自己改的标题"
+
+
+def test_summary_param_is_ignored_now_that_the_field_is_gone(service, tmp_path):
+    """老前端还会传 summary：不能报错，也不能把它存进去。
+
+    摘要字段 2026-11-07 下线。旧调用方（旧前端、脚本）传上来的 summary
+    只能被忽略——存进去就会在发布时被当成笔记摘要发出去。
+    """
+    project = make_project(service, tmp_path)
+    with_summary(service, project)
+    data = call(
+        service,
+        "publish.note",
+        {"project_id": project["id"], "summary": "旧前端塞进来的摘要"},
+    )["data"]
+    assert data["note"]["summary"] == ""
 
 
 def test_edited_delta_wins_over_regenerated_markdown(service, tmp_path):
@@ -200,6 +212,60 @@ def test_get_and_delete(service, tmp_path):
     assert twice["ok"] is False and twice["error"]["code"] == "NOT_FOUND"
 
 
+def test_delete_refuses_a_row_that_already_went_to_bilibili(service, tmp_path):
+    """已发布/已撤回的本地记录不能删 —— B站 上那条还挂着。
+
+    删掉本地这一行等于让它从界面上永久消失：撤回也撤不回来（找不到 id），
+    发布记录里也不再计数。所以只放行 draft 与 failed 两种状态。
+    """
+    project = make_project(service, tmp_path)
+    with_summary(service, project)
+    note = call(service, "publish.note", {"project_id": project["id"]})["data"]["note"]
+    for status in ("published", "withdrawn"):
+        service.repo.publish_set_status(note["id"], status)
+        refused = call(service, "publish.delete", {"id": note["id"]})
+        assert refused["ok"] is False, status
+        assert refused["error"]["code"] == "CONFLICT"
+        assert "撤回" in refused["error"]["message"]
+        assert service.repo.publish_get(note["id"])["status"] == status
+
+    # failed 照删：那行只说明"发失败了"，没有对应的线上对象
+    service.repo.publish_set_status(note["id"], "failed")
+    removed = call(service, "publish.delete", {"id": note["id"]})
+    assert removed["ok"] is True
+    assert service.repo.publish_get(note["id"]) is None
+
+
+def test_regenerate_does_not_bring_the_old_caution_back(service, tmp_path):
+    """只换标题时正文沿用库里那一份 —— 但那份要是老行，里面还带着注意事项。
+
+    不在这里洗一遍，用户看到预览里那段又回来了，再点「保存草稿」就等于
+    把已经下线的字段偷偷写回库（2026-11-07 的假迁移）。
+    """
+    project = make_project(service, tmp_path)
+    with_summary(service, project)
+    note = call(service, "publish.note", {"project_id": project["id"]})["data"]["note"]
+    dirty = json.dumps(
+        [
+            {"insert": "正文第一段。\n"},
+            {"insert": "注意：素材为机器转录，错字错词极多。\n"},
+        ],
+        ensure_ascii=False,
+    )
+    service.repo.publish_note_upsert(
+        project["id"],
+        bvid="BV1xx",
+        aid=1234,
+        title=note["title"],
+        summary="",
+        content=dirty,
+        note_pk=note["id"],
+    )
+    again = call(service, "publish.regenerate", {"id": note["id"], "part": "title"})["data"]
+    assert "机器转录" not in again["draft"]["content_text"], again["draft"]["content_text"]
+    assert "正文第一段" in again["draft"]["content_text"]
+
+
 def test_withdraw_rejects_unknown_and_unpublished(service, tmp_path):
     """P4-05 之后撤回是真的了，但对「不存在」和「还没发」的草稿必须说实话。"""
     missing = call(service, "publish.withdraw", {"id": "draft_x"})
@@ -230,7 +296,7 @@ def test_note_cannot_overwrite_draft_of_another_project(service, tmp_path):
     """note_pk 指向别的项目的草稿时，拒绝覆盖（D1）。
 
     草稿是按行 id 更新的。id 若属于另一个视频，一次「保存」会把那个项目的
-    标题/摘要/正文整份改掉——用户看到的是"我明明在这个视频下点的保存"。
+    标题/正文整份改掉——用户看到的是"我明明在这个视频下点的保存"。
     """
     first = make_project(service, tmp_path)
     with_summary(service, first)

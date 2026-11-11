@@ -76,7 +76,20 @@ def preflight() -> list[str]:
 
 def build(*, clean: bool, noconfirm: bool = True) -> int:
     if clean:
-        for path in (PROJ / "build" / "VideoWorkbench", DIST):
+        # workpath 下那个子目录是 PyInstaller 用 **spec 文件 stem** 命名的
+        # （`video_workbench.spec` ⇒ `build/video_workbench`）。历史上这里写死的是大写
+        # `build/VideoWorkbench`，与 PyInstaller 实际写的 `build/<spec stem>` 不一致，
+        # 所以 clean 从来没删到任何东西：上一轮的 `PYZ-00.toc` 活过 clean 构建，而
+        # `scripts/accept_frozen_package.py` 靠 `build/**/PYZ-00.toc` 判「某模块在不在包里」，
+        # 会读到旧那份、让判据绿在旧产物上。这里从 SPEC.stem 现算，换 spec 名自动跟上；
+        # 大写那份留着只为兼容早年残留，去重后一起清。
+        work_root = PROJ / "build"
+        targets = [work_root / SPEC.stem, work_root / "VideoWorkbench", DIST]
+        seen: set[Path] = set()
+        for path in targets:
+            if path in seen:
+                continue
+            seen.add(path)
             if path.exists():
                 shutil.rmtree(path, ignore_errors=True)
                 print(f"[build] 清理 {path}")

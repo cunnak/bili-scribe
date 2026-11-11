@@ -93,6 +93,9 @@ class Item:
     page_count: int = 1
     duration_ms: int = 0
     cover: str = ""
+    # 在合集/番剧里的顺位（0 起）；单稿、多P 为 None。
+    # 用它排合集目录，比按标题猜顺序可靠（「第10讲」不会被排到「第2讲」前面）。
+    collection_index: int | None = None
 
     @property
     def display_title(self) -> str:
@@ -111,6 +114,7 @@ class Item:
             "part_title": self.part_title,
             "page_count": self.page_count,
             "duration_ms": self.duration_ms,
+            "collection_index": self.collection_index,
             # 出口统一归一：CSP 只放行 https，API 给的 pic 常常是明文 http。
             "cover": normalize_cover(self.cover),
         }
@@ -216,6 +220,9 @@ def _from_view(view: dict[str, Any], page: int, raw: str) -> Resolution:
 
     if season and season.get("sections"):
         items: list[Item] = []
+        # 全局 enumerate（跨 section 连续编号）：一个合集可能拆成多个 section，
+        # 每个 section 各自从 0 开始的话，「第2讲」会拿到和「第1讲」一样的序号。
+        collection_index = 0
         for section in season.get("sections") or []:
             for ep in section.get("episodes") or []:
                 arc = ep.get("arc") or {}
@@ -225,6 +232,7 @@ def _from_view(view: dict[str, Any], page: int, raw: str) -> Resolution:
                         aid=ep.get("aid") or arc.get("aid"),
                         cid=ep.get("cid"),
                         page_no=1,
+                        collection_index=collection_index,
                         # 合集里每条 BV 的标题在 `arc.title`。整批都用父视频标题的话，
                         # 素材库 21 行会同名分不清谁是谁（真链路 BV1VZWc6dECG 撞到的）。
                         title=arc.get("title") or ep.get("title") or title,
@@ -234,6 +242,7 @@ def _from_view(view: dict[str, Any], page: int, raw: str) -> Resolution:
                         cover=arc.get("pic") or cover,
                     )
                 )
+                collection_index += 1
         if items:
             return Resolution(
                 kind=KIND_COLLECTION,
@@ -304,13 +313,14 @@ def _from_season(data: dict[str, Any], ep_id: int | None, raw: str) -> Resolutio
     up = (data.get("up_info") or {}).get("uname") or ""
     episodes = data.get("episodes") or []
     items: list[Item] = []
-    for ep in episodes:
+    for season_index, ep in enumerate(episodes):
         items.append(
             Item(
                 bvid=ep.get("bvid") or "",
                 aid=ep.get("aid"),
                 cid=ep.get("cid"),
                 page_no=1,
+                collection_index=season_index,
                 # 番剧同理：整季同名会分不清，取本话标题，取不到再回落季名。
                 title=ep.get("long_title") or ep.get("title") or title,
                 part_title=ep.get("title") or ep.get("long_title") or "",

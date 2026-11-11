@@ -121,6 +121,7 @@
       max_comment_chars: 900,
       disclose_ai: true,
       disclosure_text: "本条总结由 AI 依据视频字幕生成。",
+      // 摘要字段已下线（2026-11-07）：界面上没有摘要输入框，键留着只为兼容老配置
       max_summary_chars: 400,
       auto_comment: true
     }
@@ -736,7 +737,6 @@
       bvid: proj.bvid || "",
       aid: proj.aid || 0,
       title: title,
-      summary: "一句话摘要。",
       // 真库里 content 是 Delta 的 JSON 字符串，不是数组：mock 存成数组会让
       // mockPlain 解析失败 → 门禁判「正文是空的」，界面上就变成一句谎话。
       content: '[{"insert":"这一段是已经发出去的正文。"}]',
@@ -780,7 +780,7 @@
     var text = mockPlain(row.content);
     return {
       id: row.id, project_id: row.project_id, bvid: row.bvid, aid: row.aid,
-      title: row.title, summary: row.summary, content: row.content,
+      title: row.title, content: row.content,
       status: row.status, created_at: row.created_at,
       updated_at: row.updated_at || row.created_at,
       note_id: row.note_id || "",
@@ -789,7 +789,6 @@
       error: row.error || "",
       content_text: text, chars: mockChars(text),
       title_chars: Array.from(String(row.title || "")).length,
-      summary_chars: Array.from(String(row.summary || "")).length,
       project_title: (projectById(row.project_id) || {}).title || "",
       up_name: (projectById(row.project_id) || {}).up_name || ""
     };
@@ -805,19 +804,19 @@
   function mockGates(draft, project, note, opts) {
     var o = opts || {};
     var title = String(draft.title || "");
-    var summary = String(draft.summary || "");
     var body = String(draft.content_text || "").trim();
     var items = [
       { text: "标题 " + Array.from(title).length + " / 80 字", ok: !!title && Array.from(title).length <= 80 },
-      { text: "摘要 " + Array.from(summary).length + " / 400 字", ok: Array.from(summary).length <= 400 },
       { text: "正文 " + mockChars(body) + " 字", ok: !!body },
-      { text: "已阅读并确认标题/摘要/正文", ok: !!o.confirmed }
+      { text: "已阅读并确认标题与正文", ok: !!o.confirmed }
     ];
-    var contentStatus = !title || !body ? "blocked" : (items[0].ok && items[1].ok ? (o.confirmed ? "ok" : "todo") : "blocked");
+    var contentStatus = !title || !body ? "blocked" : (items[0].ok ? (o.confirmed ? "ok" : "todo") : "blocked");
 
     var bvid = (project && project.bvid) || (note && note.bvid) || "";
+    var aid = (project && project.aid) || (note && note.aid) || draft.aid || null;
     var accountItems = [
       { text: "视频 BV 号 " + (bvid || "（没有）"), ok: !!bvid },
+      { text: aid ? "视频 aid（av 号）" + aid : "视频 aid（av 号）：库里没有，发布时自动补", ok: !!aid },
       { text: "草稿指向的是同一个视频", ok: !!bvid },
       { text: "登录状态：" + (o.loggedIn === false ? "未登录" : o.loggedIn ? "已登录" : "发布时再确认"), ok: o.loggedIn !== false }
     ];
@@ -831,7 +830,7 @@
 
     return {
       ready: contentStatus === "ok" && accountStatus === "ok" && paceStatus === "ok",
-      limits: { summary: 400, interval: GATE_INTERVAL },
+      limits: { title: 80 },
       gates: [
         { id: "content", label: "内容确认", status: contentStatus,
           reason: contentStatus === "blocked" ? "标题或正文是空的" : (contentStatus === "todo" ? "发布前要勾一下「我已阅读并确认」" : ""),
@@ -872,7 +871,9 @@
       });
       lines.push("");
     }
-    if (content.caution) lines.push("注意：" + content.caution);
+    // 正文里只放总结本体 + 一行 AI 声明。caution（「素材为机器转录…」那类注意事项）
+    // 和 comment_short（评论区短版）都不进来：前者是写给作者的自查清单，
+    // 后者是另一个发布位的内容，混进正文等于把内部话术发给读者。
     lines.push("（本总结由 AI 依据视频字幕生成，发布前请自己过一遍）");
     var markdown = lines.join("\n");
     var text = markdown
@@ -883,14 +884,12 @@
       project_id: projectId,
       project_title: project.title,
       title: project.title,
-      summary: content.comment_short || content.one_line || "",
       content: mockDelta(text),
       content_text: text + "\n",
       markdown: markdown,
       chars: mockChars(text),
       title_chars: Array.from(project.title).length,
-      summary_chars: Array.from(content.comment_short || content.one_line || "").length,
-      limits: { title: 80, summary: 400 },
+      limits: { title: 80 },
       warnings: [],
       summary_id: box.summary.id || "",
       version: box.summary.version || 1,
@@ -1673,16 +1672,13 @@
           if (p.note_pk ? row.id === p.note_pk : row.project_id === p.project_id) target = row;
         });
         var title = String(p.title || built.title).trim();
-        var summaryText = String(p.summary || built.summary).trim();
         var content = String(p.content || built.content);
         var plain = mockPlain(content);
         if (!title) return fail("VALIDATION", "标题不能为空");
         if (!plain.trim()) return fail("VALIDATION", "正文不能为空，先给这个项目出一版总结");
         if (Array.from(title).length > 80) return fail("VALIDATION", "标题超过 80 字");
-        if (Array.from(summaryText).length > 400) return fail("VALIDATION", "摘要超过 400 字");
         if (target) {
           target.title = title;
-          target.summary = summaryText;
           target.content = content;
         } else {
           DRAFT_SEQ += 1;
@@ -1693,7 +1689,6 @@
             aid: 1000 + DRAFT_SEQ,
             note_id: null,
             title: title,
-            summary: summaryText,
             content: content,
             status: "draft",
             created_at: new Date().toISOString().slice(0, 16).replace("T", " "),
@@ -1716,7 +1711,7 @@
             if ((row.status || "draft") !== "draft") return false;
             return !p.project_id || row.project_id === p.project_id;
           }).map(mockDraftView),
-          limits: { title: 80, summary: 400 }
+          limits: { title: 80 }
         });
       case "publish.get": {
         var hit = null;
@@ -1724,7 +1719,7 @@
         if (!hit) return fail("NOT_FOUND", "草稿不存在");
         return ok({
           note: mockDraftView(hit),
-          limits: { title: 80, summary: 400 },
+          limits: { title: 80 },
           gates: mockGates(mockDraftView(hit), projectById(hit.project_id), hit, {
             confirmed: !!p.confirmed,
             loggedIn: MOCK_LOGGED_IN
@@ -1739,8 +1734,8 @@
         if (!fresh) return fail("CONFLICT", "这个项目还没有总结，重新生成也没有素材");
         var merged = JSON.parse(JSON.stringify(fresh));
         if (p.part !== "all") {
-          merged.title = p.part === "summary" ? hit2.title : fresh.title;
-          merged.summary = p.part === "title" ? hit2.summary : fresh.summary;
+          // 只重算标题：正文是用户可能改过的东西，摘要是已下线的字段
+          merged.title = p.part === "title" ? fresh.title : hit2.title;
           merged.content = hit2.content;
           merged.content_text = mockPlain(hit2.content);
           merged.chars = mockChars(merged.content_text);
@@ -1748,7 +1743,7 @@
         merged.note = mockDraftView(hit2);
         return ok({
           draft: merged,
-          part: p.part || "summary",
+          part: p.part || "title",
           gates: mockGates(merged, projectById(hit2.project_id), hit2, {})
         });
       }
@@ -2397,6 +2392,16 @@
         }, 400);
         return ok({ job: MERGE_JOB, merge_id: mergeId, output: MERGES[0].output_path, name: outName, count: pre.data.count });
       }
+      case "merge.reveal_output": {
+        var mergeRow = null;
+        for (var mi = 0; mi < MERGES.length; mi += 1) {
+          if (MERGES[mi].id === p.merge_id) mergeRow = MERGES[mi];
+        }
+        if (!mergeRow) return fail("NOT_FOUND", "找不到这次合并记录", String(p.merge_id || ""));
+        var outPath = String(mergeRow.output_path || "");
+        var folder = outPath.replace(/[\\/][^\\/]*$/, "");
+        return ok({ path: folder });
+      }
       case "merge.list": {
         return ok({
           items: MERGES.map(function (row) {
@@ -2618,7 +2623,13 @@
       case "fs.reveal":
         return ok({ path: p.path });
       case "fs.pick":
-        return ok({ path: "C:\\Users\\demo\\AppData\\Roaming\\VideoWorkbench\\media" });
+        // 选文件夹给一个像样的外部目录：mock 里也要能演示「输出目录换成素材盘」。
+        // 选文件仍给媒体库路径（合并页「添加本地文件」走这条路）。
+        return ok({
+          path: String(p.kind || "").toLowerCase() === "dir"
+            ? "C:\\Users\\demo\\Videos\\merge_out"
+            : "C:\\Users\\demo\\AppData\\Roaming\\VideoWorkbench\\media"
+        });
       default:
         return fail("NOT_FOUND", "未知接口：" + method);
     }

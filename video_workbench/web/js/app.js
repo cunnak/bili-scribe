@@ -46,6 +46,10 @@
       });
     };
   };
+  // 页面里写的是 WB.events.on(...)，而总线一直只叫 WB.on —— 于是所有订阅
+  // 都静默失效（素材库不会自己刷新、发布页收不到 publish.updated）。
+  // 这里给同一根总线补一个别名，不另造第二份监听表。
+  WB.events = { on: WB.on };
 
   function emit(name, payload) {
     (listeners[name] || []).forEach(function (fn) {
@@ -79,8 +83,12 @@
   };
 
   function handleBuiltin(name, payload) {
-    if (name === "toast") {
-      ui.toast((payload && payload.message) || "", (payload && payload.level) || "info");
+    // 后端两处都在发 `app.toast`（events.toast 与发布重试回调），这里却只认
+    // `toast` ⇒ 后端所有全局提示从来没显示过。名字两种都收；字段也两种都收
+    // （events.toast 发 message，发布重试那处发 text）。
+    if (name === "toast" || name === "app.toast") {
+      var msg = (payload && (payload.message || payload.text)) || "";
+      ui.toast(msg, (payload && payload.level) || "info");
       return;
     }
     if (name === "app.skin" && payload && payload.skin) {

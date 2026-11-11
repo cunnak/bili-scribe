@@ -338,4 +338,5 @@ def test_payload_shape_is_json_ready():
         "page_count",
         "duration_ms",
         "cover",
+        "collection_index",
     }

@@ -61,6 +61,52 @@ def _merge_row(row: Any) -> dict[str, Any]:
     return data
 
 
+# 排序白名单。**必须是模块级常量**：SQL 的 ORDER BY 只能拼白名单里的字面量，
+# 用户传的字符串永远不直接进 SQL（`sort="created_at; DROP TABLE ..."` 会被这里挡下）。
+# title 的自然序（「第2讲」<「第10讲」）SQL 排不出来——真正的顺序由 service 层用
+# natural_key 算，这里给一个稳定兜底序，保证直调 repo 时也可复现。
+SORTS: dict[str, str] = {
+    # 兼容红线：默认排序必须与改造前逐字段同序。老 SQL 是 `ORDER BY created_at DESC`，
+    # SQLite 对同一时间戳按 rowid（插入序）稳定排列；加 `id DESC` 会把同秒创建的两条翻面，
+    # 字幕页/旧调用方会看到第一项被换掉（test_subtitles_real_backend_ui 已踩到）。
+    "created_desc": "created_at DESC",
+    "created_asc": "created_at ASC, id ASC",
+    "collection_index": "collection_index ASC, created_at ASC, id ASC",
+    "title": "title COLLATE NOCASE ASC, created_at ASC, id ASC",
+}
+
+
+def _project_where(
+    query: str = "", *, stage: str = "", include_archived: bool = False
+) -> tuple[str, list[Any]]:
+    """项目列表/计数/分组的公共 WHERE。
+
+    搜索的 OR 组**必须整体加括号**：老写法 `WHERE title LIKE ? OR up_name LIKE ?` 再加
+    `AND stage=?` 时，AND 的优先级高于 OR，条件会被切成
+    `title LIKE ? OR (up_name LIKE ? AND stage=?)`——搜索词一命中标题就绕过了阶段过滤。
+    `collection_title` 也进 LIKE：用户按合集名搜「线性代数」是该库最常用的入口。
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    text = str(query or "").strip()
+    if text:
+        like = f"%{text}%"
+        clauses.append(
+            "(title LIKE ? OR up_name LIKE ? OR bvid LIKE ? OR collection_title LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    stage_key = str(stage or "").strip()
+    if stage_key:
+        clauses.append("stage=?")
+        params.append(stage_key)
+    if not include_archived:
+        # 归档是软删除：NULL 与空串都算"未归档"（老库 ALTER 出来的列默认 NULL，
+        # 但手工 SQL 写过空串的库也存在）。
+        clauses.append("COALESCE(archived_at,'')=''")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
 class RepoClosed(RuntimeError):
     """连接已经关掉之后还来写库。
 
@@ -254,6 +300,8 @@ class Repo:
             "up_name": fields.get("up_name"),
             "collection_id": fields.get("collection_id"),
             "collection_title": fields.get("collection_title"),
+            # 合集内序号：0 起。下载 worker 从解析结果带过来；单稿/多P 为 None。
+            "collection_index": fields.get("collection_index"),
             "root_dir": fields["root_dir"],
             "stage": fields.get("stage", "new"),
             "status": fields.get("status", "idle"),
@@ -278,37 +326,198 @@ class Repo:
         return self._one("SELECT * FROM wb_project WHERE bvid=? AND cid=?", (bvid, cid))
 
     def project_list(
-        self, query: str = "", limit: int = 50, offset: int = 0
+        self,
+        query: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        stage: str = "",
+        include_archived: bool = False,
+        sort: str = "created_desc",
     ) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM wb_project"
-        params: list[Any] = []
-        if query:
-            sql += " WHERE title LIKE ? OR up_name LIKE ? OR bvid LIKE ?"
-            like = f"%{query}%"
-            params.extend([like, like, like])
-        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        """项目列表。前三个位置参数保持老签名（query, limit, offset）——调用方遍地都是。"""
+        order = SORTS.get(str(sort or "created_desc"))
+        if order is None:
+            raise WBError(
+                "VALIDATION",
+                f"不支持的排序：{sort}",
+                "可选：" + " / ".join(SORTS),
+            )
+        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+        sql = f"SELECT * FROM wb_project{where} ORDER BY {order} LIMIT ? OFFSET ?"
         params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
         return self._all(sql, params)
 
-    def project_count(self, query: str = "") -> int:
-        sql = "SELECT COUNT(*) AS n FROM wb_project"
-        params: list[Any] = []
-        if query:
-            sql += " WHERE title LIKE ? OR up_name LIKE ? OR bvid LIKE ?"
-            like = f"%{query}%"
-            params.extend([like, like, like])
-        row = self._one(sql, params)
+    def project_count(self, query: str = "", stage: str = "", include_archived: bool = False) -> int:
+        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+        row = self._one(f"SELECT COUNT(*) AS n FROM wb_project{where}", params)
         return int(row["n"]) if row else 0
 
+    def project_title_rows(
+        self, query: str = "", stage: str = "", include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """title 排序用的轻量投影。
+
+        只取排需要的四列：1000 条项目如果每条都把 `SELECT *`（含 error/root_dir 这些
+        长文本）拉出来，光解码就比排序本身贵；这里给 service 算自然序用。
+        """
+        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+        return self._all(
+            "SELECT id, title, created_at, collection_index FROM wb_project"
+            f"{where} ORDER BY created_at DESC, id DESC",
+            params,
+        )
+
+    def project_stage_counts(
+        self, query: str = "", include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """一次 GROUP BY 拿到每个阶段的条数（facets）。
+
+        **不带 stage 过滤**：facets 回答的是「当前搜索下每个阶段各有多少」，
+        如果先按 stage 过滤，结果只会剩一个桶，点击其他阶段就没数了。
+        """
+        where, params = _project_where(query, include_archived=include_archived)
+        rows = self._all(
+            f"SELECT stage, COUNT(*) AS n FROM wb_project{where} GROUP BY stage", params
+        )
+        return [{"stage": str(row["stage"] or ""), "count": int(row["n"])} for row in rows]
+
+    def project_archive(self, ids: Sequence[str], archived: bool = True) -> dict[str, Any]:
+        """批量归档/取消归档。逐 id 校验，缺的进 skipped，不整体失败。
+
+        已处于目标状态的行不重复写时间戳也不计数——重复点「归档」是幂等的，
+        否则每次都会产生一个新的 archived_at 和一次 library.changed 事件。
+        """
+        wanted = list(dict.fromkeys(str(i) for i in ids))
+        if not wanted:
+            return {"changed": 0, "skipped": []}
+        marks = ",".join("?" for _ in wanted)
+        rows = self._all(
+            f"SELECT id, archived_at FROM wb_project WHERE id IN ({marks})", wanted
+        )
+        state = {str(row["id"]): row["archived_at"] for row in rows}
+        skipped = [{"id": pid, "reason": "项目不存在"} for pid in wanted if pid not in state]
+        stamp = now_iso()
+        archived_at = stamp if archived else None
+        changed = 0
+        with DB_LOCK:
+            self._guard()
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                for pid in wanted:
+                    if pid not in state:
+                        continue
+                    if bool(state[pid]) is bool(archived):
+                        continue
+                    self.conn.execute(
+                        "UPDATE wb_project SET archived_at=?, updated_at=? WHERE id=?",
+                        (archived_at, stamp, pid),
+                    )
+                    changed += 1
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+        return {"changed": changed, "skipped": skipped}
+
+    def project_get_many(self, ids: Sequence[str]) -> list[dict[str, Any]]:
+        """按 id 批量取整行（title 排序先算 id、再一次性取回，避免 N+1）。"""
+        wanted = list(dict.fromkeys(str(i) for i in ids))
+        if not wanted:
+            return []
+        marks = ",".join("?" for _ in wanted)
+        rows = self._all(f"SELECT * FROM wb_project WHERE id IN ({marks})", wanted)
+        by_id = {str(row["id"]): row for row in rows}
+        return [by_id[pid] for pid in wanted if pid in by_id]
+
+    def project_related_counts(self, ids: Sequence[str]) -> dict[str, int]:
+        """删除预览要的三个数字（只 COUNT，不拉内容）。"""
+        wanted = list(dict.fromkeys(str(i) for i in ids))
+        if not wanted:
+            return {"with_draft": 0, "with_clip": 0, "with_candidate": 0}
+        marks = ",".join("?" for _ in wanted)
+        out: dict[str, int] = {}
+        for key, sql in (
+            (
+                "with_draft",
+                "SELECT COUNT(DISTINCT project_id) AS n FROM wb_publish_note"
+                f" WHERE status='draft' AND project_id IN ({marks})",
+            ),
+            (
+                "with_clip",
+                f"SELECT COUNT(DISTINCT project_id) AS n FROM wb_clip WHERE project_id IN ({marks})",
+            ),
+            (
+                "with_candidate",
+                "SELECT COUNT(DISTINCT project_id) AS n FROM wb_candidate"
+                f" WHERE project_id IN ({marks})",
+            ),
+        ):
+            row = self._one(sql, wanted)
+            out[key] = int(row["n"]) if row else 0
+        return out
+
+    def project_related_rows(self, ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
+        """删除前要把三张关联表的内容留证：删完再查就只剩空表了。
+
+        为什么连 `wb_candidate` 也留：切片候选里有用户手调过的 start/end 与备注，
+        重建一次分析要花模型钱，删错了没有副本就只能重跑。
+        """
+        wanted = list(dict.fromkeys(str(i) for i in ids))
+        if not wanted:
+            return {"publish_note": [], "clip": [], "candidate": []}
+        marks = ",".join("?" for _ in wanted)
+        return {
+            "publish_note": self._all(
+                f"SELECT * FROM wb_publish_note WHERE project_id IN ({marks})"
+                " ORDER BY created_at, id",
+                wanted,
+            ),
+            "clip": self._all(
+                f"SELECT * FROM wb_clip WHERE project_id IN ({marks}) ORDER BY created_at, id",
+                wanted,
+            ),
+            "candidate": self._all(
+                f"SELECT * FROM wb_candidate WHERE project_id IN ({marks})"
+                " ORDER BY created_at, id",
+                wanted,
+            ),
+        }
+
+    def project_delete_many(self, ids: Sequence[str]) -> int:
+        """批量删除。**单事务**：中途失败整批回滚，不留下"删了一半"的库。"""
+        wanted = list(dict.fromkeys(str(i) for i in ids))
+        if not wanted:
+            return 0
+        marks = ",".join("?" for _ in wanted)
+        with DB_LOCK:
+            self._guard()
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self.conn.execute(f"DELETE FROM wb_project WHERE id IN ({marks})", wanted)
+                removed = cur.rowcount or 0
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+        return removed
+
     def project_update(self, project_id: str, **fields: Any) -> None:
+        # aid 在里面是因为下载 worker 需要"重新下载一集就把 av 号补回来"：
+        # 早期版本组装项目字段时漏了它，老项目的这一列全是 NULL，
+        # 而发布笔记必须拿 aid 当 oid。bvid/cid 仍**不在**白名单里——
+        # 那两列决定"这一行代表哪一集"，改它们等于把项目指向另一个视频。
         allowed = {
             "title",
+            "aid",
             "stage",
             "status",
             "error",
             "root_dir",
             "collection_id",
             "collection_title",
+            # 合集内序号允许更新：老项目是在 v5 之前导入的，这一列全是 NULL，
+            # 回填脚本要靠 project_update 把它补上。
+            "collection_index",
         }
         sets: list[str] = []
         params: list[Any] = []

@@ -112,6 +112,19 @@ def test_fs_pick_without_picker_is_unsupported(service):
     _err(service.dispatch("fs.pick", {"kind": "dir"}), "UNSUPPORTED")
 
 
+def test_fs_pick_forwards_kind_and_returns_the_picked_path(service):
+    seen: list[str] = []
+
+    def picker(kind):
+        seen.append(kind)
+        return "C:/a.mp4|C:/b.mp4"
+
+    service.picker = picker
+    result = _ok(service.dispatch("fs.pick", {"kind": "files"}))
+    assert result["path"] == "C:/a.mp4|C:/b.mp4"
+    assert seen == ["files"]
+
+
 def test_fs_reveal_rejects_outside_path(service):
     _err(service.dispatch("fs.reveal", {"path": "C:/Windows/notepad.exe"}), "VALIDATION")
 

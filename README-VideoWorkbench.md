@@ -105,7 +105,7 @@ WB 没有权限制去动它）。但老版本的 WB 曾经往那份文件里写�
 | `transcribe` | `engine`（faster-whisper）、`model`、`device`（auto/cuda/cpu）、`language`、`vad`、`word_timestamps` |
 | `subtitle` | `default_style`、`optimize`、`translate.{target,bilingual,glossary}` |
 | `clip` | `highlight_min/max`、`segment_min/max`、`candidate_count`、`snap_tolerance_ms`、`vertical_mode`、`follow_enhance`、`bgm_volume`、`bgm_duck`、`fade_ms` |
-| `publish` | `require_confirm`、`min_interval_seconds`、`max_summary_chars`、`max_comment_chars`、`disclose_ai`、`auto_comment` |
+| `publish` | `require_confirm`、`min_interval_seconds`、`max_comment_chars`、`disclose_ai`、`auto_comment`（`max_summary_chars` 已随摘要字段下线，只剩兼容位） |
 
 `llm.tasks.<任务>` 里既能写 `服务商/模型`（`kimi/moonshot-v1-8k`），也能只写模型名
 （`deepseek-reasoner`，谁的 `models` 里有它就用谁）；解析只有 `config.resolve_task_model` 一个入口。

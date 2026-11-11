@@ -22,7 +22,7 @@ from pathlib import Path
 
 from video_workbench.app.errors import WBError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # 一个连接要在三类线程间共享：WebView 的 RPC 回调线程、后台任务线程、
 # 事件推送线程。sqlite3 的连接对象本身不是线程安全的，所以**所有 SQL 都过这把锁**。
@@ -206,6 +206,8 @@ CREATE TABLE IF NOT EXISTS wb_job (
 
 CREATE INDEX IF NOT EXISTS idx_wb_project_bvid ON wb_project(bvid, cid);
 CREATE INDEX IF NOT EXISTS idx_wb_project_collection ON wb_project(collection_id);
+-- 素材库列表要按项目查资产（_decorate 每条项目一次），没有这条索引就是全表扫。
+CREATE INDEX IF NOT EXISTS idx_wb_asset_project ON wb_asset(project_id);
 CREATE INDEX IF NOT EXISTS idx_wb_job_status ON wb_job(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_wb_candidate_project ON wb_candidate(project_id, score DESC);
 CREATE INDEX IF NOT EXISTS idx_wb_clip_project ON wb_clip(project_id, created_at);
@@ -267,11 +269,14 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def _backup(db_path: Path) -> Path | None:
-    """迁移前备份。文件名带时间戳，避免第二次迁移覆盖掉第一次的好副本。"""
+    """迁移前备份。文件名带时间戳，避免第二次迁移覆盖掉第一次的好副本。
+
+    失败**不吞**：调用方（`migrate`）负责把它变成 WBError 并中止迁移——
+    没有一份可回滚的副本就动共享库，是拿 bili-scribe 的数据在赌。
+    """
     if not db_path.exists() or db_path.stat().st_size == 0:
         return None
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = db_path.with_name(f"workbench.db.bak-{stamp}")
+    target = backup_target(db_path)
     shutil.copy2(db_path, target)
     return target
 
@@ -304,6 +309,76 @@ _V4_COLUMNS = {
     "wb_publish_note": {"updated_at": "TEXT"},
 }
 
+# v5：素材库信息架构。archived_at 是"软删除"的时间戳（NULL=未归档，归档才有值），
+# 用它而不是 status 里加一个值：status 已经承担任务态（idle/queued/running/failed），
+# 混进去会让所有按 status 过滤的路径都要多想一步。
+# collection_index 是"这条在合集中的第几个"，用来按合集顺序排；平台给的下标是 0 起。
+_V5_COLUMNS = {
+    "wb_project": {"archived_at": "TEXT", "collection_index": "INTEGER"},
+}
+
+# 所有补列桶，**按版本顺序**排。加版本时必须往这里补一个桶（哪怕空 dict）——
+# 下面的检查是"忘了写迁移"的牙：schema_version 涨了但没登记桶，import 直接失败。
+_ALL_COLUMN_BUCKETS = (
+    _V2_COLUMNS,
+    _V3_COLUMNS,
+    _V4_COLUMNS,
+    _V5_COLUMNS,
+)
+
+def _assert_column_buckets() -> None:
+    """schema 版本与补列桶的绑定检查。
+
+    单独抽成函数是为了能让测试「删掉一个桶再显式调用」——import 期只调用一次，
+    import 之后再改模块属性不会重跑，没法证明这条牙还在。
+    """
+    expected = SCHEMA_VERSION - 1
+    actual = len(_ALL_COLUMN_BUCKETS)
+    if actual != expected:
+        raise RuntimeError(
+            f"SCHEMA_VERSION={SCHEMA_VERSION}，但登记了 {actual} 个补列桶；"
+            "每把 SCHEMA_VERSION 加一版，必须往 _ALL_COLUMN_BUCKETS 末尾补一个桶"
+            "（这一版没有新列也要补空 dict，用来证明迁移被想过了）"
+        )
+
+
+_assert_column_buckets()
+
+
+def _merged_columns() -> dict[str, dict[str, str]]:
+    """所有桶按版本顺序合并成 {表: {列: 类型}}。"""
+    merged: dict[str, dict[str, str]] = {}
+    for bucket in _ALL_COLUMN_BUCKETS:
+        for table, columns in bucket.items():
+            merged.setdefault(table, {}).update(columns)
+    return merged
+
+
+def pending_columns(conn: sqlite3.Connection) -> list[str]:
+    """只读：现在跑 migrate() 会补哪些列（`表.列` 形式）。
+
+    `--migrate-check` 用它打印"将补的列"，不执行任何 ALTER。表还不存在的
+    不算补列——那种情况 DDL 会整张表建出来。
+    """
+    out: list[str] = []
+    for table, columns in _merged_columns().items():
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        except sqlite3.Error:  # pragma: no cover - 表不存在时交给 DDL
+            continue
+        if not rows:
+            continue
+        have = {row[1] for row in rows}
+        out.extend(f"{table}.{name}" for name in columns if name not in have)
+    return out
+
+
+def backup_target(db_path: str | Path) -> Path:
+    """迁移会写到哪个备份文件（只算路径，不复制）。`--migrate-check` 用它报落点。"""
+    path = Path(db_path)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return path.with_name(f"{path.name}.bak-{stamp}")
+
 
 def _add_missing_columns(conn: sqlite3.Connection) -> list[str]:
     """给老库补新列（SQLite 没有 ADD COLUMN IF NOT EXISTS）。
@@ -311,10 +386,7 @@ def _add_missing_columns(conn: sqlite3.Connection) -> list[str]:
     只补自己表；不动 bili-scribe 的表。返回补过哪些列，便于日志里说清楚。
     """
     added: list[str] = []
-    merged: dict[str, dict[str, str]] = {}
-    for bucket in (_V2_COLUMNS, _V3_COLUMNS, _V4_COLUMNS):
-        for table, columns in bucket.items():
-            merged.setdefault(table, {}).update(columns)
+    merged = _merged_columns()
     for table, columns in merged.items():
         try:
             rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -336,15 +408,22 @@ def migrate(conn: sqlite3.Connection, db_path: str | Path | None = None) -> dict
     """
     before = schema_version(conn)
     backup_path = None
-    if before == 0 and db_path is not None:
-        # 只在「从无到有」时备份：这时库里可能有 bili-scribe 的数据，
-        # 一旦我们的 DDL 出问题，受害者不只是我们自己的表。
-        backup_path = _backup(Path(db_path))
+    if before < SCHEMA_VERSION and db_path is not None:
+        # 只要这次真会改结构就备份（不只是"从无到有"）：v4→v5 会 ALTER 共享库，
+        # 出问题时受害者不只是我们自己的表。空的/不存在的库 _backup 返回 None。
+        try:
+            backup_path = _backup(Path(db_path))
+        except OSError as exc:
+            raise WBError(
+                "IO",
+                "迁移前备份失败，已中止（数据库未被改动）",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
 
     conn.execute(_META_DDL)
     # executescript 自带隐式 COMMIT，不能放在事务里，所以这里不用 BEGIN。
     conn.executescript(_DDL)
-    _add_missing_columns(conn)
+    added = _add_missing_columns(conn)
 
     stamp = now_iso()
     for style_id, name, mode, config_json, builtin in _builtin_style_rows():
@@ -368,6 +447,7 @@ def migrate(conn: sqlite3.Connection, db_path: str | Path | None = None) -> dict
         "from": before,
         "to": SCHEMA_VERSION,
         "backup": str(backup_path) if backup_path else None,
+        "columns": added,
     }
 
 

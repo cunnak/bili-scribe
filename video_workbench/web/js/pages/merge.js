@@ -16,6 +16,13 @@
   var WB = (window.WB = window.WB || {});
   var ui = WB.ui;
 
+  // 合并可能跑很久：两小时素材的精确重编码实测要 20 分钟。轮询节奏与"什么时候
+  // 放手"抽成纯函数，避免再出现"到 12 分钟就停、界面永远停在合并中"。
+  var POLL_MS = 800;
+  var SLOW_MS = 3000;       // 超过 POLL_LIMIT 之后放慢，界面不再密集问一次
+  var POLL_LIMIT = 900;     // 12 分钟之后转慢速跟随
+  var HARD_LIMIT = 3600;    // 约 2 小时 40 分：到这儿才放手，并说清"还在后台跑"
+
   var state = {
     sources: { clips: [], library: [] },
     query: "",
@@ -24,6 +31,8 @@
     loading: false,
     busy: false,
     running: false,
+    jobId: "",
+    detached: false,
     progress: 0,
     error: "",
     note: "",
@@ -34,7 +43,11 @@
     height: 0,
     fps: 0,
     outDir: "",
-    outName: ""
+    outDirManual: false,
+    outName: "",
+    // 上一次成功的合并：打开输出目录只认这条记录的 merge_id，不拿页面上的路径去开。
+    lastMergeId: "",
+    lastOutput: ""
   };
 
   var els = {};
@@ -110,7 +123,14 @@
         paintAll();
         return;
       }
-      addSource({ path: picked, name: nameOf(picked), origin: "local" });
+      // 系统选择框允许多选，桌面层用 "|" 把多个路径拼回来（与素材库导入共用同一约定）。
+      var paths = String(picked).split("|").filter(function (path) {
+        return !!String(path || "").trim();
+      });
+      paths.forEach(function (path) {
+        var clean = String(path).trim();
+        addSource({ path: clean, name: nameOf(clean), origin: "local" });
+      });
     }).catch(function (err) {
       state.busy = false;
       state.error = (err && err.message) || "选择文件失败";
@@ -140,6 +160,14 @@
     if (!state.order.length) return;
     state.order = [];
     state.preflight = null;
+    // 清空 = 回到新任务的初态：手选的输出目录、上次成片引用一起放下。
+    // 只清顺序表会留下「目录指向上一轮、列表却是空的」这种错位状态。
+    state.outDir = "";
+    state.outDirManual = false;
+    state.lastMergeId = "";
+    state.lastOutput = "";
+    state.note = "";
+    state.error = "";
     paintAll();
   }
 
@@ -165,7 +193,8 @@
         state.preflight = data || null;
         state.error = "";
         if (data && data.output) {
-          state.outDir = data.output.dir || state.outDir;
+          // 手选过就不要再被预检的默认值盖回去——那等于用户点一次白点。
+          if (!state.outDirManual) state.outDir = data.output.dir || state.outDir;
           // 文件名里的段数由后端按当前列表给：用户没亲手改过就跟它走，
           // 否则勾了三段还挂着"合并_1段"这种自相矛盾的名字。
           if (!state.outNameManual) state.outName = data.output.name || "";
@@ -360,23 +389,64 @@
     }
   }
 
+  // ------------------------------------------------------------ 输出目录
+
+  function pickOutDir() {
+    if (state.busy || state.running) return;
+    state.busy = true;
+    state.error = "";
+    paintAll();
+    WB.rpc("fs.pick", { kind: "dir" }, { silent: true })
+      .then(function (data) {
+        state.busy = false;
+        var picked = data && data.path ? String(data.path).trim() : "";
+        // 取消选择（path 为空）不改原值：用户点了取消不等于要清空当前目录。
+        if (picked) {
+          state.outDir = picked;
+          state.outDirManual = true;
+          state.note = "";
+        }
+        paintAll();
+      })
+      .catch(function (err) {
+        state.busy = false;
+        state.error = (err && err.message) || "打不开文件夹选择框";
+        paintAll();
+      });
+  }
+
+  function openOutputDir() {
+    if (!state.lastMergeId || state.busy || state.running || state.detached) return;
+    state.error = "";
+    WB.rpc("merge.reveal_output", { merge_id: state.lastMergeId }, { silent: true })
+      .then(function () {
+        paintAll();
+      })
+      .catch(function (err) {
+        state.error = (err && err.message) || "打不开输出目录";
+        paintAll();
+      });
+  }
+
   // ------------------------------------------------------------ 开始合并
 
   function collect() {
     return {
       paths: paths(),
       mode: state.mode === "quick" ? "quick" : "precise",
-      out_dir: state.outDir || "",
+      // 没手选就传空，让后端按「第一个可用源文件父目录下的 merge/」算。
+      // 把默认值当显式路径传回去，会让后端去校验一个它自己给的目录。
+      out_dir: state.outDirManual ? state.outDir || "" : "",
       out_name: (els.outName && els.outName.value || "").trim(),
-      width: 0,
-      height: 0,
-      fps: 0
+      width: Number(state.width) || 0,
+      height: Number(state.height) || 0,
+      fps: Number(state.fps) || 0
     };
   }
 
   function paintRunning() {
     if (!els.start) return;
-    els.start.textContent = state.running ? "合并中…" : "开始合并";
+    els.start.textContent = state.detached ? "后台合并中…" : state.running ? "合并中…" : "开始合并";
     if (els.note && state.running) {
       els.note.textContent = "正在拼接：" + Math.round((state.progress || 0) * 100) + "%";
       els.note.style.display = "";
@@ -384,7 +454,13 @@
   }
 
   function startMerge() {
-    if (state.running || state.busy) return;
+    if (state.running || state.busy || state.detached) return;
+    var pf = state.preflight || {};
+    if ((pf.missing && pf.missing.length) || (pf.broken && pf.broken.length)) {
+      state.error = "先把标红的文件移出列表再开始合并";
+      paintAll();
+      return;
+    }
     var body = collect();
     if (!body.paths.length || body.paths.length < 2) {
       state.note = "先加两个以上可用片段";
@@ -394,14 +470,28 @@
     state.error = "";
     state.note = "";
     state.running = true;
+    state.detached = false;
+    state.jobId = "";
     state.progress = 0;
+    settledJobId = "";
     paintAll();
     paintRunning();
     WB.rpc("merge.start", body, { silent: true }).then(function (data) {
       var job = data.job || {};
-      if (job.id) pollMerge(job.id);
+      if (!job.id) {
+        state.running = false;
+        state.error = "任务没有返回编号";
+        paintAll();
+        paintRunning();
+        return;
+      }
+      state.jobId = job.id;
+      watchJob(job.id);
+      pollMerge(job.id);
     }).catch(function (err) {
+      unwatchJob();
       state.running = false;
+      state.jobId = "";
       state.error = err.message || "合并没能开始";
       // 规格不一致这类错误会带结构化差异，交给预检表去说
       if (err.detail) {
@@ -415,39 +505,97 @@
     });
   }
 
+  // 轮询节奏与"什么时候放手"抽成纯函数：这两个阈值曾是现场 bug（12 分钟就停，
+  // 用户以为失败，实际后台还在跑 20 分钟）。测试直接断言这两个函数。
+  function pollDelay(attempts) { return attempts > POLL_LIMIT ? SLOW_MS : POLL_MS; }
+  function pollGaveUp(attempts) { return attempts > HARD_LIMIT; }
+
+  var settledJobId = "";
+  var jobOff = null;
+
+  function settleJob(jobId, status, result, errorMessage) {
+    if (settledJobId === jobId) return;
+    settledJobId = jobId;
+    state.running = false;
+    state.detached = false;
+    state.jobId = "";
+    if (status === "succeeded") {
+      var payload = result || {};
+      state.progress = 1;
+      state.note = "合并完成：" + (payload.name || "") + "（" + (payload.count || 0) + " 段）";
+      // 快速拼接失败后自动重编码：不说出来，用户只会觉得"慢了一点"，
+      // 回头查为什么画面有轻微缩放也找不到线索。
+      if (payload.fallback_used) {
+        state.note += " · 快速拼接失败，已切精确重编码";
+      }
+      // 打开输出目录只认这条记录的 merge_id：页面自己拼路径会绕开
+      // 「按库里 output_path 打开」的授权口径。
+      state.lastMergeId = payload.merge_id || "";
+      state.lastOutput = payload.path || "";
+      if (payload.path) WB.revealLast = payload.path;
+    } else {
+      state.error = errorMessage || (status === "canceled" ? "已取消" : "合并失败");
+    }
+    paintAll();
+    paintRunning();
+  }
+
+  // 事件是轮询的兜底：任务跑完那一刻即使轮询正好断了，也能把页面收尾。
+  // 事件可能丢（任务中心那边有同样问题），所以不能只靠它。
+  function watchJob(jobId) {
+    if (jobOff) { jobOff(); jobOff = null; }
+    jobOff = WB.on("job.any", function (payload) {
+      if (!payload || String(payload.id || "") !== String(jobId)) return;
+      if (payload.status === "succeeded") {
+        settleJob(jobId, "succeeded", payload.result || (payload.job && payload.job.result) || {}, "");
+      } else if (payload.status === "failed" || payload.status === "canceled") {
+        var msg = (payload.job && payload.job.error_message) ||
+          payload.error_message || (payload.error && payload.error.message) || "";
+        settleJob(jobId, payload.status, null, msg);
+      }
+    });
+  }
+
+  function unwatchJob() {
+    if (jobOff) { jobOff(); jobOff = null; }
+  }
+
   function pollMerge(jobId) {
     var tries = 0;
     function tick() {
       tries += 1;
       WB.rpc("job.get", { id: jobId }, { silent: true }).then(function (data) {
+        if (state.jobId !== jobId) return;
         var job = (data && data.job) || data || {};
         state.progress = Number(job.progress) || 0;
         if (job.status === "succeeded") {
-          state.running = false;
-          var result = job.result || {};
-          state.note = "合并完成：" + (result.name || "") + "（" + (result.count || 0) + " 段）";
-          // 快速拼接失败后自动重编码：不说出来，用户只会觉得"慢了一点"，
-          // 回头查为什么画面有轻微缩放也找不到线索。
-          if (result.fallback_used) {
-            state.note += " · 快速拼接失败，已切精确重编码";
-          }
-          paintAll();
-          paintRunning();
-          if (result.path) WB.revealLast = result.path;
+          settleJob(jobId, "succeeded", job.result || {}, "");
           return;
         }
         if (job.status === "failed" || job.status === "canceled") {
+          settleJob(jobId, job.status, null, job.error_message || (job.status === "canceled" ? "已取消" : "合并失败"));
+          return;
+        }
+        paintRunning();
+        if (pollGaveUp(tries)) {
+          // 到硬上限不再密集问，但**不当成失败**：任务可能还在后台跑。
+          // 页面保持可恢复：job.finished 事件到了照样能把结果写回来。
+          state.detached = true;
           state.running = false;
-          state.error = job.error_message || (job.status === "canceled" ? "已取消" : "合并失败");
+          state.note = "任务还在后台跑（去任务中心看进度），这里不再等";
           paintAll();
           paintRunning();
           return;
         }
-        paintRunning();
-        if (tries < 900) setTimeout(tick, 800);
+        setTimeout(tick, pollDelay(tries));
       }).catch(function (err) {
+        if (state.jobId !== jobId) return;
+        // 单次查询失败不判死：本地 RPC 偶尔会撞上主线程正忙，连续三次才报。
+        if (tries < 3) { setTimeout(tick, POLL_MS); return; }
         state.running = false;
-        state.error = err.message || "查不到任务状态";
+        state.detached = false;
+        state.jobId = "";
+        state.error = (err && err.message) || "查不到任务状态";
         paintAll();
         paintRunning();
       });
@@ -464,18 +612,37 @@
       : "规格不一致或文件不够，快速拼接不可用";
     els.modeQuick.checked = state.mode === "quick";
     els.modePrecise.checked = state.mode !== "quick";
-    if (els.outDir) els.outDir.value = state.outDir;
+    if (els.outDir) {
+      // 路径本身就是按钮：没有可用路径时给一句能点的说明，而不是留个空框
+      var shown = state.outDir || "选择输出目录";
+      if (els.outDir.textContent !== shown) els.outDir.textContent = shown;
+      var tip = state.outDir || "点击选择输出目录";
+      if (els.outDir.title !== tip) els.outDir.title = tip;
+    }
+    if (els.openDir) {
+      var canOpen = !!state.lastMergeId && !state.running && !state.busy && !state.detached;
+      els.openDir.disabled = !canOpen;
+      els.openDir.title = canOpen
+        ? "在资源管理器里打开这次的成片目录"
+        : state.detached ? "后台合并完成后可打开" : state.running ? "合并完成后可打开" : "先合并一次";
+    }
     if (els.outName) els.outName.value = state.outName;
     if (els.start) {
+      var pf = state.preflight;
+      var hasUnusable = !!(pf && ((pf.missing && pf.missing.length) || (pf.broken && pf.broken.length)));
       var ready =
-        !!state.order.length && !state.busy && !state.running &&
-        !!state.preflight && state.preflight.count >= 2;
+        !!state.order.length && !state.busy && !state.running && !state.detached &&
+        !!pf && pf.count >= 2 && !hasUnusable;
       els.start.disabled = !ready;
-      els.start.title = state.running
-        ? "正在合并，请稍候"
-        : ready ? "开始合并" : "先加两个以上可用片段";
-      if (els.start.textContent !== (state.running ? "合并中…" : "开始合并")) {
-        els.start.textContent = state.running ? "合并中…" : "开始合并";
+      els.start.title = state.detached
+        ? "上一个合并还在后台跑，先别开新的"
+        : state.running
+          ? "正在合并，请稍候"
+          : hasUnusable ? "先把标红的文件移出列表"
+          : ready ? "开始合并" : "先加两个以上可用片段";
+      var startText = state.detached ? "后台合并中…" : state.running ? "合并中…" : "开始合并";
+      if (els.start.textContent !== startText) {
+        els.start.textContent = startText;
       }
     }
   }
@@ -531,7 +698,13 @@
       ui.h("h2", { class: "page__title", text: "合并" }),
       ui.h("p", { class: "page__hint", text: "把多个片段按顺序拼成一条成品" }),
       ui.h("div", { class: "page__actions" }, [
-        ui.h("button", { class: "btn", type: "button", text: "添加本地文件", onclick: addLocal }),
+        ui.h("button", {
+          class: "btn",
+          type: "button",
+          text: "添加本地文件",
+          title: "一次可以选多个视频",
+          onclick: addLocal
+        }),
         (els.start = ui.h("button", {
           class: "btn btn--primary",
           type: "button",
@@ -583,7 +756,23 @@
     els.modeQuick.addEventListener("change", function () { setMode("quick"); });
     els.modePrecise.addEventListener("change", function () { setMode("precise"); });
     els.modeNote = ui.h("p", { class: "field__help", text: "" });
-    els.outDir = ui.h("input", { class: "input mono", readonly: true });
+    // 路径本身是按钮：点它换目录。用 button 而不是 readonly input ——
+    // 只读输入框看上去像能改、点了没反应，是这一栏之前最直接的坑。
+    els.outDir = ui.h("button", {
+      class: "btn btn--ghost merge-outdir-path",
+      type: "button",
+      text: "选择输出目录",
+      title: "点击选择输出目录",
+      onclick: pickOutDir
+    });
+    els.openDir = ui.h("button", {
+      class: "btn btn--ghost",
+      type: "button",
+      text: "打开输出目录",
+      disabled: true,
+      title: "先合并一次",
+      onclick: openOutputDir
+    });
     els.outName = ui.h("input", {
       class: "input mono",
       oninput: function (event) {
@@ -602,7 +791,7 @@
         ]),
         ui.h("div", { class: "field" }, [
           ui.h("span", { class: "field__label", text: "输出目录" }),
-          els.outDir
+          ui.h("div", { class: "merge-outdir-row" }, [els.outDir, els.openDir])
         ]),
         ui.h("div", { class: "field" }, [
           ui.h("span", { class: "field__label", text: "文件名" }),
@@ -646,11 +835,23 @@
     return els.root;
   }
 
+  // 给前端测试用的纯函数（轮询节奏 / 何时放手）
+  WB._mergePoll = {
+    delay: pollDelay,
+    gaveUp: pollGaveUp,
+    limit: POLL_LIMIT,
+    hard: HARD_LIMIT,
+    slow: SLOW_MS
+  };
+
   WB.pages = WB.pages || {};
   WB.pages.merge = {
     render: render,
     _internals: {
       state: state,
+      watchJob: watchJob,
+      unwatchJob: unwatchJob,
+      settleJob: settleJob,
       addSource: addSource,
       moveAt: moveAt,
       removeAt: removeAt,
@@ -658,6 +859,8 @@
       clearAll: clearAll,
       refreshPreflight: refreshPreflight,
       startMerge: startMerge,
+      pickOutDir: pickOutDir,
+      openOutputDir: openOutputDir,
       paths: paths
     }
   };

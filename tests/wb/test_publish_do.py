@@ -19,6 +19,7 @@ from bili_scribe.infra.bili_client import BiliError
 from bili_scribe.infra.endpoints import NOTE_ADD, NOTE_DEL
 from video_workbench.app.errors import WBError
 from video_workbench.core import publisher as pub
+from video_workbench.core.layout import SIDECAR
 
 # --------------------------------------------------------------------- 替身
 
@@ -53,7 +54,7 @@ class FakeGateway:
         return self._logged_in
 
 
-def make_note(service, *, title="一篇笔记", summary="摘要", body=None, status="draft"):
+def make_note(service, *, title="一篇笔记", summary="", body=None, status="draft"):
     """造一条草稿行（用真 repo，别用假表——门禁要看真字段）。"""
     project = service.repo.project_create(
         title="测试视频",
@@ -123,14 +124,54 @@ def test_post_note_builds_bilibili_payload():
     client = FakeClient()
     out = pub.post_note(
         client,
-        {"aid": 42, "title": "标题", "summary": "摘要", "content": '[{"insert":"x\\n"}]'},
+        {"aid": 42, "title": "标题", "content": '[{"insert":"x\\n"}]'},
     )
     url, payload = client.calls[0]
     assert url == NOTE_ADD
     assert payload["oid"] == 42 and payload["oid_type"] == 0
-    assert payload["title"] == "标题" and payload["summary"] == "摘要"
-    assert payload["auto_comment"] == 1 and payload["publish"] == 1
+    assert payload["title"] == "标题"
+    # 摘要字段已下线（2026-11-07）：界面上没有这个输入框，库里也不认老值。
+    # 但接口把它标成"必要"，所以这个位置发的是**正文开头**（不是空串，空串在必填位
+    # 上可能直接被平台 -400 —— 那正是"点了发布发不出去"的一种死法）。
+    # auto_comment 恒 0：那个开关的语义是「把摘要自动发成评论区评论」。
+    assert payload["summary"] == "x"
+    assert payload["auto_comment"] == 0
+    assert payload["publish"] == 1
     assert out["note_id"] == "9001" and out["attempts"] == 1
+
+
+def test_a_legacy_summary_in_the_row_is_not_sent():
+    """老草稿行里还留着下线前算好的摘要：发出去时**不许**认它。
+
+    实录：draft_8dfe01d36c95 的 summary 列是 268 字（与 comment_short 逐字同源），
+    用户界面上早就看不到这个字段了，但 payload 里带着它 + auto_comment=1
+    ⇒ 发一条没人看过的评论。库里的老行没有清零路径，只能在出口这一处不认。
+
+    现在那个位置发的是**正文开头**：正文是用户确认过的那一份，前 200 字天然属于
+    它，既不会空着（必填位），也不会多出用户没见过的话。
+    """
+    client = FakeClient()
+    pub.post_note(
+        client,
+        {
+            "aid": 7,
+            "summary": "旧草稿里的 268 字",
+            "content": '[{"insert":"正文第一句。\\n第二句。\\n"}]',
+        },
+    )
+    payload = client.calls[0][1]
+    assert "旧草稿" not in payload["summary"]
+    assert payload["summary"] == "正文第一句。 第二句。"
+    assert payload["auto_comment"] == 0
+
+
+def test_the_summary_slot_is_filled_from_the_body_and_capped():
+    """必填位不许空着，但也不许超过预览口径。"""
+    body = "".join(f"第{i}段。" for i in range(60))
+    payload = pub.note_payload({"aid": 1, "content": json.dumps([{"insert": body + "\\n"}])})
+    assert payload["summary"], "必填位被发成了空串"
+    assert len(payload["summary"]) == pub.NOTE_PREVIEW_CHARS
+    assert body.startswith(payload["summary"])
 
 
 def test_post_note_rejects_empty_content_before_any_request():
@@ -289,3 +330,84 @@ def test_get_with_confirmed_turns_content_gate_green(service):
     warm = ok(service, "publish.get", {"id": note["id"], "confirmed": True})
     assert warm["gates"]["ready"] is True
     assert [g["status"] for g in warm["gates"]["gates"]] == ["ok", "ok", "ok"]
+
+
+# --------------------------------------------------------- aid 三级兜底
+
+# 这三条盯的是同一个事故的另一半：`wb_project.aid` 与 `wb_publish_note.aid`
+# 历史上全是 NULL（下载 worker 把解析器给的 aid 丢了），于是发布必死在
+# 「这条草稿没有 aid，定位不到视频」，而门禁只看 bvid、三道门全绿。
+# 现在发布前按「库里 → 侧车 → 解析器」三级现取，取到就地回写草稿行。
+
+
+class _Item:
+    def __init__(self, aid):
+        self.aid = aid
+
+
+class FakeResolver:
+    """只实现 resolve：解析器那一级兜底的替身，不碰网络。"""
+
+    def __init__(self, aid=None, error=None):
+        self.aid = aid
+        self.error = error
+        self.calls: list[str] = []
+
+    def resolve(self, raw):
+        self.calls.append(raw)
+        if self.error:
+            raise self.error
+        return type("R", (), {"items": [_Item(self.aid)]})()
+
+
+def make_note_without_aid(service, *, root_dir=""):
+    """造一条 aid 为空的草稿（老数据的样子：项目行与草稿行都没 aid）。"""
+    project = service.repo.project_create(
+        title="测试视频", bvid="BV1xx411c7mD", root_dir=root_dir, up_name="验收UP"
+    )
+    note = service.repo.publish_note_upsert(
+        project["id"],
+        bvid="BV1xx411c7mD",
+        title="一篇笔记",
+        content=json.dumps([{"insert": "正文一段话\n"}]),
+    )
+    return project, service.repo.publish_get(note["id"])
+
+
+def test_publish_fills_aid_from_the_sidecar_when_the_row_has_none(service, tmp_path):
+    """项目目录里的 source.wb.json 写着 aid：就地补上，并且回写草稿行。"""
+    root = tmp_path / "media" / "UP" / "标题"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / SIDECAR).write_text(json.dumps({"aid": 555, "bvid": "BV1xx411c7mD"}), "utf-8")
+
+    project, note = make_note_without_aid(service, root_dir=str(root))
+    assert note["aid"] is None, "夹具得真的没有 aid，否则这条测的是另一件事"
+    client = use_client(service, FakeClient())
+
+    ok(service, "publish.publish", {"id": note["id"], "confirmed": True})
+    assert client.calls[0][1]["oid"] == 555
+    assert service.repo.publish_get(note["id"])["aid"] == 555, "补到的 aid 要回写，别每次都现找"
+
+
+def test_publish_falls_back_to_the_resolver_when_there_is_no_sidecar(service):
+    """连侧车都没有（本地导入/目录被搬走）：拿 bvid 现问一次解析器。"""
+    project, note = make_note_without_aid(service)
+    resolver = FakeResolver(aid=777)
+    service._resolver = resolver
+    client = use_client(service, FakeClient())
+
+    ok(service, "publish.publish", {"id": note["id"], "confirmed": True})
+    assert resolver.calls == ["BV1xx411c7mD"]
+    assert client.calls[0][1]["oid"] == 777
+
+
+def test_publish_says_why_when_no_aid_can_be_found(service):
+    """三条腿都空：一个请求都不发，报错要说清「重新下载这一集会补上」。"""
+    project, note = make_note_without_aid(service)
+    service._resolver = FakeResolver(aid=None)
+    client = use_client(service, FakeClient())
+
+    error = err(service, "publish.publish", {"id": note["id"], "confirmed": True})
+    assert error["code"] == "CONFLICT"
+    assert "aid" in error["message"] and "重新下载" in error["message"]
+    assert client.calls == [], "没有 aid 就一个请求都不该发"

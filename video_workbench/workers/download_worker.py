@@ -164,12 +164,18 @@ def make_download_handler(
         project = _upsert_project(
             repo,
             bvid=bvid,
+            # aid（av 号）必须落库：发布笔记时接口要拿它当 oid。
+            # 这里曾经漏传，导致所有项目的 wb_project.aid 都是 NULL，
+            # 发布一律死在「这条草稿没有 aid，定位不到视频」。
+            aid=item.get("aid"),
             cid=cid,
             page_no=page_no,
             title=str(item.get("title") or bvid),
             up_name=str(payload.get("up_name") or ""),
             up_mid=item.get("up_mid"),
             collection_title=str(payload.get("collection_title") or ""),
+            # 合集内顺位由 resolver 的全局 enumerate 给；单稿/多P 是 None。
+            collection_index=item.get("collection_index"),
             root_dir=str(layout.root),
             status="downloading",
         )
@@ -361,8 +367,17 @@ def _upsert_project(repo: Any, **fields: Any) -> dict[str, Any]:
         repo.project_update(
             existing["id"],
             title=fields.get("title") or existing.get("title"),
+            # 老项目这一列是 NULL，重新下载一次就把 aid 补回来
+            aid=fields.get("aid") or existing.get("aid"),
             root_dir=fields.get("root_dir") or existing.get("root_dir"),
             status=fields.get("status") or existing.get("status"),
+            # 只在这次真的带了序号时才写：从单集链接重下同一集时 payload 没有
+            # collection_index，写成 NULL 会把老项目在合集里的位置抹掉。
+            collection_index=(
+                fields["collection_index"]
+                if fields.get("collection_index") is not None
+                else existing.get("collection_index")
+            ),
             error=None,
         )
         return repo.project_get(existing["id"]) or existing

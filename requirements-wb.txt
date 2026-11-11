@@ -7,4 +7,4 @@ huggingface-hub>=0.24     # 模型下载（走 hf-mirror）
 yt-dlp>=2026.1            # 下载（真站解析/取流）
 numpy>=1.26               # 波形峰值、ASR 音频数组
 pillow>=10.0              # 封面合成
-pyinstaller>=6.0          # 只在需要出 exe 时
+pyinstaller==6.22.3       # 只在需要出 exe 时（钉死：PYZ 结构与 accept_frozen_package.py 的判据耦合）

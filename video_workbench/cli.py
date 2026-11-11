@@ -30,14 +30,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from video_workbench import APP_NAME, __version__
 from video_workbench.app.errors import RETRYABLE_CODES, WBError
 from video_workbench.app.service import WorkbenchService, roles_payload
 from video_workbench.config import WorkbenchConfig
+from video_workbench.infra.db import SCHEMA_VERSION, backup_target, pending_columns, schema_version
 
 EXIT_OK = 0
 EXIT_JOB_FAILED = 1
@@ -266,6 +269,45 @@ class Cli:
                 sha8 = str(row.get("prompt_sha8") or "")
                 tail = f" · {row.get('prompt_bytes')} B · {sha8}" if sha8 else ""
                 print(f"  {row.get('key')}｜{row.get('name')}｜{row.get('passes')} 轮｜{src}{tail}")
+        return EXIT_OK
+
+    def cmd_migrate_check(self) -> int:
+        """只读体检：打开库前先说清楚「会不会迁移、补哪些列、备份落哪里」。
+
+        严格不写盘：sqlite 用 `mode=ro` 打开，不调用 `migrate()`、不装配服务
+        （装配会建库/建 logs/）。库不存在时也不创建，只报告「首次启动会建到 vN」。
+        """
+        cfg = WorkbenchConfig.load(getattr(self.args, "config", "") or None)
+        db_path = cfg.db_path
+        exists = Path(db_path).is_file()
+        current = 0
+        pending: list[str] = []
+        if exists:
+            uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+            conn = sqlite3.connect(uri, uri=True)
+            try:
+                conn.row_factory = sqlite3.Row
+                current = schema_version(conn)
+                if current < SCHEMA_VERSION:
+                    pending = pending_columns(conn)
+            finally:
+                conn.close()
+        needed = current < SCHEMA_VERSION
+        data = {
+            "db_path": db_path,
+            "exists": exists,
+            "schema_version": current,
+            "target_version": SCHEMA_VERSION,
+            "migrate_needed": needed,
+            "pending_columns": pending,
+            "backup_path": str(backup_target(db_path)) if exists and needed else "",
+        }
+        self.emit("migrate-check", data)
+        if not self.json:
+            print(f"数据库：{db_path}" + ("" if exists else "（不存在，首次启动会直接建到 v{0}）".format(SCHEMA_VERSION)))
+            print(f"schema_version：{current}" + (f" → {SCHEMA_VERSION}（需要迁移）" if needed else "（已是最新）"))
+            print("将补列：" + ("、".join(pending) if pending else "无"))
+            print("备份落点：" + (data["backup_path"] or "无（无需迁移）"))
         return EXIT_OK
 
     def cmd_jobs(self) -> int:
@@ -592,11 +634,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="等价于 `roles` 子命令：离线打印角色名单与各自真源（打包验收用）",
     )
+    parser.add_argument(
+        "--migrate-check",
+        action="store_true",
+        help="只读打印当前 schema_version、将补的列与备份落点（不迁移、不写盘）",
+    )
     subs = parser.add_subparsers(dest="cmd", required=True)
 
     subs.add_parser("info", help="环境与依赖状态")
     subs.add_parser("jobs", help="最近的任务")
     subs.add_parser("roles", help="角色名单与各自真源（离线：不联网、不写配置）")
+    subs.add_parser("migrate-check", help="只读：当前 schema_version、将补的列、备份落点")
 
     p = subs.add_parser("download", help="解析并下载")
     p.add_argument("--url", required=True)
@@ -646,7 +694,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_GLOBAL_FLAGS = ("--json", "--quiet", "--version", "--roles")
+_GLOBAL_FLAGS = ("--json", "--quiet", "--version", "--roles", "--migrate-check")
 _GLOBAL_VALUES = ("--config", "--timeout")
 
 
@@ -733,14 +781,21 @@ def main(argv: list[str] | None = None) -> int:
         # 把 roles 放到最前就把 `--config` 挤到子解析器里去了
         # （`error: unrecognized arguments: --config …`，我第一版就是这么红的）。
         tokens = [t for t in tokens if t != "--roles"] + ["roles"]
+    # `--migrate-check` 同理：打包/运维验收会写 `VideoWorkbench.exe --migrate-check`，
+    # 没有子命令时翻译成同名子命令；和显式子命令一起写则报错，不静默二选一。
+    if "--migrate-check" in tokens and not _has_subcommand(tokens):
+        tokens = [t for t in tokens if t != "--migrate-check"] + ["migrate-check"]
     args = parser.parse_args(tokens)
     if args.roles and args.cmd != "roles":
         parser.error(f"--roles 就是 roles 子命令，别再和 {args.cmd} 一起写")
+    if args.migrate_check and args.cmd != "migrate-check":
+        parser.error(f"--migrate-check 就是 migrate-check 子命令，别再和 {args.cmd} 一起写")
     cli = Cli(args)
     handler = {
         "info": cli.cmd_info,
         "jobs": cli.cmd_jobs,
         "roles": cli.cmd_roles,
+        "migrate-check": cli.cmd_migrate_check,
         "download": cli.cmd_download,
         "transcribe": cli.cmd_transcribe,
         "summarize": cli.cmd_summarize,

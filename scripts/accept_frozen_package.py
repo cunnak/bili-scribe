@@ -10,15 +10,20 @@ r"""打包版（onedir）交付验收：把「这个包里到底有没有今天�
 落成 exe 旁边的 json；而「PyInstaller 退出码 0」根本不能证明**内容**是新一代的 —— 今天
 `dist` 里那份 exe 就比仓库晚了两笔提交，靠肉眼在 `_internal` 里搜字符串才发现。
 
-五类检查（任何一条 FAIL 就 rc=1）：
+六类检查（任何一条 FAIL 就 rc=1；健康包上共 9 条断言——exe/设置/toc 各自「不存在」那
+三条只在坏包上才会跑到，所以这里的类数与读数里的分母不是同一个数）：
 
 1. exe 在；
 2. 六个提示词真源 txt 字节数与仓库一致（名单现读自 `scripts/build_wb.PROMPT_TXT_NAMES`，
    不抄第二份名单 —— 抄了就有两个 owner，`test_git_no_normalization_on_locked_paths.py`
    那把闸就是靠「锁清单现读自 build_wb」才只有一份真源）；
 3. 包内 `settings.js` 有今天的截帧 help，旧的两句假文案不许回来；
-4. 新模块在不在包里，判据是 PyInstaller 的 `PYZ-00.toc`，**不是**对二进制裸串 grep：
-   函数名在压缩 marshal 里，裸串永远搜不到（今天就在这一条上误判过一次「包是旧的」）；
+4. **这份包是不是改完之后重建的**，判据是 PyInstaller 的 `PYZ-00.toc`，**不是**对二进制裸串
+   grep：函数名在压缩 marshal 里，裸串永远搜不到（v0.9.3 就在这一条上误判过一次「包是旧的」）。
+   只判「模块在不在」不够——`core/frames.py` 从 0.2.2 起就在包里，上一轮的旧包同样命中，
+   于是「重建之后再验收」会绿在重建**之前**那份产物上。所以两件事一起判：只认本 spec 那一条
+   toc（`build/<spec stem>/PYZ-00.toc`，不再 rglob 全树——全树里还躺着 bs 的
+   `build/exe/bili-scribe/PYZ-00.toc`），且它的 mtime 不早于 `video_workbench/` 下最新的源文件；
 5. `--check` / `--roles` 各跑一次：退出码 0、包内自显示版本 == 仓库 `__version__`
    （不钉字面量，钉的是 owner 那条）、六把角色 + 三把退役仍在；
 6. 验收前后三个真实配置文件的 sha256 逐字相同 —— 窗口可能在你看不见的时候写盘。
@@ -34,6 +39,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,7 +47,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 # 名单只有一个 owner：现读自 build_wb，不在此处另抄六个文件名。
-from scripts.build_wb import PROMPT_TXT_NAMES  # noqa: E402
+from scripts.build_wb import PROMPT_TXT_NAMES, SPEC  # noqa: E402
 
 OUT = Path(tempfile.gettempdir()).resolve() / "wb-frozen-accept.json"
 
@@ -129,20 +135,46 @@ def main() -> int:
     else:
         check("包内 settings.js 存在", False, str(settings))
 
-    tocs = list((REPO / "build").rglob("PYZ-00.toc"))
-    hit = None
-    for toc in tocs:
-        try:
-            if "video_workbench.core.frames" in toc.read_text(encoding="utf-8", errors="replace"):
-                hit = toc
-                break
-        except OSError:
+    # 判「某个模块在不在包里」只有 PYZ-00.toc 一种读法（exe 与 _internal 里的名字在压缩 marshal 里，
+    # 裸串永远搜不到 —— AGENTS.md 记着 v0.9.3 那次差点据此判「包是旧的」）。但只判「在不在」不够：
+    # frames.py 从 0.2.2 起就在包里，上一轮的旧包同样命中，于是「重建之后再验收」会绿在重建之前的
+    # 那份产物上 —— 这条判据就退化成一句「历史上曾经打过包」。所以两件事一起判：
+    #   ① 只认本 spec 那一条 toc。PyInstaller 的 workpath 子目录用 **spec 文件 stem** 命名
+    #      （video_workbench.spec ⇒ build/video_workbench），路径可现算，不抄第二份；不再 rglob
+    #      全树 —— 全树里还躺着 bs 的 build/exe/bili-scribe/PYZ-00.toc，谁先被扫到谁说了算。
+    #   ② toc 的 mtime 必须不早于 video_workbench/ 下最新的源文件，否则这份包是改之前建的。
+    toc = REPO / "build" / SPEC.stem / "PYZ-00.toc"
+    newest, newest_at = 0.0, None
+    for path in (REPO / "video_workbench").rglob("*"):
+        if not path.is_file() or "__pycache__" in path.parts:
             continue
-    check(
-        "新模块 video_workbench/core/frames.py 进了包（判据 = PYZ-00.toc）",
-        hit is not None,
-        str(hit) if hit else f"扫了 {len(tocs)} 份 toc 都没命中",
-    )
+        stamp = path.stat().st_mtime
+        if stamp > newest:
+            newest, newest_at = stamp, path
+    if not toc.is_file():
+        check("PYZ-00.toc 在（判据 = build/<spec stem>/PYZ-00.toc）", False, str(toc))
+    else:
+        text = toc.read_text(encoding="utf-8", errors="replace")
+        has_module = "video_workbench.core.frames" in text
+        toc_at = toc.stat().st_mtime
+        fresh = toc_at >= newest
+        note = (
+            f"{toc.stat().st_size} B @ {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(toc_at))}"
+        )
+        if newest_at is not None:
+            note += (
+                f"；最新源 {newest_at.relative_to(REPO)} @ "
+                f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(newest))}"
+            )
+        if not has_module:
+            note += "；toc 里没有 video_workbench.core.frames"
+        if not fresh:
+            note += "；这份包比源文件旧 —— 先重建再验收"
+        check(
+            "包是改完之后重建的，且新模块 video_workbench/core/frames.py 在里面",
+            has_module and fresh,
+            note,
+        )
 
     from video_workbench import __version__ as repo_version
 

@@ -117,6 +117,25 @@ def test_download_creates_layout_sidecar_and_asset(service, tmp_path):
     assert calls[0]["quality"] == "1080P"
 
 
+def test_project_row_carries_the_aid_publish_needs(service, tmp_path):
+    """项目行必须带 aid（av 号）——发布笔记拿它当 oid。
+
+    这里曾经漏传：解析器给了 aid、侧车里也写了，唯独 `_upsert_project`
+    组装字段时没带上，于是 35 个项目的 `wb_project.aid` 全是 NULL，
+    点发布只会得到一句「这条草稿没有 aid，定位不到视频」。
+    """
+    run, _ = make_downloader(service)
+    handler = W.make_download_handler(
+        repo=service.repo, media_root=tmp_path / "media", downloader=run
+    )
+    result = handler(FakeCtx(), payload())
+    project = service.repo.project_get(result["project_id"])
+    assert project["aid"] == 42
+    # 侧车与库两边必须是同一个数，不能各说各的
+    sidecar = read_sidecar(Path(result["path"]).parent / SIDECAR)
+    assert int(sidecar["aid"]) == int(project["aid"])
+
+
 def test_reuse_skips_second_download(service, tmp_path):
     run, calls = make_downloader(service)
     media = tmp_path / "media"

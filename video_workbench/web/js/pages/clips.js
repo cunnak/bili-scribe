@@ -2042,7 +2042,7 @@
   function uploadCover() {
     var cand = selected();
     if (!cand) return;
-    WB.rpc("fs.pick", { kind: "files" }, { silent: true })
+    WB.rpc("fs.pick", { kind: "file" }, { silent: true })
       .then(function (data) {
         var path = (data && data.path) || "";
         if (!path) {

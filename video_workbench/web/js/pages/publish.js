@@ -7,9 +7,9 @@
  * 用户会以为是自己没登录。
  *
  * 三条实现约束：
- * 1. **字数口径跟后端一致**：标题/摘要按码点数（`Array.from`，emoji 算 1），
+ * 1. **字数口径跟后端一致**：标题按码点数（`Array.from`，emoji 算 1），
  *    正文用后端算好的 `content_text`。前端另算一套，两个数字迟早对不上。
- * 2. **改过的不能被重新生成打回**：生成时把用户已改的标题/摘要带上；
+ * 2. **改过的不能被重新生成打回**：生成时把用户已改的标题带上；
  *    保存永远提交输入框里的当前值。
  * 3. **正文只读预览用 textContent**：正文来自模型，里面出现 `<` 是常态。
  * ========================================================================= */
@@ -33,9 +33,8 @@
     records: [], // 发布记录（发过 / 撤过 / 发失败）
     recordCounts: { published: 0, withdrawn: 0, failed: 0 },     // 三道门禁的当前状态（publish.get / preview 里带回来）
     editTitle: "",       // 标题输入框的当前值：重绘不丢（S2）
-    editSummary: "",     // 摘要输入框的当前值
     confirmedFor: "",    // 勾过「我已阅读并确认」的那份草稿 id；换草稿自动失效（S3）
-    limits: { title: 80, summary: 400 },  // 字数上限由后端 limits 下发，前端不另立一套
+    limits: { title: 80 },  // 字数上限由后端 limits 下发，前端不另立一套
     panel: null,         // 挂载点 {main, rail}：发布卡是总结页里的一块，不再是独立页
     loaded: false,       // 首次数据是否已拉过（重新挂载只重画，不重拉）
     publishing: false,
@@ -78,10 +77,9 @@
     return node;
   }
 
-  /** 把一份载荷的标题/摘要灌进编辑缓冲。任何「换了内容」的路径都要调它。 */
-  function syncEdit(title, summary) {
+  /** 把一份载荷的标题灌进编辑缓冲。任何「换了内容」的路径都要调它。 */
+  function syncEdit(title) {
     state.editTitle = String(title || "");
-    state.editSummary = String(summary || "");
   }
 
   // ------------------------------------------------------------------ 数据
@@ -103,6 +101,10 @@
   }
 
   function loadNotes(selectId) {
+    // 第二参 onRejected 不能省：发布流程收尾时用 Promise.all([loadNotes, loadRecords])，
+    // 这里一 reject 整个 all 就 reject，收尾那一步被跳过 —— 现场表现是按钮永久停在
+    // 「发布中…」且点不动，用户以为发失败了，其实请求早就回来了（2026-11-07）。
+    // 口径与 loadRecords 一致：列表拿不到只说明这一屏没数据，不该让整页红掉。
     return call("publish.list", {}).then(function (data) {
       state.notes = (data && data.notes) || [];
       if (selectId) return loadNote(selectId);
@@ -110,8 +112,13 @@
       state.current = null;
       state.draft = null;
       state.confirmedFor = "";
-      syncEdit("", "");
+      syncEdit("");
       return null;
+    }, function (error) {
+      state.notes = [];
+      state.error = (error && error.message) || "草稿列表读不到";
+      paint();
+      return [];
     });
   }
 
@@ -150,20 +157,31 @@
   function loadNote(id) {
     // 确认只对「勾过的那一份」有效：换草稿一律不继承（S3）
     var confirmed = state.confirmedFor === id;
-    return call("publish.get", { id: id, confirmed: confirmed }).then(function (data) {
-      state.current = data.note;
-      state.draft = null;
-      state.gates = data.gates || null;
-      if (!confirmed) state.confirmedFor = "";
-      syncEdit(state.current.title, state.current.summary);
-      // 不写 state.projectId：那是「新建草稿」选的目标项目，被 loadNote 改掉后
-      // 用户选的视频会静默漂移（R3）
-      if (data.limits) state.limits = data.limits;
-      return state.current;
-    });
+    return call("publish.get", { id: id, confirmed: confirmed }).then(
+      function (data) {
+        state.current = data.note;
+        state.draft = null;
+        state.gates = data.gates || null;
+        if (!confirmed) state.confirmedFor = "";
+        syncEdit(state.current.title);
+        // 不写 state.projectId：那是「新建草稿」选的目标项目，被 loadNote 改掉后
+        // 用户选的视频会静默漂移（R3）
+        if (data.limits) state.limits = data.limits;
+        return state.current;
+      },
+      function (error) {
+        // 与 loadNotes 同一条理由：收尾的 Promise.all 里一 reject，复位就被跳过。
+        // 这里只把这份草稿标成"读不到"，让用户看见原因，不当成整页失败。
+        state.current = null;
+        state.gates = null;
+        state.error = (error && error.message) || "这份草稿读不到";
+        paint();
+        return null;
+      }
+    );
   }
 
-  /** 重新生成标题/摘要。默认只重算摘要——正文是用户可能已经改过的东西。 */
+  /** 重新生成标题。正文是用户可能已经改过的东西，默认不动它。 */
   function regenerate(part) {
     if (!state.current) {
       ui.toast("先选一份草稿", "error");
@@ -172,14 +190,14 @@
     state.regenerating = true;
     state.error = "";
     paint();
-    return call("publish.regenerate", { id: state.current.id, part: part || "summary" })
+    return call("publish.regenerate", { id: state.current.id, part: part || "title" })
       .then(function (data) {
         state.regenerating = false;
         state.draft = data.draft;
         state.gates = data.gates || null;
         state.confirmedFor = "";   // 内容变了，之前的确认作废
-        syncEdit(data.draft.title, data.draft.summary);
-        state.note = part === "all" ? "标题与摘要已按最新总结重写" : "摘要已重写";
+        syncEdit(data.draft.title);
+        state.note = part === "all" ? "标题与正文已按最新总结重写" : "标题已重写";
         paint();
       })
       .catch(function (err) {
@@ -205,7 +223,7 @@
         state.gates = data.gates || null;
         state.busy = false;
         state.confirmedFor = "";
-        syncEdit(data.title, data.summary);
+        syncEdit(data.title);
         if (data.limits) state.limits = data.limits;
         paint();
       })
@@ -219,7 +237,6 @@
   function save() {
     // 读 state 而不是 document：输入时已经写回 state，重绘不会把用户改的字冲掉（S2）
     var title = state.editTitle;
-    var summary = state.editSummary;
     if (!title.trim()) {
       state.error = "标题不能为空";
       paint();
@@ -237,7 +254,6 @@
       project_id: (state.current && state.current.project_id) || state.projectId,
       note_pk: state.current ? state.current.id : "",
       title: title,
-      summary: summary,
       content: body
     })
       .then(function (data) {
@@ -245,7 +261,7 @@
         state.current = data.note;
         state.draft = null;
         state.confirmedFor = "";   // 存成新一版之后，之前的确认作废
-        syncEdit(data.note.title, data.note.summary);
+        syncEdit(data.note.title);
         state.note = "草稿已保存";
         return loadNotes(data.note.id);
       })
@@ -266,7 +282,7 @@
         state.current = null;
         state.draft = null;
         state.confirmedFor = "";
-        syncEdit("", "");
+        syncEdit("");
         state.note = "草稿已删除";
         return loadNotes();
       })
@@ -478,36 +494,69 @@
       ]),
       h("div", { class: "pb-pick" }, [
         select,
-        btn(state.busy ? "生成中…" : "从总结生成", "用最新一版总结拼出标题、摘要和正文", generate, {
+        btn(state.busy ? "生成中…" : "从总结生成", "用最新一版总结拼出标题和正文", generate, {
           primary: true,
           disabled: state.busy
         })
       ]),
       h("div", {
         class: "pb-hint",
-        text: "标题 ≤ " + (state.limits.title || 80) + " 字、摘要 ≤ " +
-          (state.limits.summary || 400) + " 字；超了会被拦下，不会偷偷截断。"
+        text: "标题 ≤ " + (state.limits.title || 80) +
+          " 字；超了会被拦下，不会偷偷截断。"
       })
     ]);
   }
 
-  function confirmDelete() {
+  /**
+   * 确认框，**保证 Promise 一定有结果**。
+   *
+   * 这里踩过一个很难复现的坑：`ui.modal` 有四条关闭路径（确定、取消、ESC、点遮罩），
+   * 而只有两个按钮会 `resolve`。用户按 ESC 或点遮罩关掉时，Promise 永远悬着，
+   * 调用方的 `.then` 一次都不执行——发布那边因此把按钮永久停在「发布中…」，
+   * 用户看到的是"点了没反应、之后再点也没反应"，日志里连一条请求都没有。
+   *
+   * 所以 `onClose` 是**必需**的，不是兜底：它负责 ESC / 遮罩 / × 这三条路。
+   * 每条路都用 `settle` 包一层幂等，谁先到算谁。
+   */
+  function askConfirm(title, body, okLabel, opts) {
+    var options = opts || {};
     return new Promise(function (resolve) {
+      var done = false;
+      function settle(value) {
+        if (done) return;
+        done = true;
+        resolve(value);
+      }
       var modal = ui.modal({
-        title: "删除这份草稿？",
-        body: h("p", { text: "只删本地草稿，B站 上什么都没发出去过。" }),
+        title: title,
+        body: body,
+        onClose: function () {
+          // ESC / 点遮罩 / 点 ×：一律当「算了」
+          settle(false);
+        },
         footer: h("div", { class: "modal__actions" }, [
-          btn("取消", "", function () {
+          // 先 settle 再 close：close() 会触发 onClose（那里 settle(false)），
+          // 顺序反了的话「确定」会被 onClose 抢先定成 false，按了等于没按。
+          btn(options.cancelLabel || "取消", "", function () {
+            settle(false);
             modal.close();
-            resolve(false);
           }),
-          btn("删除", "", function () {
+          btn(okLabel, "", function () {
+            settle(true);
             modal.close();
-            resolve(true);
-          }, { danger: true, primary: true })
+          }, { danger: !!options.danger, primary: true })
         ])
       });
     });
+  }
+
+  function confirmDelete() {
+    return askConfirm(
+      "删除这份草稿？",
+      h("p", { text: "只删本地草稿，B站 上什么都没发出去过。" }),
+      "删除",
+      { danger: true }
+    );
   }
 
   /** 勾/取消「我已阅读并确认」：门禁状态要跟着变，不用等点发布才发现少一步。 */
@@ -531,11 +580,22 @@
       });
   }
 
+  /** 标题改过但没保存：发布读的是库里那一行，发出去的会是旧标题。 */
+  function titleDirty() {
+    if (!state.current) return false;
+    return state.editTitle !== state.current.title;
+  }
+
   function publishReady() {
-    // 四件事同时成立才算能发：没有未保存的预览、有落库的草稿、
-    // 勾的是**这一份**、后端三关全绿。
+    // 五件事同时成立才算能发：没有未保存的预览、有落库的草稿、
+    // 标题没有改动未保存、勾的是**这一份**、后端三关全绿。
+    //
+    // 标题这一条是 2026-11-07 补的：原来只挡「未保存的预览」，但标题输入框
+    // 改字只写 state.editTitle、不置 state.draft ⇒ 改了标题没保存也能点发布，
+    // 发出去的是库里那一版旧标题，而勾选框写的正是"确认标题与正文都要发出去"。
     if (state.draft) return false;
     if (!state.current) return false;
+    if (titleDirty()) return false;
     if (state.confirmedFor !== state.current.id) return false;
     return !!(state.gates && state.gates.ready);
   }
@@ -543,6 +603,7 @@
   function gateBlockedText() {
     if (state.draft) return "屏幕上是还没保存的预览：先点「保存草稿」，发布才会用这一版";
     if (!state.current) return "先选一份草稿";
+    if (titleDirty()) return "标题改过还没保存：先点「保存草稿」，否则发出去的是库里那一版";
     if (!state.gates) return "门禁状态还没拿到";
     var bad = (state.gates.gates || []).filter(function (g) { return g.status !== "ok"; });
     if (!bad.length) return "";
@@ -550,25 +611,15 @@
   }
 
   function confirmPublish() {
-    return new Promise(function (resolve) {
-      var modal = ui.modal({
-        title: "发布这篇笔记？",
-        body: h("div", {}, [
-          h("p", { text: "笔记会发到视频《" + ((state.current && state.current.project_title) || "") + "》下，并自动出现在评论区。" }),
-          h("p", { class: "muted", text: "发布之后不能改，只能撤回；撤回后评论区里的笔记卡也会消失。" })
-        ]),
-        footer: h("div", { class: "modal__actions" }, [
-          btn("再想想", "", function () {
-            modal.close();
-            resolve(false);
-          }),
-          btn("发布", "", function () {
-            modal.close();
-            resolve(true);
-          }, { primary: true, danger: true })
-        ])
-      });
-    });
+    return askConfirm(
+      "发布这篇笔记？",
+      h("div", {}, [
+        h("p", { text: "笔记会发到视频《" + ((state.current && state.current.project_title) || "") + "》下。" }),
+        h("p", { class: "muted", text: "发布之后不能改，只能撤回；撤回后评论区里的笔记卡也会消失。" })
+      ]),
+      "发布",
+      { cancelLabel: "再想想", danger: true }
+    );
   }
 
   function publishNow() {
@@ -581,10 +632,16 @@
     // 会开出第二个确认框、发出第二次请求（D2 的前端一半；后端另有互斥）
     state.publishing = true;
     paint();
+    // 复位只在这里发生一次。以前是三处各写一遍、最后那一步又是 .then(onFulfilled)
+    // 单参 —— 只要中途任何一个 Promise reject（例如收尾时草稿列表读不到），
+    // 复位就被整段跳过，按钮永久停在「发布中…」且点不动（2026-11-07 的现场）。
+    // 项目里没有 .finally 的用法，所以用两参 .then(done, done)：成功失败都复位。
+    var done = function () {
+      state.publishing = false;
+      paint();
+    };
     return confirmPublish().then(function (yes) {
       if (!yes) {
-        state.publishing = false;
-        paint();
         return null;
       }
       state.error = "";
@@ -599,56 +656,47 @@
         .catch(function (error) {
           state.error = (error && error.message) || "发布失败";
           state.note = "";
-          return Promise.all([loadNotes(state.current.id), loadRecords()]);
-        })
-        .then(function () {
-          state.publishing = false;
           paint();
+          return Promise.all([loadNotes(state.current.id), loadRecords()]);
         });
-    });
+    })
+      .then(done, done);
   }
 
   function confirmWithdraw() {
-    return new Promise(function (resolve) {
-      var modal = ui.modal({
-        title: "撤回这篇笔记？",
-        body: h("p", { text: "撤回后评论区里的笔记卡会消失，本地记录保留为「已撤回」。" }),
-        footer: h("div", { class: "modal__actions" }, [
-          btn("取消", "", function () {
-            modal.close();
-            resolve(false);
-          }),
-          btn("撤回", "", function () {
-            modal.close();
-            resolve(true);
-          }, { primary: true, danger: true })
-        ])
-      });
-    });
+    return askConfirm(
+      "撤回这篇笔记？",
+      h("p", { text: "撤回后评论区里的笔记卡会消失，本地记录保留为「已撤回」。" }),
+      "撤回",
+      { danger: true }
+    );
   }
 
   function withdrawNow() {
     if (!state.current || state.publishing) return Promise.resolve();
-    return confirmWithdraw().then(function (yes) {
-      if (!yes) return null;
-      state.publishing = true;
-      state.error = "";
-      state.note = "";
+    var done = function () {
+      state.publishing = false;
       paint();
-      return call("publish.withdraw", { id: state.current.id })
-        .then(function () {
-          ui.toast("已撤回");
-          return Promise.all([loadNotes(state.current.id), loadRecords()]);
-        })
-        .catch(function (error) {
-          state.error = (error && error.message) || "撤回失败";
-          return Promise.all([loadNotes(state.current.id), loadRecords()]);
-        })
-        .then(function () {
-          state.publishing = false;
-          paint();
-        });
-    });
+    };
+    return confirmWithdraw()
+      .then(function (yes) {
+        if (!yes) return null;
+        state.publishing = true;
+        state.error = "";
+        state.note = "";
+        paint();
+        return call("publish.withdraw", { id: state.current.id })
+          .then(function () {
+            ui.toast("已撤回");
+            return Promise.all([loadNotes(state.current.id), loadRecords()]);
+          })
+          .catch(function (error) {
+            state.error = (error && error.message) || "撤回失败";
+            paint();
+            return Promise.all([loadNotes(state.current.id), loadRecords()]);
+          });
+      })
+      .then(done, done);
   }
 
   function editor() {
@@ -664,7 +712,6 @@
     // 输入框的值一律取 state.edit*：重绘（勾确认、切草稿、生成结束回填）
     // 不会冲掉用户已经改过的字。S2 的复现路径就是「改标题 → 勾确认 → 标题被打回」。
     var title = state.editTitle;
-    var summary = state.editSummary;
     var body = source.content_text || "";
 
     var titleInput = h("input", {
@@ -674,24 +721,11 @@
       value: title,
       placeholder: "笔记标题"
     });
-    var summaryInput = h("textarea", {
-      class: "pb-textarea",
-      id: "pb-summary",
-      rows: "3",
-      placeholder: "摘要（评论区卡片上显示的就是它）"
-    });
-    summaryInput.value = summary;
-
     var bodyNode = h("div", { class: "pb-body", id: "pb-body" });
     bodyNode.textContent = body;
 
     var maxTitle = state.limits.title || 80;
-    var maxSummary = state.limits.summary || 400;
     var titleCount = h("span", { class: "pb-count", text: len(title) + " / " + maxTitle });
-    var summaryCount = h("span", {
-      class: "pb-count" + (len(summary) > maxSummary ? " is-over" : ""),
-      text: len(summary) + " / " + maxSummary
-    });
     var bodyCount = h("span", { class: "pb-count", text: chars(body) + " 字" });
 
     titleInput.addEventListener("input", function () {
@@ -700,13 +734,6 @@
       titleCount.textContent = n + " / " + maxTitle;
       titleCount.className = "pb-count" + (n > maxTitle ? " is-over" : "");
     });
-    summaryInput.addEventListener("input", function () {
-      state.editSummary = summaryInput.value;
-      var n = len(state.editSummary);
-      summaryCount.textContent = n + " / " + maxSummary;
-      summaryCount.className = "pb-count" + (n > maxSummary ? " is-over" : "");
-    });
-
     var warnings = (draft && draft.warnings) || [];
     var warnBox = warnings.length
       ? h("div", { class: "callout callout--warn", text: warnings.join("；") })
@@ -718,8 +745,8 @@
         disabled: state.busy
       }),
       note
-        ? btn(state.regenerating ? "生成中…" : "重新生成摘要", "按最新一版总结重写摘要，标题与正文不动", function () {
-            regenerate("summary");
+        ? btn(state.regenerating ? "生成中…" : "重新生成标题", "按最新一版总结重写标题，正文不动", function () {
+            regenerate("title");
           }, { disabled: state.regenerating })
         : null,
       btn("复制正文", "复制成纯文本，直接贴到 B站", function () {
@@ -762,7 +789,7 @@
         publishRow = h("div", { class: "pb-publish" }, [
           h("label", { class: "pb-publish__label", for: "pb-confirm" }, [
             box,
-            h("span", { text: "我已阅读并确认标题、摘要、正文都要发出去" })
+            h("span", { text: "我已阅读并确认标题与正文都要发出去" })
           ]),
           btn(
             state.publishing ? "发布中…" : "发布笔记",
@@ -785,7 +812,7 @@
       publishRow = h("div", { class: "pb-publish" }, [
         h("span", {
           class: "pb-publish__hint",
-          text: "先点「保存草稿」：发布会用库里这一版的标题、摘要与正文"
+          text: "先点「保存草稿」：发布会用库里这一版的标题与正文"
         })
       ]);
     }
@@ -800,10 +827,6 @@
       h("label", { class: "pb-field" }, [
         h("span", { class: "pb-field__label" }, [h("span", { text: "标题" }), titleCount]),
         titleInput
-      ]),
-      h("label", { class: "pb-field" }, [
-        h("span", { class: "pb-field__label" }, [h("span", { text: "摘要" }), summaryCount]),
-        summaryInput
       ]),
       h("div", { class: "pb-field" }, [
         h("span", { class: "pb-field__label" }, [h("span", { text: "正文" }), bodyCount]),
@@ -931,6 +954,8 @@
       paint: paint,
       mount: mount,
       publishReady: publishReady,
+      gateBlockedText: gateBlockedText,
+      titleDirty: titleDirty,
       syncEdit: syncEdit
     }
   };

@@ -211,10 +211,9 @@
     {
       key: "publish",
       title: "发布",
-      hint: "默认每一步都要人确认。自动评论是可选动作，不勾就不会动账号。",
+      hint: "默认每一步都要人确认。笔记只发标题与正文，摘要不再发。",
       fields: [
         { path: "publish.require_confirm", label: "发布前确认", type: "switch", help: "关掉意味着点了就发。建议保持开启。" },
-        { path: "publish.auto_comment", label: "自动发总结评论", type: "switch" },
         { path: "publish.max_comment_chars", label: "评论长度上限", type: "number" },
         { path: "publish.disclose_ai", label: "标注 AI 生成", type: "switch" },
         { path: "publish.disclosure_text", label: "标注文案", type: "text" },

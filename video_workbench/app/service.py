@@ -17,9 +17,9 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from importlib.util import find_spec
@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, field_validator
 from video_workbench import APP_NAME, __version__
 from video_workbench.app.errors import ERROR_CODES, WBError
 from video_workbench.app.events import EventBus
-from video_workbench.app.jobs import JobContext, JobManager
+from video_workbench.app.jobs import JobContext, JobManager, exit_conflict_error
 from video_workbench.app.rpc import Router
 from video_workbench.config import (
     TRANSLATE_TARGETS,
@@ -70,7 +70,9 @@ from video_workbench.core.bili import default_gateway
 from video_workbench.core.downloader import BACKENDS
 from video_workbench.core.importer import import_videos
 from video_workbench.core.probe import make_thumbnail, probe_file
+from video_workbench.core.stages import STAGE_LABELS, STAGE_ORDER, stage_label
 from video_workbench.core.transcriber import format_srt, make_transcribe_handler
+from video_workbench.infra import cookies as cookies_mod
 from video_workbench.infra import languages
 from video_workbench.infra import log as log_mod
 from video_workbench.infra import models as models_mod
@@ -86,7 +88,7 @@ from video_workbench.infra.files import (
 )
 from video_workbench.infra.llm import ChatClient, ChatError
 from video_workbench.infra.notecache import NoteCache
-from video_workbench.infra.repo import Repo, new_id
+from video_workbench.infra.repo import Repo, RepoClosed, new_id
 from video_workbench.workers.batch_worker import (
     BATCH_TYPE,
     CHILD_TYPE,
@@ -94,6 +96,22 @@ from video_workbench.workers.batch_worker import (
     make_batch_handler,
 )
 from video_workbench.workers.download_worker import make_download_handler
+
+
+def natural_key(text: str) -> tuple[tuple[int, str], ...]:
+    """自然序排序 key：连续数字段按数值比，而不是按字符比。
+
+    没有它，「第10讲」会排在「第2讲」前面（'1' < '2'），用户看到的是乱序目录。
+    返回的元素统一是 `(数字, 文本)` 二元组，保证不同段之间也能比较。
+    """
+    parts = re.split(r"(\d+)", str(text or ""))
+    return tuple((int(part), "") if part.isdigit() else (0, part.casefold()) for part in parts)
+
+
+# 删除/归档一次最多处理多少个项目。1000 条以上要用户先缩小筛选——
+# 一个 IN (...) 绑一千个参数是 SQLite 的常规上限，再往上没有现实意义。
+MAX_BATCH_PROJECTS = 1000
+
 
 # ============================================================ 参数模型
 #
@@ -138,6 +156,32 @@ class ListParams(BaseModel):
     query: str = ""
     limit: int = 50
     offset: int = 0
+    # 空串 = 全部阶段。前端 chips 的"全部"传的就是空串。
+    stage: str = ""
+    # 排序白名单在 repo.SORTS；title 走自然序（service 层算）。
+    sort: str = "created_desc"
+    # 归档箱：默认不看归档，勾上才混进来。
+    include_archived: bool = False
+
+
+class ArchiveParams(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    archived: bool = True
+
+
+class DeletePreviewParams(BaseModel):
+    # 二选一：给了 ids 就按 id；否则按 query/stage 现算。
+    ids: list[str] = Field(default_factory=list)
+    query: str = ""
+    stage: str = ""
+
+
+class DeleteManyParams(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    query: str = ""
+    stage: str = ""
+    # 必填：调用方必须先看过预览的数字，删除数量对不上就拒绝（防"看着 3 条删了 300 条"）。
+    expect_total: int
 
 
 class IdParams(BaseModel):
@@ -598,6 +642,16 @@ class MergeStartParams(BaseModel):
     fps: float = 0.0
 
 
+class MergeRevealOutputParams(BaseModel):
+    """打开某次合并的成片目录。
+
+    **只收 merge_id，不收路径。** 授权来源是库里的 `wb_merge.output_path`，
+    不是页面递上来的字符串——否则这个接口就成了「打开任意目录」的原语。
+    """
+
+    merge_id: str = ""
+
+
 class PeaksParams(BaseModel):
     project_id: str = ""
     refresh: bool = False
@@ -715,6 +769,10 @@ class WorkbenchService:
         # picker 由桌面层注入（需要 webview 窗口句柄才能弹系统对话框）。
         # 调试模式下为 None，相关接口直接报 UNSUPPORTED。
         self.picker = picker
+        # 用户从系统对话框亲手选过的目录（进程内）。merge.start 接受「允许根之外」
+        # 的输出目录只有这一条通道：选过才算数，页面递一个字符串过来不算。
+        # 只活在内存里——重启即清，与「重启恢复默认」的产品决策一致。
+        self._picked_dirs: list[str] = []
         self._cookie_file: str | None = None
 
         self.cfg = WorkbenchConfig.load(config_path)
@@ -900,6 +958,9 @@ class WorkbenchService:
         r.add("library.list", self.library_list, ListParams)
         r.add("library.get", self.library_get, IdParams)
         r.add("library.delete", self.library_delete, IdParams)
+        r.add("library.archive", self.library_archive, ArchiveParams)
+        r.add("library.delete_preview", self.library_delete_preview, DeletePreviewParams)
+        r.add("library.delete_many", self.library_delete_many, DeleteManyParams)
         r.add("style.list", self.style_list)
         r.add("style.get", self.style_get, StyleKeyParams)
         r.add("style.save", self.style_save, StyleSaveParams)
@@ -985,6 +1046,7 @@ class WorkbenchService:
         r.add("merge.preflight", self.merge_preflight, MergePreflightParams)
         r.add("merge.start", self.merge_start, MergeStartParams)
         r.add("merge.list", self.merge_list)
+        r.add("merge.reveal_output", self.merge_reveal_output, MergeRevealOutputParams)
         r.add("publish.preview", self.publish_preview, PublishPreviewParams)
         r.add("publish.note", self.publish_note, PublishNoteParams)
         r.add("publish.list", self.publish_list, PublishListParams)
@@ -1059,7 +1121,7 @@ class WorkbenchService:
             "info": self.app_info(),
             "settings": self.cfg.public_view(),
             "library": self.library_list("", 50, 0),
-            "jobs": self.repo.job_list(limit=20),
+            "jobs": self.jobs.list(limit=20),
             "styles": self.style_list(),
         }
 
@@ -1151,15 +1213,75 @@ class WorkbenchService:
             )
         return row
 
-    def library_list(self, query: str = "", limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    def _library_facets(self, query: str, include_archived: bool) -> list[dict[str, Any]]:
+        """阶段计数（一次 GROUP BY），按 STAGE_ORDER 顺序；历史脏值追加在末尾。
+
+        facets 不带 stage 过滤——它回答"当前搜索下每个阶段各有多少"，
+        先按阶段筛就只剩一个桶。stage=="" 时 sum(count)==total 是不变量。
+        """
+        counts = {
+            str(row["stage"] or ""): int(row["count"])
+            for row in self.repo.project_stage_counts(query, include_archived=include_archived)
+        }
+        facets: list[dict[str, Any]] = []
+        for key in STAGE_ORDER:
+            facets.append({"key": key, "label": stage_label(key), "count": counts.get(key, 0)})
+        known = set(STAGE_ORDER)
+        for key in sorted(counts):
+            if key in known:
+                continue
+            facets.append({"key": key, "label": stage_label(key), "count": counts[key]})
+        return facets
+
+    def library_list(
+        self,
+        query: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        stage: str = "",
+        sort: str = "created_desc",
+        include_archived: bool = False,
+    ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
-        items = [self._decorate(p) for p in self.repo.project_list(query, limit, offset)]
+        query_text = str(query or "")
+        stage_key = str(stage or "").strip()
+        sort_key = str(sort or "created_desc")
+
+        total = self.repo.project_count(
+            query_text, stage=stage_key, include_archived=include_archived
+        )
+        if sort_key == "title":
+            # 自然序只能整段算：先拿轻量投影排序，再按排好的 id 取回整行（不是 N+1）。
+            projected = self.repo.project_title_rows(
+                query_text, stage=stage_key, include_archived=include_archived
+            )
+            projected.sort(
+                key=lambda row: (natural_key(str(row.get("title") or "")), str(row.get("id") or ""))
+            )
+            page = projected[offset : offset + limit]
+            projects = self.repo.project_get_many([str(row["id"]) for row in page])
+        else:
+            projects = self.repo.project_list(
+                query_text,
+                limit,
+                offset,
+                stage=stage_key,
+                include_archived=include_archived,
+                sort=sort_key,
+            )
+        items = [self._decorate(p) for p in projects]
+
+        visible_total = self.repo.project_count(query_text, stage=stage_key, include_archived=False)
+        all_total = self.repo.project_count(query_text, stage=stage_key, include_archived=True)
         return {
             "items": items,
-            "total": self.repo.project_count(query),
+            "total": total,
             "limit": limit,
             "offset": offset,
+            "facets": self._library_facets(query_text, include_archived),
+            "stage_labels": dict(STAGE_LABELS),
+            "archived_total": max(0, all_total - visible_total),
         }
 
     def library_get(self, id: str) -> dict[str, Any]:
@@ -1176,6 +1298,125 @@ class WorkbenchService:
         self.repo.project_delete(id)
         self.events.emit_now("library.changed", {"id": id, "op": "delete"})
         return {"id": id, "removed": True}
+
+    # ------------------------------------------------------- 素材库批量操作
+
+    def _library_target_ids(self, ids: list[str], query: str, stage: str) -> list[str]:
+        """批量操作的 id 集合：给了 ids 用它，否则按当前筛选现算（只算未归档的）。"""
+        wanted = [str(item) for item in (ids or [])]
+        if wanted:
+            return list(dict.fromkeys(wanted))
+        rows = self.repo.project_title_rows(str(query or ""), stage=str(stage or ""))
+        return [str(row["id"]) for row in rows]
+
+    def library_archive(self, ids: list[str] = [], archived: bool = True) -> dict[str, Any]:
+        """批量归档/取消归档。一次调用只发一次 `library.changed`。"""
+        wanted = [str(item) for item in (ids or [])]
+        if len(wanted) > MAX_BATCH_PROJECTS:
+            raise WBError("VALIDATION", f"一次最多归档 {MAX_BATCH_PROJECTS} 个项目")
+        result = self.repo.project_archive(wanted, bool(archived))
+        if result["changed"]:
+            skipped_ids = {str(item["id"]) for item in result["skipped"]}
+            self.events.emit_now(
+                "library.changed",
+                {
+                    "op": "archive",
+                    "archived": bool(archived),
+                    "ids": [pid for pid in dict.fromkeys(wanted) if pid not in skipped_ids],
+                },
+            )
+        return result
+
+    def library_delete_preview(
+        self, ids: list[str] = [], query: str = "", stage: str = ""
+    ) -> dict[str, Any]:
+        """删除前给用户看的数字：删几条、其中几条带草稿/切片/候选。"""
+        wanted = self._library_target_ids(ids, query, stage)
+        projects = self.repo.project_get_many(wanted)
+        counts = self.repo.project_related_counts([str(p["id"]) for p in projects])
+        return {
+            "total": len(projects),
+            "with_draft": counts["with_draft"],
+            "with_clip": counts["with_clip"],
+            "with_candidate": counts["with_candidate"],
+            "sample_titles": [str(p.get("title") or "") for p in projects[:5]],
+        }
+
+    def _write_removed_snapshot(self, projects: list[dict[str, Any]]) -> Path:
+        """把要删项目连同三张关联表落一份 json，返回文件路径。
+
+        这是删除前的**唯一退路**：候选片的 start/end 与文案是用户手调过的，
+        重建要花模型钱。写到项目自己的目录下（`<root_dir>/_removed/`），
+        删库不删盘，所以文件还在用户看得见的地方。
+        """
+        root = ""
+        for project in projects:
+            candidate = str(project.get("root_dir") or "")
+            if candidate:
+                root = candidate
+                break
+        base = Path(root or self.cfg.media_root) / "_removed"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = base / f"{stamp}.json"
+        index = 2
+        while target.exists():
+            target = base / f"{stamp}-{index}.json"
+            index += 1
+        ids = [str(p["id"]) for p in projects]
+        related = self.repo.project_related_rows(ids)
+        payload = {
+            "created_at": db_now_iso(),
+            "projects": projects,
+            "publish_note": related["publish_note"],
+            "clip": related["clip"],
+            "candidate": related["candidate"],
+        }
+        atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return target
+
+    def library_delete_many(
+        self,
+        ids: list[str] = [],
+        query: str = "",
+        stage: str = "",
+        expect_total: int = 0,
+    ) -> dict[str, Any]:
+        """批量删除：先对账、再留证、最后单事务删。
+
+        `expect_total` 是调用方在预览里看到的数字。对不上说明筛选结果在两次调用之间
+        变了（别的窗口刚导入/删除），这时**一条都不删**，让用户刷新后重看。
+        """
+        raw_ids = [str(item) for item in (ids or [])]
+        if len(raw_ids) > MAX_BATCH_PROJECTS:
+            raise WBError("VALIDATION", f"一次最多删除 {MAX_BATCH_PROJECTS} 个项目")
+        wanted = self._library_target_ids(raw_ids, query, stage)
+        if len(wanted) > MAX_BATCH_PROJECTS:
+            raise WBError(
+                "VALIDATION",
+                f"筛选结果超过 {MAX_BATCH_PROJECTS} 条，请先缩小范围",
+                f"当前筛选命中 {len(wanted)} 条",
+            )
+        projects = self.repo.project_get_many(wanted)
+        existing = {str(p["id"]) for p in projects}
+        skipped = [{"id": pid, "reason": "项目不存在"} for pid in wanted if pid not in existing]
+        if len(projects) != int(expect_total):
+            raise WBError(
+                "CONFLICT",
+                f"要删除的项目数已变化（预览 {int(expect_total)}，现在 {len(projects)}），请刷新后重试",
+            )
+        if not projects:
+            return {"removed": 0, "skipped": skipped, "snapshot_path": ""}
+        snapshot = self._write_removed_snapshot(projects)
+        removed = self.repo.project_delete_many([str(p["id"]) for p in projects])
+        self.events.emit_now(
+            "library.changed",
+            {
+                "op": "delete",
+                "ids": [str(p["id"]) for p in projects],
+                "removed": removed,
+            },
+        )
+        return {"removed": removed, "skipped": skipped, "snapshot_path": str(snapshot)}
 
     def style_list(self) -> list[dict[str, Any]]:
         rows = self.repo.style_list()
@@ -1464,33 +1705,41 @@ class WorkbenchService:
 
     # ------------------------------------------------------- 下载 / 导入
 
+    def _cookie_path(self) -> str:
+        """导出的明文 Cookie 落点：缓存目录，不是系统临时目录。
+
+        以前写在 ``tempfile.gettempdir()`` 下、固定名 ``video-workbench-cookies.txt``，
+        两个问题：① 那是**全机器共用**的目录，任何本机进程都能读到 SESSDATA；
+        ② ``close()`` 从来不删它，docstring 承诺的"退出即失效"从没兑现
+        （实测 ``$TEMP/video-workbench-cookies.txt`` 715 B、7 个键全非空）。
+        现在落到 ``cache_root``（跟着配置走，隔离夹具能把它关在临时目录里），
+        写入走 ``infra/cookies.write_netscape``（原子替换 + chmod 0600），
+        退出时 ``close()`` 删掉。
+        """
+        return str(Path(self.cfg.cache_root) / "cookies.bili.txt")
+
     def _cookies(self) -> str | None:
         """把共用的登录态导成 Netscape cookie 文件，路径交给 yt-dlp。
 
         裸登录失败时 yt-dlp 还能下 480P，但"用户明明登录了却只能看 480P"
         是最容易被当成 bug 报上来的事，所以有 cookie 就一定带上。
-        文件写在临时目录、进程存活期间复用，退出即失效——不往用户家里多塞一份凭据。
+
+        **这是明文凭据**：只挑 B站 的键（``cookies_mod.BILI_COOKIE_KEYS``）、
+        权限 0600、超 6 小时重新导（SESSDATA 会滚）、进程退出删除。
         """
-        if self._cookie_file and os.path.isfile(self._cookie_file):
-            return self._cookie_file
+        path = self._cookie_path()
+        if os.path.isfile(path) and not cookies_mod.is_stale(path):
+            self._cookie_file = path
+            return path
         try:
-            jar = dict(self._gateway.client().cookies or {})
+            client = self._gateway.client()
         except WBError:
             return None
-        if not jar.get("SESSDATA"):
+        written = cookies_mod.export_from_client(client, path)
+        if written is None:
             return None
-        lines = ["# Netscape HTTP Cookie File", ""]
-        for name, value in jar.items():
-            if not value:
-                continue
-            lines.append(
-                "	".join([".bilibili.com", "TRUE", "/", "FALSE", "0", name, str(value)])
-            )
-        path = os.path.join(tempfile.gettempdir(), "video-workbench-cookies.txt")
-        with open(path, "w", encoding="utf-8", newline=chr(10)) as fh:
-            fh.write(chr(10).join(lines) + chr(10))
-        self._cookie_file = path
-        return path
+        self._cookie_file = str(written)
+        return self._cookie_file
 
     @staticmethod
     def _probe(path: str | os.PathLike[str]) -> Any:
@@ -3285,7 +3534,6 @@ class WorkbenchService:
         draft = publisher_core.build_draft(
             project,
             record.get("content") or {},
-            max_summary_chars=self.cfg.publish.max_summary_chars,
             disclose=self.cfg.publish.disclose_ai,
         )
         draft["summary_id"] = record.get("id", "")
@@ -3319,10 +3567,8 @@ class WorkbenchService:
         draft = publisher_core.build_draft(
             project,
             record.get("content") or {},
-            max_summary_chars=self.cfg.publish.max_summary_chars,
             disclose=self.cfg.publish.disclose_ai,
             title=title,
-            summary_text=summary,
         )
         # 用户手改过正文时以他的为准：Delta 是他能看到的最终形态，
         # 拿 Markdown 覆盖回去等于把他的编辑丢掉。
@@ -3336,7 +3582,7 @@ class WorkbenchService:
         row = self.repo.publish_note_upsert(
             project_id,
             bvid=str(project.get("bvid") or ""),
-            aid=project.get("aid"),
+            aid=self._publish_aid(project),
             title=draft["title"],
             summary=draft["summary"],
             content=use_content,
@@ -3393,6 +3639,22 @@ class WorkbenchService:
         }
 
     def publish_delete(self, id: str = "") -> dict[str, Any]:
+        """只删本地草稿行。
+
+        守卫只看一件事：**这条记录有没有真的发出去过**。发出去的笔记在 B站 上
+        还挂着，删掉本地这一行只会让界面再也找不到它（撤回也撤回不了），
+        所以已发布/已撤回的记录必须留着。状态是 failed 的照删 —— 那行本来就
+        只说明"发失败了"，没有对应的线上对象。
+        """
+        row = self.repo.publish_get(id) if id else None
+        if not row:
+            raise WBError("NOT_FOUND", "草稿不存在")
+        status = str(row.get("status") or "draft")
+        if status in ("published", "withdrawn"):
+            raise WBError(
+                "CONFLICT",
+                "这条已经发到 B站 了，本地记录不能删；要下架请先「撤回笔记」",
+            )
         removed = self.repo.publish_delete(id)
         if not removed:
             raise WBError("NOT_FOUND", "草稿不存在")
@@ -3439,8 +3701,27 @@ class WorkbenchService:
                 detail=json.dumps(gates, ensure_ascii=False),
             )
 
-        if not row.get("aid"):
-            raise WBError("CONFLICT", "这条草稿没有 aid，定位不到视频")
+        # aid 缺了就地补：老草稿（2026-11-07 之前存的）这一列必然是空的，
+        # 而发布必须拿 aid 当 oid。补不到才报错，且报错里说清楚"哪个项目"。
+        aid = row.get("aid") or self._publish_aid(project)
+        if not aid:
+            raise WBError(
+                "CONFLICT",
+                "这个视频没有 aid（av 号），发不了笔记。"
+                "项目目录里也找不到 source.wb.json，重新下载这一集会把它补上。",
+            )
+        if aid != row.get("aid"):
+            # 顺手补回草稿行，下次发布不用再走一遍解析
+            self.repo.publish_note_upsert(
+                str(row.get("project_id") or ""),
+                bvid=str(row.get("bvid") or ""),
+                aid=aid,
+                title=str(row.get("title") or ""),
+                summary=str(row.get("summary") or ""),
+                content=str(row.get("content") or ""),
+                note_pk=str(row.get("id") or ""),
+            )
+            row = self.repo.publish_get(str(row.get("id") or "")) or row
 
         try:
             client = self._gateway.client()
@@ -3493,7 +3774,10 @@ class WorkbenchService:
         except WBError as exc:
             raise WBError(exc.code, f"登录态用不了：{exc.message}", detail=exc.detail) from exc
 
-        publisher_core.withdraw_note(client, aid=row.get("aid"), note_id=str(row["note_id"]))
+        aid = row.get("aid") or self._publish_aid(
+            self.repo.project_get(str(row.get("project_id", ""))) or {}
+        )
+        publisher_core.withdraw_note(client, aid=aid, note_id=str(row["note_id"]))
         self.repo.publish_set_status(id, "withdrawn")
         self.events.emit_now("publish.updated", {"id": id, "status": "withdrawn"})
         return {
@@ -3502,10 +3786,13 @@ class WorkbenchService:
         }
 
     def publish_regenerate(self, id: str, part: str = "all") -> dict[str, Any]:
-        """按当前项目的最新总结重算标题/摘要（**不落库**）。
+        """按当前项目的最新总结重算标题与正文（**不落库**）。
 
-        用户点它通常是因为"AI 给的标题不满意，但正文我想留着"——所以默认只换
-        标题与摘要，正文仍然用存下来的那份，除非他明确要整份重来。
+        摘要字段已下线（2026-11-07），所以这里只剩两种用法：
+
+        - `part="title"`：用户对正文满意、只想换标题 —— 标题取最新的，
+          正文沿用库里那一份（他可能已经手改过）。
+        - `part="all"`（或其它值）：标题与正文都按最新总结重写。
         """
         row = self.repo.publish_get(id)
         if not row:
@@ -3517,22 +3804,22 @@ class WorkbenchService:
         fresh = publisher_core.build_draft(
             project,
             record.get("content") or {},
-            max_summary_chars=self.cfg.publish.max_summary_chars,
             disclose=self.cfg.publish.disclose_ai,
         )
-        keep_content = str(row.get("content", "") or "")
+        # 库里那份可能还带着老版本写进去的注意事项（2026-11-07 之前落的行）。
+        # 读出来先洗一遍：否则「只换标题」会把那段又塞回预览，用户看着不对再点保存，
+        # 就等于把已经下线的字段偷偷复活了一次。
+        keep_content = publisher_core.strip_caution_lines(str(row.get("content", "") or ""))
         draft = fresh
-        if part != "all" and keep_content.strip():
-            # 只换指定的一小块，其余保留用户已经编辑过的版本
+        if part == "title" and keep_content.strip():
+            # 只换标题（拿最新总结的），正文保留用户已经编辑过的版本
             draft = dict(fresh)
-            draft["title"] = row.get("title") if part == "summary" else fresh["title"]
-            draft["summary"] = row.get("summary") if part == "title" else fresh["summary"]
+            draft["title"] = fresh["title"]
             text = publisher_core.plain_text(keep_content)
             draft["content"] = keep_content
             draft["content_text"] = text
             draft["chars"] = publisher_core.count_chars(text)
             draft["title_chars"] = len(str(draft["title"] or ""))
-            draft["summary_chars"] = len(str(draft["summary"] or ""))
         draft["note"] = publisher_core.row_view(row)
         draft["summary_id"] = record.get("id", "")
         draft["version"] = record.get("version", 1)
@@ -3579,14 +3866,57 @@ class WorkbenchService:
             note=note or {},
             published_note=published_note,
             last_publish_at=last_publish_at,
-            summary_limit=self.cfg.publish.max_summary_chars,
             min_interval_seconds=self.cfg.publish.min_interval_seconds,
             confirmed=confirmed,
             logged_in=logged_in,
         )
 
     def _publish_limits(self) -> dict[str, int]:
-        return {"title": publisher_core.TITLE_MAX, "summary": self.cfg.publish.max_summary_chars}
+        # 摘要字段已下线（2026-11-07）：界面上不再有摘要输入框，这里也不再回上限。
+        return {"title": publisher_core.TITLE_MAX}
+
+    def _publish_aid(self, project: dict[str, Any]) -> int | None:
+        """这个项目的 aid（av 号）。三条腿按代价从低到高走。
+
+        为什么必须在这里兜底：`wb_project.aid` 历史上**从来没被写过**——
+        下载 worker 组装项目字段时把解析器给的 aid 丢了（sidecar 里其实有）。
+        于是发布一律死在「这条草稿没有 aid，定位不到视频」，
+        而门禁只看 bvid，界面上三道门全绿，用户点下去只得到一句看不懂的报错。
+
+        1. 项目行里的 aid（新下载的项目会有）；
+        2. 项目目录下的 `source.wb.json`（老项目都有，里面写着 aid）；
+        3. 拿 bvid 现问一次解析器（最贵，只在上面两条都空时才走）。
+        """
+        project = project or {}
+        aid = project.get("aid")
+        if aid:
+            return int(aid)
+        root = str(project.get("root_dir") or "").strip()
+        if root:
+            try:
+                from video_workbench.core.layout import SIDECAR, read_sidecar
+
+                side = read_sidecar(Path(root) / SIDECAR)
+            except Exception:  # noqa: BLE001 - 读不到 sidecar 只说明这条路不通
+                side = {}
+            if side.get("aid"):
+                try:
+                    return int(side["aid"])
+                except (TypeError, ValueError):
+                    pass
+        bvid = str(project.get("bvid") or "").strip()
+        if not bvid:
+            return None
+        try:
+            resolution = self._resolver.resolve(bvid)
+            items = list(getattr(resolution, "items", []) or [])
+            found = getattr(items[0], "aid", None) if items else None
+        except Exception:  # noqa: BLE001 - 解析失败就把 None 交回，让上层报原话
+            return None
+        try:
+            return int(found) if found else None
+        except (TypeError, ValueError):
+            return None
 
     # ------------------------------------------------------- 切片候选（P3-01/02/03）
 
@@ -4450,7 +4780,11 @@ class WorkbenchService:
 
         done = set()
         if skip_exported:
-            for job in self.repo.job_list(limit=500, project_id=project_id):
+            try:
+                exported = self.repo.job_list(limit=500, project_id=project_id)
+            except RepoClosed:
+                raise exit_conflict_error() from None
+            for job in exported:
                 if job.get("type") != "clip.export" or job.get("status") != "succeeded":
                     continue
                 path = str((job.get("result") or {}).get("path") or "")
@@ -4557,7 +4891,11 @@ class WorkbenchService:
             if a.get("kind") == "export"
         }
         out = []
-        for job in self.repo.job_list(limit=200, project_id=project_id):
+        try:
+            export_jobs = self.repo.job_list(limit=200, project_id=project_id)
+        except RepoClosed:
+            raise exit_conflict_error() from None
+        for job in export_jobs:
             if job.get("type") != "clip.export":
                 continue
             result = job.get("result") or {}
@@ -4793,7 +5131,13 @@ class WorkbenchService:
         candidate_id = str(candidate.get("id") or "")
         best = ""
         best_at = ""
-        for job in self.repo.job_list(limit=300, project_id=str(candidate.get("project_id") or "")):
+        try:
+            export_jobs = self.repo.job_list(
+                limit=300, project_id=str(candidate.get("project_id") or "")
+            )
+        except RepoClosed:
+            raise exit_conflict_error() from None
+        for job in export_jobs:
             if str(job.get("type") or "") != "clip.export":
                 continue
             body = job.get("payload") or {}
@@ -5669,7 +6013,8 @@ class WorkbenchService:
         result = merger.preflight(self._ffmpeg, wanted, width=width, height=height, fps=fps)
         usable = [i for i in result["items"] if i.get("ok")]
         # 预检里的"能不能快速拼接"只对 quick 是把关；precise 存在的意义就是兜住不一致，
-        # 所以这里只拦"文件不够/读不出"，不拦"规格不一致"。
+        # 所以这里不拦"规格不一致"。但缺失/坏文件两种模式都拦——precise 也不能
+        # 静默把列表里的坏段丢掉，只合并剩下的可用子集。
         reason = merger.block_reason(result, "quick" if mode == "quick" else "precise")
         if len(usable) < 2 or reason:
             raise WBError(
@@ -5678,11 +6023,20 @@ class WorkbenchService:
                 json.dumps(result.get("differences") or [], ensure_ascii=False),
             )
 
-        directory = (
-            Path(out_dir)
-            if out_dir
-            else merger.default_output_dir(str(Path(usable[0]["path"]).parent), self.cfg.media_root)
-        )
+        # 留空 = 走默认目录（第一个可用源文件父目录下的 `merge/`），自动建；
+        # 非空 = 用户手选的目录，必须过 `_resolve_manual_out_dir` 的四条判据。
+        # 默认目录也建出来：`ensure_free_space` 会往上找已存在祖先，但 ffmpeg 自己
+        # 不会建父目录，不先建的话快速拼接会在收尾时才失败。
+        if str(out_dir or "").strip():
+            directory = self._resolve_manual_out_dir(out_dir)
+        else:
+            directory = merger.default_output_dir(
+                str(Path(usable[0]["path"]).parent), self.cfg.media_root
+            )
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise WBError("IO", "输出目录建不出来", str(exc)) from exc
         suffix = "_quick" if mode == "quick" else "_precise"
         name = out_name.strip() or merger.output_name(usable, suffix=suffix)
         if not name.lower().endswith(".mp4"):
@@ -5691,10 +6045,16 @@ class WorkbenchService:
 
         estimate = merger.estimate(result, mode)
         # 守卫在提交前：不足就直接拒，不留半成品。估不准是常态，宁可略高。
-        ensure_free_space(
-            str(directory),
-            int(estimate.get("size_bytes") or 0) * 2 + 2 * 1024**3,
-        )
+        # `OSError` 必须转成 `IO`：盘符不存在时 `shutil.disk_usage` 抛的是
+        # `FileNotFoundError`，不接住就会经 RPC 变成 INTERNAL，用户看到"内部错误"
+        # 却不知道该去改哪个路径。
+        try:
+            ensure_free_space(
+                str(directory),
+                int(estimate.get("size_bytes") or 0) * 2 + 2 * 1024**3,
+            )
+        except OSError as exc:
+            raise WBError("IO", "输出目录不可写", str(exc)) from exc
 
         record = self.repo.merge_insert(
             items=[i.get("path") for i in usable],
@@ -5745,6 +6105,46 @@ class WorkbenchService:
             row["name"] = Path(path).name if path else ""
             row["bytes"] = Path(path).stat().st_size if row["exists"] else 0
         return {"items": rows, "total": len(rows)}
+
+    def merge_reveal_output(self, merge_id: str = "") -> dict[str, Any]:
+        """打开某次合并的成片所在目录。
+
+        **只认 `merge_id`。** 授权来源是库里的 `wb_merge.output_path`，不是页面
+        递上来的路径——`fs.reveal` 的白名单是故意收紧的（防止页面探测本机目录），
+        这里不能为了一个"打开文件夹"就把它放开。
+
+        快速拼接失败转精确时成片名会变（`_precise` 后缀），但
+        `repo.merge_update` 同步更新了 `output_path`，所以这里读到的永远是
+        最终那一个。
+        """
+        wanted = str(merge_id or "").strip()
+        if not wanted:
+            raise WBError("VALIDATION", "要先有一次合并")
+        row = self.repo.merge_get(wanted)
+        if not row:
+            raise WBError("NOT_FOUND", "找不到这次合并记录", wanted)
+        output = str(row.get("output_path") or "").strip()
+        if not output:
+            raise WBError("NOT_FOUND", "这次合并没有记录成片路径", wanted)
+        target = Path(output)
+        if target.is_file():
+            folder = target.parent
+        elif target.parent.is_dir():
+            # 成片被用户挪走/删掉了：父目录还在就打开父目录，比报"找不到"有用
+            folder = target.parent
+        else:
+            raise WBError("NOT_FOUND", "成片和它所在的目录都不在了", str(target))
+        try:
+            if os.name == "nt":
+                os.startfile(str(folder))  # noqa: S606 - 本机 GUI 应用，路径来自库
+            else:  # pragma: no cover - 非目标平台
+                opener = shutil.which("open") or shutil.which("xdg-open")
+                if not opener:
+                    raise WBError("UNSUPPORTED", "这个系统没有可用的打开方式")
+                subprocess.Popen([opener, str(folder)])  # noqa: S603
+        except OSError as exc:
+            raise WBError("PROCESS_FAILED", "无法打开资源管理器", str(exc)) from exc
+        return {"path": str(folder)}
 
     def _merge_job(self, ctx: Any, payload: dict[str, Any]) -> dict[str, Any]:
         """合并本体：快速拼接优先，失败自动切精确重编码（只切一次），全程可取消。
@@ -5920,6 +6320,53 @@ class WorkbenchService:
         if self.cfg.source_path:
             roots.append(os.path.dirname(self.cfg.source_path))
         return [os.path.abspath(r) for r in roots if r]
+
+    def _remember_picked_dir(self, path: str | None) -> None:
+        """记下用户从系统对话框亲手选的目录（进程内，最多留 32 个）。
+
+        **为什么要有这份名单。** 输出目录可以落在工作区外（用户的素材盘），
+        但 `merge_start` 不能因此接受页面递来的任意字符串——那就成了一个
+        「往任意目录写文件」的原语。判据是「这个人真的在系统对话框里点过它」，
+        而对话框是桌面层弹的，只有服务端这边记得住。
+        """
+        raw = str(path or "").strip()
+        if not raw:
+            return
+        target = os.path.normcase(os.path.abspath(os.path.expandvars(os.path.expanduser(raw))))
+        if target in self._picked_dirs:
+            self._picked_dirs.remove(target)
+        self._picked_dirs.append(target)
+        del self._picked_dirs[:-32]
+
+    def _resolve_manual_out_dir(self, out_dir: str) -> Path:
+        """校验用户手选/手填的输出目录，返回规范化后的 Path。
+
+        四条判据缺一不可：绝对路径、不是设备命名空间伪路径、是已存在的目录、
+        在工作区内或本次进程里被对话框选过。失败一律 `VALIDATION`——这是用户
+        能自己改的错，不该报成内部错误。
+        """
+        from video_workbench.infra.files import is_within
+
+        raw = str(out_dir or "").strip()
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+        if not os.path.isabs(expanded):
+            raise WBError("VALIDATION", "输出目录要给绝对路径", raw)
+        if expanded.startswith("\\\\?\\") or expanded.startswith("\\\\.\\"):
+            raise WBError("VALIDATION", "输出目录不能是设备路径", raw)
+        target = os.path.abspath(expanded)
+        if os.path.isfile(target):
+            raise WBError("VALIDATION", "输出目录指向的是一个文件，不是文件夹", target)
+        if not os.path.isdir(target):
+            raise WBError("VALIDATION", "输出目录不存在，先在资源管理器里建好", target)
+        in_roots = any(is_within(root, target) for root in self._allowed_roots())
+        picked = os.path.normcase(target) in self._picked_dirs
+        if not (in_roots or picked):
+            raise WBError(
+                "VALIDATION",
+                "输出目录要在工作区内，或者用「选择输出目录」按钮选一次",
+                target,
+            )
+        return Path(target)
 
     def fs_reveal(self, path: str) -> dict[str, Any]:
         """在资源管理器里定位一个文件。
@@ -6125,10 +6572,17 @@ class WorkbenchService:
         return {"path": self.cfg.media_root, "exists": os.path.isdir(self.cfg.media_root)}
 
     def fs_pick(self, kind: str = "dir") -> dict[str, Any]:
-        """打开系统选择框。桌面层注入的 ``picker`` 才有实现。"""
+        """打开系统选择框。桌面层注入的 ``picker`` 才有实现。
+
+        选文件夹时顺手记一笔（见 `_remember_picked_dir`）：`merge.start` 之后
+        才敢接受这个目录当输出位置。选文件不记——那是素材，不是写盘目标。
+        """
         if self.picker is None:
             raise WBError("UNSUPPORTED", "当前运行方式不支持系统对话框")
-        picked = self.picker(str(kind))
+        normalized = str(kind or "").strip().lower() or "dir"
+        picked = self.picker(normalized)
+        if normalized == "dir":
+            self._remember_picked_dir(picked)
         return {"path": picked}
 
     # ------------------------------------------------------- 退出
@@ -6144,6 +6598,11 @@ class WorkbenchService:
         self.jobs.shutdown()
         self.events.close()
         self.repo.close()
+        # 明文 Cookie 不留在盘上：docstring 一直承诺"退出即失效"，
+        # 之前只做了前半句（写在临时目录），删除这一步从来没写过（2026-11-07）。
+        if self._cookie_file:
+            cookies_mod.remove(self._cookie_file)
+            self._cookie_file = None
 
 
 class _PickParams(BaseModel):

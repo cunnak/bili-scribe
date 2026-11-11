@@ -16,10 +16,8 @@ from video_workbench.core import publisher as publisher_core
 def _draft(**over):
     base = {
         "title": "一个标题",
-        "summary": "一句话摘要",
         "content_text": "正文正文正文",
         "title_chars": 4,
-        "summary_chars": 5,
         "chars": 6,
     }
     base.update(over)
@@ -130,6 +128,39 @@ def test_pace_gate_ok_after_interval():
     assert _by_id(report)["pace"]["status"] == "ok"
 
 
+def test_account_gate_reports_the_aid_it_would_need():
+    """aid（av 号）是发笔记的必填参数，但历史项目行里大多是空的。
+
+    这一项要如实标出来（ok=False 的 item），**不能**因此把整关判 blocked：
+    发布那一刻会自动补（sidecar → 视频信息），补得到就发得出去。
+    判 blocked 的后果是按钮永久灰着，而它其实发得出去。
+    """
+    without = _by_id(
+        publisher_core.gate_report(_draft(), project={"bvid": "BV1aa"}, logged_in=True)
+    )["account"]
+    texts = [item["text"] for item in without["items"]]
+    assert any("aid" in text for text in texts), texts
+    assert [item["ok"] for item in without["items"] if "aid" in item["text"]] == [False]
+    assert "自动补" in without["reason"], without["reason"]
+
+    with_aid = _by_id(
+        publisher_core.gate_report(_draft(), project={"bvid": "BV1aa", "aid": 4242}, logged_in=True)
+    )["account"]
+    assert any("4242" in item["text"] for item in with_aid["items"])
+    assert with_aid["reason"] == "", "aid 有了就不该再留那句话"
+
+
+def test_limits_carries_only_the_title_cap():
+    """limits 是界面渲染字数计数器的依据，只装"上限"这一类东西。
+
+    限流走 wait_seconds —— 两处都写会让界面不知道该信哪个（2026-11-07 统一）。
+    """
+    report = publisher_core.gate_report(_draft(), project={"bvid": "BV1aa"})
+    assert report["limits"] == {"title": publisher_core.TITLE_MAX}
+    assert "interval" not in report["limits"]
+    assert report["wait_seconds"] == 0
+
+
 def test_ready_requires_every_gate_ok():
     report = publisher_core.gate_report(
         _draft(), project={"bvid": "BV1aa"}, confirmed=True, logged_in=True
@@ -198,11 +229,7 @@ def test_publish_get_returns_gates(service):
     saved = _data(
         service,
         "publish.note",
-        {
-            "project_id": project["id"],
-            "title": draft["title"],
-            "summary": draft["summary"],
-        },
+        {"project_id": project["id"], "title": draft["title"]},
     )
     detail = _data(service, "publish.get", {"id": saved["note"]["id"]})
     assert [gate["id"] for gate in detail["gates"]["gates"]] == ["content", "account", "pace"]
@@ -213,44 +240,44 @@ def test_publish_get_returns_gates(service):
 def test_publish_list_carries_up_name_and_updated_at(service):
     project = _make_project(service)
     _seed_summary(service, project["id"])
-    _data(
-        service,
-        "publish.note",
-        {"project_id": project["id"], "title": "标题", "summary": "摘要"},
-    )
+    _data(service, "publish.note", {"project_id": project["id"], "title": "标题"})
     rows = _data(service, "publish.list", {})["notes"]
     assert rows and rows[0]["up_name"] == "测试UP"
     assert rows[0]["updated_at"], "列表要显示更新时间，updated_at 不能是空的"
 
 
-def test_regenerate_summary_keeps_edited_title(service):
+def test_regenerate_title_takes_fresh_title_and_keeps_body(service):
+    """`part="title"` 只重算标题，正文保留——正文是用户可能改过的东西。
+
+    摘要字段 2026-11-07 下线后，界面上的「重新生成」按钮走的就是这一支。
+    """
     project = _make_project(service)
     _seed_summary(service, project["id"])
     view = _data(service, "publish.preview", {"project_id": project["id"]})
     saved = _data(
         service,
         "publish.note",
-        {"project_id": project["id"], "title": "我改过的标题", "summary": "我改过的摘要"},
+        {"project_id": project["id"], "title": "我改过的标题"},
     )
     note_id = saved["note"]["id"]
-    again = _data(service, "publish.regenerate", {"id": note_id, "part": "summary"})
-    assert again["draft"]["title"] == "我改过的标题", "只换摘要时标题不该被打回原样"
-    assert again["draft"]["summary"] == view["summary"]
+    again = _data(service, "publish.regenerate", {"id": note_id, "part": "title"})
+    assert again["draft"]["title"] == view["title"], "重新生成要拿最新总结的标题"
     assert again["draft"]["content_text"], "正文要保留"
+    assert again["draft"]["summary"] == "", "摘要字段已下线，重算也不该冒出来"
 
 
-def test_regenerate_all_takes_fresh_title_and_summary(service):
+def test_regenerate_all_takes_fresh_title_and_body(service):
     project = _make_project(service)
     _seed_summary(service, project["id"])
     view = _data(service, "publish.preview", {"project_id": project["id"]})
     saved = _data(
         service,
         "publish.note",
-        {"project_id": project["id"], "title": "旧标题", "summary": "旧摘要"},
+        {"project_id": project["id"], "title": "旧标题"},
     )
     again = _data(service, "publish.regenerate", {"id": saved["note"]["id"], "part": "all"})
     assert again["draft"]["title"] == view["title"]
-    assert again["draft"]["summary"] == view["summary"]
+    assert again["draft"]["content_text"] == view["content_text"]
 
 
 def test_regenerate_on_missing_draft_is_not_found(service):
@@ -262,22 +289,14 @@ def test_gates_block_duplicate_after_publish_row(service):
     """同一 bvid 已有一份 published 记录时，新草稿的第三关要红。"""
     project = _make_project(service, bvid="BV1dup")
     _seed_summary(service, project["id"])
-    first = _data(
-        service,
-        "publish.note",
-        {"project_id": project["id"], "title": "标题", "summary": "摘要"},
-    )
+    first = _data(service, "publish.note", {"project_id": project["id"], "title": "标题"})
     # 直接改状态模拟"已经发出去了"，P4-05 会用真接口
     service.repo._exec(
         "UPDATE wb_publish_note SET status='published', note_id='note_x',"
         " published_at='2026-01-01T00:00:00Z' WHERE id=?",
         (first["note"]["id"],),
     )
-    second = _data(
-        service,
-        "publish.note",
-        {"project_id": project["id"], "title": "标题二", "summary": "摘要二"},
-    )
+    second = _data(service, "publish.note", {"project_id": project["id"], "title": "标题二"})
     detail = _data(service, "publish.get", {"id": second["note"]["id"]})
     pace = [gate for gate in detail["gates"]["gates"] if gate["id"] == "pace"][0]
     assert pace["status"] == "blocked"

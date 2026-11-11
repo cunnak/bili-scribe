@@ -600,10 +600,9 @@ class StorageConfig(_StorageConfig):
 
 @dataclass
 class PublishConfig(_PublishConfig):
-    # 摘要字数上限。默认 400（2026-11-02 按用户要求从 200 上调）。
-    # 方案书 §756 记的是「B站笔记接口限制 200 字」；这条到底能不能突破，只有真的
-    # 发一次超 200 字的摘要才知道（撞 12025 就是没突破）。撞了把这个值调回 200 即可，
-    # 渲染与门禁都从 limits 读，不需要改代码。
+    # 摘要字段已下线（2026-11-07）：笔记不再带摘要，界面上也没有这个输入框。
+    # 这个键留着只为兼容老配置文件（删掉会让 _fill 对未知键抛 VALIDATION），
+    # 不再参与任何计算，也不在设置页暴露。
     max_summary_chars: int = 400
     auto_comment: bool = True
 

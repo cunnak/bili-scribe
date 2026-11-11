@@ -65,6 +65,16 @@ def test_probe_item_missing_file_is_reported_not_raised(tmp_path: Path):
     assert item["error"] == "文件不在了"
 
 
+def test_probe_item_says_folder_instead_of_file_missing(tmp_path: Path):
+    # 用户用文件夹选择框选错时，列表里必须说"这是文件夹"，不能谎报文件丢了。
+    folder = tmp_path / "raw"
+    folder.mkdir()
+    item = merger.probe_item(FakeFFmpeg(), folder)
+    assert item["exists"] is False
+    assert item["ok"] is False
+    assert item["error"] == "这是一个文件夹，不是视频文件"
+
+
 def test_probe_item_carries_spec_fields(files):
     item = merger.probe_item(FakeFFmpeg(), files[0], origin="clip")
     assert item["ok"] is True

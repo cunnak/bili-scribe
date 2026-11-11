@@ -111,16 +111,22 @@ def main() -> int:
             f"{draft.get('summary_id')} v{draft.get('version')}",
         )
         check("标题默认取视频标题", draft["title"] == project["title"], draft["title"])
-        check("摘要默认取短评", draft["summary"] == CONTENT["comment_short"], draft["summary"])
+        # 摘要字段已下线（2026-11-07）：它不再进正文、不再进 payload，也不再是
+        # 一个能被手改的输入框。这里断的是"它确实不再被算出来"。
+        check("摘要字段已下线", draft["summary"] == "", json.dumps(draft.get("summary")))
         check(
-            "字数门禁与平台一致",
-            draft["limits"] == {"title": 80, "summary": 200},
+            "字数门禁只剩标题",
+            draft["limits"] == {"title": 80},
             json.dumps(draft["limits"]),
         )
         body = draft["markdown"]
         check("正文有要点分节", "## 要点" in body, body[:80])
         check("正文有时间轴分节", "## 时间轴" in body and "`00:12`" in body)
-        check("正文带注意提示", "注意：数字与专有名词建议回视频核对" in body)
+        check(
+            "正文不带注意提示",
+            "注意：数字与专有名词建议回视频核对" not in body,
+            body[:120],
+        )
         check("正文带 AI 披露", "本总结由 AI 依据视频字幕生成" in body)
         check("内部嘱咐没混进正文", "素材局限" not in body and "采集提示" not in body)
         check(
@@ -177,7 +183,11 @@ def main() -> int:
         )["note"]
         check("改标题落在同一行", edited["id"] == note["id"], f"{edited['id']} vs {note['id']}")
         check("改标题生效", edited["title"] == "我自己改的标题", edited["title"])
-        check("改摘要生效", edited["summary"] == "我自己改的摘要", edited["summary"])
+        check(
+            "改摘要不再生效（字段已下线）",
+            edited["summary"] == "",
+            json.dumps(edited.get("summary")),
+        )
         again = data_of(service, "publish.list", {"project_id": project["id"]})["notes"]
         check("重复保存不会堆积草稿", len(again) == 1, str(len(again)))
 
@@ -202,15 +212,17 @@ def main() -> int:
             "标题超过 80 字" in long_title["error"]["message"],
             long_title["error"]["message"],
         )
+        # 摘要没了，长摘要自然也不再被拒；参数还在只为兼容老前端，值被忽略。
         long_summary = call(
             service,
             "publish.note",
             {"project_id": project["id"], "title": "正常标题", "summary": "长" * 260},
         )
         check(
-            "超长摘要被拒",
-            long_summary.get("ok") is False
-            and "摘要超过 200 字" in long_summary["error"]["message"],
+            "长摘要参数被忽略而不是被拒",
+            long_summary.get("ok") is True
+            and ((long_summary.get("data") or {}).get("note") or {}).get("summary") == "",
+            json.dumps(long_summary.get("error"), ensure_ascii=False),
         )
         empty_body = call(service, "publish.note", {"project_id": project["id"], "content": "[]"})
         check(
@@ -236,13 +248,13 @@ def main() -> int:
         survived = data_of(service, "publish.get", {"id": note_id})["note"]
         check("重启后草稿还在", survived["id"] == note_id and survived["status"] == "draft")
 
-        # ---- 10) 撤回如实说 Phase 5 ----
+        # ---- 10) 撤回：Phase 5 已经接上了，草稿行撤回要说清楚"没发出去的东西撤不回来"
         withdraw = call(service, "publish.withdraw", {"id": note_id})
         check(
-            "撤回明确说 Phase 5 才接",
+            "草稿撤回说清楚只有已发布的才能撤",
             withdraw.get("ok") is False
-            and withdraw["error"]["code"] == "UNSUPPORTED"
-            and "Phase 5" in withdraw["error"]["message"],
+            and withdraw["error"]["code"] == "CONFLICT"
+            and "已发布" in withdraw["error"]["message"],
             json.dumps(withdraw.get("error"), ensure_ascii=False),
         )
 

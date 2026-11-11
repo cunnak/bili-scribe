@@ -106,6 +106,17 @@ def error_message_for_row(error: dict[str, Any] | None) -> str | None:
     return message + ERROR_DETAIL_JOINER + detail[:room]
 
 
+def exit_conflict_error() -> WBError:
+    """「程序正在退出」这句话的唯一 owner。
+
+    ``Repo`` 关库之后每个方法都抛 ``RepoClosed``。放它出去会被 ``rpc.dispatch``
+    兜成 ``INTERNAL``，而 ``INTERNAL`` 在 ``RETRYABLE_CODES`` 里 ⇒ 界面把一条注定
+    失败的调用标成「可重试」并真的去重试。退出竞态对用户是同一件事，所以
+    ``submit()`` 与四个只读/管理入口共用这个码这句话。
+    """
+    return WBError("CONFLICT", "程序正在退出，不再接受新任务")
+
+
 class JobContext:
     """handler 能看到的一切。刻意只暴露这四件事：
 
@@ -224,8 +235,9 @@ class JobManager:
     ) -> dict[str, Any]:
         if job_type not in self._handlers:
             raise WBError("UNSUPPORTED", f"未知任务类型：{job_type}")
-        if self._closed:
-            raise WBError("CONFLICT", "程序正在退出，不再接受新任务")
+        with self._lock:
+            if self._closed:
+                raise exit_conflict_error()
 
         job_id = new_id("job")
         body = payload or {}
@@ -234,19 +246,29 @@ class JobManager:
         except RepoClosed:
             # 与上面那个 _closed 检查是同一条竞态的另一半：检查通过之后、写库之前
             # 连接被关掉。对界面来说两种情况都是「程序正在退出」。
-            raise WBError("CONFLICT", "程序正在退出，不再接受新任务") from None
-        self._cancel[job_id] = threading.Event()
-        self.events.emit_now("job.created", {"job": job})
-
+            raise exit_conflict_error() from None
         thread = threading.Thread(
             target=self._run,
             args=(job_id, job_type, project_id, body),
             name=f"wb-job-{job_type}-{job_id[-4:]}",
             daemon=True,
         )
+        # 事件必须在 start() 之前发（界面靠它插第一行），但不能在 _lock 里发：
+        # emit_now 会走到 EventBus 自己的锁，两把锁叠在一起是白送的死锁面。
+        self.events.emit_now("job.created", {"job": job})
+
+        # 登记与 start() 必须在同一个临界区：shutdown() 也在这把锁里拍快照。
+        # 拆成两段就会出现「已登记、没起来」的线程被 join（RuntimeError），
+        # 或者「起来了、没登记」的线程从快照后面溜过去（跑到 repo.close() 之后）。
         with self._lock:
+            if self._closed:
+                # 上面那次检查之后、这里登记之前 shutdown() 已经开跑：这条线程
+                # 不在它的快照里，起来就没人 kill/join。库里那行留给下次启动的
+                # job_mark_interrupted() 收，不在这里加第二条清理路径。
+                raise exit_conflict_error()
+            self._cancel[job_id] = threading.Event()
             self._threads[job_id] = thread
-        thread.start()
+            thread.start()
         return job
 
     def submit_batch(
@@ -509,8 +531,26 @@ class JobManager:
                 continue
         return killed
 
+    def _read_job(self, job_id: str) -> dict[str, Any] | None:
+        """读一条任务记录。库已关（程序正在退出）时按「程序正在退出」报。
+
+        与 submit() 里那条 RepoClosed 是同一条竞态：关窗瞬间界面上还点得动，
+        该看到的是 CONFLICT（不可重试），而不是带 retryable=True 的 INTERNAL。
+        """
+        try:
+            return self.repo.job_get(job_id)
+        except RepoClosed:
+            raise exit_conflict_error() from None
+
+    def _write_job(self, job_id: str, **fields: Any) -> None:
+        """写一条任务记录，库已关时同上。"""
+        try:
+            self.repo.job_update(job_id, **fields)
+        except RepoClosed:
+            raise exit_conflict_error() from None
+
     def cancel(self, job_id: str) -> dict[str, Any]:
-        job = self.repo.job_get(job_id)
+        job = self._read_job(job_id)
         if not job:
             raise WBError("NOT_FOUND", "任务不存在")
         if job["status"] in ("succeeded", "failed", "canceled"):
@@ -519,8 +559,8 @@ class JobManager:
         if event is not None:
             event.set()
         self._kill_processes(job_id)
-        self.repo.job_update(job_id, cancel_requested=True)
-        return self.repo.job_get(job_id) or job
+        self._write_job(job_id, cancel_requested=True)
+        return self._read_job(job_id) or job
 
     def retry(self, job_id: str) -> dict[str, Any]:
         """重试 = 用同样的类型和 payload 起一个新任务。
@@ -528,25 +568,28 @@ class JobManager:
         不复活原记录：历史失败记录本身有价值（同一素材反复失败说明素材有问题），
         覆盖掉就看不到这个信号了。
         """
-        job = self.repo.job_get(job_id)
+        job = self._read_job(job_id)
         if not job:
             raise WBError("NOT_FOUND", "任务不存在")
         if job["status"] in ("queued", "running"):
             raise WBError("CONFLICT", "任务正在进行中，不能重试")
         new_job = self.submit(job["type"], job.get("project_id"), job.get("payload") or {})
-        self.repo.job_update(new_job["id"], attempts=int(job.get("attempts") or 0) + 1)
+        self._write_job(new_job["id"], attempts=int(job.get("attempts") or 0) + 1)
         # 回读再返回：submit 的快照是"加 attempt 之前"的，直接把旧字典交出去，
         # 界面会显示"第 0 次重试"，而库里其实是第 1 次。
-        return self.repo.job_get(new_job["id"]) or new_job
+        return self._read_job(new_job["id"]) or new_job
 
     def get(self, job_id: str) -> dict[str, Any]:
-        job = self.repo.job_get(job_id)
+        job = self._read_job(job_id)
         if not job:
             raise WBError("NOT_FOUND", "任务不存在")
         return job
 
     def list(self, statuses: list[str] | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        return self.repo.job_list(statuses, limit)
+        try:
+            return self.repo.job_list(statuses, limit)
+        except RepoClosed:
+            raise exit_conflict_error() from None
 
     def shutdown(self) -> None:
         """停止接受新任务，并给在跑的任务一点时间收尾。
@@ -555,15 +598,28 @@ class JobManager:
         要等子进程出口才醒——而子进程正是那个要跑十分钟的东西。所以这里和 `cancel()`
         一样要把子进程杀掉，否则下面那个 join 每次都会超时，连接随后被关掉，
         收尾那一腿就撞上「closed database」。
+
+        `_closed` / `_cancel` / `_threads` 三处写入全在 `self._lock` 里（`submit()`
+        也在同一把锁里登记并 `start()`），所以这里拍快照既不会撞上「dictionary changed
+        size during iteration」，也捞不到一条还没 start 的线程（那会让 `join()` 抛
+        `RuntimeError`）。杀进程与 join 一律放在锁外：join 要等 handler 收尾，握着锁等
+        它就会把并发进来的 `submit()` 一起卡死。
         """
-        self._closed = True
         with self._lock:
-            for event in self._cancel.values():
-                event.set()
-            threads = list(self._threads.values())
+            self._closed = True
+            events = list(self._cancel.values())
             job_ids = list(self._threads)
+            threads = list(self._threads.values())
+        for event in events:
+            event.set()
         for job_id in job_ids:
             self._kill_processes(job_id)
         # 给 handler 一点时间走完 except/finally，避免退出时把库写坏
         for thread in threads:
-            thread.join(timeout=2.0)
+            try:
+                thread.join(timeout=2.0)
+            except RuntimeError:
+                # 理论上到不了这里（登记与 start() 是同一个临界区）。留这一层是因为
+                # shutdown() 在退出路径上，它自己抛异常会把 events.close() /
+                # repo.close() 一起跳过——那正是这条缺陷最初的形态。
+                continue

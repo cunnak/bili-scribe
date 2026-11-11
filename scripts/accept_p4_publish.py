@@ -91,17 +91,12 @@ def main() -> int:
     preview = call(service, "publish.preview", {"project_id": pid})
     draft = preview.get("draft") or preview  # preview 直接返回草稿本体
     check(
-        "预览给出标题/摘要/正文",
-        bool(draft.get("title"))
-        and bool(draft.get("summary"))
-        and bool((draft.get("content_text") or "").strip()),
+        "预览给出标题与正文",
+        bool(draft.get("title")) and bool((draft.get("content_text") or "").strip()),
         f"title={len(draft.get('title') or '')}字 body={len((draft.get('content_text') or ''))}字",
     )
-    check(
-        "摘要不超过 200 字",
-        len(draft.get("summary") or "") <= 200,
-        f"{len(draft.get('summary') or '')} 字",
-    )
+    # 摘要字段已下线（2026-11-07）：不再是预览的一部分，也不再发到 B站。
+    check("摘要不再出现在预览里", draft.get("summary") == "", json.dumps(draft.get("summary")))
 
     # ── 2. 门禁三关都在，未确认时不能发
     gates = preview.get("gates") or {}
@@ -155,28 +150,37 @@ def main() -> int:
     check("列表带更新时间", bool(hit.get("updated_at")), f"updated_at={hit.get('updated_at')}")
     check("列表带状态", hit.get("status") == "draft", f"status={hit.get('status')}")
 
-    # ── 4. 重新生成只换指定部分
-    before_summary = str(saved.get("summary") or "")
-    regen = call(service, "publish.regenerate", {"id": note.get("id"), "part": "summary"})
-    fresh = regen.get("draft") or {}
-    check("只重算摘要时标题保留手改值", fresh.get("title") == mine, f"title={fresh.get('title')}")
+    # ── 4. 重新生成只换指定部分（摘要下线后只剩 title / all 两种）
+    regen_title = call(service, "publish.regenerate", {"id": note.get("id"), "part": "title"})
+    fresh = regen_title.get("draft") or {}
+    check("只重算标题时标题被换掉", fresh.get("title") != mine, f"title={fresh.get('title')}")
     check(
-        "只重算摘要时正文不被清空",
+        "只重算标题时正文不被清空",
         bool((fresh.get("content_text") or "").strip()),
         f"body={len(fresh.get('content_text') or '')}字",
     )
-    check("重算摘要带门禁状态", bool((regen.get("gates") or {}).get("gates")), "gates 有值")
     check(
-        "重算摘要不写库（草稿仍是旧摘要）",
-        (call(service, "publish.get", {"id": note.get("id")}).get("note") or {}).get("summary")
-        == before_summary,
-        "get 回来的摘要未变",
+        "只重算标题时正文就是库里那一份",
+        (fresh.get("content_text") or "") == (saved.get("content_text") or ""),
+        "正文逐字相同",
     )
-    regen_title = call(service, "publish.regenerate", {"id": note.get("id"), "part": "title"})
+    check("重算带门禁状态", bool((regen_title.get("gates") or {}).get("gates")), "gates 有值")
     check(
-        "只重算标题时摘要保留",
-        (regen_title.get("draft") or {}).get("summary") == before_summary,
-        "摘要未变",
+        "重算不写库（草稿仍是旧标题）",
+        (call(service, "publish.get", {"id": note.get("id")}).get("note") or {}).get("title")
+        == mine,
+        "get 回来的标题未变",
+    )
+    regen_all = call(service, "publish.regenerate", {"id": note.get("id"), "part": "all"})
+    check(
+        "全量重算会把标题换掉",
+        (regen_all.get("draft") or {}).get("title") != mine,
+        f"title={(regen_all.get('draft') or {}).get('title')}",
+    )
+    check(
+        "重算出来的正文也不带注意提示",
+        "素材为机器转录" not in ((regen_all.get("draft") or {}).get("content_text") or ""),
+        "正文干净",
     )
 
     # ── 5. 勾了确认 + 已登录：三关全绿

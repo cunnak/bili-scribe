@@ -15,7 +15,10 @@
 （``lines`` 数组）发出去。攒批**不丢行**：窗口到点全发，关窗时 flush。
 
 **永不抛异常。** 事件是旁路：推送失败（窗口已关、JS 报错）不该让
-正在跑的任务跟着失败。所有 sink 调用都用 try/except 包住。
+正在跑的任务跟着失败。所有 sink 调用都用 try/except 包住。但"不抛"不等于
+"不留痕"：关窗（``close()``）之后事件只能丢掉，第一条丢弃记一条 warning，之后只
+累加计数（逐条记会把日志刷爆——关窗后每个事件都会走这条路）。还没装 sink 的总线
+（CLI / 无界面跑 / 测试）事件本来就没人要，那不算丢，不留痕。
 """
 
 from __future__ import annotations
@@ -51,6 +54,9 @@ class EventBus:
         self._sink: Sink | None = None
         self._last: dict[str, float] = {}
         self._pending: dict[str, tuple[str, dict[str, Any]]] = {}
+        # 关窗后没有 sink 时事件只能丢；记一条 warning 和累计丢弃数，不逐条刷屏
+        self._drop_warned = False
+        self._dropped = 0
         self._closed = False
         self._thread: threading.Thread | None = None
 
@@ -88,9 +94,27 @@ class EventBus:
 
     # ---------------------------------------------------------- 发送
 
+    def _note_drop(self, name: str) -> None:
+        """事件没人接时只能丢，但**不能连一条痕迹都不留**。
+
+        只在关窗之后（``close()`` 把 ``_closed`` 置真）记：那时每个事件都会走到这里，
+        逐条记会把日志刷爆（一次任务收尾几十条），所以只记第一条并说明后续不再逐条记，
+        条数继续累计在 ``_dropped`` 里。
+        还没装 sink 的总线（CLI / 无界面跑 / 测试）事件本来就没人要，那不算丢、不留痕
+        ——否则无界面跑一次任务就能把界面日志撑起来。
+        """
+        with self._lock:
+            self._dropped += 1
+            first = self._closed and not self._drop_warned
+            if first:
+                self._drop_warned = True
+        if first:
+            _LOGGER.warning("事件没有 sink 可送，丢弃: %s（之后只累计条数，不再逐条记）", name)
+
     def _deliver(self, name: str, payload: dict[str, Any]) -> None:
         sink = self._sink
         if sink is None:
+            self._note_drop(name)
             return
         body = json.dumps(payload, ensure_ascii=False)
         for attempt in (1, 2):
@@ -186,6 +210,18 @@ class EventBus:
         # 关之前把攒着的日志发掉：最后那几十行往往正是失败原因
         try:
             self.flush_logs()
+        except Exception:
+            pass
+        # 再把节流攒下的最后一批事件送出去：_flush_due 只在 _loop 里跑，
+        # 而 _loop 见到 _closed 就退，所以不在这里排空，最后那条永远送不到
+        # （2026-11-01「任务跑完了界面还停在 97%」就是这么丢的）。
+        # 关窗时不再节流：攒着的每一条都要送到。
+        try:
+            with self._lock:
+                pending = list(self._pending.values())
+                self._pending.clear()
+            for name, payload in pending:
+                self._deliver(name, payload)
         except Exception:
             pass
         self._closed = True

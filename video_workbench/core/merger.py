@@ -64,7 +64,9 @@ def probe_item(ffmpeg: Any, path: str | Path, *, origin: str = "") -> dict[str, 
         "error": "",
     }
     if not item["exists"]:
-        item["error"] = "文件不在了"
+        # 文件夹不是"文件没了"：用系统选择框选错（或手填了目录）时，
+        # 用户需要看到的是"这是文件夹"，而不是一个查不到的视频文件。
+        item["error"] = "这是一个文件夹，不是视频文件" if target.is_dir() else "文件不在了"
         return item
     try:
         info = ffmpeg.probe(target)
@@ -325,12 +327,12 @@ def block_reason(result: dict[str, Any], mode: str = "quick") -> str:
 
     `quick` 的三条门槛分开写：条数不够、文件缺失、规格不一致——三种原因的处置办法
     完全不同（加文件 / 找回文件 / 换精确模式），不能合并成一句「不能合并」。
+
+    **缺失/坏文件对两种模式都拦。** 精确重编码能兜住规格不一致，兜不住"文件不在"；
+    以前这里只拦 quick，于是 precise 会静默只合并可用的子集，用户少了几段却不知道。
+    条数不够仍只在这里拦 quick，precise 的条数由 service 单独判——这样保留
+    `block_reason({"count": 0}, "precise") == ""` 的既有语义。
     """
-    if mode != "quick":
-        return ""
-    count = int(result.get("count") or 0)
-    if count < 2:
-        return "至少要两个可用片段才能拼接"
     # `missing` / `broken` 是行列表（界面要显示是哪几个），不是计数
     missing = result.get("missing") or []
     if missing:
@@ -338,6 +340,11 @@ def block_reason(result: dict[str, Any], mode: str = "quick") -> str:
     broken = result.get("broken") or []
     if broken:
         return f"有 {len(broken)} 个文件读不出视频流，先移出列表"
+    if mode != "quick":
+        return ""
+    count = int(result.get("count") or 0)
+    if count < 2:
+        return "至少要两个可用片段才能拼接"
     if result.get("differences"):
         return difference_text(result)
     return ""
