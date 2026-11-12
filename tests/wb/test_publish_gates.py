@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import json
+
 from video_workbench.core import publisher as publisher_core
 
 # ---------------------------------------------------------------- 纯函数
@@ -56,6 +58,19 @@ def test_content_gate_blocks_when_title_over_limit():
     gate = _by_id(report)["content"]
     assert gate["status"] == "blocked"
     assert "80" in gate["reason"]
+
+
+def test_content_gate_blocks_when_form_body_exceeds_limit():
+    huge = "中" * 12_000
+    report = publisher_core.gate_report(
+        _draft(title="标题", content=json.dumps([{"insert": huge}]), content_text=huge),
+        project={"bvid": "BV1xx"},
+        confirmed=True,
+        logged_in=True,
+    )
+    gate = _by_id(report)["content"]
+    assert gate["status"] == "blocked"
+    assert "20000" in gate["reason"] and "字节" in gate["reason"]
 
 
 def test_account_gate_blocks_without_bvid():

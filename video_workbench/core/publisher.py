@@ -13,8 +13,9 @@
   未知属性很敏感（多塞一个 header 可能直接 -400），这套保守映射已经被真站验过。
 
 字数口径（界面上要显示，所以必须写清楚）：
-- **正文字数** = Delta 里所有 insert 文本去掉空白后的字符数。B站 的限制按字符算，
-  而中文正文里的换行与缩进对限制没有贡献，算进去只会让人以为超了。
+- **正文字数** = Delta 里所有 insert 文本去掉空白后的字符数，这是界面计数口径。
+- **正文请求体**：B站 x/note/add 按表单编码后的请求体字节数校验，约 20000 B 上限；
+  中文经 urlencode 后每字约 9 字节，逐行 op 的 Delta 很容易把请求体顶过线。
 - 标题 ≤ 80：接口硬限制，超了发不出去，所以在**存草稿之前**就报出来。
 
 **摘要字段已下线（2026-11-07）**：笔记接口的 `summary` 会被 `auto_comment`
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlencode
 
 from bili_scribe.core import composer
 from bili_scribe.core.summarizer import Summary
@@ -41,6 +43,9 @@ from bili_scribe.infra.endpoints import (
 from ..app.errors import WBError
 
 TITLE_MAX = 80
+# B站 x/note/add 的实测表单请求体上限约 20000 B；留 200 B 余量，
+# 避免 csrf/cookie 长度差异把刚好卡线的草稿再送进 79501。
+NOTE_BODY_MAX_BYTES = 19_800
 DISCLOSURE = "（本总结由 AI 依据视频字幕生成，发布前请自己过一遍）"
 
 # 方案书 §5.9.3 第 3 条：距上次发布 ≥ 60s。写成常量是因为界面上要显示
@@ -128,6 +133,59 @@ def plain_text(delta_json: str) -> str:
         if isinstance(op, dict) and isinstance(op.get("insert"), str):
             out.append(op["insert"])
     return "".join(out)
+
+
+def compact_delta(delta_json: str) -> str:
+    """把相邻且 attributes 相同的文本 op 合并，减少重复的 Delta 包装。
+
+    B站 笔记接口按 form-urlencoded 后的请求体大小校验。逐行一个
+    ``{"insert": "\\n"}`` 的 Delta 会产生大量重复的 JSON 键与百分号转义；
+    合并后纯文本与格式属性完全不变，只是请求体明显变小。
+
+    非法 JSON 或非 list 输入原样返回，保持老草稿的降级路径不变。
+    """
+    try:
+        ops = json.loads(delta_json) if delta_json else []
+    except (TypeError, ValueError):
+        return delta_json or ""
+    if not isinstance(ops, list):
+        return delta_json or ""
+
+    merged: list[Any] = []
+    for op in ops:
+        if not isinstance(op, dict):
+            merged.append(op)
+            continue
+        insert = op.get("insert")
+        attrs = op.get("attributes") or {}
+        if (
+            merged
+            and isinstance(merged[-1], dict)
+            and isinstance(insert, str)
+            and isinstance(merged[-1].get("insert"), str)
+            and (merged[-1].get("attributes") or {}) == attrs
+        ):
+            merged[-1]["insert"] = str(merged[-1]["insert"]) + insert
+            continue
+        item = dict(op)
+        if attrs:
+            item["attributes"] = attrs
+        else:
+            item.pop("attributes", None)
+        merged.append(item)
+    return json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
+
+
+def form_body_bytes(payload: dict[str, Any], csrf: str = "") -> int:
+    """按 ``BiliClient.post_form`` 的编码方式计算请求体字节数。
+
+    ``csrf`` 是真实发布时 ``post_form`` 会补上的 32 字符 token；门禁阶段
+    用占位串计算，真实发送前再用客户端的 csrf 重算，二者只差长度相同的 token。
+    """
+    data = dict(payload or {})
+    if csrf and "csrf" not in data:
+        data["csrf"] = csrf
+    return len(urlencode(data, encoding="utf-8", errors="strict").encode("utf-8"))
 
 
 def count_chars(text: str) -> int:
@@ -391,10 +449,31 @@ def gate_report(
             "ok": bool(title) and len(title) <= TITLE_MAX,
         }
     )
-    items.append({"text": f"正文 {len(''.join(body.split()))} 字", "ok": bool(body)})
+    content_delta = str(draft.get("content") or "")
+    if not content_delta and body:
+        # 单测/老调用方可能只给 content_text；按同一份正文估算请求体，
+        # 真实服务路径始终会带完整 content。
+        content_delta = json.dumps([{"insert": body}], ensure_ascii=False)
+    body_bytes = form_body_bytes(
+        note_payload(
+            {"aid": draft.get("aid"), "title": draft.get("title"), "content": content_delta}
+        ),
+        csrf="x" * 32,
+    )
+    body_bytes_ok = bool(body) and body_bytes <= NOTE_BODY_MAX_BYTES
+    items.append(
+        {
+            "text": f"正文 {len(''.join(body.split()))} 字 / 表单编码 {body_bytes} 字节",
+            "ok": body_bytes_ok,
+        }
+    )
     items.append({"text": "已阅读并确认标题与正文", "ok": bool(confirmed)})
-    # 只有标题这一项会「超限」，正文那一项是"有没有内容"，不参与 over。
+    # 标题和请求体是两个独立的「超限」；正文空只算空，不算「超限」。
     over = [items[0]["text"]] if not items[0]["ok"] else []
+    if body and body_bytes > NOTE_BODY_MAX_BYTES:
+        over.append(
+            f"正文 {body_bytes} 字节（B站 约 20000 字节上限，本机安全线 {NOTE_BODY_MAX_BYTES} 字节）"
+        )
     if not title or not body:
         content_status, content_reason = "blocked", "标题或正文是空的"
     elif over:
@@ -532,8 +611,8 @@ def gate_report(
 # ------------------------------------------------------------------ 发布
 
 NOTE_TITLE_MAX = TITLE_MAX
-# 摘要字段已下线（2026-11-07）：WB 不再往笔记里塞摘要，payload 里那个键固定发空串。
-# 平台侧对摘要的口径是「约 200 字」，这个常量留着只作参考，不参与任何判定。
+# 摘要字段已下线（2026-11-07）：payload 的 summary 位发正文开头（note_preview），
+# 不是用户可编辑的摘要。平台侧口径约 200 字；这个常量只作历史参考，不参与判定。
 NOTE_SUMMARY_MAX = 200
 NOTE_ATTEMPTS = 3
 
@@ -552,6 +631,7 @@ _NOTE_HINTS = {
     # 这两个都不能靠重试解决，也不能自动覆盖——重复笔记一旦被平台判成刷量更麻烦。
     79508: "这个视频下已经有你创建的笔记了。先去 B站 删掉旧的那条，再回来发；本应用不会覆盖它。",
     79513: "这个视频不支持笔记功能。可以改成发一条普通评论（本阶段还没做这个入口）。",
+    79501: "笔记正文超过平台约 20000 字节的表单请求体上限。先删减正文再发；这不是登录态问题，重试不会变好。",
 }
 
 
@@ -603,7 +683,7 @@ def record_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return view
 
 
-NOTE_PREVIEW_CHARS = 200
+NOTE_PREVIEW_CHARS = 80
 
 
 def note_preview(content_delta: str, limit: int = NOTE_PREVIEW_CHARS) -> str:
@@ -616,8 +696,8 @@ def note_preview(content_delta: str, limit: int = NOTE_PREVIEW_CHARS) -> str:
     而且这类失败本应用拿不到真站回执去验证，赌不起。
     发老草稿里那份的风险：那是用户已经在界面上删掉的摘要，发出去等于没删。
 
-    两头都躲开的做法是**从正文现算**：正文就是用户确认过的那一份，前 200 字
-    天然是它的开头，既不为空，也不多出任何用户没见过的话。
+    真实客户端 BiliPai 的 `VideoNoteContentCodec.encode` 把 summary 截到 80 字，
+    WB 跟着 80 走：既不为空、不多出用户没见过的话，也少占表单请求体。
     """
     text = " ".join(plain_text(content_delta).split())
     return text[:limit]
@@ -640,7 +720,7 @@ def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
     # 只要这里还认它，发老草稿时就会把它塞进 payload 并把 auto_comment 打开，
     # 等于用户明明已经把摘要删掉了，发出去还是多一条评论——库里没清零路径，
     # 只能在出口这一处不认它（一处改动覆盖所有老行，不需要数据迁移）。
-    content = strip_caution_lines(str(draft.get("content") or ""))
+    content = compact_delta(strip_caution_lines(str(draft.get("content") or "")))
     return {
         "oid": draft.get("aid"),
         "oid_type": 0,
@@ -652,6 +732,9 @@ def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
         # auto_comment 恒 0 ⇒ 这段预览只出现在笔记列表的预览位，不会被发成评论。
         "summary": note_preview(content),
         "content": content,
+        # 真实客户端（BiliPai VideoNoteRepository）会带 cont_len；补上它，
+        # 让平台按与真实客户端一致的形状计算正文长度。
+        "cont_len": len(plain_text(content)),
         "cls": 1,
         "from": "save",
         "platform": "web",
@@ -681,6 +764,12 @@ def post_note(
         raise WBError("VALIDATION", "笔记正文是空的，先出一版总结")
     if not payload.get("oid"):
         raise WBError("CONFLICT", "这条草稿没有 aid，定位不到视频")
+    body_bytes = form_body_bytes(payload, csrf=str(getattr(client, "csrf", "") or ""))
+    if body_bytes > NOTE_BODY_MAX_BYTES:
+        raise WBError(
+            "VALIDATION",
+            f"笔记正文超过 B站接口上限（约 20000 字节，当前 {body_bytes} 字节），请删减正文后再发",
+        )
 
     last: BiliError | None = None
     for index in range(max(1, attempts)):
