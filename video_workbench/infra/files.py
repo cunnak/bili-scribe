@@ -168,6 +168,29 @@ def ensure_free_space(path: str | os.PathLike, need_bytes: int) -> dict[str, int
     return {"free": int(usage.free), "need": need}
 
 
+def disk_usage(path: str | os.PathLike) -> dict[str, int] | None:
+    """素材盘还剩多少——给状态条那一格用（它今天恒显示「磁盘 —」）。
+
+    与 ensure_free_space 共用同一套「目录还没建出来就往上找已存在祖先」的探测
+    逻辑，但语义完全不同：那条是写盘前的守卫，不足就抛 DISK_FULL；这条只读数，
+    任何探测失败一律返回 None。
+
+    为什么不抛：状态条是首屏的一部分，盘符拔了、网络盘断线、目录权限被改，
+    都不该让整个 app.info 挂掉——那样界面连「哪里出错」都显示不出来。
+    None 在界面上画成「磁盘 ?」，用户看得出是「读不到」而不是「没空间」。
+    """
+    try:
+        probe = Path(path)
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        usage = shutil.disk_usage(str(probe))
+    except (OSError, ValueError):
+        # OSError 覆盖 PermissionError / FileNotFoundError / 盘符不存在；
+        # ValueError 是 Windows 上非法盘符会抛的那种。
+        return None
+    return {"free_bytes": int(usage.free), "total_bytes": int(usage.total)}
+
+
 def has_free_space(path: str | os.PathLike, need_bytes: int) -> bool:
     try:
         ensure_free_space(path, need_bytes)

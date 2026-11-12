@@ -88,6 +88,7 @@
       } catch (err) {
         /* 宿主禁止改 hash 也无所谓，下面直接渲染 */
       }
+      lastHash = next;
       renderRoute({ route: route, params: params || {}, hash: next });
     },
 
@@ -116,6 +117,7 @@
           /* 渲染不依赖地址 */
         }
       }
+      lastHash = next;
       renderRoute({ route: route, params: params || {}, hash: next });
     },
 
@@ -132,10 +134,15 @@
       if (!location.hash || location.hash.indexOf("#/") !== 0) {
         location.hash = "#/" + (fallback || order[0] || "library");
         // 某些宿主不会因为设置 hash 触发 hashchange（同一文档内已存在时），
-        // 所以这里补一次 resolve；重复 resolve 由 current 判断消化。
-        resolve();
+        // 所以这里补一次 resolve。这时地址是我们刚写的，先把它记下来，
+        // 免得随后真派发的那个 hashchange 再渲染一遍。
+        lastHash = location.hash;
+        renderRoute(router.parse(location.hash));
       } else {
-        resolve();
+        // 地址本来就带着 #/xxx（老链接、验收脚本设的 hash）：这一次必须渲染。
+        // 直接渲染而不是走 resolve —— resolve 的守卫会把这个 hash 当成
+        // "我们自己刚写的"，首屏就永远画不出来（实测：默认落在素材库那条直接空视图）。
+        renderRoute(router.parse(location.hash));
       }
     },
 
@@ -148,8 +155,15 @@
   });
 
   var started = false;
+  // 我们自己刚写进地址栏的那个 hash。go() / replace() 已经直接渲染过一次，
+  // 紧接着宿主派发的 hashchange 会拿同一个 hash 再渲染一次 —— 表现为
+  // 同一页 render 跑两遍、上一页的 destroy 也跑两遍（实测 destroy 计数 2）。
+  // 只有"地址不是我们写的那一个"才需要重渲染，也就是用户手改地址栏、
+  // 按后退键、以及验收脚本里直接设 hash 这三种真实路径。
+  var lastHash = "";
 
   function resolve() {
+    if (location.hash === lastHash) return;
     renderRoute(router.parse(location.hash));
   }
 
@@ -198,7 +212,7 @@
     }
   }
 
-  /** 左栏渲染：路由表 + 计数占位。折叠态由 `<html data-rail>` 决定，这里不管。 */
+  /** 左栏渲染：路由表。折叠态由 `<html data-rail>` 决定，这里不管。 */
   router.renderRail = function (host) {
     if (!host) return;
     host.textContent = "";
@@ -219,8 +233,7 @@
           },
           [
             ui.h("span", { html: ui.svg(item.icon) }),
-            ui.h("span", { class: "rail__label", text: item.title }),
-            ui.h("span", { class: "rail__count" })
+            ui.h("span", { class: "rail__label", text: item.title })
           ]
         )
       );

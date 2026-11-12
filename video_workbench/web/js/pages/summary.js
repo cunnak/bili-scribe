@@ -282,13 +282,20 @@
       state.versions = [];
       return Promise.resolve(null);
     }
+    state.loading = true;
     return call("summary.get", { id: state.projectId }).then(function (data) {
+      state.loading = false;
       state.found = !!(data && data.found);
       state.summary = (data && data.summary) || null;
       state.versions = (data && data.versions) || [];
       state.totals = (data && data.totals) || null;
       adoptRole(state.summary && state.summary.role);
       return state.summary;
+    }).catch(function (err) {
+      // 不清 loading 就会永远停在"读取中"——错误条在下面照样画得出来，
+      // 但正文区会一直是转圈，用户以为还没读完。
+      state.loading = false;
+      throw err;
     });
   }
 
@@ -297,12 +304,19 @@
   function pollDelay(attempts) { return attempts > POLL_LIMIT ? SLOW_MS : POLL_MS; }
   function pollGaveUp(attempts) { return attempts > HARD_LIMIT; }
 
+  // 离开页面时把在飞的那条轮询作废：以前只有 state.projectId 变了才会自己停，
+  // 而 destroy 之后 DOM 已经不在，轮询还会每 1.2 秒往 #sum-note 写一次进度。
+  var pollToken = 0;
+
   function pollJob(jobId) {
     var attempts = 0;
+    var myToken = pollToken;
     return new Promise(function (resolve, reject) {
       function tick() {
+        if (myToken !== pollToken) { resolve(null); return; }
         attempts += 1;
         call("job.get", { id: jobId }).then(function (job) {
+          if (myToken !== pollToken) { resolve(null); return; }
           if (!job) { reject(new Error("任务不见了")); return; }
           if (job.status === "succeeded") { resolve(job); return; }
           if (job.status === "failed" || job.status === "canceled") {
@@ -909,6 +923,11 @@
 
   function bodyCard() {
     var data = (state.summary && state.summary.content) || {};
+    // 读取中：不能先画「还没有总结」——那句话是结论，而此刻我们还没有结论。
+    // 首屏一进来就闪一下"还没有总结"，用户会以为生成的东西丢了。
+    if (state.loading) {
+      return ui.h("div", { class: "sum-card" }, [ui.loading("正在读取这一条的总结…")]);
+    }
     if (!state.found) {
       return ui.h("div", { class: "sum-card" }, [
         ui.h("div", { class: "idx", text: "NO DOC" }),
@@ -1318,6 +1337,16 @@
     crumb: "结构化笔记与版本",
     icon: "note",
     nav: true,
-    render: render
+    render: render,
+    // 轮询、事件订阅、发布卡都挂在全局对象上：不在这里收，离开页面后
+    // 它们还会往已经不存在的 DOM 上写。
+    destroy: function () {
+      // 作废在飞的轮询：自增即让上一轮 tick 在下一个检查点退出。
+      pollToken += 1;
+      // 发布卡挂在 summary 的两个容器里，容器随页面一起没了，它自己的
+      // 缓存与监听也要一起收，否则下次进页面拿到的还是上一条视频的草稿。
+      var publish = WB.pages && WB.pages.publish;
+      if (publish && publish.unmount) publish.unmount();
+    }
   });
 })();

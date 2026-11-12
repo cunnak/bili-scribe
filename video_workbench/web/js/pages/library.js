@@ -32,6 +32,8 @@
   var state = {
     query: "",
     stage: "",
+    collection: "",
+    group: "",
     sort: "created_desc",
     includeArchived: false,
     smartView: "",
@@ -154,6 +156,12 @@
     var params = (ctx && ctx.params) || {};
     state.sort = validSort(params.sort || "created_desc");
     state.includeArchived = params.archived === "1";
+    state.collection = params.collection ? String(params.collection) : "";
+    state.group = params.group ? String(params.group) : "";
+    if (state.collection) {
+      state.group = "";
+      state.expanded["col:" + state.collection] = true;
+    }
     if (params.q !== undefined) state.query = String(params.q || "");
     if (params.project) state.selected = String(params.project);
     else if (params.id) state.selected = String(params.id);
@@ -258,9 +266,11 @@
 
     body.appendChild(
       ui.h("button", {
-        class: "tree__row" + (!state.stage && !state.includeArchived && !state.smartView ? " is-active" : ""),
+        class: "tree__row" + (!state.stage && !state.includeArchived && !state.smartView && !state.collection && !state.group ? " is-active" : ""),
         onclick: function () {
           state.stage = "";
+          state.collection = "";
+          state.group = "";
           state.includeArchived = false;
           state.smartView = "";
           syncUrl();
@@ -277,13 +287,28 @@
     if (!state.includeArchived) {
       groupedRows().forEach(function (group) {
         var open = !!state.expanded[group.key];
+        var isCollection = group.key.indexOf("col:") === 0;
+        var active = isCollection ? state.collection === group.title : state.group === group.key;
         var head = ui.h(
           "button",
           {
-            class: "tree__row lib-tree__group" + (open ? " is-open" : ""),
+            class: "tree__row lib-tree__group" + (open ? " is-open" : "") + (active ? " is-active" : ""),
+            "data-collection": isCollection ? group.title : "",
+            "data-group": isCollection ? "" : group.key,
             onclick: function () {
-              state.expanded[group.key] = !open;
-              paint();
+              if (isCollection) {
+                state.collection = group.title;
+                state.group = "";
+              } else {
+                state.collection = "";
+                state.group = group.key;
+              }
+              state.stage = "";
+              state.smartView = "";
+              state.includeArchived = false;
+              state.expanded[group.key] = !(active && open);
+              syncUrl();
+              load({ resetSelection: true });
             }
           },
           [
@@ -323,6 +348,8 @@
           if (!state.includeArchived && state.treeArchivedTotal <= 0) return;
           state.includeArchived = !state.includeArchived;
           state.stage = "";
+          state.collection = "";
+          state.group = "";
           state.smartView = "";
           syncUrl();
           load({ resetSelection: true });
@@ -492,6 +519,17 @@
     );
 
     wrap.appendChild(paintChips());
+    if (state.collection || state.group) {
+      var scopeName = state.collection
+        ? "合集「" + state.collection + "」"
+        : groupTitle(state.group, null);
+      wrap.appendChild(
+        ui.h("p", {
+          class: "lib-scope-note",
+          text: "当前来源：" + scopeName + "。右侧只显示这个来源内的素材；点左栏「全部项目」回到全部。"
+        })
+      );
+    }
     if (state.smartView === "missing") {
       wrap.appendChild(
         ui.h("p", {
@@ -503,12 +541,20 @@
     wrap.appendChild(paintBulkBar());
 
     if (state.loading) {
-      wrap.appendChild(ui.h("div", { class: "empty" }, [ui.h("div", { class: "empty__hint", text: "正在读取素材库…" })]));
+      wrap.appendChild(ui.loading("正在读取素材库…"));
       return wrap;
     }
 
     if (state.error) {
-      wrap.appendChild(ui.empty("读取失败", state.error));
+      // 只画错误块、不再额外 toast：catch 里那次 toast 与这块是同一个消息的
+      // 两条通道，屏幕上重复一遍，而 toast 3 秒就没了、块还在。留块。
+      wrap.appendChild(
+        ui.errorBlock({
+          title: "读取失败",
+          message: state.error,
+          onRetry: function () { load({ resetSelection: false }); }
+        })
+      );
       return wrap;
     }
 
@@ -524,6 +570,9 @@
       } else if (state.query || state.stage) {
         title = "没有匹配的项目";
         hint = "换个关键词或切回「全部」。搜索会匹配标题、UP 名与 BV 号。";
+      } else if (state.collection || state.group) {
+        title = "这个来源下没有项目";
+        hint = "点左栏「全部项目」回到全部素材。";
       } else {
         title = "素材库还是空的";
         hint = "粘贴 B站 链接下载，或点右上角「导入本地」把已有视频加进来。";
@@ -893,11 +942,18 @@
       return col;
     }
     if (state.detailLoading) {
-      col.appendChild(ui.h("div", { class: "empty" }, [ui.h("div", { class: "empty__hint", text: "读取详情…" })]));
+      col.appendChild(ui.loading("读取详情…"));
       return col;
     }
     if (!state.detail) {
-      col.appendChild(ui.empty("读取详情失败", state.detailError || "请稍后重试。"));
+      // 详情读不到时列表还在，重试只需要重发这一条的 library.get。
+      col.appendChild(
+        ui.errorBlock({
+          title: "读取详情失败",
+          message: state.detailError || "请稍后重试。",
+          onRetry: state.selected ? function () { select(state.selected, { force: true }); } : null
+        })
+      );
       return col;
     }
 
@@ -1151,7 +1207,10 @@
 
   function removeSelected() {
     if (state.allMatching) {
-      removeByPayload({ query: state.query, stage: state.stage }, true);
+      var payload = { query: state.query, stage: state.stage };
+      if (state.collection) payload.collection = state.collection;
+      else if (state.group) payload.group = state.group;
+      removeByPayload(payload, true);
       return;
     }
     removeIds(Object.keys(state.selectedIds));
@@ -1221,13 +1280,18 @@
       include_archived: state.includeArchived
     };
     if (state.stage) params.stage = state.stage;
+    if (state.collection) params.collection = state.collection;
+    else if (state.group) params.group = state.group;
     return params;
   }
 
-  // 左栏树只看“来源”，不带 stage；否则点一次「已总结」就把 39 集大组从树上裁掉。
+  // 左栏树只看“来源”，不带 stage/collection/group；否则点一次「已总结」或某个合集
+  // 就把其它大组从树上裁掉。
   function treeParams() {
     var params = listParams(0);
     delete params.stage;
+    delete params.collection;
+    delete params.group;
     return params;
   }
 
@@ -1273,7 +1337,7 @@
     state.error = "";
     paint();
     var mainCall = call("library.list", listParams(0));
-    var treeCall = state.stage
+    var treeCall = (state.stage || state.collection || state.group)
       ? call("library.list", treeParams()).catch(function () { return null; })
       : Promise.resolve(null);
     Promise.all([mainCall, treeCall])
@@ -1320,7 +1384,6 @@
         state.hasMore = false;
         state.error = (err && err.message) || "读不到素材库";
         paint();
-        ui.toast(state.error, "error");
       });
   }
 
@@ -1427,6 +1490,10 @@
       else params.sort = state.sort;
       if (state.includeArchived) params.archived = "1";
       else delete params.archived;
+      if (state.collection) params.collection = state.collection;
+      else delete params.collection;
+      if (state.group) params.group = state.group;
+      else delete params.group;
       var query = Object.keys(params).map(function (key) {
         return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
       }).join("&");

@@ -77,7 +77,12 @@ SORTS: dict[str, str] = {
 
 
 def _project_where(
-    query: str = "", *, stage: str = "", include_archived: bool = False
+    query: str = "",
+    *,
+    stage: str = "",
+    include_archived: bool = False,
+    collection: str = "",
+    group: str = "",
 ) -> tuple[str, list[Any]]:
     """项目列表/计数/分组的公共 WHERE。
 
@@ -99,6 +104,23 @@ def _project_where(
     if stage_key:
         clauses.append("stage=?")
         params.append(stage_key)
+    collection_title = str(collection or "")
+    if collection_title:
+        clauses.append("collection_title=?")
+        params.append(collection_title)
+    group_key = str(group or "").strip()
+    if group_key == "local":
+        clauses.append("COALESCE(collection_title,'')='' AND source_kind='local'")
+    elif group_key == "unassigned":
+        clauses.append(
+            "COALESCE(collection_title,'')='' AND COALESCE(source_kind,'')<>'local'"
+            " AND COALESCE(bvid,'')<>''"
+        )
+    elif group_key == "other":
+        clauses.append(
+            "COALESCE(collection_title,'')='' AND COALESCE(source_kind,'')<>'local'"
+            " AND COALESCE(bvid,'')=''"
+        )
     if not include_archived:
         # 归档是软删除：NULL 与空串都算"未归档"（老库 ALTER 出来的列默认 NULL，
         # 但手工 SQL 写过空串的库也存在）。
@@ -333,6 +355,8 @@ class Repo:
         stage: str = "",
         include_archived: bool = False,
         sort: str = "created_desc",
+        collection: str = "",
+        group: str = "",
     ) -> list[dict[str, Any]]:
         """项目列表。前三个位置参数保持老签名（query, limit, offset）——调用方遍地都是。"""
         order = SORTS.get(str(sort or "created_desc"))
@@ -342,25 +366,55 @@ class Repo:
                 f"不支持的排序：{sort}",
                 "可选：" + " / ".join(SORTS),
             )
-        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+        where, params = _project_where(
+            query,
+            stage=stage,
+            include_archived=include_archived,
+            collection=collection,
+            group=group,
+        )
         sql = f"SELECT * FROM wb_project{where} ORDER BY {order} LIMIT ? OFFSET ?"
         params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
         return self._all(sql, params)
 
-    def project_count(self, query: str = "", stage: str = "", include_archived: bool = False) -> int:
-        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+    def project_count(
+        self,
+        query: str = "",
+        stage: str = "",
+        include_archived: bool = False,
+        collection: str = "",
+        group: str = "",
+    ) -> int:
+        where, params = _project_where(
+            query,
+            stage=stage,
+            include_archived=include_archived,
+            collection=collection,
+            group=group,
+        )
         row = self._one(f"SELECT COUNT(*) AS n FROM wb_project{where}", params)
         return int(row["n"]) if row else 0
 
     def project_title_rows(
-        self, query: str = "", stage: str = "", include_archived: bool = False
+        self,
+        query: str = "",
+        stage: str = "",
+        include_archived: bool = False,
+        collection: str = "",
+        group: str = "",
     ) -> list[dict[str, Any]]:
         """title 排序用的轻量投影。
 
         只取排需要的四列：1000 条项目如果每条都把 `SELECT *`（含 error/root_dir 这些
         长文本）拉出来，光解码就比排序本身贵；这里给 service 算自然序用。
         """
-        where, params = _project_where(query, stage=stage, include_archived=include_archived)
+        where, params = _project_where(
+            query,
+            stage=stage,
+            include_archived=include_archived,
+            collection=collection,
+            group=group,
+        )
         return self._all(
             "SELECT id, title, created_at, collection_index FROM wb_project"
             f"{where} ORDER BY created_at DESC, id DESC",
@@ -368,14 +422,23 @@ class Repo:
         )
 
     def project_stage_counts(
-        self, query: str = "", include_archived: bool = False
+        self,
+        query: str = "",
+        include_archived: bool = False,
+        collection: str = "",
+        group: str = "",
     ) -> list[dict[str, Any]]:
         """一次 GROUP BY 拿到每个阶段的条数（facets）。
 
         **不带 stage 过滤**：facets 回答的是「当前搜索下每个阶段各有多少」，
         如果先按 stage 过滤，结果只会剩一个桶，点击其他阶段就没数了。
         """
-        where, params = _project_where(query, include_archived=include_archived)
+        where, params = _project_where(
+            query,
+            include_archived=include_archived,
+            collection=collection,
+            group=group,
+        )
         rows = self._all(
             f"SELECT stage, COUNT(*) AS n FROM wb_project{where} GROUP BY stage", params
         )
@@ -530,6 +593,19 @@ class Repo:
         sets.append("updated_at=?")
         params.extend([now_iso(), project_id])
         self._exec(f"UPDATE wb_project SET {', '.join(sets)} WHERE id=?", params)
+
+    def project_set_publish_video(
+        self, project_id: str, *, bvid: str | None, aid: int | None
+    ) -> None:
+        """只写“发布视频号”绑定，不碰项目身份列。
+
+        ``bvid``/``aid`` 是下载去重身份（``project_find_by_bvid`` 靠它们认“同一集”），
+        本地项目永远不该写进去；发布卡填的号只属于发布链路，落在 ``publish_*``。
+        """
+        self._exec(
+            "UPDATE wb_project SET publish_bvid=?, publish_aid=?, updated_at=? WHERE id=?",
+            [bvid, aid, now_iso(), project_id],
+        )
 
     def project_delete(self, project_id: str) -> None:
         """删项目。资产/字幕/切片靠外键 ON DELETE CASCADE 一起走，不在这里手写。"""

@@ -156,6 +156,31 @@ async function main() {
     assert.ok(rows.length >= 1, "列表一条都没渲染出来");
   });
 
+  await check("素材库：点合集只显示合集内素材，点全部项目恢复", async () => {
+    WB.router.go("library");
+    await tick(300);
+    const groups = [...window.document.querySelectorAll(".lib-tree__group")];
+    const group = groups.find((node) => node.getAttribute("data-collection"));
+    assert.ok(group, "mock 素材库里没有合集组");
+    const title = group.getAttribute("data-collection");
+    group.click();
+    await until(
+      () => WB.pages.library.state.collection === title && !WB.pages.library.state.loading,
+      "点合集组后进入来源筛选"
+    );
+    const scopedRows = window.document.querySelectorAll(".lib-row");
+    assert.strictEqual(scopedRows.length, 3, "mock 合集应有 3 条素材，实际 " + scopedRows.length);
+    const all = [...window.document.querySelectorAll(".tree__row")]
+      .find((node) => (node.textContent || "").indexOf("全部项目") >= 0);
+    assert.ok(all, "没有「全部项目」入口");
+    all.click();
+    await until(
+      () => WB.pages.library.state.collection === "" && !WB.pages.library.state.loading,
+      "点全部项目后清空来源"
+    );
+    assert.ok(window.document.querySelectorAll(".lib-row").length >= 4, "清来源后没有恢复全部素材");
+  });
+
   // ---------------------------------------------------------------- 源语言
 
   // 以前点转录按钮直接发 RPC，源语言只能靠自动探测——探测只看开头一段，
@@ -694,10 +719,13 @@ async function main() {
     assert.strictEqual(adv.querySelector(".adv__title").textContent.trim(), "上下文与长素材");
     adv.open = true;
     await tick(30);
-    assert.ok(adv.querySelectorAll(".seg__item").length >= 3, "深度思考不是三档分段");
+    // 「深度思考」三档分段控件已在 task-26 删除（WB 自己不发送 enable_thinking，
+    // 留着按钮等于假承诺；理由逐字写在 settings.js 的字段表里）。这里改成反向锁：
+    // 它不许回来。原来那条 >= 3 的断言在控件删掉当天就该跟着删，留着的结果是
+    // 整个套件在 HEAD 上常年红一条，谁也不敢把它当闸用。
+    assert.strictEqual(adv.querySelectorAll(".seg__item").length, 0,
+                       "「深度思考」分段控件不该回来（WB 不发这个参数）");
     assert.strictEqual(adv.querySelectorAll(".taskmap__row").length, 7, "任务模型该有七行");
-    const thinkBtns = [...adv.querySelectorAll(".seg__item")].slice(0, 3);
-    assert.strictEqual(thinkBtns.filter((b) => b.classList.contains("is-on")).length, 1, "分段控件该只有一个选中");
 
     // 保存：providers 整个数组 + active_provider 一起发出去（mock 的 merge 对数组是整体替换）
     const save = [...body.querySelectorAll("button")].find((b) => b.textContent.trim() === "保存");
@@ -3128,6 +3156,204 @@ async function main() {
     } finally {
       WB.rpc = realRpc;
     }
+  });
+
+
+  // ---------------------------------------------------------------- 三态与交互规格
+  //
+  // 上面那批用例钉的是"功能对不对"，这一段钉的是"状态说没说真话"。
+  // 三态改造最容易犯的错是：加载中先画一句"还没有 X"——数据一到又变，
+  // 但那一瞬间用户已经去点「重新生成」了。
+
+  await check("状态条：磁盘那一格从载荷读，三种状态三种字", async () => {
+    const disk = window.document.getElementById("status-disk");
+    assert.ok(disk, "状态条没有 #status-disk");
+    // mock 的 INFO.disk 是具体值 → 必须画成「磁盘 <大小>」
+    assert.ok(/^磁盘\s/.test(disk.textContent), "磁盘槽没有画成「磁盘 …」：" + disk.textContent);
+    assert.ok(/\d/.test(disk.textContent), "磁盘槽没有数字：" + disk.textContent);
+    assert.ok(disk.getAttribute("title").indexOf("素材盘剩余空间") >= 0,
+      "磁盘槽的 title 没说清这是什么：" + disk.getAttribute("title"));
+    assert.notStrictEqual(disk.textContent.trim(), "磁盘 —", "磁盘槽还是占位符（没人给数）");
+  });
+
+  await check("状态条：后端未连接是独立一格，不写进依赖槽", async () => {
+    const conn = window.document.getElementById("status-conn");
+    assert.ok(conn, "状态条没有 #status-conn（连接状态没地方放）");
+    // 演示态：连接正常 ⇒ 这一格收起来，不占位置
+    assert.strictEqual(conn.hidden, true, "演示态下连接状态那一格不该露出来");
+    const deps = window.document.getElementById("status-deps").textContent;
+    assert.notStrictEqual(deps, "后端未连接", "「后端未连接」又写进依赖槽了（用户会去重装 ffmpeg）");
+  });
+
+  await check("加载态：转圈带 role=status，不是一句「正在加载」", async () => {
+    const host = window.document.createElement("div");
+    host.appendChild(WB.ui.loading("正在读取素材库…"));
+    const box = host.querySelector(".empty--loading");
+    assert.ok(box, "ui.loading 没有 .empty--loading");
+    assert.strictEqual(box.getAttribute("role"), "status", "加载态没有 role=status（读屏用户听不到）");
+    assert.strictEqual(box.getAttribute("aria-live"), "polite", "加载态没有 aria-live");
+    assert.ok(box.textContent.indexOf("正在读取素材库") >= 0, "加载文案丢了");
+    assert.strictEqual(box.querySelectorAll(".empty__title").length, 0,
+      "加载态不该有标题——它是「还没有结论」，不是「结论是空的」");
+  });
+
+  await check("错误态：可重试才给按钮，不可重试就不给", async () => {
+    // 可重试：有按钮，点了会回调
+    let hits = 0;
+    const retryable = WB.ui.errorFrom(
+      { message: "网络断了", retryable: true },
+      () => { hits += 1; },
+      "读不到任务"
+    );
+    assert.strictEqual(retryable.getAttribute("role"), "alert", "错误块没有 role=alert");
+    const btn = retryable.querySelector("button");
+    assert.ok(btn, "可重试的错误没有重试按钮");
+    btn.click();
+    assert.strictEqual(hits, 1, "重试按钮没触发回调");
+    assert.ok(retryable.textContent.indexOf("网络断了") >= 0, "错误原文丢了");
+
+    // 不可重试：不给按钮（点了也白点，还会让人以为是网络问题）
+    const fatal = WB.ui.errorFrom(
+      { message: "接口地址没填", retryable: false },
+      () => { hits += 1; },
+      "读不到任务"
+    );
+    assert.strictEqual(fatal.querySelectorAll("button").length, 0,
+      "不可重试的错误也长了重试按钮");
+    assert.ok(fatal.textContent.indexOf("接口地址没填") >= 0, "不可重试的错误文案丢了");
+  });
+
+  await check("任务中心空态：给按钮，不让人去点右下角", async () => {
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "job.list") return Promise.resolve([]);
+      return realRpc.call(WB, method, params, opts);
+    };
+    try {
+      Array.prototype.slice.call(window.document.querySelectorAll(".modal__x")).forEach((b) => b.click());
+      await tick(60);
+      // 先把前面检查可能留下的弹窗全关掉，否则拿到的是旧的那个。
+      Array.prototype.slice.call(window.document.querySelectorAll(".modal__x")).forEach((b) => b.click());
+      await tick(80);
+      window.document.getElementById("status-jobs").click();
+      // 按标题挑，不按位置挑：前面几项检查可能还留着别的弹窗，
+      // `.modal .modal__body` 拿到的是 DOM 里第一个，未必是刚开的这个。
+      const dialogs = [...window.document.querySelectorAll(".modal")];
+      const target = dialogs.find((d) => {
+        const head = d.querySelector(".modal__head");
+        return head && head.textContent.indexOf("任务中心") >= 0;
+      });
+      assert.ok(target, "任务中心没打开（现存弹窗 " + dialogs.length + " 个）");
+      const body = target.querySelector(".modal__body");
+      // 等的是"填充完成"，不是"有子节点"：.modal__body 里一创建就有一个空的
+      // div.col（那是 openJobsModal 传进去的容器本身），children.length > 0
+      // 在 job.list 回来之前就已经成立，判据会抢跑读到空容器。
+      await until(() => body.textContent.trim().length > 0, "任务中心填充完成");
+      const text = body.textContent;
+      assert.ok(text.indexOf("还没有任务") >= 0,
+        "空态文案不对：[" + text.slice(0, 120) + "] html=" + body.innerHTML.slice(0, 400));
+      assert.ok(text.indexOf("右下角") < 0, "空态还在让人去点右下角（那里没有按钮）");
+      const demo = [...body.querySelectorAll("button")].find((b) => b.textContent.indexOf("演示任务") >= 0);
+      assert.ok(demo, "空态里没有「跑一个演示任务」按钮");
+    } finally {
+      WB.rpc = realRpc;
+      Array.prototype.slice.call(window.document.querySelectorAll(".modal__x")).forEach((b) => b.click());
+      await tick(60);
+    }
+  });
+
+  await check("弹窗：Tab 在内部循环，关闭后焦点还给原处", async () => {
+    const opener = window.document.getElementById("status-jobs");
+    opener.focus();
+    await tick(40);
+    const dlg = WB.ui.modal({
+      title: "焦点陷阱自检",
+      body: WB.ui.h("p", { text: "两个按钮之间循环" }),
+      footer: [
+        WB.ui.h("button", { class: "btn", type: "button", text: "甲" }),
+        WB.ui.h("button", { class: "btn btn--primary", type: "button", text: "乙" })
+      ]
+    });
+    await tick(60);
+    const panel = window.document.querySelector(".modal__panel");
+    assert.ok(panel, "弹窗没挂出来");
+    assert.strictEqual(panel.getAttribute("tabindex"), "-1", "panel 没有 tabindex=-1，焦点落不进去");
+    assert.ok(panel.contains(window.document.activeElement) || window.document.activeElement === panel,
+      "打开弹窗后焦点还在页面别处");
+
+    // 焦点落在最后一个可聚焦控件上再按 Tab，必须回到第一个。
+    //
+    // jsdom 里 offsetParent 恒为 null，而 focusables() 用 offsetParent 过滤
+    // "看得见"的控件（那条规则在真浏览器里是对的：display:none 的控件不该进循环）。
+    // 所以在 jsdom 里它会过滤掉全部控件、走"没有可聚焦控件"那一支，把焦点留在 panel。
+    // 这不是缺陷，是 jsdom 没有布局。判据因此断**不变量**：焦点必须还在 panel 里，
+    // 而且绝不能跑到遮罩后面 —— 那才是这一条真正要守的东西。
+    const focusables = [...panel.querySelectorAll("button")];
+    assert.ok(focusables.length >= 3, "弹窗里的可聚焦控件太少：" + focusables.length);
+    focusables[focusables.length - 1].focus();
+    const ev = new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    window.document.dispatchEvent(ev);
+    await tick(40);
+    const active = window.document.activeElement;
+    assert.ok(active === panel || panel.contains(active),
+      "按 Tab 后焦点跑到弹窗外面了（role=dialog aria-modal 是空承诺）");
+
+    dlg.close();
+    await tick(60);
+    assert.strictEqual(window.document.activeElement, opener,
+      "关闭弹窗后焦点没有还给打开它的那个按钮");
+  });
+
+  await check("三态：切页时上一页的 destroy 真的跑了", async () => {
+    // 用一个临时路由验证机制本身：注册 → 进入 → 离开，destroy 必须被调用一次
+    let destroyed = 0;
+    WB.router.define("_tristate_probe", {
+      title: "探针",
+      render: function () { return WB.ui.h("div", { class: "page", text: "探针" }); },
+      destroy: function () { destroyed += 1; }
+    });
+    WB.router.go("_tristate_probe");
+    await tick(120);
+    WB.router.go("library");
+    await tick(120);
+    assert.strictEqual(destroyed, 1, "离开页面时 destroy 没被调用（或调用了多次）：" + destroyed);
+  });
+
+  await check("三态：destroy 抛异常不阻断路由", async () => {
+    WB.router.define("_tristate_boom", {
+      title: "炸的探针",
+      render: function () { return WB.ui.h("div", { class: "page", text: "炸的探针" }); },
+      destroy: function () { throw new Error("清理失败"); }
+    });
+    WB.router.go("_tristate_boom");
+    await tick(120);
+    WB.router.go("library");
+    await tick(160);
+    assert.strictEqual(WB.router.current().route, "library",
+      "上一页 destroy 抛异常把路由卡住了（用户点左栏没反应）");
+    assert.strictEqual($("#page-title").textContent.trim(), "素材库", "没落到素材库");
+  });
+
+  await check("字幕页：Ctrl+F 开的是批量替换，不是全局搜索", async () => {
+    WB.router.go("subtitles");
+    await tick(400);
+    const search = window.document.getElementById("global-search");
+    search.blur();
+    const view = $("#view");
+    assert.ok(view, "字幕页没渲染");
+    // 字幕页的 Ctrl+F 监听挂在列表滚动容器上（onKeyDown 是列表的 handler），
+    // 事件从那里冒泡到 document —— 这正是真实路径：焦点在列表里，按 Ctrl+F。
+    const listScroll = window.document.getElementById("sub-scroll");
+    assert.ok(listScroll, "字幕页没有列表容器，没法复现键盘路径");
+    const ev = new window.KeyboardEvent("keydown", {
+      key: "f", ctrlKey: true, bubbles: true, cancelable: true
+    });
+    listScroll.dispatchEvent(ev);
+    await tick(120);
+    assert.strictEqual(ev.defaultPrevented, true,
+      "字幕页的 Ctrl+F 没有被页面自己拦下（全局搜索会把它吃掉）");
+    assert.notStrictEqual(window.document.activeElement, search,
+      "在字幕页按 Ctrl+F，焦点被全局搜索抢走了（替换框根本没开）");
   });
 
   dom.window.close();

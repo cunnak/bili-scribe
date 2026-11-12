@@ -84,11 +84,13 @@
     paintSources();
     return WB.rpc("merge.sources", { query: state.query }, { silent: true }).then(function (data) {
       state.loading = false;
+      state.error = "";
       state.sources = { clips: (data && data.clips) || [], library: (data && data.library) || [] };
       paintSources();
     }).catch(function (err) {
       state.loading = false;
       state.error = (err && err.message) || "来源列表读不出来";
+      // 上次成功读到的列表要留着：读失败不等于来源没了，清空会让用户以为素材库被删。
       paintSources();
     });
   }
@@ -228,6 +230,24 @@
   function paintSources() {
     if (!els.sourceList) return;
     els.sourceList.textContent = "";
+    // 左栏是「能加什么」的入口，它自己也有三态：读的时候不能显示成"一个来源都没有"
+    // （那会让人以为素材库是空的，于是去别处翻），读失败也不能静默留白。
+    if (state.loading) {
+      els.sourceList.appendChild(ui.loading("正在读取可用来源…"));
+      if (els.sourceCount) els.sourceCount.textContent = "";
+      return;
+    }
+    if (state.error) {
+      els.sourceList.appendChild(
+        ui.errorBlock({
+          title: "读不到可用来源",
+          message: state.error,
+          onRetry: function () { loadSources(); }
+        })
+      );
+      if (els.sourceCount) els.sourceCount.textContent = "";
+      return;
+    }
     var groups = [
       { key: "clips", label: "切片成片", empty: "还没有导出的切片" },
       { key: "library", label: "素材库源视频", empty: "素材库里还没有源视频" }
@@ -870,6 +890,15 @@
     crumb: "拼接与成片",
     icon: "merge",
     nav: true,
-    render: render
+    render: render,
+    // 离开页面必须解绑：job.any 的订阅挂在全局事件总线上，不解绑就一直收
+    // 这个任务的事件、继续改已经不在屏上的 DOM。轮询那条腿靠 state.jobId
+    // 比对自保，但事件腿没有这层保护。
+    destroy: function () {
+      unwatchJob();
+      state.running = false;
+      state.detached = false;
+      state.jobId = "";
+    }
   });
 })();

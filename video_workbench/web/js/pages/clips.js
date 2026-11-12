@@ -192,8 +192,20 @@
       });
   }
 
+  // 计时器提到模块作用域：留在函数里时，页面被销毁后没有任何人能清掉它，
+  // 它会一直每 800ms 打一次 job.get，并在 600 次之后往已卸载的 DOM 上写错误。
+  var pollTimer = null;
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
   function pollJob(jobId) {
     var tries = 0;
+    stopPolling();
     var timer = setInterval(function () {
       tries += 1;
       WB.rpc("job.get", { id: jobId }, { silent: true }).then(function (job) {
@@ -202,7 +214,7 @@
         if (job.progress) state.note += " " + Math.round(job.progress * 100) + "%";
         renderNote();
         if (job.status === "succeeded" || job.status === "failed" || job.status === "canceled") {
-          clearInterval(timer);
+          stopPolling();
           state.jobId = "";
           state.busy = false;
           if (job.status === "succeeded") {
@@ -224,7 +236,7 @@
         }
       });
       if (tries > 600) {
-        clearInterval(timer);
+        stopPolling();
         state.busy = false;
         state.jobId = "";
         state.note = "";
@@ -431,6 +443,21 @@
   function removeCandidate() {
     var cand = selected();
     if (!cand) return;
+    // 删除没有撤销（clip.delete 直接把行删掉），所以必须先问一次。
+    // 以前点了就删：一次误触就丢一条已经调好时间的候选。
+    // 用 ui.confirm 而不是自己搭弹窗：素材库移除、字幕删段、设置页重置都走这一条，
+    // 用户学一次就够，ESC 与遮罩关闭的兜底也只有一处要维护。
+    ui.confirm(
+      "删除这条候选？",
+      "「" + (cand.title || "未命名") + "」会从列表里移除，不能撤销。",
+      { confirmText: "删除", danger: true }
+    ).then(function (ok) {
+      if (!ok) return;
+      doRemoveCandidate(cand);
+    });
+  }
+
+  function doRemoveCandidate(cand) {
     WB.rpc("clip.delete", { id: cand.id })
       .then(function () {
         state.selectedId = "";
@@ -513,6 +540,16 @@
       });
       card.addEventListener("dblclick", function () {
         select(cand.id, true);
+      });
+      // role="button" + tabindex="0" 是对键盘用户的承诺：回车/空格必须等价于点击。
+      // 以前只写了这两个属性、没有 keydown，Tab 到这里是个"能聚焦但按什么都没反应"
+      // 的死点——比不聚焦更糟，因为它先告诉用户"这里能操作"。
+      card.addEventListener("keydown", function (ev) {
+        if (ev.target !== card) return;
+        if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+          ev.preventDefault();
+          select(cand.id, false);
+        }
       });
       // 勾选只影响批量导出，不该顺带把这条选中——两件事分开，点勾时别冒泡到卡片
       var pickBox = card.querySelector(".clip-card__pick");
@@ -2432,6 +2469,23 @@
     crumb: "候选与切点",
     icon: "scissors",
     nav: true,
-    render: render$
+    render: render$,
+    // 三样东西挂在页面之外：轮询计时器、window 的 resize 监听、以及正在播的 <video>。
+    // 不在这里收，离开切片台之后它们还在跑——计时器继续问后端，resize 继续算一个
+    // 已经不存在的画布，视频继续在后台出声。
+    destroy: function () {
+      stopPolling();
+      if (resizeHandler) {
+        window.removeEventListener("resize", resizeHandler);
+        resizeHandler = null;
+      }
+      try {
+        if (player && typeof player.pause === "function") player.pause();
+      } catch (_err) {
+        /* 播放器已经随 DOM 一起没了，不必阻断离开 */
+      }
+      state.busy = false;
+      state.jobId = "";
+    }
   });
 })();

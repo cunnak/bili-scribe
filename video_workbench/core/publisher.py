@@ -447,7 +447,10 @@ def gate_report(
         }
     )
     if not project_bvid:
-        account_status, account_reason = "blocked", "这个项目没有 BV 号，发不了笔记"
+        account_status, account_reason = (
+            "blocked",
+            "这个项目没有 BV 号，发不了笔记：在发布卡「视频号」里填 BV 号或 av 号，保存草稿后生效",
+        )
     elif not same:
         account_status, account_reason = "blocked", "草稿的 BV 号与项目对不上"
     elif logged_in is False:

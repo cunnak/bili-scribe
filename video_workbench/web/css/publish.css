@@ -192,6 +192,20 @@
   color: var(--muted);
 }
 
+/* 本地导入项目的 BV/AV 输入：两个并排，窄容器自动折成一列。 */
+.pb-video-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pb-video {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
 .pb-input,
 .pb-textarea {
   width: 100%;

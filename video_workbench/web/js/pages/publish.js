@@ -33,6 +33,9 @@
     records: [], // 发布记录（发过 / 撤过 / 发失败）
     recordCounts: { published: 0, withdrawn: 0, failed: 0 },     // 三道门禁的当前状态（publish.get / preview 里带回来）
     editTitle: "",       // 标题输入框的当前值：重绘不丢（S2）
+    editBvid: "",       // 视频号 BV 输入框的当前值
+    editAid: "",        // 视频号 AV 输入框的当前值（显示为 av123）
+    video: null,         // 发布用视频号 {bvid, aid, source_kind, bound}
     confirmedFor: "",    // 勾过「我已阅读并确认」的那份草稿 id；换草稿自动失效（S3）
     limits: { title: 80 },  // 字数上限由后端 limits 下发，前端不另立一套
     panel: null,         // 挂载点 {main, rail}：发布卡是总结页里的一块，不再是独立页
@@ -82,6 +85,39 @@
     state.editTitle = String(title || "");
   }
 
+  /** 把发布用视频号灌进编辑缓冲；aid 显示成 av 号给用户看。 */
+  function syncVideo(video) {
+    state.video = video || null;
+    state.editBvid = String((video && video.bvid) || "");
+    state.editAid = video && video.aid ? "av" + video.aid : "";
+  }
+
+  /** 本地导入项目没有视频号，需要输入栏；已下载项目有 bvid 时不打扰。 */
+  function videoVisible(video) {
+    var item = video || state.video;
+    if (!item) return false;
+    return item.source_kind === "local" || item.source_kind === "subtitle_ai" || !item.bvid;
+  }
+
+  function normBv(value) {
+    return String(value || "").trim().toUpperCase();
+  }
+
+  function normAid(value) {
+    var text = String(value || "").trim().toLowerCase();
+    if (text.indexOf("av") === 0) text = text.slice(2);
+    return text.replace(/^0+(?=\d)/, "");
+  }
+
+  /** 视频号改过但没保存：发布用的是库里那一版，必须先存。 */
+  function videoDirty() {
+    if (!state.current) return false;
+    if (!videoVisible(state.video)) return false;
+    var view = state.video || {};
+    return normBv(state.editBvid) !== normBv(view.bvid) ||
+      normAid(state.editAid) !== normAid(view.aid);
+  }
+
   // ------------------------------------------------------------------ 数据
 
   function loadProjects() {
@@ -113,6 +149,7 @@
       state.draft = null;
       state.confirmedFor = "";
       syncEdit("");
+      syncVideo(null);
       return null;
     }, function (error) {
       state.notes = [];
@@ -164,6 +201,7 @@
         state.gates = data.gates || null;
         if (!confirmed) state.confirmedFor = "";
         syncEdit(state.current.title);
+        syncVideo(data.video || null);
         // 不写 state.projectId：那是「新建草稿」选的目标项目，被 loadNote 改掉后
         // 用户选的视频会静默漂移（R3）
         if (data.limits) state.limits = data.limits;
@@ -174,6 +212,7 @@
         // 这里只把这份草稿标成"读不到"，让用户看见原因，不当成整页失败。
         state.current = null;
         state.gates = null;
+        syncVideo(null);
         state.error = (error && error.message) || "这份草稿读不到";
         paint();
         return null;
@@ -197,6 +236,7 @@
         state.gates = data.gates || null;
         state.confirmedFor = "";   // 内容变了，之前的确认作废
         syncEdit(data.draft.title);
+        syncVideo(data.draft.video || state.video);
         state.note = part === "all" ? "标题与正文已按最新总结重写" : "标题已重写";
         paint();
       })
@@ -224,6 +264,7 @@
         state.busy = false;
         state.confirmedFor = "";
         syncEdit(data.title);
+        syncVideo(data.video || null);
         if (data.limits) state.limits = data.limits;
         paint();
       })
@@ -250,18 +291,24 @@
     state.busy = true;
     state.error = "";
     paint();
-    return call("publish.note", {
+    var payload = {
       project_id: (state.current && state.current.project_id) || state.projectId,
       note_pk: state.current ? state.current.id : "",
       title: title,
       content: body
-    })
+    };
+    if (videoVisible(state.video)) {
+      payload.bvid = state.editBvid;
+      payload.aid = state.editAid;
+    }
+    return call("publish.note", payload)
       .then(function (data) {
         state.busy = false;
         state.current = data.note;
         state.draft = null;
         state.confirmedFor = "";   // 存成新一版之后，之前的确认作废
         syncEdit(data.note.title);
+        syncVideo(data.video || state.video);
         state.note = "草稿已保存";
         return loadNotes(data.note.id);
       })
@@ -596,6 +643,7 @@
     if (state.draft) return false;
     if (!state.current) return false;
     if (titleDirty()) return false;
+    if (videoDirty()) return false;
     if (state.confirmedFor !== state.current.id) return false;
     return !!(state.gates && state.gates.ready);
   }
@@ -604,6 +652,7 @@
     if (state.draft) return "屏幕上是还没保存的预览：先点「保存草稿」，发布才会用这一版";
     if (!state.current) return "先选一份草稿";
     if (titleDirty()) return "标题改过还没保存：先点「保存草稿」，否则发出去的是库里那一版";
+    if (videoDirty()) return "视频号改过还没保存：先点「保存草稿」";
     if (!state.gates) return "门禁状态还没拿到";
     var bad = (state.gates.gates || []).filter(function (g) { return g.status !== "ok"; });
     if (!bad.length) return "";
@@ -699,6 +748,47 @@
       .then(done, done);
   }
 
+  /** 本地项目专用：BV / AV 视频号输入栏。 */
+  function videoField() {
+    if (!videoVisible(state.video)) return null;
+    var bvInput = h("input", {
+      class: "pb-input",
+      id: "pb-bvid",
+      type: "text",
+      value: state.editBvid,
+      placeholder: "BV 号，例如 BV1xx411c7mD"
+    });
+    var aidInput = h("input", {
+      class: "pb-input",
+      id: "pb-aid",
+      type: "text",
+      value: state.editAid,
+      placeholder: "AV 号，例如 av123456"
+    });
+    bvInput.addEventListener("input", function () {
+      state.editBvid = bvInput.value;   // 立即回写：重绘不丢用户输入
+    });
+    aidInput.addEventListener("input", function () {
+      state.editAid = aidInput.value;
+    });
+    return h("div", { class: "pb-video-wrap" }, [
+      h("div", { class: "pb-video" }, [
+        h("label", { class: "pb-field" }, [
+          h("span", { class: "pb-field__label" }, [h("span", { text: "BV 号" })]),
+          bvInput
+        ]),
+        h("label", { class: "pb-field" }, [
+          h("span", { class: "pb-field__label" }, [h("span", { text: "AV 号" })]),
+          aidInput
+        ])
+      ]),
+      h("div", {
+        class: "pb-hint",
+        text: "本地导入的视频没有视频号。BV 号或 av 号任填一个，保存草稿后即可发布笔记。"
+      })
+    ]);
+  }
+
   function editor() {
     var note = state.current;
     var draft = state.draft;
@@ -713,6 +803,7 @@
     // 不会冲掉用户已经改过的字。S2 的复现路径就是「改标题 → 勾确认 → 标题被打回」。
     var title = state.editTitle;
     var body = source.content_text || "";
+    var videoBox = videoField();
 
     var titleInput = h("input", {
       class: "pb-input",
@@ -824,6 +915,7 @@
         h("span", { class: "pb-card__count", text: (note && note.project_title) || "" })
       ]),
       warnBox,
+      videoBox,
       h("label", { class: "pb-field" }, [
         h("span", { class: "pb-field__label" }, [h("span", { text: "标题" }), titleCount]),
         titleInput
@@ -914,6 +1006,16 @@
       });
   }
 
+  /**
+   * 从总结页摘下来。容器随页面一起被丢掉，但 state.panel 还指着那两个死节点、
+   * state.loaded 还记着"这批数据已经读过" —— 下次进总结页（尤其换了视频）就会
+   * 直接 paint 到已脱离文档的节点上，屏幕上什么都不变，像卡住了。
+   */
+  function unmount() {
+    state.panel = null;
+    state.loaded = false;
+  }
+
   function render() {
     // 发布已经不是独立页了：UI 在总结页里。这里只留一块指路牌，
     // 免得老书签 / 老链接落进空白页。
@@ -936,6 +1038,7 @@
   WB.pages.publish = {
     render: render,
     mount: mount,
+    unmount: unmount,
     state: state,
     _internals: {
       state: state,
@@ -956,7 +1059,10 @@
       publishReady: publishReady,
       gateBlockedText: gateBlockedText,
       titleDirty: titleDirty,
-      syncEdit: syncEdit
+      videoDirty: videoDirty,
+      syncEdit: syncEdit,
+      syncVideo: syncVideo,
+      videoField: videoField
     }
   };
 

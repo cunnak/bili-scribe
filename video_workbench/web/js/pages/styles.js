@@ -406,11 +406,23 @@
   }
 
   function loadList(selectId) {
+    state.listLoading = true;
+    state.listError = "";
+    paintAll();
     return WB.rpc("style.list").then(function (rows) {
+      state.listLoading = false;
       state.list = rows || [];
       var wanted = selectId || state.id || (state.list[0] && state.list[0].id) || "";
       var exists = state.list.some(function (row) { return row.id === wanted; });
       return pick(exists ? wanted : (state.list[0] && state.list[0].id) || "");
+    }).catch(function (error) {
+      state.listLoading = false;
+      state.listError = (error && error.message) || "读不到样式列表";
+      paintAll();
+      // 不再往外抛：读列表失败已经有自己的错误块与重试按钮，再抛一次只会让
+      // 调用方各自 catch 一遍同一句话，或（render 里那个 setTimeout）变成
+      // 一个没人接的 unhandled rejection。
+      return null;
     });
   }
 
@@ -488,12 +500,11 @@
   }
 
   function importJson() {
-    if (!WB.fs || !WB.fs.pickFile) {
-      state.error = "这个环境没有文件选择器，请用「导出」确认格式后手工放到 styles 目录";
-      paintAll();
-      return;
-    }
-    WB.fs.pickFile({ title: "选择样式 JSON" }).then(function (path) {
+    // 走产品既有的 fs.pick 通道。以前这里调 WB.fs.pickFile —— 全仓没有 WB.fs
+    // 这个对象，于是「导入」在任何环境下都只弹一句"这个环境没有文件选择器"，
+    // 用户以为是自己机器缺东西。桌面层的选择器一直都在，只是没被接上。
+    WB.rpc("fs.pick", { kind: "file" }, { silent: true }).then(function (picked) {
+      var path = (picked && picked.path) || "";
       if (!path) return null;
       return WB.rpc("style.import", { path: path });
     }).then(function (data) {
@@ -541,6 +552,24 @@
   // ------------------------------------------------------------ 渲染
 
   function listPane() {
+    // 左栏三态：读列表时不能显示成「还没有样式」（那会让人以为预设全丢了，
+    // 于是去点「新建」再手搓一遍），读失败也不能只剩一句空话。
+    if (state.listLoading) {
+      return n("div", { class: "styles__pane styles__pane--list" }, [
+        n("div", { class: "styles__pane-head" }, [n("strong", { text: "预设" })]),
+        ui.loading("正在读取样式列表…")
+      ]);
+    }
+    if (state.listError) {
+      return n("div", { class: "styles__pane styles__pane--list" }, [
+        n("div", { class: "styles__pane-head" }, [n("strong", { text: "预设" })]),
+        ui.errorBlock({
+          title: "读不到样式列表",
+          message: state.listError,
+          onRetry: function () { loadList(); }
+        })
+      ]);
+    }
     var rows = state.list.map(function (row) {
       var active = row.id === state.id;
       var node = n("button", {

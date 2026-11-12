@@ -137,13 +137,64 @@ def test_library_ia_real_browser_flow(browser, web_base_url, service):
     page.wait_for_selector(".lib-tree", timeout=15000)
     page.wait_for_selector(".lib-list", timeout=15000)
 
-    # 1) 两级树：展开第一个合集组
+    # 1) 两级树：点第一个合集组 = 只筛这个合集，并把组展开
     groups = page.locator(".lib-tree__group")
     assert groups.count() >= 1, "左栏没有合集组"
     groups_before = groups.count()
-    groups.first.click()
+    preferred = page.locator('.lib-tree__group[data-collection="2026正大杯备赛"]')
+    first_group = preferred.first if preferred.count() else groups.first
+    collection_title = first_group.get_attribute("data-collection")
+    assert collection_title, "第一个组不是合集组，无法验收来源筛选"
+    collection_data = (
+        service.dispatch("library.list", {"collection": collection_title, "limit": 200}).get("data")
+        or {}
+    )
+    collection_total = int(collection_data.get("total") or 0)
+    assert collection_total > 0, "真实库副本里这个合集是空的，无法断言"
+    first_group.click()
     page.wait_for_selector(".lib-tree__children", timeout=5000)
+    assert "is-active" in (first_group.get_attribute("class") or ""), "点击合集后组头没有高亮"
+    assert "collection=" in page.url, "来源筛选没有写进 URL：%s" % page.url
+    head = page.locator(".list__head").inner_text()
+    assert ("%d / %d" % (collection_total, collection_total)) in head, (
+        "合集筛选后的列表计数不对：%s" % head
+    )
+    all_chip = page.locator(".lib-chip", has_text="全部").first
+    assert str(collection_total) in all_chip.inner_text(), (
+        "来源筛选后「全部」chip 的总数没有跟着收窄：%s" % all_chip.inner_text()
+    )
     page.screenshot(path=str(SHOTS / "01-tree-expanded.png"), full_page=True)
+
+    # 1b) 来源内再点一个非零阶段 chip：数字必须来自该来源的 facets
+    collection_facets = collection_data.get("facets") or []
+    scoped_facet = next(
+        (facet for facet in collection_facets if int(facet.get("count") or 0) > 0),
+        None,
+    )
+    assert scoped_facet is not None, "合集内没有非零阶段，无法验收来源内阶段筛选"
+    page.locator(".lib-chip", has_text=scoped_facet["label"]).first.click()
+    page.wait_for_timeout(350)
+    head = page.locator(".list__head").inner_text()
+    want = "%d / %d" % (int(scoped_facet["count"]), int(scoped_facet["count"]))
+    assert want in head, "来源内阶段筛选后的计数不对：期望 %s，实际 %s" % (want, head)
+    page.screenshot(path=str(SHOTS / "02-source-stage-filter.png"), full_page=True)
+    page.locator(".lib-chip", has_text="全部").first.click()
+    page.wait_for_timeout(250)
+
+    # 1c) 全部项目 = 清除来源，列表回到全库
+    page.locator(".tree__row", has_text="全部项目").first.click()
+    page.wait_for_timeout(350)
+    assert "is-active" not in (first_group.get_attribute("class") or ""), (
+        "点「全部项目」后合集组头还保持高亮"
+    )
+    assert "collection=" not in page.url, "清来源后 URL 还挂着 collection：%s" % page.url
+    assert groups.count() == groups_before, "清来源后左栏树被裁掉了"
+    global_data = service.dispatch("library.list", {"limit": 200}).get("data") or {}
+    global_total = int(global_data.get("total") or 0)
+    head = page.locator(".list__head").inner_text()
+    assert ("%d / %d" % (global_total, global_total)) in head, (
+        "点「全部项目」后没有回到全库：%s" % head
+    )
 
     # 2) chips：点「已总结」，断言列表数量来自后端 facets
     # 期望值不许写死：夹具打的是真实库副本，行数会漂，写死就是本文件原先那条红。

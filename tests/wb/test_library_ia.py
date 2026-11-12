@@ -505,6 +505,112 @@ def test_a5_collection_group_count_matches_the_same_list_call(service, tmp_path)
     )
 
 
+def test_a6_collection_filter_narrows_rows_and_facets_to_the_source(service, tmp_path):
+    wanted = [
+        _project(
+            service, tmp_path, "合集A-下载1", stage="downloaded", collection_title="2026正大杯备赛"
+        ),
+        _project(
+            service, tmp_path, "合集A-下载2", stage="downloaded", collection_title="2026正大杯备赛"
+        ),
+        _project(
+            service, tmp_path, "合集A-总结", stage="summarized", collection_title="2026正大杯备赛"
+        ),
+        _project(
+            service, tmp_path, "合集A-旧阶段", stage="analyzed", collection_title="2026正大杯备赛"
+        ),
+        _project(
+            service, tmp_path, "合集B-下载", stage="downloaded", collection_title="另一个合集"
+        ),
+        _project(service, tmp_path, "单稿-下载", stage="downloaded"),
+    ]
+    data = _ok(service, "library.list", {"collection": "2026正大杯备赛", "limit": 200})
+    assert data["total"] == 4
+    assert {row["id"] for row in data["items"]} == {row["id"] for row in wanted[:4]}
+    assert all(row["collection_title"] == "2026正大杯备赛" for row in data["items"])
+    assert sum(int(facet["count"]) for facet in data["facets"]) == data["total"]
+    counts = {facet["key"]: int(facet["count"]) for facet in data["facets"]}
+    assert counts["downloaded"] == 2
+    assert counts["summarized"] == 1
+    assert counts["analyzed"] == 1
+
+    empty = _ok(service, "library.list", {"collection": "不存在的合集", "limit": 200})
+    assert empty["items"] == []
+    assert empty["total"] == 0
+    assert sum(int(facet["count"]) for facet in empty["facets"]) == 0
+
+
+def test_a7_source_group_filters_match_tree_buckets(service, tmp_path):
+    local = _project(service, tmp_path, "本地导入", source_kind="local")
+    unassigned = _project(service, tmp_path, "有BV无合集", bvid="BV1aa411c7mF")
+    other = _project(service, tmp_path, "无BV无合集")
+    in_collection = _project(service, tmp_path, "合集内", collection_title="合集C")
+
+    def ids(group: str) -> set[str]:
+        data = _ok(service, "library.list", {"group": group, "limit": 200})
+        assert sum(int(facet["count"]) for facet in data["facets"]) == data["total"]
+        return {row["id"] for row in data["items"]}
+
+    assert ids("local") == {local["id"]}
+    assert ids("unassigned") == {unassigned["id"]}
+    assert ids("other") == {other["id"]}
+    assert in_collection["id"] not in ids("local") | ids("unassigned") | ids("other")
+
+    payload = _rpc(service, "library.list", {"group": "not-a-group"})
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "VALIDATION"
+
+
+def test_a8_collection_filter_combines_with_stage_and_archived_total(service, tmp_path):
+    a_downloaded = [
+        _project(service, tmp_path, f"A下载{i}", stage="downloaded", collection_title="合集D")
+        for i in range(3)
+    ]
+    a_summarized = _project(
+        service, tmp_path, "A总结", stage="summarized", collection_title="合集D"
+    )
+    _project(service, tmp_path, "B下载", stage="downloaded", collection_title="合集E")
+
+    staged = _ok(
+        service, "library.list", {"collection": "合集D", "stage": "downloaded", "limit": 200}
+    )
+    assert staged["total"] == 3
+    assert {row["id"] for row in staged["items"]} == {row["id"] for row in a_downloaded}
+    assert sum(int(facet["count"]) for facet in staged["facets"]) == 4, (
+        "facets 必须覆盖来源内全部阶段，不能因为选了 downloaded 就只剩一个桶"
+    )
+
+    service.repo.project_archive([a_summarized["id"]], True)
+    visible = _ok(service, "library.list", {"collection": "合集D", "limit": 200})
+    assert visible["total"] == 3
+    assert visible["archived_total"] == 1
+    assert all(row["id"] != a_summarized["id"] for row in visible["items"])
+
+
+def test_a9_delete_preview_and_delete_many_respect_collection_filter(service, tmp_path):
+    for i in range(3):
+        _project(service, tmp_path, f"待删A{i}", stage="downloaded", collection_title="待删合集A")
+    for i in range(2):
+        _project(service, tmp_path, f"保留B{i}", stage="downloaded", collection_title="保留合集B")
+
+    preview = _ok(service, "library.delete_preview", {"collection": "待删合集A"})
+    assert preview["total"] == 3
+
+    removed = _ok(
+        service,
+        "library.delete_many",
+        {"collection": "待删合集A", "expect_total": 3},
+    )
+    assert removed["removed"] == 3
+
+    assert _ok(service, "library.list", {"collection": "待删合集A"})["total"] == 0
+    assert _ok(service, "library.list", {"collection": "保留合集B"})["total"] == 2
+
+    bad = _rpc(service, "library.delete_preview", {"group": "not-a-group"})
+    assert bad["ok"] is False, "批量删除入口不能绕过来源分组校验"
+    assert bad["error"]["code"] == "VALIDATION"
+
+
 def test_b4_library_get_missing_project_returns_not_found_after_delete(service, tmp_path):
     project = _project(service, tmp_path, "待删项目", stage="downloaded")
     project_id = project["id"]

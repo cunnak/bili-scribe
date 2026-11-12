@@ -158,7 +158,16 @@
         applyPayload(data);
         state.project = (results[1] && results[1].project) || state.project;
         state.loading = false;
-        state.error = data.has_transcript ? "" : "还没有字幕，先回素材库转录";
+        state.error = "";
+        // 「没有字幕」是**空态**，不是错误：以前它被塞进 state.error，而这个字段
+        // 在 paint() 里根本没有读者——于是用户看到的是一条空的段落列表，
+        // 屏幕上没有任何一句话解释为什么是空的。空态走 notice 容器，带出口。
+        if (data.has_transcript === false) {
+          showNotice({
+            kind: "no-transcript",
+            text: "这条视频还没有字幕。转录之后才能在这里改字、质检、导出。"
+          });
+        }
         paint();
         mountMedia();
         loadPeaks(pid, token);
@@ -175,6 +184,11 @@
           showNotice({ kind: "project-missing", text: "项目不存在或已删除" });
         } else {
           state.error = (err && err.message) || String(err);
+          // 读取失败也必须有一条看得见、点得动的出路：重试就是重发这一次 load。
+          showNotice({
+            kind: "load-failed",
+            text: "读不到这条视频的字幕：" + state.error
+          });
         }
         paint();
       });
@@ -466,6 +480,16 @@
       card.appendChild(h("button", {
         class: "btn btn--ghost", type: "button", text: "回素材库",
         onclick: function () { WB.router.go("library"); }
+      }));
+    } else if (notice.kind === "no-transcript") {
+      card.appendChild(h("button", {
+        class: "btn btn--ghost", type: "button", text: "去转录",
+        onclick: function () { WB.router.go("library", { project: state.projectId }); }
+      }));
+    } else if (notice.kind === "load-failed") {
+      card.appendChild(h("button", {
+        class: "btn btn--ghost", type: "button", text: "重试",
+        onclick: function () { showNotice(null); load(pageToken); }
       }));
     }
     host.appendChild(card);

@@ -180,6 +180,10 @@
     });
 
     document.addEventListener("keydown", function (event) {
+      // 页面自己先处理过的组合键不再抢：字幕页把 Ctrl+F 定义成「批量替换」，
+      // 两边都监听 document，谁后注册谁生效——结果是在字幕页按 Ctrl+F，
+      // 焦点跳到左上角全局搜索，替换框根本没开。
+      if (event.defaultPrevented) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         input.focus();
@@ -257,6 +261,17 @@
     if (dot) dot.setAttribute("data-active", counts.download + counts.transcribe + counts.export > 0 ? "true" : "false");
   }
 
+  /** 演示任务：footer 的按钮与空态里的按钮走同一个函数，不写两份回调。 */
+  function submitDemo() {
+    return WB.rpc("job.demo.submit", { seconds: 6 }, { silent: true })
+      .then(function () {
+        ui.toast("演示任务已提交，进度会出现在状态条与这里", "success");
+      })
+      .catch(function (err) {
+        ui.toast((err && err.message) || "提交失败", "error");
+      });
+  }
+
   function openJobsModal() {
     var body = ui.h("div", { class: "col", style: "gap:12px" });
     var dialog = ui.modal({
@@ -268,14 +283,7 @@
           text: "跑一个演示任务",
           title: "验证进度 / 取消 / 重试三条链路（Phase 0 自检）",
           onclick: function () {
-            WB.rpc("job.demo.submit", { seconds: 6 }, { silent: true })
-              .then(function () {
-                ui.toast("演示任务已提交，进度会出现在状态条与这里", "success");
-                paintJobs(body, rows, function () {});
-              })
-              .catch(function (err) {
-                ui.toast((err && err.message) || "提交失败", "error");
-              });
+            submitDemo().then(function () { paintJobs(body, rows, function () {}); });
           }
         }),
         ui.h("button", {
@@ -379,7 +387,11 @@
       })
       .catch(function (err) {
         body.textContent = "";
-        body.appendChild(ui.empty("读不到任务", (err && err.message) || "任务表不可用"));
+        // 失败必须带出口：任务中心是「任务卡住了」时唯一能看的地方，
+        // 它自己读不到时再让人去别处点刷新，等于把人赶出这扇门。
+        body.appendChild(
+          ui.errorFrom(err, function () { paintJobs(body, rows); }, "读不到任务")
+        );
       });
   }
 
@@ -407,9 +419,16 @@
         var jobs = preferFresher(list).slice(0, 30);
         state.jobs = jobs;
         refreshJobText(null);
+        // 「集合没变」不能只看计数相等：任务数为 0 且 rows 为空时两边都是 0，
+        // 判成"没变"就直接返回，于是**首次打开任务中心（一个任务都没有）是一整块空白** ——
+        // 用户以为面板坏了，而空态文案与按钮都在下面那段永远不会执行到的分支里。
+        // 空集合只有在屏幕上已经画着空态时才算"没变"。
+        var showingEmpty = !jobs.length && !!body.querySelector(".empty");
         var sameSet =
-          jobs.length === Object.keys(rows).length &&
-          jobs.every(function (job) { return !!rows[job.id]; });
+          showingEmpty ||
+          (jobs.length > 0 &&
+            jobs.length === Object.keys(rows).length &&
+            jobs.every(function (job) { return !!rows[job.id]; }));
 
         if (sameSet) {
           // 同一批任务：只刷数值，不碰节点结构，也就不会闪
@@ -421,7 +440,21 @@
         var frag = document.createDocumentFragment();
         var next = {};
         if (!jobs.length) {
-          frag.appendChild(ui.empty("没有任务", "Phase 1 起，下载 / 转录 / 导出都会出现在这里。可以先点右下角跑一个演示任务。"));
+          // 旧文案让人「点右下角跑一个演示任务」，而右下角是 toast 区、按钮其实在
+          // 这个弹窗的 footer 里 —— 按提示去找必然扑空。空态直接给按钮，别再指路。
+          frag.appendChild(
+            ui.empty(
+              "还没有任务",
+              "下载 / 转录 / 导出跑起来之后会出现在这里，可以取消、重试、看进度。",
+              ui.h("button", {
+                class: "btn",
+                type: "button",
+                text: "跑一个演示任务",
+                title: "验证进度 / 取消 / 重试三条链路（Phase 0 自检）",
+                onclick: function () { submitDemo(); }
+              })
+            )
+          );
         } else {
           jobs.forEach(function (job) {
             var repaint = function () { paintJobs(body, next); };
@@ -509,6 +542,8 @@
     var version = document.getElementById("status-version");
     if (version) version.textContent = "v" + (info.version || "—");
 
+    paintDisk(info.disk);
+
     var deps = info.deps || {};
     var missing = [];
     if (!deps.ffmpeg) missing.push("ffmpeg");
@@ -520,6 +555,36 @@
       depsNode.setAttribute("title", missing.length ? "缺这些跑不了对应环节，设置页有说明" : "ffmpeg / yt-dlp / faster-whisper 都已就绪");
     }
     document.title = (info.name || "VideoWorkbench") + " · " + (WB.router.current() ? WB.router.current().route : "");
+  }
+
+  /**
+   * 磁盘槽：素材盘剩余空间。
+   *
+   * 三种输入各画各的，**不许混成一句**：
+   * - 有数 → 「磁盘 480 GB」
+   * - `null`（后端探测失败：盘拔了 / 网络盘断线 / 目录权限被改）→ 「磁盘 ?」，
+   *   并把原因写进 title。这和「磁盘 —」不同：破折号读起来像"还没算"，
+   *   问号读起来像"读不到"，后者才是实情。
+   * - 信息还没到（首屏还没回来）→ 「磁盘 …」。
+   */
+  function paintDisk(disk) {
+    var node = document.getElementById("status-disk");
+    if (!node) return;
+    if (disk && typeof disk.free_bytes === "number") {
+      node.textContent = "磁盘 " + ui.formatBytes(disk.free_bytes);
+      var total = typeof disk.total_bytes === "number" && disk.total_bytes > 0
+        ? " / " + ui.formatBytes(disk.total_bytes)
+        : "";
+      node.setAttribute("title", "素材盘剩余空间" + total);
+      return;
+    }
+    if (disk === null) {
+      node.textContent = "磁盘 ?";
+      node.setAttribute("title", "读不到素材盘剩余空间：盘符不存在、网络盘断线或没有访问权限");
+      return;
+    }
+    node.textContent = "磁盘 …";
+    node.setAttribute("title", "素材盘剩余空间（正在读取）");
   }
 
   // ------------------------------------------------------------ 启动
@@ -704,9 +769,22 @@
         /* 早期版本没有这个方法，不影响主流程 */
       }
     }
+    // 连接状态与依赖状态是**两根轴**：以前「后端未连接」被写进依赖槽，
+    // 于是用户读到的是「依赖没装」，而真实原因是桥没起来 —— 修的东西完全不同。
+    // 现在连接状态独占一格，依赖槽只谈依赖。
+    var connNode = document.getElementById("status-conn");
+    if (connNode) {
+      var down = !data && !WB.isMock();
+      connNode.hidden = !down;
+      connNode.textContent = down ? "未连上后端" : "";
+      connNode.setAttribute("title", down ? "界面跑在演示数据上：桥没建立，所有操作都不会真的执行" : "");
+    }
     if (!data && !WB.isMock()) {
       var depsNode = document.getElementById("status-deps");
-      if (depsNode) depsNode.textContent = "后端未连接";
+      if (depsNode) {
+        depsNode.textContent = "依赖未知";
+        depsNode.setAttribute("title", "后端没连上，查不到 ffmpeg / yt-dlp / faster-whisper 装没装");
+      }
     }
     // 首次启动的"五件事体检"：只在没看过时浮出来，跳过一次就不再弹。
     // 放在 finishBoot 之后：先让用户看见界面，再叠一层说明，而不是先白屏再出东西。

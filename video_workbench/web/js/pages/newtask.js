@@ -301,14 +301,14 @@
     host.textContent = "";
 
     if (state.busy) {
-      host.appendChild(ui.h("div", { class: "card" }, [
-        ui.h("div", { class: "card__body" }, [ui.h("p", { class: "muted", text: "正在解析…" })])
-      ]));
+      // 与其他页同一块 loading：转圈 + 一句机制文案，不再是"正在解析…"的纯文本。
+      host.appendChild(ui.loading("正在解析这个链接…"));
       return;
     }
     if (state.error) {
+      // 重试按钮走 ui.errorBlock 的统一出口，与素材库、合并页一致。
       host.appendChild(
-        ui.empty("解析不出来", state.error, ui.h("button", { class: "btn", text: "重试", onclick: resolve }))
+        ui.errorBlock({ title: "解析不出来", message: state.error, onRetry: resolve })
       );
       return;
     }

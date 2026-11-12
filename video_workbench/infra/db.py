@@ -22,7 +22,7 @@ from pathlib import Path
 
 from video_workbench.app.errors import WBError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # 一个连接要在三类线程间共享：WebView 的 RPC 回调线程、后台任务线程、
 # 事件推送线程。sqlite3 的连接对象本身不是线程安全的，所以**所有 SQL 都过这把锁**。
@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS wb_project (
   title TEXT NOT NULL,
   source_kind TEXT NOT NULL,
   bvid TEXT, aid INTEGER, cid INTEGER, page_no INTEGER,
+  publish_bvid TEXT, publish_aid INTEGER,
   up_mid INTEGER, up_name TEXT,
   collection_id TEXT REFERENCES wb_collection(id) ON DELETE SET NULL,
   collection_title TEXT,
@@ -317,6 +318,14 @@ _V5_COLUMNS = {
     "wb_project": {"archived_at": "TEXT", "collection_index": "INTEGER"},
 }
 
+# v6：本地导入项目的“发布视频号”。不能写进 bvid/aid——那两列是下载去重身份，
+# 下载 worker 用 project_find_by_bvid 找已有项目；本地视频一旦被写上 bvid，
+# 后续同 bv 的下载会把这条本地项目当成“同一集”去更新。
+# publish_* 只服务发布链路：为空时回落到 bvid/aid，已有下载项目不受影响。
+_V6_COLUMNS = {
+    "wb_project": {"publish_bvid": "TEXT", "publish_aid": "INTEGER"},
+}
+
 # 所有补列桶，**按版本顺序**排。加版本时必须往这里补一个桶（哪怕空 dict）——
 # 下面的检查是"忘了写迁移"的牙：schema_version 涨了但没登记桶，import 直接失败。
 _ALL_COLUMN_BUCKETS = (
@@ -324,7 +333,9 @@ _ALL_COLUMN_BUCKETS = (
     _V3_COLUMNS,
     _V4_COLUMNS,
     _V5_COLUMNS,
+    _V6_COLUMNS,
 )
+
 
 def _assert_column_buckets() -> None:
     """schema 版本与补列桶的绑定检查。

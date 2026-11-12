@@ -219,13 +219,6 @@ select,
   text-overflow: ellipsis;
 }
 
-.rail__count {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--dim);
-}
-
 .rail__foot {
   display: flex;
   flex-direction: column;
@@ -234,9 +227,8 @@ select,
   padding-top: var(--gap-2);
 }
 
-/* 折叠态：只剩图标，文字与计数让位；tooltip 由 title 属性兜底。 */
-[data-rail="collapsed"] .rail__label,
-[data-rail="collapsed"] .rail__count {
+/* 折叠态：只剩图标，文字让位；tooltip 由 title 属性兜底。 */
+[data-rail="collapsed"] .rail__label {
   display: none;
 }
 
@@ -565,6 +557,32 @@ select,
   width: 26px;
   height: 26px;
   color: var(--dim);
+}
+
+/* 加载态：只让那个 spinner 转，其余与 .empty 完全同形。
+   不加颜色——三态的区别靠文案与图标，不靠色。 */
+.empty--loading svg {
+  animation: wb-spin 1s linear infinite;
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 关掉动效的机器上不能只剩一个静止的半圆——那是"卡住"的样子。
+   改为整块淡入淡出，仍然表达"还在进行"。 */
+@media (prefers-reduced-motion: reduce) {
+  .empty--loading svg {
+    animation: wb-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes wb-pulse {
+    50% {
+      opacity: .35;
+    }
+  }
 }
 
 /* 表格：行高 44，时间码等宽 */

@@ -138,6 +138,9 @@
     log_dir: "C:\Users\demo\AppData\Roaming\VideoWorkbench\logs",
     log_file: "C:\Users\demo\AppData\Roaming\VideoWorkbench\logs\wb-20261030.log",
     uptime: 12.4,
+    // 素材盘剩余空间。真后端由 infra/files.py 的 disk_usage() 现算，探测失败给 null；
+    // 演示态必须也有一组具体值——否则截图与真机长得不一样，那一格会被读成缺陷。
+    disk: { free_bytes: 482344960000, total_bytes: 1024209543168 },
     // 演示数据按"装好了"给：缺依赖是状态提示，不该混进样张里干扰判断。
     deps: { ffmpeg: true, yt_dlp: true, faster_whisper: true },
     // 截图默认不弹向导：向导另有 #/onboard 路由可单独拍
@@ -182,6 +185,7 @@
     {
       id: "p_demo_1",
       title: "【硬核】三十分钟讲透注意力机制",
+      source_kind: "bilibili",
       up_name: "示例UP",
       bvid: "BV1xx411c7mD",
       source_url: "https://www.bilibili.com/video/BV1xx411c7mD",
@@ -202,6 +206,7 @@
     {
       id: "p_demo_2",
       title: "线性代数期末速通（第一讲）",
+      source_kind: "bilibili",
       up_name: "示例UP",
       bvid: "BV1yy411c7mE",
       source_url: "https://www.bilibili.com/video/BV1yy411c7mE",
@@ -222,6 +227,7 @@
     {
       id: "p_demo_3",
       title: "本地素材：讲座录像 2026-10-27.mp4",
+      source_kind: "local",
       up_name: "本地文件",
       bvid: "",
       source_url: "",
@@ -242,6 +248,7 @@
     {
       id: "p_demo_4",
       title: "【第三讲】残差连接为什么好用",
+      source_kind: "bilibili",
       up_name: "示例UP",
       bvid: "BV1zz411c7mF",
       source_url: "https://www.bilibili.com/video/BV1zz411c7mF",
@@ -796,6 +803,18 @@
 
   var GATE_INTERVAL = 60;
   var NOTE_SEQ = 0;
+
+  function mockVideo(project) {
+    project = project || {};
+    var aid = 0;
+    try { aid = Number(project.publish_aid || project.aid || 0) || 0; } catch (err) { aid = 0; }
+    return {
+      bvid: String(project.publish_bvid || project.bvid || ""),
+      aid: aid,
+      source_kind: String(project.source_kind || ""),
+      bound: !!(project.publish_bvid || project.publish_aid)
+    };
+  }
   // 演示环境里当成「扫码登录过」：真后端读的是本地登录态（service.py 里 _gateway.is_logged_in），
   // mock 没有登录流程，写死成已登录才走得到「三关全绿」那一步。
   var MOCK_LOGGED_IN = true;
@@ -812,8 +831,10 @@
     ];
     var contentStatus = !title || !body ? "blocked" : (items[0].ok ? (o.confirmed ? "ok" : "todo") : "blocked");
 
-    var bvid = (project && project.bvid) || (note && note.bvid) || "";
-    var aid = (project && project.aid) || (note && note.aid) || draft.aid || null;
+    var bvid = (project && (project.publish_bvid || project.bvid)) ||
+      (note && note.bvid) || "";
+    var aid = (project && (project.publish_aid || project.aid)) ||
+      (note && note.aid) || draft.aid || null;
     var accountItems = [
       { text: "视频 BV 号 " + (bvid || "（没有）"), ok: !!bvid },
       { text: aid ? "视频 aid（av 号）" + aid : "视频 aid（av 号）：库里没有，发布时自动补", ok: !!aid },
@@ -836,7 +857,9 @@
           reason: contentStatus === "blocked" ? "标题或正文是空的" : (contentStatus === "todo" ? "发布前要勾一下「我已阅读并确认」" : ""),
           items: items },
         { id: "account", label: "账号与视频", status: accountStatus,
-          reason: accountStatus === "blocked" ? "这个项目没有 BV 号，发不了笔记" : (accountStatus === "todo" ? "发布时会再核一次登录态与视频可访问性" : ""),
+          reason: accountStatus === "blocked"
+            ? "这个项目没有 BV 号，发不了笔记：在发布卡「视频号」里填 BV 号或 av 号，保存草稿后生效"
+            : (accountStatus === "todo" ? "发布时会再核一次登录态与视频可访问性" : ""),
           items: accountItems },
         { id: "pace", label: "频率与重复", status: paceStatus,
           reason: paceStatus === "ok" ? "" : "正文是空的",
@@ -893,6 +916,7 @@
       warnings: [],
       summary_id: box.summary.id || "",
       version: box.summary.version || 1,
+      video: mockVideo(project),
       note: null
     };
   }
@@ -1226,7 +1250,8 @@
       case "app.info":
         return ok(INFO);
       case "app.bootstrap":
-        return ok({ info: INFO, settings: SETTINGS, library: listProjects("", 50, 0), jobs: JOBS,
+        return ok({ info: INFO, settings: SETTINGS,
+                    library: listProjects({ query: "", limit: 50, offset: 0 }), jobs: JOBS,
                     styles: STYLES.map(function (row) { return styleRow(row.config, row.builtin); }) });
       case "app.settings.get":
         return ok(SETTINGS);
@@ -1241,7 +1266,7 @@
         SETTINGS.ui.rail_collapsed = !!p.collapsed;
         return ok({ collapsed: !!p.collapsed });
       case "library.list":
-        return ok(listProjects(p.query || "", p.limit || 50, p.offset || 0));
+        return ok(listProjects(p));
       case "library.get":
         for (var i = 0; i < PROJECTS.length; i++) {
           if (PROJECTS[i].id === p.id) {
@@ -1667,6 +1692,25 @@
         if (!project) return fail("NOT_FOUND", "项目不存在");
         var built = mockPreview(p.project_id);
         if (!built) return fail("CONFLICT", "这个项目还没有总结，先去「总结」页出一版");
+        var bvInput = String(p.bvid || "").trim();
+        var aidInput = String(p.aid || "").trim();
+        if (bvInput || aidInput) {
+          var bvValue = bvInput.toUpperCase();
+          if (bvValue && !/^BV[0-9A-Za-z]{10}$/.test(bvValue)) {
+            return fail("VALIDATION", "BV 号格式不对：应形如 BV1xx411c7mD");
+          }
+          var aidValue = 0;
+          if (aidInput) {
+            var avText = aidInput.toLowerCase().indexOf("av") === 0 ? aidInput.slice(2) : aidInput;
+            if (!/^\d+$/.test(avText) || Number(avText) <= 0) {
+              return fail("VALIDATION", "AV 号格式不对：应形如 av123456");
+            }
+            aidValue = Number(avText);
+          }
+          project.publish_bvid = bvValue || project.publish_bvid ||
+            (aidValue ? "BVmock" + String(1000000 + aidValue).slice(-6) : "");
+          project.publish_aid = aidValue || project.publish_aid || project.aid || 0;
+        }
         var target = null;
         DRAFTS.forEach(function (row) {
           if (p.note_pk ? row.id === p.note_pk : row.project_id === p.project_id) target = row;
@@ -1680,13 +1724,15 @@
         if (target) {
           target.title = title;
           target.content = content;
+          target.bvid = project.publish_bvid || project.bvid || "";
+          target.aid = project.publish_aid || project.aid || target.aid;
         } else {
           DRAFT_SEQ += 1;
           target = {
             id: "draft_mock_" + DRAFT_SEQ,
             project_id: p.project_id,
-            bvid: project.bvid || "",
-            aid: 1000 + DRAFT_SEQ,
+            bvid: project.publish_bvid || project.bvid || "",
+            aid: project.publish_aid || project.aid || (1000 + DRAFT_SEQ),
             note_id: null,
             title: title,
             content: content,
@@ -1701,6 +1747,7 @@
           note: mockDraftView(target),
           draft: built,
           warnings: [],
+          video: mockVideo(project),
           gates: mockGates(mockDraftView(target), project, target, { confirmed: true })
         });
       }
@@ -1717,10 +1764,12 @@
         var hit = null;
         DRAFTS.forEach(function (row) { if (row.id === p.id) hit = row; });
         if (!hit) return fail("NOT_FOUND", "草稿不存在");
+        var hitProject = projectById(hit.project_id) || {};
         return ok({
           note: mockDraftView(hit),
           limits: { title: 80 },
-          gates: mockGates(mockDraftView(hit), projectById(hit.project_id), hit, {
+          video: mockVideo(hitProject),
+          gates: mockGates(mockDraftView(hit), hitProject, hit, {
             confirmed: !!p.confirmed,
             loggedIn: MOCK_LOGGED_IN
           })
@@ -2635,21 +2684,90 @@
     }
   }
 
-  function listProjects(query, limit, offset) {
-    var q = String(query || "").trim().toLowerCase();
-    var rows = PROJECTS.filter(function (row) {
+  var MOCK_STAGE_ORDER = [
+    "new", "downloaded", "subtitle", "transcribed",
+    "summarized", "clipped", "merged", "published"
+  ];
+  var MOCK_STAGE_LABELS = {
+    new: "待转录",
+    downloaded: "已下载",
+    subtitle: "有字幕",
+    transcribed: "已转录",
+    summarized: "已总结",
+    clipped: "已切片",
+    merged: "已合并",
+    published: "已发布"
+  };
+
+  function listProjects(params) {
+    params = params || {};
+    var q = String(params.query || "").trim().toLowerCase();
+    var stage = String(params.stage || "");
+    var collection = String(params.collection || "");
+    var group = String(params.group || "");
+    var includeArchived = !!params.include_archived;
+    var limit = Math.max(1, Math.min(Number(params.limit) || 50, 200));
+    var offset = Math.max(0, Number(params.offset) || 0);
+
+    function matchesQuery(row) {
       if (!q) return true;
       return (
-        String(row.title).toLowerCase().indexOf(q) >= 0 ||
-        String(row.up_name).toLowerCase().indexOf(q) >= 0 ||
-        String(row.bvid).toLowerCase().indexOf(q) >= 0
+        String(row.title || "").toLowerCase().indexOf(q) >= 0 ||
+        String(row.up_name || "").toLowerCase().indexOf(q) >= 0 ||
+        String(row.bvid || "").toLowerCase().indexOf(q) >= 0 ||
+        String(row.collection_title || "").toLowerCase().indexOf(q) >= 0
       );
+    }
+
+    function matchesSource(row) {
+      var title = String(row.collection_title || "");
+      if (collection) return title === collection;
+      if (group === "local") return !title && row.source_kind === "local";
+      if (group === "unassigned") return !title && row.source_kind !== "local" && !!row.bvid;
+      if (group === "other") return !title && row.source_kind !== "local" && !row.bvid;
+      return true;
+    }
+
+    var sourceRows = PROJECTS.filter(function (row) {
+      if (!includeArchived && row.archived_at) return false;
+      return matchesSource(row) && matchesQuery(row);
     });
+
+    var counts = {};
+    sourceRows.forEach(function (row) {
+      counts[row.stage || ""] = (counts[row.stage || ""] || 0) + 1;
+    });
+    var facets = MOCK_STAGE_ORDER.map(function (key) {
+      return { key: key, label: MOCK_STAGE_LABELS[key], count: counts[key] || 0 };
+    });
+    Object.keys(counts).forEach(function (key) {
+      if (MOCK_STAGE_ORDER.indexOf(key) < 0) {
+        facets.push({ key: key, label: key, count: counts[key] });
+      }
+    });
+
+    var rows = sourceRows.filter(function (row) {
+      return !stage || row.stage === stage;
+    });
+    rows = rows.slice().sort(function (a, b) {
+      if (params.sort === "title") {
+        return String(a.title || "").localeCompare(String(b.title || ""), "zh-CN");
+      }
+      if (params.sort === "collection_index") {
+        return (Number(a.collection_index) || 0) - (Number(b.collection_index) || 0)
+          || String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
     return {
       items: rows.slice(offset, offset + limit),
       total: rows.length,
       limit: limit,
-      offset: offset
+      offset: offset,
+      facets: facets,
+      stage_labels: MOCK_STAGE_LABELS,
+      archived_total: 0
     };
   }
 

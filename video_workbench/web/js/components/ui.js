@@ -100,7 +100,9 @@
   ui.toast = function (message, level, timeoutMs) {
     var host = document.getElementById("toasts");
     if (!host) return null;
-    var levelName = level || "info";
+    // 等级名归一：调用点里 "warn" 与 "warning" 并存，而 CSS 只有 .toast--warning。
+    // 治本放在这里，不改 30 个调用点。
+    var levelName = (level || "info") === "warn" ? "warning" : (level || "info");
     var node = h("div", { class: "toast toast--" + levelName, role: "status", text: String(message) });
     host.appendChild(node);
     // 错误留在屏幕上久一点：读者往往正在看别处，一闪而过等于没提示。
@@ -112,6 +114,28 @@
   };
 
   // ---------------------------------------------------------------- 弹窗
+
+  /** 弹窗内可聚焦控件（Tab 陷阱与"打开时聚焦"共用一份选择器）。 */
+  var FOCUSABLE = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(",");
+
+  function focusables(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return [];
+    var list = root.querySelectorAll(FOCUSABLE);
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      // offsetParent 为 null 的（display:none / hidden）不该进循环：
+      // 焦点落到看不见的控件上等于焦点消失。
+      if (list[i].offsetParent !== null) out.push(list[i]);
+    }
+    return out;
+  }
 
   /**
    * 打开一个弹窗，返回 { close, body }。ESC 与点遮罩都能关。
@@ -131,6 +155,9 @@
     var body = h("div", { class: "modal__body" }, opts.body || null);
     var foot = opts.footer || null;
     var closed = false;
+    // 打开前谁拿着焦点：关闭时要还回去，否则焦点落回 <body>，
+    // 键盘用户得从页首重新 Tab 一遍才能回到刚才那个按钮。
+    var opener = document.activeElement;
 
     var close = function () {
       // panel 的父节点是 overlay，不是 #modal-root —— 之前写 root.removeChild(panel)
@@ -140,16 +167,51 @@
       closed = true;
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       document.removeEventListener("keydown", onKey, true);
+      // 焦点还回去：只在原节点仍挂在文档里时才还，否则焦点会落到一个已卸载的节点上。
+      if (opener && opener.isConnected && typeof opener.focus === "function") {
+        try {
+          opener.focus();
+        } catch (_err) {
+          /* 老 WebView 对已隐藏节点 focus() 会抛，不阻断关闭 */
+        }
+      }
       if (typeof opts.onClose === "function") opts.onClose();
     };
     var onKey = function (event) {
       if (event.key === "Escape") {
         event.stopPropagation();
         close();
+        return;
+      }
+      // 焦点陷阱：Tab / Shift+Tab 在 panel 内循环，不许跑到遮罩后面的页面上。
+      // 没有这一条时 role="dialog" aria-modal="true" 只是一句声明——Tab 照样能出去。
+      if (event.key === "Tab") trapTab(event);
+    };
+    /** 把 Tab 的落点收回 panel：可聚焦控件为空时留在 panel 自己身上。 */
+    var trapTab = function (event) {
+      var nodes = focusables(panel);
+      if (!nodes.length) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      var first = nodes[0];
+      var last = nodes[nodes.length - 1];
+      var active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || active === panel || !panel.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+      if (active === last || !panel.contains(active)) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
-    var panel = h("div", { class: "modal__panel", role: "dialog", "aria-modal": "true" }, [
+    var panel = h("div", { class: "modal__panel", role: "dialog", "aria-modal": "true", tabindex: "-1" }, [
       h("div", { class: "modal__head" }, [
         h("span", { text: opts.title || "" }),
         h("span", { class: "topbar__spacer" }),
@@ -170,6 +232,15 @@
 
     root.appendChild(overlay);
     document.addEventListener("keydown", onKey, true);
+    // 打开即把焦点移进弹窗：否则读屏与键盘用户还在页面原处，弹窗对他们是隐形的。
+    // 落在 panel 自己身上（tabindex="-1"）而不是首个控件：自动聚焦到单选/输入框
+    // 会顺手选中或弹出软键盘，那不是"打开弹窗"该有的副作用；panel 拿到焦点后
+    // 第一次 Tab 自然落到第一个可聚焦子节点上。
+    try {
+      panel.focus();
+    } catch (_err) {
+      /* 老 WebView 对未布局节点 focus() 会抛，不阻断弹窗 */
+    }
     return { close: close, body: body };
   };
 
@@ -318,18 +389,61 @@
     ]);
   };
 
-  /** 统一的"这里还没做"占位：Phase 0 的五个页面用它，Phase 1+ 逐个替换。 */
-  ui.placeholder = function (title, hint, todos) {
-    var list = (todos || []).map(function (item) {
-      return h("li", { text: item });
-    });
-    return h("div", { class: "card" }, [
-      h("div", { class: "card__body" }, [
-        h("div", { class: "empty__title", text: title }),
-        h("p", { class: "page__hint", text: hint }),
-        list.length ? h("ul", { class: "col", style: "margin:12px 0 0;padding-left:18px" }, list) : null
-      ])
+  /**
+   * 加载态：图标 + 一句**机制**文案（"读取素材库…"），不写"请稍候"这类空话。
+   *
+   * 为什么复用 `.empty` 而不新开一个类：三态在视觉上应当是同一块区域换内容，
+   * 换类名会让每个页面各自长出一个「加载中的样子」。`.empty--loading` 只挂动画。
+   *
+   * **只用于首次加载。** 已有内容时的刷新走「按钮禁用 + 文案变更」
+   * （summary.js 的 progressBlock()、clips.js 的 renderActions() 已是这个范式）——
+   * 整块替换成 loading 会把键盘焦点吞掉。
+   */
+  ui.loading = function (text) {
+    return h("div", { class: "empty empty--loading", role: "status", "aria-live": "polite" }, [
+      h("div", { html: ui.svg("spinner") }),
+      h("div", { class: "empty__hint", text: text || "读取中…" })
     ]);
+  };
+
+  /**
+   * 错误态：**必须带出口**。opts = { title, message, retryText, onRetry }。
+   *
+   * `onRetry` 为空时才允许没有按钮，且那时 `message` 必须写清下一步
+   * （例如"去 设置 → 模型 填好接口地址与 Key"）——报错后唯一出路是
+   * "再点一次原动作、而原动作可能已不在视野里"的那批页面，就是这么来的。
+   */
+  ui.errorBlock = function (opts) {
+    var o = opts || {};
+    var kids = [h("div", { html: ui.svg("alert") })];
+    kids.push(h("div", { class: "empty__title", text: o.title || "读取失败" }));
+    if (o.message) kids.push(h("div", { class: "empty__hint", text: o.message }));
+    if (o.onRetry) {
+      kids.push(
+        h("button", {
+          class: "btn",
+          type: "button",
+          text: o.retryText || "重试",
+          onclick: o.onRetry
+        })
+      );
+    }
+    return h("div", { class: "empty", role: "alert" }, kids);
+  };
+
+  /**
+   * 从 RpcError 直接产出错误块——**全仓唯一消费 `retryable` 的地方**。
+   *
+   * 后端 errors.py 的 RETRYABLE_CODES 已经判定过"重试有没有意义"，前端不重新猜：
+   * 说可重试才给按钮；不可重试的（VALIDATION / NOT_FOUND / LLM_NOT_CONFIGURED…）
+   * 给了按钮只会让人白点一次，改为在 message 里写清该改哪儿。
+   */
+  ui.errorFrom = function (err, onRetry, title) {
+    return ui.errorBlock({
+      title: title || "读取失败",
+      message: (err && err.message) || "未知原因",
+      onRetry: (err && err.retryable && onRetry) ? onRetry : null
+    });
   };
 
   // ---------------------------------------------------------------- 格式化

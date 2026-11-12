@@ -81,6 +81,7 @@ from video_workbench.infra.db import open_and_migrate, schema_version
 from video_workbench.infra.ffmpeg import FFmpeg, subtitle_filter
 from video_workbench.infra.files import (
     atomic_write_text,
+    disk_usage,
     ensure_free_space,
     is_within,
     sanitize_name,
@@ -152,6 +153,10 @@ class LogTailParams(BaseModel):
     lines: int = 200
 
 
+#: 左栏「来源」树的非合集分组键。合集走 collection_title 精确匹配，不在这里。
+SOURCE_GROUPS = ("local", "unassigned", "other")
+
+
 class ListParams(BaseModel):
     query: str = ""
     limit: int = 50
@@ -162,6 +167,10 @@ class ListParams(BaseModel):
     sort: str = "created_desc"
     # 归档箱：默认不看归档，勾上才混进来。
     include_archived: bool = False
+    # 左栏来源筛选：collection 是合集名（collection_title），group 是
+    # local / unassigned / other 之一。两者互斥，空串都表示不过滤。
+    collection: str = ""
+    group: str = ""
 
 
 class ArchiveParams(BaseModel):
@@ -170,16 +179,20 @@ class ArchiveParams(BaseModel):
 
 
 class DeletePreviewParams(BaseModel):
-    # 二选一：给了 ids 就按 id；否则按 query/stage 现算。
+    # 二选一：给了 ids 就按 id；否则按 query/stage/来源现算。
     ids: list[str] = Field(default_factory=list)
     query: str = ""
     stage: str = ""
+    collection: str = ""
+    group: str = ""
 
 
 class DeleteManyParams(BaseModel):
     ids: list[str] = Field(default_factory=list)
     query: str = ""
     stage: str = ""
+    collection: str = ""
+    group: str = ""
     # 必填：调用方必须先看过预览的数字，删除数量对不上就拒绝（防"看着 3 条删了 300 条"）。
     expect_total: int
 
@@ -466,6 +479,10 @@ class PublishNoteParams(BaseModel):
     title: str = ""
     summary: str = ""
     content: str = ""
+    # 本地导入项目没有 bvid/aid：用户在发布卡手填的“视频号”。
+    # 空串表示不改动；只写 publish_bvid/publish_aid，不碰项目身份列。
+    bvid: str = ""
+    aid: str = ""
 
 
 class PublishListParams(BaseModel):
@@ -1104,6 +1121,11 @@ class WorkbenchService:
             # 这里必须给一个能看见的地方：`info` / `--check` 的 json 里能看到，
             # 启动日志里同一条是 warning。空列表 = 干净，界面无需为此多画一栏。
             "foreign_keys": list(getattr(self.cfg, "foreign_keys", [])),
+            # 素材盘剩余空间：状态条那一格今天恒显示「磁盘 —」，因为从来没人给过数。
+            # 探测失败一律 None（盘拔了 / 网络盘断线 / 目录权限被改），界面画成
+            # 「磁盘 ?」——看得懂是「读不到」，不是「没空间」。绝不在这里抛：
+            # app.info 一挂，界面连"哪里出错"都显示不出来。
+            "disk": disk_usage(self.cfg.media_root),
             "deps": {
                 "ffmpeg": bool(shutil.which("ffmpeg") or self._ffmpeg_in_config_dir()),
                 "yt_dlp": find_spec("yt_dlp") is not None,
@@ -1213,15 +1235,37 @@ class WorkbenchService:
             )
         return row
 
-    def _library_facets(self, query: str, include_archived: bool) -> list[dict[str, Any]]:
+    @staticmethod
+    def _library_source_keys(collection: str, group: str) -> tuple[str, str]:
+        """来源筛选参数只在这一处校验，列表与批量操作共用同一口径。"""
+        collection_key = str(collection or "")
+        group_key = str(group or "").strip()
+        if group_key and group_key not in SOURCE_GROUPS:
+            raise WBError("VALIDATION", f"不支持的来源分组：{group_key}")
+        if collection_key and group_key:
+            raise WBError("VALIDATION", "collection 与 group 只能二选一")
+        return collection_key, group_key
+
+    def _library_facets(
+        self,
+        query: str,
+        include_archived: bool,
+        collection: str = "",
+        group: str = "",
+    ) -> list[dict[str, Any]]:
         """阶段计数（一次 GROUP BY），按 STAGE_ORDER 顺序；历史脏值追加在末尾。
 
-        facets 不带 stage 过滤——它回答"当前搜索下每个阶段各有多少"，
+        facets 不带 stage 过滤——它回答"当前搜索/来源下每个阶段各有多少"，
         先按阶段筛就只剩一个桶。stage=="" 时 sum(count)==total 是不变量。
         """
         counts = {
             str(row["stage"] or ""): int(row["count"])
-            for row in self.repo.project_stage_counts(query, include_archived=include_archived)
+            for row in self.repo.project_stage_counts(
+                query,
+                include_archived=include_archived,
+                collection=collection,
+                group=group,
+            )
         }
         facets: list[dict[str, Any]] = []
         for key in STAGE_ORDER:
@@ -1241,20 +1285,31 @@ class WorkbenchService:
         stage: str = "",
         sort: str = "created_desc",
         include_archived: bool = False,
+        collection: str = "",
+        group: str = "",
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         query_text = str(query or "")
         stage_key = str(stage or "").strip()
         sort_key = str(sort or "created_desc")
+        collection_key, group_key = self._library_source_keys(collection, group)
 
         total = self.repo.project_count(
-            query_text, stage=stage_key, include_archived=include_archived
+            query_text,
+            stage=stage_key,
+            include_archived=include_archived,
+            collection=collection_key,
+            group=group_key,
         )
         if sort_key == "title":
             # 自然序只能整段算：先拿轻量投影排序，再按排好的 id 取回整行（不是 N+1）。
             projected = self.repo.project_title_rows(
-                query_text, stage=stage_key, include_archived=include_archived
+                query_text,
+                stage=stage_key,
+                include_archived=include_archived,
+                collection=collection_key,
+                group=group_key,
             )
             projected.sort(
                 key=lambda row: (natural_key(str(row.get("title") or "")), str(row.get("id") or ""))
@@ -1269,17 +1324,36 @@ class WorkbenchService:
                 stage=stage_key,
                 include_archived=include_archived,
                 sort=sort_key,
+                collection=collection_key,
+                group=group_key,
             )
         items = [self._decorate(p) for p in projects]
 
-        visible_total = self.repo.project_count(query_text, stage=stage_key, include_archived=False)
-        all_total = self.repo.project_count(query_text, stage=stage_key, include_archived=True)
+        visible_total = self.repo.project_count(
+            query_text,
+            stage=stage_key,
+            include_archived=False,
+            collection=collection_key,
+            group=group_key,
+        )
+        all_total = self.repo.project_count(
+            query_text,
+            stage=stage_key,
+            include_archived=True,
+            collection=collection_key,
+            group=group_key,
+        )
         return {
             "items": items,
             "total": total,
             "limit": limit,
             "offset": offset,
-            "facets": self._library_facets(query_text, include_archived),
+            "facets": self._library_facets(
+                query_text,
+                include_archived,
+                collection=collection_key,
+                group=group_key,
+            ),
             "stage_labels": dict(STAGE_LABELS),
             "archived_total": max(0, all_total - visible_total),
         }
@@ -1301,12 +1375,25 @@ class WorkbenchService:
 
     # ------------------------------------------------------- 素材库批量操作
 
-    def _library_target_ids(self, ids: list[str], query: str, stage: str) -> list[str]:
+    def _library_target_ids(
+        self,
+        ids: list[str],
+        query: str,
+        stage: str,
+        collection: str = "",
+        group: str = "",
+    ) -> list[str]:
         """批量操作的 id 集合：给了 ids 用它，否则按当前筛选现算（只算未归档的）。"""
+        collection_key, group_key = self._library_source_keys(collection, group)
         wanted = [str(item) for item in (ids or [])]
         if wanted:
             return list(dict.fromkeys(wanted))
-        rows = self.repo.project_title_rows(str(query or ""), stage=str(stage or ""))
+        rows = self.repo.project_title_rows(
+            str(query or ""),
+            stage=str(stage or ""),
+            collection=collection_key,
+            group=group_key,
+        )
         return [str(row["id"]) for row in rows]
 
     def library_archive(self, ids: list[str] = [], archived: bool = True) -> dict[str, Any]:
@@ -1328,10 +1415,15 @@ class WorkbenchService:
         return result
 
     def library_delete_preview(
-        self, ids: list[str] = [], query: str = "", stage: str = ""
+        self,
+        ids: list[str] = [],
+        query: str = "",
+        stage: str = "",
+        collection: str = "",
+        group: str = "",
     ) -> dict[str, Any]:
         """删除前给用户看的数字：删几条、其中几条带草稿/切片/候选。"""
-        wanted = self._library_target_ids(ids, query, stage)
+        wanted = self._library_target_ids(ids, query, stage, collection, group)
         projects = self.repo.project_get_many(wanted)
         counts = self.repo.project_related_counts([str(p["id"]) for p in projects])
         return {
@@ -1380,6 +1472,8 @@ class WorkbenchService:
         query: str = "",
         stage: str = "",
         expect_total: int = 0,
+        collection: str = "",
+        group: str = "",
     ) -> dict[str, Any]:
         """批量删除：先对账、再留证、最后单事务删。
 
@@ -1389,7 +1483,7 @@ class WorkbenchService:
         raw_ids = [str(item) for item in (ids or [])]
         if len(raw_ids) > MAX_BATCH_PROJECTS:
             raise WBError("VALIDATION", f"一次最多删除 {MAX_BATCH_PROJECTS} 个项目")
-        wanted = self._library_target_ids(raw_ids, query, stage)
+        wanted = self._library_target_ids(raw_ids, query, stage, collection, group)
         if len(wanted) > MAX_BATCH_PROJECTS:
             raise WBError(
                 "VALIDATION",
@@ -3524,12 +3618,113 @@ class WorkbenchService:
             raise WBError("VALIDATION", "这版总结不属于当前项目")
         return record
 
-    def publish_preview(
-        self, project_id: str, summary_id: str = "", confirmed: bool = False
-    ) -> dict[str, Any]:
+    def _with_publish_video(self, project: dict[str, Any]) -> dict[str, Any]:
+        """把“发布用的视频号”叠加到项目副本上。
+
+        本地导入项目的 bvid/aid 是空的；publish_bvid/publish_aid 是用户在发布卡
+        手填的绑定。所有发布链路只看这个副本，不去改 wb_project.bvid/aid
+        （那两列是下载去重身份，project_find_by_bvid 靠它们认“同一集”）。
+        """
+        if not project:
+            return {}
+        out = dict(project)
+        out["bvid"] = str(project.get("publish_bvid") or project.get("bvid") or "")
+        raw_aid = project.get("publish_aid") or project.get("aid")
+        try:
+            out["aid"] = int(raw_aid) if raw_aid else None
+        except (TypeError, ValueError):
+            out["aid"] = None
+        return out
+
+    def _publish_project(self, project_id: str) -> dict[str, Any]:
         project = self.repo.project_get(project_id)
         if not project:
             raise WBError("NOT_FOUND", "项目不存在")
+        return self._with_publish_video(project)
+
+    def _publish_video_view(self, project: dict[str, Any]) -> dict[str, Any]:
+        project = project or {}
+        try:
+            aid = int(project.get("aid") or 0)
+        except (TypeError, ValueError):
+            aid = 0
+        return {
+            "bvid": str(project.get("bvid") or ""),
+            "aid": aid,
+            "source_kind": str(project.get("source_kind") or ""),
+            "bound": bool(project.get("publish_bvid") or project.get("publish_aid")),
+        }
+
+    def _bind_publish_video(
+        self, project: dict[str, Any], *, bvid: str, aid: str
+    ) -> dict[str, Any]:
+        """保存用户手填的 BV/AV 号。只写 publish_bvid/publish_aid。"""
+        raw_bv = str(bvid or "").strip()
+        raw_av = str(aid or "").strip()
+        if not raw_bv and not raw_av:
+            return project
+
+        bv = ""
+        av: int | None = None
+        if raw_bv:
+            kind, value, _ = resolver_mod.identify(raw_bv)
+            if kind != "bv":
+                raise WBError("VALIDATION", "BV 号格式不对：应形如 BV1xx411c7mD")
+            bv = value
+        if raw_av:
+            text = raw_av
+            if text.isdigit():
+                av = int(text)
+            else:
+                kind, value, _ = resolver_mod.identify(text)
+                if kind != "av":
+                    raise WBError("VALIDATION", "AV 号格式不对：应形如 av123456")
+                av = int(value)
+            if not av:
+                raise WBError("VALIDATION", "AV 号必须大于 0")
+
+        if bv and av:
+            try:
+                resolution = self._resolver.resolve(bv)
+            except WBError as exc:
+                raise WBError(
+                    "BILI_ERROR", f"核对视频号失败：{exc.message}", detail=exc.detail
+                ) from exc
+            items = list(getattr(resolution, "items", []) or [])
+            found = [int(item.aid) for item in items if getattr(item, "aid", None)]
+            if not found:
+                raise WBError("BILI_ERROR", "没查到这条视频的 av 号，检查 BV 号是否正确")
+            if av not in found:
+                raise WBError("VALIDATION", "BV 号与 AV 号不是同一个视频")
+        elif av is not None:
+            try:
+                resolution = self._resolver.resolve(f"av{av}")
+            except WBError as exc:
+                raise WBError(
+                    "BILI_ERROR", f"核对视频号失败：{exc.message}", detail=exc.detail
+                ) from exc
+            items = list(getattr(resolution, "items", []) or [])
+            bv = str(getattr(items[0], "bvid", "") or "") if items else ""
+            if not bv:
+                raise WBError("BILI_ERROR", "没查到这条视频的 BV 号，检查 av 号是否正确")
+
+        old_bv = str(project.get("publish_bvid") or "")
+        old_aid = project.get("publish_aid")
+        keep_aid = av
+        if bv and av is None and old_bv == bv and old_aid:
+            try:
+                keep_aid = int(old_aid)
+            except (TypeError, ValueError):
+                keep_aid = None
+        self.repo.project_set_publish_video(
+            str(project.get("id") or ""), bvid=bv or None, aid=keep_aid
+        )
+        return self._publish_project(str(project.get("id") or ""))
+
+    def publish_preview(
+        self, project_id: str, summary_id: str = "", confirmed: bool = False
+    ) -> dict[str, Any]:
+        project = self._publish_project(project_id)
         record = self._publish_content(project_id, summary_id)
         draft = publisher_core.build_draft(
             project,
@@ -3540,6 +3735,7 @@ class WorkbenchService:
         draft["version"] = record.get("version", 1)
         note_row = self.repo.publish_for_project(project_id)
         draft["note"] = publisher_core.row_view(note_row)
+        draft["video"] = self._publish_video_view(project)
         draft["gates"] = self._publish_gates(
             draft, project=project, note=note_row or {}, confirmed=confirmed
         )
@@ -3553,10 +3749,10 @@ class WorkbenchService:
         title: str = "",
         summary: str = "",
         content: str = "",
+        bvid: str = "",
+        aid: str = "",
     ) -> dict[str, Any]:
-        project = self.repo.project_get(project_id)
-        if not project:
-            raise WBError("NOT_FOUND", "项目不存在")
+        project = self._publish_project(project_id)
         if note_pk:
             # 草稿行是按 id 更新的。id 若属于另一个项目，这次「保存」会把那个项目的
             # 草稿标题/摘要/正文整份覆盖掉（D1：跨项目覆盖）。
@@ -3564,6 +3760,8 @@ class WorkbenchService:
             if target and str(target.get("project_id") or "") != str(project_id):
                 raise WBError("CONFLICT", "这份草稿属于另一个视频，不能在这里覆盖")
         record = self._publish_content(project_id, summary_id)
+        if str(bvid).strip() or str(aid).strip():
+            project = self._bind_publish_video(project, bvid=bvid, aid=aid)
         draft = publisher_core.build_draft(
             project,
             record.get("content") or {},
@@ -3594,6 +3792,7 @@ class WorkbenchService:
             "note": view,
             "draft": draft,
             "warnings": draft["warnings"],
+            "video": self._publish_video_view(project),
             "gates": self._publish_gates(view, project=project, note=row, confirmed=True),
         }
 
@@ -3628,13 +3827,16 @@ class WorkbenchService:
         row = self.repo.publish_get(id)
         if not row:
             raise WBError("NOT_FOUND", "草稿不存在")
-        project = self.repo.project_get(str(row.get("project_id", ""))) or {}
+        project = self._with_publish_video(
+            self.repo.project_get(str(row.get("project_id", ""))) or {}
+        )
         view = publisher_core.row_view(row)
         view["project_title"] = project.get("title", "")
         view["up_name"] = project.get("up_name", "")
         return {
             "note": view,
             "limits": self._publish_limits(),
+            "video": self._publish_video_view(project),
             "gates": self._publish_gates(view, project=project, note=row, confirmed=confirmed),
         }
 
@@ -3687,7 +3889,9 @@ class WorkbenchService:
         if not confirmed:
             raise WBError("CONFLICT", "还没勾「我已阅读并确认」，这条不发布")
 
-        project = self.repo.project_get(str(row.get("project_id", ""))) or {}
+        project = self._with_publish_video(
+            self.repo.project_get(str(row.get("project_id", ""))) or {}
+        )
         view = publisher_core.row_view(row)
         gates = self._publish_gates(view, project=project, note=row, confirmed=True)
         if not gates.get("ready"):
@@ -3775,7 +3979,7 @@ class WorkbenchService:
             raise WBError(exc.code, f"登录态用不了：{exc.message}", detail=exc.detail) from exc
 
         aid = row.get("aid") or self._publish_aid(
-            self.repo.project_get(str(row.get("project_id", ""))) or {}
+            self._with_publish_video(self.repo.project_get(str(row.get("project_id", ""))) or {})
         )
         publisher_core.withdraw_note(client, aid=aid, note_id=str(row["note_id"]))
         self.repo.publish_set_status(id, "withdrawn")
@@ -3797,7 +4001,9 @@ class WorkbenchService:
         row = self.repo.publish_get(id)
         if not row:
             raise WBError("NOT_FOUND", "草稿不存在")
-        project = self.repo.project_get(str(row.get("project_id", ""))) or {}
+        project = self._with_publish_video(
+            self.repo.project_get(str(row.get("project_id", ""))) or {}
+        )
         record = self.repo.summary_latest(str(row.get("project_id", "")))
         if not record:
             raise WBError("CONFLICT", "这个项目还没有总结，重新生成也没有素材")
@@ -3823,6 +4029,7 @@ class WorkbenchService:
         draft["note"] = publisher_core.row_view(row)
         draft["summary_id"] = record.get("id", "")
         draft["version"] = record.get("version", 1)
+        draft["video"] = self._publish_video_view(project)
         return {
             "draft": draft,
             "part": part,

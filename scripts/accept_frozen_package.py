@@ -192,6 +192,81 @@ def main() -> int:
         f"包内 {(report.get('info') or {}).get('version')} / 仓库 {repo_version}",
     )
 
+    # ---- 三态改造那一批（前端静态资源 + 后端 disk 字段）
+    #
+    # 为什么读「包内文件内容」而不是 PYZ-00.toc：三态是 js/css，PyInstaller 把
+    # video_workbench/web 整份拷进 _internal/video_workbench/web（video_workbench.spec 的
+    # datas），文件内容本身就是真凭据；toc 只登记 Python 模块，对 js/css 无话可说。
+    #
+    # 为什么既有「必须含」也有「必须不含」：ui.placeholder 与 .rail__count 是这次**删掉**的。
+    # 只判「新的在」会绿在一份新旧都还在的包上 —— 那种包说明构建收的是半新半旧的树。
+    web = internal / "video_workbench" / "web"
+
+    def _packed(rel: str) -> str:
+        path = web / rel
+        if not path.is_file():
+            return ""
+        return path.read_bytes().decode("utf-8", errors="replace")
+
+    ui_js = _packed("js/components/ui.js")
+    tri_missing = [
+        name
+        for name in ("ui.loading = function", "ui.errorBlock = function", "ui.errorFrom = function")
+        if name not in ui_js
+    ]
+    check(
+        "包内 ui.js 有三个三态原语（loading / errorBlock / errorFrom）",
+        bool(ui_js) and not tri_missing,
+        ("缺 " + "、".join(tri_missing) if tri_missing else "") if ui_js else "包内没有 ui.js",
+    )
+    check(
+        "包内 ui.placeholder 已删除（只判新的在会绿在半新半旧的包上）",
+        bool(ui_js) and "ui.placeholder = function" not in ui_js,
+        "" if ui_js else "包内没有 ui.js",
+    )
+    router_js = _packed("js/router.js")
+    check(
+        "包内 router.js 不再生成左栏空角标 .rail__count",
+        bool(router_js) and "rail__count" not in router_js,
+        "" if router_js else "包内没有 router.js",
+    )
+    app_js = _packed("js/app.js")
+    disk_missing = [n for n in ("function paintDisk", "status-conn") if n not in app_js]
+    check(
+        "包内 app.js 有磁盘槽 paintDisk 与「后端连接」独立轴",
+        bool(app_js) and not disk_missing,
+        ("缺 " + "、".join(disk_missing) if disk_missing else "") if app_js else "包内没有 app.js",
+    )
+    app_css = _packed("css/app.css")
+    check(
+        "包内 app.css 有加载态转圈动画 wb-spin",
+        bool(app_css) and "@keyframes wb-spin" in app_css,
+        "" if app_css else "包内没有 app.css",
+    )
+    publish_js = _packed("js/pages/publish.js")
+    publish_missing = [
+        name for name in ("pb-bvid", "pb-aid", "本地导入的视频没有视频号") if name not in publish_js
+    ]
+    check(
+        "包内 publish.js 有本地项目视频号输入栏",
+        bool(publish_js) and not publish_missing,
+        ("缺 " + "、".join(publish_missing) if publish_missing else "")
+        if publish_js
+        else "包内没有 publish.js",
+    )
+    disk = (report.get("info") or {}).get("disk")
+    disk_ok = (
+        isinstance(disk, dict)
+        and isinstance(disk.get("free_bytes"), int)
+        and isinstance(disk.get("total_bytes"), int)
+        and 0 <= disk["free_bytes"] <= disk["total_bytes"]
+    )
+    check(
+        "--check 载荷带 info.disk 且 free/total 都是整数（状态条磁盘槽的数据源）",
+        disk_ok,
+        f"disk={disk!r}",
+    )
+
     rc, roles = run_switch(exe, "--roles", "wb-roles.json")
     keys = [r.get("key") for r in (roles.get("roles") or [])]
     check(
