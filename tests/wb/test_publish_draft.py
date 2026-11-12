@@ -92,8 +92,8 @@ def test_default_summary_is_retired():
     """摘要字段已下线（2026-11-07）：不管素材里有什么，都返回空串。
 
     函数留着只为兼容老调用方——它的签名里有 `content`，删掉会 KeyError。
-    为什么下线：笔记接口的 summary 会由 `auto_comment` 自动发成评论区评论，
-    而同一段话在正文里已经有了（用户原话「评论区短版不要加到正文里」）。
+    为什么下线：`comment_short` 是另一段文案，继续拿它当 summary 会在评论区重复；
+    现在发布时 summary 从正文开头现算，`auto_comment=1` 负责同步评论卡。
     """
     assert publisher.default_summary(CONTENT) == ""
     assert publisher.default_summary({"one_line": "只有一句话"}) == ""

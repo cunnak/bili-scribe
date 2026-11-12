@@ -604,6 +604,7 @@ class PublishConfig(_PublishConfig):
     # 这个键留着只为兼容老配置文件（删掉会让 _fill 对未知键抛 VALIDATION），
     # 不再参与任何计算，也不在设置页暴露。
     max_summary_chars: int = 400
+    # 发布笔记时把摘要预览作为【评论卡】同步到视频评论区；默认开启。
     auto_comment: bool = True
 
 

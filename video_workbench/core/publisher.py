@@ -18,10 +18,10 @@
   中文经 urlencode 后每字约 9 字节，逐行 op 的 Delta 很容易把请求体顶过线。
 - 标题 ≤ 80：接口硬限制，超了发不出去，所以在**存草稿之前**就报出来。
 
-**摘要字段已下线（2026-11-07）**：笔记接口的 `summary` 会被 `auto_comment`
-自动发成评论区评论，而同一段话在正文里已经有了。界面上不再给这个输入框，
-库里老行存的那份也不再认。接口里那个位置仍然要填（文档标的是"必要"），
-填的是**正文开头**（`note_preview`），`auto_comment` 恒关。
+**摘要字段已下线（2026-11-07）**：界面上不再给这个输入框，库里老行存的那份
+也不再认。接口里那个位置仍然要填（文档标的是"必要"），填的是**正文开头**
+（`note_preview`）；`auto_comment=1` 让平台把这段预览以【评论卡】形态
+同步到评论区——这也是长文突破普通评论 1000 字上限的正规通道。
 """
 
 from __future__ import annotations
@@ -689,8 +689,8 @@ NOTE_PREVIEW_CHARS = 80
 def note_preview(content_delta: str, limit: int = NOTE_PREVIEW_CHARS) -> str:
     """笔记接口那个 `summary` 位置发什么：**正文开头的纯文本**，不是用户删掉的摘要。
 
-    接口文档把这个字段标成"必要"，而它的原用途是笔记列表里的预览文本
-    （`auto_comment=1` 时还会被拿去发一条评论区评论——本应用恒关）。
+    接口文档把这个字段标成"必要"，它的用途是笔记列表里的预览文本；
+    发布时 `auto_comment=1` 会把它作为【评论卡】同步到评论区。
 
     发空串的风险：平台可能按"必填留空"直接 -400，用户看到的就是"点了发布发不出去"，
     而且这类失败本应用拿不到真站回执去验证，赌不起。
@@ -703,13 +703,14 @@ def note_preview(content_delta: str, limit: int = NOTE_PREVIEW_CHARS) -> str:
     return text[:limit]
 
 
-def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
+def note_payload(draft: dict[str, Any], *, auto_comment: bool = True) -> dict[str, Any]:
     """按笔记接口的形状组 payload（标题不截断：超长要在发之前被拦）。
 
     摘要字段已下线（2026-11-07）。`summary` 这个键仍要发——接口文档把它标成
-    "必要"，而它的原用途是笔记列表里的预览文本（`auto_comment=1` 时还会被拿去
-    发一条评论区评论，本应用恒关）。发什么见 `note_preview`：**正文开头**，
+    "必要"，用途是笔记列表里的预览文本。发什么见 `note_preview`：**正文开头**，
     既不空着（必填位留空可能直接 -400），也不多出用户没见过的话。
+    发布时 `auto_comment=1`，平台会把这段预览以【评论卡】同步到评论区；
+    `auto_comment=False` 只保留为测试/显式关闭用，生产默认开启。
 
     注意这里**故意不读 `draft["summary"]`**：老草稿行里还留着下线前算好的那份，
     认它等于把用户已经删掉的摘要又发出去。调用方传什么都不影响结果。
@@ -717,7 +718,7 @@ def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
     draft = draft or {}
     # **不读 draft["summary"]。** 摘要在 2026-11-07 下线了，但老草稿行里还留着
     # 当年算好的那一份（实测 draft_8dfe01d36c95 里是 268 字，与 comment_short 同源）。
-    # 只要这里还认它，发老草稿时就会把它塞进 payload 并把 auto_comment 打开，
+    # 只要这里还认它，发老草稿时就会把它作为评论卡同步到评论区，
     # 等于用户明明已经把摘要删掉了，发出去还是多一条评论——库里没清零路径，
     # 只能在出口这一处不认它（一处改动覆盖所有老行，不需要数据迁移）。
     content = compact_delta(strip_caution_lines(str(draft.get("content") or "")))
@@ -729,7 +730,7 @@ def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
         # 里存的那份：那份是用户已经在界面上删掉的，认它等于把删掉的东西又发出去。
         # 之所以不干脆发空串：空串在接口里是"必填字段留空"，平台很可能直接 -400，
         # 而那正是"点了发布发不出去"的一种死法——本应用拿不到真站回执来赌这一把。
-        # auto_comment 恒 0 ⇒ 这段预览只出现在笔记列表的预览位，不会被发成评论。
+        # auto_comment 1 ⇒ 平台把这段预览作为评论卡同步到视频评论区。
         "summary": note_preview(content),
         "content": content,
         # 真实客户端（BiliPai VideoNoteRepository）会带 cont_len；补上它，
@@ -739,7 +740,7 @@ def note_payload(draft: dict[str, Any]) -> dict[str, Any]:
         "from": "save",
         "platform": "web",
         "publish": 1,
-        "auto_comment": 0,
+        "auto_comment": 1 if auto_comment else 0,
     }
 
 
@@ -750,16 +751,19 @@ def post_note(
     attempts: int = NOTE_ATTEMPTS,
     sleep: Any = None,
     on_retry: Any = None,
+    auto_comment: bool = True,
 ) -> dict[str, Any]:
-    """发布一篇笔记。成功返回 ``{note_id, attempts, raw}``。
+    """发布一篇笔记，并让平台把摘要预览作为评论卡同步到视频评论区。
 
-    只对 ``-509``（限流）重试；其余错误一律原样交回——验证码/敏感/重复这类
-    重试一百次也一样，重试只会让风控更认定这是脚本。
+    `auto_comment` 默认开启；只有显式传 False 才关闭评论卡同步。
+    成功返回 ``{note_id, attempts, raw}``。只对 ``-509``（限流）重试；
+    其余错误一律原样交回——验证码/敏感/重复这类重试一百次也一样，
+    重试只会让风控更认定这是脚本。
     """
     import time as _time
 
     wait = sleep or _time.sleep
-    payload = note_payload(draft)
+    payload = note_payload(draft, auto_comment=auto_comment)
     if not str(payload.get("content") or "").strip() or payload["content"].strip() == "[]":
         raise WBError("VALIDATION", "笔记正文是空的，先出一版总结")
     if not payload.get("oid"):

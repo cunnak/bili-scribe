@@ -3941,6 +3941,7 @@ class WorkbenchService:
                     "summary": row.get("summary"),
                     "content": row.get("content"),
                 },
+                auto_comment=bool(self.cfg.publish.auto_comment),
                 on_retry=lambda msg: self.events.emit_now(
                     "app.toast", {"level": "info", "text": msg}
                 ),

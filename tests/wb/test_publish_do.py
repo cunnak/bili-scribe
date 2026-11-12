@@ -138,22 +138,32 @@ def test_post_note_builds_bilibili_payload():
     # 摘要字段已下线（2026-11-07）：界面上没有这个输入框，库里也不认老值。
     # 但接口把它标成"必要"，所以这个位置发的是**正文开头**（不是空串，空串在必填位
     # 上可能直接被平台 -400 —— 那正是"点了发布发不出去"的一种死法）。
-    # auto_comment 恒 0：那个开关的语义是「把摘要自动发成评论区评论」。
+    # auto_comment=1：平台把摘要预览作为评论卡同步到视频评论区。
     assert payload["summary"] == "x"
-    assert payload["auto_comment"] == 0
+    assert payload["auto_comment"] == 1
     assert payload["publish"] == 1
     assert out["note_id"] == "9001" and out["attempts"] == 1
+
+
+def test_auto_comment_can_be_explicitly_disabled():
+    """默认同步到评论区；只有显式传 False 才关闭评论卡。"""
+    payload = pub.note_payload(
+        {"aid": 1, "content": '[{"insert":"x\\n"}]'},
+        auto_comment=False,
+    )
+    assert payload["auto_comment"] == 0
 
 
 def test_a_legacy_summary_in_the_row_is_not_sent():
     """老草稿行里还留着下线前算好的摘要：发出去时**不许**认它。
 
     实录：draft_8dfe01d36c95 的 summary 列是 268 字（与 comment_short 逐字同源），
-    用户界面上早就看不到这个字段了，但 payload 里带着它 + auto_comment=1
-    ⇒ 发一条没人看过的评论。库里的老行没有清零路径，只能在出口这一处不认。
+    用户界面上早就看不到这个字段了；如果认它，就会把用户删掉的摘要作为评论卡
+    同步到评论区。库里的老行没有清零路径，只能在出口这一处不认。
 
     现在那个位置发的是**正文开头**：正文是用户确认过的那一份，前 80 字天然属于
-    它，既不会空着（必填位），也不会多出用户没见过的话。
+    它，既不会空着（必填位），也不会多出用户没见过的话；auto_comment=1 让它
+    作为评论卡同步到视频评论区。
     """
     client = FakeClient()
     pub.post_note(
@@ -167,7 +177,7 @@ def test_a_legacy_summary_in_the_row_is_not_sent():
     payload = client.calls[0][1]
     assert "旧草稿" not in payload["summary"]
     assert payload["summary"] == "正文第一句。 第二句。"
-    assert payload["auto_comment"] == 0
+    assert payload["auto_comment"] == 1
 
 
 def test_the_summary_slot_is_filled_from_the_body_and_capped():
@@ -237,7 +247,7 @@ def test_a_two_thousand_char_multiline_note_fits_after_compaction():
         "from": "save",
         "platform": "web",
         "publish": 1,
-        "auto_comment": 0,
+        "auto_comment": 1,
     }
     assert pub.form_body_bytes(raw_payload, csrf="a" * 32) > 20_000
     payload = pub.note_payload({"aid": 1, "title": "标题", "content": raw})
@@ -323,6 +333,7 @@ def test_publish_success_writes_note_id_and_status(service):
     assert row["note_id"] == "123456"
     assert row["published_at"]
     assert client.calls[0][0] == NOTE_ADD
+    assert client.calls[0][1]["auto_comment"] == 1, "服务层发布也要同步到评论区"
 
 
 def test_publish_twice_is_blocked(service):

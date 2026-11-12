@@ -661,10 +661,10 @@
 
   function confirmPublish() {
     return askConfirm(
-      "发布这篇笔记？",
+      "发布这篇笔记并同步到评论区？",
       h("div", {}, [
-        h("p", { text: "笔记会发到视频《" + ((state.current && state.current.project_title) || "") + "》下。" }),
-        h("p", { class: "muted", text: "发布之后不能改，只能撤回；撤回后评论区里的笔记卡也会消失。" })
+        h("p", { text: "笔记会发到视频《" + ((state.current && state.current.project_title) || "") + "》下，审核通过后同步至动态及评论区。" }),
+        h("p", { class: "muted", text: "发布之后不能改，只能撤回；撤回后动态与评论区里的笔记卡也会消失。" })
       ]),
       "发布",
       { cancelLabel: "再想想", danger: true }
@@ -698,8 +698,8 @@
       paint();
       return call("publish.publish", { id: state.current.id, confirmed: true })
         .then(function (data) {
-          state.note = "已发布（note_id " + (data.note_id || "未知") + "）";
-          ui.toast("已发布");
+          state.note = "已发布并同步到评论区（note_id " + (data.note_id || "未知") + "）";
+          ui.toast("已发布并同步到评论区");
           return Promise.all([loadNotes(state.current.id), loadRecords()]);
         })
         .catch(function (error) {
@@ -715,7 +715,7 @@
   function confirmWithdraw() {
     return askConfirm(
       "撤回这篇笔记？",
-      h("p", { text: "撤回后评论区里的笔记卡会消失，本地记录保留为「已撤回」。" }),
+      h("p", { text: "撤回后动态与评论区里的笔记卡会消失，本地记录保留为「已撤回」。" }),
       "撤回",
       { danger: true }
     );
@@ -864,8 +864,8 @@
     if (note) {
       if (note.status === "published") {
         publishRow = h("div", { class: "pb-publish" }, [
-          h("span", { class: "pb-publish__hint", text: "已发布，note_id " + (note.note_id || "未知") }),
-          btn(state.publishing ? "撤回中…" : "撤回笔记", "按 note_id 撤回，撤回后评论区卡片消失", withdrawNow, {
+          h("span", { class: "pb-publish__hint", text: "已发布并同步到评论区，note_id " + (note.note_id || "未知") }),
+          btn(state.publishing ? "撤回中…" : "撤回笔记", "按 note_id 撤回，撤回后动态与评论区卡片消失", withdrawNow, {
             danger: true,
             disabled: state.publishing
           })
@@ -884,7 +884,7 @@
           ]),
           btn(
             state.publishing ? "发布中…" : "发布笔记",
-            publishReady() ? "会真的发到 B站，发出去只能撤回" : gateBlockedText() || "门禁没过",
+            publishReady() ? "会真的发到 B站并同步到视频评论区，发出去只能撤回" : gateBlockedText() || "门禁没过",
             publishNow,
             { primary: true, disabled: !publishReady() || state.publishing }
           )
