@@ -244,6 +244,104 @@
     return { close: close, body: body };
   };
 
+
+  /**
+   * 要一个字符串。返回 Promise：确定 resolve(新值)，任何方式关闭 resolve(null)。
+   *
+   * 为什么不复用 ui.confirm 再让调用方自己读输入框：`ui.modal` 有四条关闭路径
+   * （确定 / 取消 / ESC / 点遮罩），只有把「结束」挂进 close 本身 Promise 才不会挂死。
+   * 同一族坑在 ui.pick 上已经踩过一次。
+   *
+   * opts = { title, label, value, placeholder, confirmText, hint, validate }
+   * `validate(next)` 返回错误文案就不允许提交（比如「名字不能为空」）。
+   */
+  ui.prompt = function (opts) {
+    var o = opts || {};
+    var settled = false;
+    var resolvePromise = null;
+    var dialog = null;
+    // ui.h 的属性是**平铺**写法，没有 attrs 这一层（那是 subtitle_style_form 里
+    // 自己包的一层 n()）。这里写成嵌套对象会被 setAttribute 成 attrs="[object Object]"，
+    // aria-label 与 data-field 一起丢失——无障碍名没了，判据也定位不到这个框。
+    var input = h("input", {
+      class: "input",
+      type: "text",
+      value: o.value == null ? "" : String(o.value),
+      placeholder: o.placeholder || "",
+      "aria-label": o.label || o.title || "输入",
+      "data-field": "prompt"
+    });
+    var hint = h("div", { class: "field__help", text: o.hint || "" });
+    var errorLine = h("div", { class: "field__help field__help--danger", text: "" });
+    errorLine.hidden = true;
+
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      if (resolvePromise) resolvePromise(value);
+    }
+
+    function submit() {
+      var next = input.value.trim();
+      var bad = "";
+      if (typeof o.validate === "function") bad = o.validate(next) || "";
+      if (bad) {
+        errorLine.textContent = bad;
+        errorLine.hidden = false;
+        input.focus();
+        return;
+      }
+      finish(next);
+      if (dialog) dialog.close();
+    }
+
+    return new Promise(function (resolve) {
+      resolvePromise = resolve;
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submit();
+        }
+      });
+      dialog = ui.modal({
+        title: o.title || "输入",
+        body: h("label", { class: "field" }, [
+          h("span", { class: "field__label", text: o.label || "" }),
+          input,
+          hint,
+          errorLine
+        ]),
+        footer: [
+          h("button", {
+            class: "btn",
+            type: "button",
+            text: "取消",
+            onclick: function () {
+              finish(null);
+              dialog.close();
+            }
+          }),
+          h("button", {
+            class: "btn btn--primary",
+            type: "button",
+            text: o.confirmText || "确定",
+            onclick: submit
+          })
+        ],
+        // ESC / 点遮罩 / × 关掉时两个按钮都没被点：onClose 兜底成「放弃」
+        onClose: function () {
+          finish(null);
+        }
+      });
+      try {
+        input.focus();
+        input.select();
+      } catch (_err) {
+        /* 老 WebView 对未布局节点 focus() 会抛，不阻断弹窗 */
+      }
+    });
+  };
+
   ui.confirm = function (title, message, options) {
     var opts = options || {};
     var label = opts.confirmText || "确认";

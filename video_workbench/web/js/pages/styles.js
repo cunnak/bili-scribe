@@ -224,32 +224,87 @@
     });
   }
 
+  // 另存为同样当场问名字：默认带一个可用的建议值，用户直接回车就行。
+  // 原来直接拿 draft.name 提交，另存出来的名字与当前预设一模一样（后端去重加成「 2」），
+  // 用户看着像「多了一份莫名其妙的副本」，而不是「我另存了一个」。
   function saveAsPreset() {
     if (!state.draft) return Promise.resolve();
-    var name = state.draft.name || "新样式";
-    return flush().then(function () {
-      return WB.rpc("style.save", { name: name, config: state.draft });
-    }).then(function (data) {
-      if (!data) return null;
-      state.note = "已另存为预设：" + data.style.name;
-      return loadList();
-    }).catch(function (error) {
-      state.error = (error && error.message) || "另存失败";
-      paintAll();
+    var base = (state.draft.name || "新样式").replace(/\s+\d+$/, "");
+    var suggested = base + " 副本";
+    return WB.ui.prompt({
+      title: "另存为新预设",
+      label: "预设名",
+      value: suggested,
+      confirmText: "保存",
+      hint: "保存的是当前这份配置的整份拷贝",
+      validate: function (next) {
+        return next ? "" : "名字不能为空";
+      }
+    }).then(function (name) {
+      if (!name) return null;
+      return flush().then(function () {
+        return WB.rpc("style.save", { name: name, config: state.draft });
+      }).then(function (data) {
+        if (!data) return null;
+        state.note = "已另存为预设：" + data.style.name;
+        state.error = "";
+        return loadList().then(function () { paintAll(); });
+      }).catch(function (error) {
+        state.error = (error && error.message) || "另存失败";
+        paintAll();
+      });
     });
   }
 
+  // 重命名必须**主动问**新名字。
+  //
+  // 原来这里直接拿 state.draft.name 提交：用户没先去「基本」区块改那个输入框，
+  // 提交的就是原名，后端保存成功、列表一字未变 —— 用户看到的是「点了重命名没反应」。
+  // 重命名这个动作的语义就是「给一个新名字」，所以当场问，不指望用户先去别处改。
   function renamePreset() {
-    if (!state.draft || !state.draft.id) return Promise.resolve();
-    return WB.rpc("style.save", { id: state.draft.id, name: state.draft.name, config: state.draft })
-      .then(function (data) {
-        if (!data) return null;
-        state.note = "预设已重命名为：" + data.style.name;
-        return loadList();
-      }).catch(function (error) {
-        state.error = (error && error.message) || "重命名失败";
-        paintAll();
+    if (!state.draft || !state.draft.id) {
+      state.error = "当前这份还不是已保存的预设，先另存为新预设";
+      paintAll();
+      return Promise.resolve();
+    }
+    // 内置预设后端会拒（"内置样式不可修改，请先复制一份"）。在这里当场问，
+    // 比让用户点完重命名再读一行红字强：他要的结果（有一份自己名字的预设）就在下一步。
+    var row = state.list.filter(function (r) { return r.id === state.draft.id; })[0] || {};
+    if (row.builtin) {
+      return WB.ui.confirm(
+        "内置预设不能改名",
+        "「" + (row.name || state.draft.id) + "」是内置预设，后端不许改它。复制一份出来就能随便改名，配置会一起带过去。",
+        { confirmText: "复制一份再改" }
+      ).then(function (yes) {
+        return yes ? saveAsPreset() : null;
       });
+    }
+    var current = state.draft.name || "";
+    return WB.ui.prompt({
+      title: "重命名预设",
+      label: "新名字",
+      value: current,
+      confirmText: "重命名",
+      hint: "名字重复时会自动加「 2」「 3」",
+      validate: function (next) {
+        if (!next) return "名字不能为空";
+        if (next === current) return "名字没变，改一个再确定";
+        return "";
+      }
+    }).then(function (next) {
+      if (!next) return null;
+      return WB.rpc("style.save", { id: state.draft.id, name: next, config: state.draft })
+        .then(function (data) {
+          if (!data) return null;
+          state.draft.name = data.style.name;
+          state.note = "预设已重命名为：" + data.style.name;
+          state.error = "";
+          return loadList().then(function () { paintAll(); });
+        }).catch(function (error) {
+          state.error = (error && error.message) || "重命名失败";
+          paintAll();
+        });
+    });
   }
 
   function duplicatePreset() {
@@ -441,11 +496,15 @@
 
   function btn(text, title, handler, opts) {
     var options = opts || {};
+    var attrs = { type: "button", title: title || text };
+    // 给按钮一个稳定的 id：判据要按「用户点的那个按钮」定位，
+    // 靠中文文案匹配会在改一句提示语时静默失效。
+    if (options.id) attrs.id = options.id;
     var node = n("button", {
       class: "btn btn--ghost" + (options.primary ? " btn--primary" : "") +
         (options.danger ? " btn--danger" : ""),
       text: text,
-      attrs: { type: "button", title: title || text }
+      attrs: attrs
     });
     if (options.disabled) node.disabled = true;
     else node.addEventListener("click", handler);
@@ -475,7 +534,7 @@
         class: "styles__item" + (active ? " is-active" : ""),
         attrs: { type: "button", "data-preset-id": row.id }
       }, [
-        n("span", { class: "styles__item-name", text: row.name }),
+        n("span", { class: "styles__item-name", text: row.name, attrs: { "data-preset-name": row.id } }),
         n("span", { class: "styles__item-meta" }, [
           n("span", { class: "pill" + (row.mode === "rounded" ? " pill--warn" : ""),
                      text: row.mode === "rounded" ? "圆角条" : "描边" }),
@@ -494,10 +553,10 @@
       n("div", { class: "styles__items" },
         rows.length ? rows : [n("p", { class: "styles__hint", text: "还没有预设" })]),
       n("div", { class: "styles__actions" }, [
-        btn("另存为新预设", "把当前配置存成一个新预设", saveAsPreset),
-        btn("重命名", "改当前预设的名字", renamePreset),
-        btn("复制", "复制当前预设", duplicatePreset),
-        btn("删除", "删除当前预设", removePreset, { danger: true }),
+        btn("另存为新预设", "把当前配置存成一个新预设", saveAsPreset, { id: "styles-save-as" }),
+        btn("重命名", "改当前预设的名字", renamePreset, { id: "styles-rename" }),
+        btn("复制", "复制当前预设", duplicatePreset, { id: "styles-duplicate" }),
+        btn("删除", "删除当前预设", removePreset, { id: "styles-delete", danger: true }),
         btn("导入 JSON", "从 JSON 文件导入一份样式", importJson),
         btn("导出 JSON", "把当前预设导出成 JSON 文件", exportJson),
         btn("打开目录", "打开样式 JSON 所在目录", revealStyles)
@@ -550,6 +609,10 @@
     var builtin = !!(state.list.filter(function (row) {
       return row.id === state.draft.id;
     })[0] || {}).builtin;
+    // 名字输入框**不再禁用**。原来内置预设时把它 disabled，用户看得见却改不动，
+    // 而「重命名」按钮又直接提交 draft.name —— 两处一起导致「预设无法重命名」。
+    // 内置预设的改名在后端本来就会被拒（「内置样式不可修改，请先复制一份」），
+    // 那种情况由 renamePreset 当场问「要不要复制一份再改」，而不是让输入框装死。
     return n("div", { class: "styles__pane styles__pane--edit" }, [
       scopeBar(),
       errorsPane(),
@@ -557,8 +620,10 @@
         draft: state.draft,
         fonts: state.fonts,
         onChange: scheduleSave,
-        nameLocked: builtin,
-        headHint: builtin ? "内置预设只读：要改请点「另存为新预设」" : ""
+        nameLocked: false,
+        // 这句话只讲**实测过**的行为：点重命名会先问「复制一份再改」（renamePreset 里的分支）。
+        // 原来那句「内置预设只读」不成立——draft 是副本，配置项本来就能改。
+        headHint: builtin ? "内置预设：点「重命名」会先复制一份再改" : ""
       }),
       n("div", { class: "styles__savebar" }, [
         btn("保存", "立即保存（平时会自动保存）", function () { flush(); }, { primary: true }),
