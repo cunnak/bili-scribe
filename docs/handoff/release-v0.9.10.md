@@ -31,5 +31,7 @@
 - 发布资产：`dist/VideoWorkbench-0.2.9.zip`，**1959 个文件 / 1959 个条目 / 177,906,311 B**，SHA256 `4A8475936B873B57B49B646F070D854F2B6A577C6A7525AEDFD1A91C4E725B7A`，`ZipFile.testzip() = None`
 - 包内核验：`_internal/video_workbench/web/js/pages/summary.js` 含 `versionNotes` / `restored_version` / `changed_fields`；包内与仓库该文件 SHA256 均为 `934AAF6D5C3F9F2A28DB5FD8CA8F292295F77DB36FC38EE6193D298F2B8EB85C`
 - commit：`79c2850 fix(summary): 版本列表区分模型自述、恢复来源与实际改动并抬到 0.2.9`
-- tag：`v0.9.10`
-- release：`VideoWorkbench 0.2.9（打包版）`
+- tag：`v0.9.10`（tag 对象 `332399f`，指向 `79c2850`）
+- push：`git push origin main` → `96736e5..983bdea`；`git push origin v0.9.10` → `* [new tag] v0.9.10`
+- release：`gh release create v0.9.10 dist/VideoWorkbench-0.2.9.zip --title "VideoWorkbench 0.2.9（打包版）" --notes-file docs/handoff/release-v0.9.10.md` → rc=0，<https://github.com/cunnak/bili-scribe/releases/tag/v0.9.10>
+- 资产回读：`gh release view v0.9.10 --json assets` → `VideoWorkbench-0.2.9.zip`、`state=uploaded`、`size=177906311`、`digest=sha256:4a8475936b873b57b49b646f070d854f2b6a577c6a7525aedfd1a91c4e725b7a`
