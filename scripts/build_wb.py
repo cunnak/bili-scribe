@@ -54,6 +54,87 @@ def _need(path: Path, what: str, problems: list[str], *, wait_s: float = 0.0) ->
         time.sleep(0.5)
 
 
+def _running_from_dist() -> list[tuple[int, str]]:
+    """列出正在从 ``dist/VideoWorkbench`` 里跑起来的进程，返回 ``(pid, 镜像路径)``。
+
+    **为什么必须在 preflight 里查**：``build(clean=True)`` 的第一件事是 ``shutil.rmtree(DIST)``，
+    而一个还开着的旧包会把 ``_internal/**.pyd`` 锁住，于是构建死在这里::
+
+        PermissionError: [WinError 5] 拒绝访问。: '...\\_internal\\charset_normalizer\\cd.cp314-win_amd64.pyd'
+
+    这条报错出自 PyInstaller 的 ``_make_clean_directory``，指向的是打包工具内部——
+    真凶（"你自己的程序还开着"）在报错里一个字都看不见。2026-11-13 实际踩过一次：
+    dist 里躺着一个跑了一整天的实例，白等 81 秒才拿到那句 WinError 5。
+
+    用 ``ctypes`` 问 Windows 要进程表，不引第三方依赖（``psutil`` 装在本机 venv 里但没进
+    ``requirements-wb.txt``，打包脚本不该偷偷依赖一个没声明的包）。拿不到镜像路径的进程
+    （系统进程、无权限）一律跳过——宁可漏报也不误杀。
+    """
+    if sys.platform != "win32":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    TH32CS_SNAPPROCESS = 0x00000002
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snapshot or snapshot == INVALID_HANDLE_VALUE:
+        return []
+    dist_prefix = str(DIST).lower()
+    found: list[tuple[int, str]] = []
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        walking = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while walking:
+            pid = int(entry.th32ProcessID)
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                try:
+                    size = wintypes.DWORD(32768)
+                    buf = ctypes.create_unicode_buffer(size.value)
+                    ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+                    if ok:
+                        image = buf.value
+                        if image.lower().startswith(dist_prefix):
+                            found.append((pid, image))
+                finally:
+                    kernel32.CloseHandle(handle)
+            walking = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return found
+
+
 def preflight() -> list[str]:
     problems: list[str] = []
     _need(SPEC, "打包定义", problems)
@@ -71,6 +152,13 @@ def preflight() -> list[str]:
             __import__(mod)
         except Exception:
             problems.append(f"当前解释器没装 {mod}（用 ./.venv/Scripts/python.exe 跑）")
+    # 还开着的旧包会把 dist/_internal/**.pyd 锁住，让 shutil.rmtree 抛 WinError 5——
+    # 那条报错指向 PyInstaller 内部，看不出"你自己的程序没关"。先在这里拦成一句人话。
+    for pid, image in _running_from_dist():
+        problems.append(
+            f"打包产物还开着（PID {pid}：{image}）——先关掉它再构建，"
+            "否则清理 dist 会被文件锁挡住（WinError 5）"
+        )
     return problems
 
 
