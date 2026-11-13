@@ -22,7 +22,7 @@ from pathlib import Path
 
 from video_workbench.app.errors import WBError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # 一个连接要在三类线程间共享：WebView 的 RPC 回调线程、后台任务线程、
 # 事件推送线程。sqlite3 的连接对象本身不是线程安全的，所以**所有 SQL 都过这把锁**。
@@ -326,6 +326,13 @@ _V6_COLUMNS = {
     "wb_project": {"publish_bvid": "TEXT", "publish_aid": "INTEGER"},
 }
 
+# v7：单视频的字幕样式**整份覆盖**。NULL = 继承全局（这是默认，也是"查看不创建覆盖"
+# 的落法）；非 NULL = 一份完整 config JSON（含 base_preset_id）。
+# 不做逐字段继承：半覆盖会让"我改了字号但颜色怎么没跟过来"变成常态问题。
+_V7_COLUMNS = {
+    "wb_project": {"subtitle_style_json": "TEXT"},
+}
+
 # 所有补列桶，**按版本顺序**排。加版本时必须往这里补一个桶（哪怕空 dict）——
 # 下面的检查是"忘了写迁移"的牙：schema_version 涨了但没登记桶，import 直接失败。
 _ALL_COLUMN_BUCKETS = (
@@ -334,6 +341,7 @@ _ALL_COLUMN_BUCKETS = (
     _V4_COLUMNS,
     _V5_COLUMNS,
     _V6_COLUMNS,
+    _V7_COLUMNS,
 )
 
 

@@ -1,17 +1,16 @@
 /* ============================================================================
- * pages/styles.js —— 字幕样式（P3-07）
+ * pages/styles.js —— 字幕样式页（任务 5 重写）
  *
- * 布局照方案书 5.11：全宽两栏，左预设、右编辑 + 实时预览。
+ * 这一页现在是**唯一**的样式状态 owner，只做四件事：
  *
- * 三条约束：
+ * 1. 作用域：设置页进来是全局，字幕页带 project_id 进来是项目；
+ * 2. 自动保存：改动 400ms 后落盘，请求串行 + revision 防旧响应覆盖；
+ * 3. 预设操作：选择＝复制到当前配置，覆盖/另存/重命名/删除/复制都是显式动作；
+ * 4. 两种预览：快速（画布近似）与精确（FFmpeg 真图）。
  *
- * 1. **内置样式只读**。改不动就直说（按钮禁用 + 一句"内置样式不可修改，
- *    请先复制一份"），不要让人点进去改半天才发现保存失败。
- * 2. **编辑中的值不落盘**。所有改动只进 `state.draft`，点保存才调
- *    `style.save`；否则"随手试一下字号"会污染样式库。
- * 3. **预览是近似的，真渲染才是证据**。画布按 ASS 的排版规则估（字号以像素、
- *    底边距从底往上、圆角条按文本宽算），但字体度量、换行、半透明叠加只有
- *    FFmpeg 说了算——所以有「真实渲染」按钮，失败就明说失败。
+ * 表单与预览的画法分别住在 components/subtitle_style_form.js 与
+ * subtitle_style_preview.js。它们不知道 RPC 存在，页面也不重复实现画布——
+ * 两边各画一次必然漂移。
  * ========================================================================= */
 
 (function () {
@@ -20,16 +19,12 @@
   var WB = (window.WB = window.WB || {});
   var ui = WB.ui;
 
-  // ui.h 的属性写法是"平铺"的，没有 attrs 这一层。这里包一层：本页要写的
-  // aria-label / min / max / step 太多，平铺开会让每个控件都变成一行长调用。
   function n(tag, attrs, children) {
     var bag = attrs || {};
     var flat = {};
     Object.keys(bag).forEach(function (key) {
       if (key === "attrs" && bag.attrs) {
-        Object.keys(bag.attrs).forEach(function (name) {
-          flat[name] = bag.attrs[name];
-        });
+        Object.keys(bag.attrs).forEach(function (name) { flat[name] = bag.attrs[name]; });
       } else {
         flat[key] = bag[key];
       }
@@ -37,461 +32,249 @@
     return ui.h(tag, flat, children);
   }
 
-  var FACES = [
-    { key: "primary", label: "主字幕", hint: "原文（或译文在上时的第一行）" },
-    { key: "secondary", label: "副字幕", hint: "译文那行；只在双语时出现" }
-  ];
-
-  var MODES = [["ass", "普通字幕（描边）"], ["rounded", "圆角背景条"]];
-  var LAYOUTS = [
-    ["original_top", "原文在上"],
-    ["translated_top", "译文在上"],
-    ["original_only", "仅原文"],
-    ["translated_only", "仅译文"]
-  ];
-  var LENGTHS = [["short", "短句"], ["medium", "中句"], ["long", "长句"]];
-  var ORIENTS = [["landscape", "16:9 横屏"], ["portrait", "9:16 竖屏"]];
-  var BACKDROPS = [["dark", "深色"], ["light", "浅色"], ["image", "图片"]];
-  var SAMPLES = {
-    short: "这里是短句",
-    medium: "先把反例摆出来，说明直觉为什么不可靠",
-    long: "先把反例摆出来，说明直觉为什么不可靠；再把变量拆开，逐个控制做对比；最后落到可复现的操作顺序上"
-  };
+  //: 自动保存的静默期。太短会在拖 range 时连发十几个请求，太长会让人以为没存。
+  var AUTOSAVE_MS = 400;
 
   var state = {
+    projectId: "",
     list: [],
-    id: "",
-    builtin: false,
-    draft: null,
-    warnings: [],
-    dirty: false,
+    listLoading: false,
+    listError: "",
     fonts: [],
+    draft: null,
+    scope: "global",
+    inherited: true,
+    revision: "",
+    warnings: [],
+    actualFonts: null,
+    dirty: false,
+    saving: false,
     note: "",
     error: "",
+    errors: [],
     renderPath: "",
     renderNote: "",
-    busy: false
+    renderBusy: false,
+    // 串行化：同一时刻只有一个 put 在飞，排队中的只保留最后一次
+    inFlight: false,
+    queued: false,
+    timer: 0,
+    // 每次落盘成功自增；响应回来时序号不符＝旧响应，直接丢
+    seq: 0,
+    appliedSeq: 0
   };
-
-  // ------------------------------------------------------------ 小工具
 
   function copy(value) {
     return JSON.parse(JSON.stringify(value));
   }
 
-  function face(key) {
-    return (state.draft && state.draft[key]) || {};
+  function form() {
+    return WB.components && WB.components.subtitleStyleForm;
   }
 
-  function knob(faceKey, field, label, opts) {
-    var conf = opts || {};
-    var input = n("input", {
-      class: "input styles__num",
-      type: conf.type || "number",
-      value: face(faceKey)[field],
-      min: conf.min,
-      max: conf.max,
-      step: conf.step || 1,
-      attrs: { "aria-label": label }
-    });
-    input.addEventListener("input", function () {
-      var raw = conf.type === "color" ? input.value : Number(input.value);
-      if (conf.type !== "color" && !isFinite(raw)) return;
-      state.draft[faceKey][field] = raw;
-      markDirty();
-    });
-    return n("label", { class: "field styles__field" }, [
-      n("span", { class: "field__label", text: label }),
-      input
-    ]);
+  function previewComp() {
+    return WB.components && WB.components.subtitleStylePreview;
   }
 
-  function faceBlock(spec) {
-    var key = spec.key;
-    var fontSelect = n("select", { class: "select", attrs: { "aria-label": spec.label + "字体" } });
-    var current = face(key).font || "Microsoft YaHei";
-    var fonts = state.fonts.slice();
-    if (fonts.indexOf(current) < 0) fonts.unshift(current);
-    fonts.forEach(function (name) {
-      var opt = n("option", { text: name, attrs: { value: name } });
-      if (name === current) opt.selected = true;
-      fontSelect.appendChild(opt);
-    });
-    fontSelect.addEventListener("change", function () {
-      state.draft[key].font = fontSelect.value;
-      markDirty();
-    });
-    var bold = n("input", { type: "checkbox", attrs: { "aria-label": spec.label + "加粗" } });
-    bold.checked = !!face(key).bold;
-    bold.addEventListener("change", function () {
-      state.draft[key].bold = bold.checked;
-      markDirty();
-    });
-    return n("div", { class: "styles__block" }, [
-      n("div", { class: "styles__block-head" }, [
-        n("strong", { text: spec.label }),
-        n("span", { class: "styles__hint", text: spec.hint })
-      ]),
-      n("label", { class: "field styles__field" }, [
-        n("span", { class: "field__label", text: "字体" }), fontSelect
-      ]),
-      n("div", { class: "styles__grid" }, [
-        knob(key, "size", "字号", { min: 12, max: 120 }),
-        knob(key, "outline_width", "描边", { min: 0, max: 10 }),
-        knob(key, "spacing", "字间距", { min: -20, max: 20 }),
-        knob(key, "color", "文字色", { type: "color" }),
-        knob(key, "outline_color", "描边色", { type: "color" }),
-        n("label", { class: "field styles__field" }, [
-          n("span", { class: "field__label", text: "加粗" }), bold
-        ])
-      ])
-    ]);
+  function scopeLabel() {
+    if (!state.projectId) return "全局默认";
+    return state.inherited ? "正在继承全局" : "项目覆盖";
   }
 
-  function roundedBlock() {
-    var rnd = (state.draft && state.draft.rounded) || {};
-    function num(field, label, min, max, step) {
-      var input = n("input", {
-        class: "input styles__num", type: "number",
-        value: rnd[field], min: min, max: max, step: step || 1,
-        attrs: { "aria-label": label }
-      });
-      input.addEventListener("input", function () {
-        var raw = Number(input.value);
-        if (!isFinite(raw)) return;
-        state.draft.rounded[field] = raw;
-        markDirty();
-      });
-      return n("label", { class: "field styles__field" }, [
-        n("span", { class: "field__label", text: label }), input
-      ]);
-    }
-    function color(field, label) {
-      var input = n("input", {
-        class: "input styles__num", type: "color", value: rnd[field],
-        attrs: { "aria-label": label }
-      });
-      input.addEventListener("input", function () {
-        state.draft.rounded[field] = input.value;
-        markDirty();
-      });
-      return n("label", { class: "field styles__field" }, [
-        n("span", { class: "field__label", text: label }), input
-      ]);
-    }
-    var alpha = n("input", {
-      class: "styles__range", type: "range", min: 0, max: 1, step: 0.05,
-      value: rnd.bg_alpha, attrs: { "aria-label": "背景不透明度" }
-    });
-    var alphaLabel = n("span", { class: "styles__hint", text: Math.round((rnd.bg_alpha || 0) * 100) + "%" });
-    alpha.addEventListener("input", function () {
-      state.draft.rounded.bg_alpha = Number(alpha.value);
-      alphaLabel.textContent = Math.round(Number(alpha.value) * 100) + "%";
-      markDirty();
-    });
-    function toggle(field, label) {
-      var box = n("input", { type: "checkbox", attrs: { "aria-label": label } });
-      box.checked = rnd[field] !== false;
-      box.addEventListener("change", function () {
-        state.draft.rounded[field] = box.checked;
-        markDirty();
-      });
-      return n("label", { class: "field styles__field" }, [
-        n("span", { class: "field__label", text: label }), box
-      ]);
-    }
-    return n("div", { class: "styles__block" }, [
-      n("div", { class: "styles__block-head" }, [
-        n("strong", { text: "圆角背景条" }),
-        n("span", { class: "styles__hint", text: "只在「圆角背景条」模式下生效；libass 没有真圆角，导出时按方框近似" })
-      ]),
-      n("div", { class: "styles__grid" }, [
-        num("size", "字号", 12, 120),
-        num("corner_radius", "圆角", 0, 40),
-        num("padding_h", "左右内边距", 0, 200),
-        num("padding_v", "上下内边距", 0, 100),
-        num("margin_bottom", "底边距", 0, 400),
-        num("line_spacing", "行距", 0, 40),
-        num("letter_spacing", "字间距", -20, 20),
-        color("text_color", "文字色"),
-        color("bg_color", "背景色")
-      ]),
-      n("label", { class: "field styles__field styles__field--wide" }, [
-        n("span", { class: "field__label", text: "背景不透明度" }),
-        n("div", { class: "styles__row" }, [alpha, alphaLabel])
-      ]),
-      n("div", { class: "styles__grid" }, [
-        toggle("primary_box", "主字幕带背景"),
-        toggle("secondary_box", "副字幕带背景")
-      ])
-    ]);
-  }
+  // ------------------------------------------------------------ 自动保存
 
-  // ------------------------------------------------------------ 画布预览
-
-  function token(name, fallback) {
-    var value = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return (value || "").trim() || fallback || "";
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    var radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + w - radius, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-    ctx.lineTo(x + w, y + h - radius);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-    ctx.lineTo(x + radius, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-  }
-
-  /** 字幕色：画面上的字不跟皮肤走，所以读 tokens.css 里的 --cap-*。 */
-  function capFg() {
-    return token("--cap-fg");
-  }
-
-  function capBg() {
-    return token("--cap-bg");
-  }
-
-  function capStroke() {
-    return token("--cap-stroke");
-  }
-
-  function drawPreview() {
-    var host = document.getElementById("styles-canvas-host");
-    if (!host || !state.draft) return;
-    var canvas = host.querySelector("canvas");
-    if (!canvas) {
-      canvas = document.createElement("canvas");
-      canvas.className = "styles__canvas";
-      host.appendChild(canvas);
-    }
-    var conf = state.draft;
-    var portrait = (conf.preview || {}).orientation === "portrait";
-    var width = portrait ? 720 : 1280;
-    var height = portrait ? 1280 : 720;
-    canvas.width = width;
-    canvas.height = height;
-    canvas.style.aspectRatio = width + " / " + height;
-    var ctx = canvas.getContext && canvas.getContext("2d");
-    if (!ctx) {
-      host.setAttribute("data-degraded", "1");
-      return;
-    }
-    host.removeAttribute("data-degraded");
-    // 背景：深色用页面底色、浅色用面板色；"图片" 只是示意——真背景来自视频帧，
-    // 这里画一道斜纹同时点明"预览不等于成片"
-    var backdrop = (conf.preview || {}).background || "dark";
-    var bg = backdrop === "light" ? token("--panel") : token("--void");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
-    if (backdrop === "dark") {
-      // 纯页面底色是近黑，圆角背景条（黑底 60% 透明）叠上去就看不见了，
-      // 用户会以为"圆角条没生效"。叠一层浅灰把画布抬到"视频画面"的亮度区间。
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = token("--muted");
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalAlpha = 1;
-    }
-    if (backdrop === "image") {
-      ctx.strokeStyle = token("--line");
-      ctx.lineWidth = 2;
-      for (var x = -height; x < width; x += 48) {
-        ctx.beginPath();
-        ctx.moveTo(x, height);
-        ctx.lineTo(x + height, 0);
-        ctx.stroke();
-      }
-    }
-    var text = SAMPLES[(conf.preview || {}).text_length || "medium"] || SAMPLES.medium;
-    var isRounded = conf.mode === "rounded";
-    var rnd = conf.rounded || {};
-    var size = Number((isRounded ? rnd.size : (conf.primary || {}).size) || 48);
-    var bottom = Number((isRounded ? rnd.margin_bottom : 42) || 42);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.font = (isRounded ? "" : (conf.primary || {}).bold ? "bold " : "") + size + "px " +
-      ((isRounded ? rnd.font : (conf.primary || {}).font) || "Microsoft YaHei");
-    // 长句要真的折行：文本长度选「长」就是为了看换行和背景条宽度，
-    // 不折行时文字直接被画布边缘切掉，看不出任何问题。
-    var maxWidth = width * 0.9;
-    var lines = wrapText(ctx, text, maxWidth, 3);
-    if (conf.layout !== "original_only") lines.push("（副字幕示例：译文这一行）");
-    var lineHeight = size * 1.35;
-    var baseY = height - bottom;
-    lines.forEach(function (line, index) {
-      var y = baseY - (lines.length - 1 - index) * lineHeight;
-      var fontSize = index === 0 ? size : Number((conf.secondary || {}).size || 36);
-      ctx.font = fontSize + "px " + ((conf.secondary || {}).font || "Microsoft YaHei");
-      var metrics = ctx.measureText(line);
-      var padH = Number(rnd.padding_h || 0);
-      var padV = Number(rnd.padding_v || 0);
-      if (isRounded) {
-        var boxW = metrics.width + padH * 2;
-        var boxH = fontSize + padV * 2;
-        // 半透明靠 globalAlpha：拼 rgba() 字符串既绕开了 token 校验，
-        // 也会在 canvas 里引入一次性颜色字面量
-        ctx.globalAlpha = rnd.bg_alpha == null ? 0.6 : Math.max(0, Math.min(1, Number(rnd.bg_alpha)));
-        ctx.fillStyle = rnd.bg_color || capBg();
-        roundRect(ctx, width / 2 - boxW / 2, y - boxH + padV, boxW, boxH, Number(rnd.corner_radius || 0));
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = rnd.text_color || capFg();
-      } else {
-        ctx.lineWidth = Number((conf.primary || {}).outline_width || 2);
-        ctx.strokeStyle = (conf.primary || {}).outline_color || capStroke();
-        ctx.fillStyle = (index === 0 ? (conf.primary || {}).color : (conf.secondary || {}).color) || capFg();
-        ctx.strokeText(line, width / 2, y);
-      }
-      ctx.fillText(line, width / 2, y);
-    });
-  }
-
-  // ------------------------------------------------------------ 数据
-
-  // 中文按字切、西文按词切；超过 maxLines 用省略号收尾（预览只示意 2–3 行）
-  function wrapText(ctx, text, maxWidth, maxLines) {
-    var out = [];
-    var line = "";
-    var tokens = String(text).match(/[A-Za-z0-9'’]+|\s+|[^\s]/g) || [];
-    tokens.forEach(function (token) {
-      var next = line + token;
-      if (line && ctx.measureText(next).width > maxWidth) {
-        out.push(line.replace(/\s+$/, ""));
-        line = token.replace(/^\s+/, "");
-      } else {
-        line = next;
-      }
-    });
-    if (line) out.push(line.replace(/\s+$/, ""));
-    if (out.length > maxLines) {
-      var kept = out.slice(0, maxLines);
-      while (kept.length && ctx.measureText(kept[kept.length - 1] + "…").width > maxWidth) {
-        kept[kept.length - 1] = kept[kept.length - 1].slice(0, -1);
-      }
-      kept[kept.length - 1] += "…";
-      return kept;
-    }
-    return out;
-  }
-
-  function markDirty() {
+  function scheduleSave() {
     state.dirty = true;
     state.renderPath = "";
     state.renderNote = "";
-    // **只重画画布和状态条**。重建整个表单会让正在输入的控件丢焦点——
-    // 名字打到第二个字光标就跳走，这种"活着但不跟手"的界面比报错更烦人。
-    drawPreview();
     paintBar();
-    paintRender();
+    drawFast();
+    if (state.timer) window.clearTimeout(state.timer);
+    state.timer = window.setTimeout(function () {
+      state.timer = 0;
+      flush();
+    }, AUTOSAVE_MS);
   }
 
-  function paintBar() {
-    var host = document.getElementById("styles-state");
-    if (host) host.textContent = state.dirty ? "有未保存的改动" : "改动实时预览，保存前不落盘";
+  /** 立刻落盘。离页、切作用域、点保存按钮都走这里。 */
+  function flush() {
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+      state.timer = 0;
+    }
+    if (!state.draft || !state.dirty) return Promise.resolve();
+    if (state.inFlight) {
+      // 在飞的时候不并发第二个请求：等它回来再发最新的一份
+      state.queued = true;
+      return Promise.resolve();
+    }
+    state.inFlight = true;
+    state.saving = true;
+    state.seq += 1;
+    var mine = state.seq;
+    var payload = {
+      project_id: state.projectId,
+      config: state.draft,
+      base_preset_id: state.draft.base_preset_id || "",
+      revision: state.revision
+    };
+    state.dirty = false;
+    paintBar();
+    return WB.rpc("style.effective.put", payload).then(function (data) {
+      state.inFlight = false;
+      state.saving = false;
+      // 旧响应失效：期间又改过，这份结果已经不是用户眼前的样子
+      if (mine < state.seq) {
+        if (state.queued) { state.queued = false; return flush(); }
+        return null;
+      }
+      state.appliedSeq = mine;
+      state.revision = data.revision || "";
+      state.scope = data.scope || state.scope;
+      state.inherited = state.scope !== "project" && !!state.projectId;
+      state.warnings = data.warnings || [];
+      state.errors = [];
+      state.error = "";
+      state.note = "已保存";
+      paintAll();
+      if (state.queued) {
+        state.queued = false;
+        return flush();
+      }
+      return null;
+    }).catch(function (error) {
+      state.inFlight = false;
+      state.saving = false;
+      // 失败保留草稿：清掉草稿等于把用户刚打的字扔掉，比不保存更糟
+      state.dirty = true;
+      var fields = (error && error.fields) || [];
+      state.errors = fields.length ? fields : [];
+      state.error = (error && error.message) || "保存失败";
+      state.note = "";
+      paintAll();
+    });
   }
+
+  // ------------------------------------------------------------ 读
 
   function loadFonts() {
-    WB.rpc("style.fonts").then(function (data) {
+    return WB.rpc("style.fonts").then(function (data) {
       state.fonts = (data && data.fonts) || [];
-      if (state.draft) paintForm();
     }).catch(function () {
       state.fonts = [];
     });
   }
 
-  function loadList(selectId) {
+  function loadList() {
     state.listLoading = true;
     state.listError = "";
-    paintAll();
+    paintList();
     return WB.rpc("style.list").then(function (rows) {
       state.listLoading = false;
       state.list = rows || [];
-      var wanted = selectId || state.id || (state.list[0] && state.list[0].id) || "";
-      var exists = state.list.some(function (row) { return row.id === wanted; });
-      return pick(exists ? wanted : (state.list[0] && state.list[0].id) || "");
+      paintList();
     }).catch(function (error) {
       state.listLoading = false;
       state.listError = (error && error.message) || "读不到样式列表";
-      paintAll();
-      // 不再往外抛：读列表失败已经有自己的错误块与重试按钮，再抛一次只会让
-      // 调用方各自 catch 一遍同一句话，或（render 里那个 setTimeout）变成
-      // 一个没人接的 unhandled rejection。
-      return null;
+      paintList();
     });
   }
 
-  function pick(id) {
+  /** 读当前作用域的有效样式。作用域是这一页的输入，不是它自己猜出来的。 */
+  function loadEffective() {
+    return WB.rpc("style.effective.get", { project_id: state.projectId })
+      .then(function (data) {
+        state.draft = copy(data.config);
+        state.scope = data.scope || "global";
+        state.inherited = !!data.inherited;
+        state.revision = data.revision || "";
+        state.warnings = data.warnings || [];
+        state.actualFonts = data.actual_fonts || null;
+        state.errors = [];
+        state.error = "";
+        state.dirty = false;
+        paintAll();
+      })
+      .catch(function (error) {
+        state.error = (error && error.message) || "读不到样式";
+        paintAll();
+      });
+  }
+
+  // ------------------------------------------------------------ 预设操作
+
+  function pickPreset(id) {
     if (!id) return Promise.resolve();
-    state.busy = true;
-    return WB.rpc("style.get", { id: id }).then(function (data) {
-      state.id = data.style.id;
-      state.builtin = !!data.builtin;
+    // 切预设前先把在途改动落地，否则"改了没存就切走"会静默丢改动
+    return flush().then(function () {
+      return WB.rpc("style.get", { id: id });
+    }).then(function (data) {
+      if (!data) return null;
+      // 预设只当模板：整份复制进当前作用域，不建立"跟随某个预设"的引用
       state.draft = copy(data.style);
+      state.draft.base_preset_id = data.style.id || id;
       state.warnings = data.warnings || [];
-      state.dirty = false;
-      state.error = "";
-      state.renderPath = "";
+      state.dirty = true;
+      state.note = "已套用预设：" + (data.style.name || id) + "（还没保存）";
       paintAll();
+      return flush();
     }).catch(function (error) {
-      state.error = (error && error.message) || "读不到这个样式";
+      state.error = (error && error.message) || "套用预设失败";
       paintAll();
-    }).then(function () {
-      state.busy = false;
     });
   }
 
-  function save() {
-    if (!state.draft) return;
-    state.busy = true;
-    var payload = {
-      id: state.builtin ? "" : state.id,
-      name: state.draft.name,
-      config: state.draft
-    };
-    WB.rpc("style.save", payload).then(function (data) {
-      state.id = data.style.id;
-      state.builtin = false;
-      state.draft = copy(data.style);
-      state.warnings = data.warnings || [];
-      state.dirty = false;
-      state.note = "已保存：" + data.style.name;
-      return loadList(state.id);
+  function saveAsPreset() {
+    if (!state.draft) return Promise.resolve();
+    var name = state.draft.name || "新样式";
+    return flush().then(function () {
+      return WB.rpc("style.save", { name: name, config: state.draft });
+    }).then(function (data) {
+      if (!data) return null;
+      state.note = "已另存为预设：" + data.style.name;
+      return loadList();
     }).catch(function (error) {
-      state.error = (error && error.message) || "保存失败";
+      state.error = (error && error.message) || "另存失败";
       paintAll();
-    }).then(function () {
-      state.busy = false;
     });
   }
 
-  function duplicate() {
-    if (!state.draft) return;
-    state.busy = true;
+  function renamePreset() {
+    if (!state.draft || !state.draft.id) return Promise.resolve();
+    return WB.rpc("style.save", { id: state.draft.id, name: state.draft.name, config: state.draft })
+      .then(function (data) {
+        if (!data) return null;
+        state.note = "预设已重命名为：" + data.style.name;
+        return loadList();
+      }).catch(function (error) {
+        state.error = (error && error.message) || "重命名失败";
+        paintAll();
+      });
+  }
+
+  function duplicatePreset() {
+    if (!state.draft) return Promise.resolve();
     var draft = copy(state.draft);
-    draft.name = draft.name + " 副本";
-    WB.rpc("style.save", { name: draft.name, config: draft }).then(function (data) {
+    draft.name = (draft.name || "样式") + " 副本";
+    return WB.rpc("style.save", { name: draft.name, config: draft }).then(function (data) {
+      if (!data) return null;
       state.note = "已复制为：" + data.style.name;
-      return loadList(data.style.id);
+      return loadList();
     }).catch(function (error) {
       state.error = (error && error.message) || "复制失败";
       paintAll();
-    }).then(function () {
-      state.busy = false;
     });
   }
 
-  function remove() {
-    if (!state.draft || state.builtin) return;
-    var name = state.draft.name;
-    WB.rpc("style.delete", { id: state.id }).then(function () {
-      state.note = "已删除：" + name;
-      state.id = "";
+  function removePreset() {
+    var id = (state.draft && state.draft.id) || "";
+    if (!id) {
+      state.error = "当前这份还不是已保存的预设，没有可删的东西";
+      paintAll();
+      return Promise.resolve();
+    }
+    return WB.rpc("style.delete", { id: id }).then(function () {
+      state.note = "已删除预设";
       return loadList();
     }).catch(function (error) {
       state.error = (error && error.message) || "删除失败";
@@ -499,6 +282,63 @@
     });
   }
 
+  function revealStyles() {
+    WB.rpc("fs.reveal", { path: "" }, { silent: true }).then(function (data) {
+      state.note = "已打开样式目录：" + ((data && data.path) || "");
+      paintBar();
+    }).catch(function (error) {
+      state.error = (error && error.message) || "打不开样式目录";
+      paintAll();
+    });
+  }
+
+  function resetScope() {
+    if (!state.projectId) {
+      state.error = "全局作用域没有「继承」可恢复；要回内置默认请点「恢复内置默认」";
+      paintAll();
+      return Promise.resolve();
+    }
+    return flush().then(function () {
+      return WB.rpc("style.effective.reset", { project_id: state.projectId });
+    }).then(function (data) {
+      if (!data) return null;
+      state.draft = copy(data.config);
+      state.scope = data.scope || "global";
+      state.inherited = true;
+      state.revision = data.revision || "";
+      state.warnings = data.warnings || [];
+      state.dirty = false;
+      state.note = "已恢复继承全局默认";
+      paintAll();
+    }).catch(function (error) {
+      state.error = (error && error.message) || "恢复继承失败";
+      paintAll();
+    });
+  }
+
+  function resetGlobal() {
+    if (state.projectId) {
+      state.error = "这一页是项目作用域；要回内置默认请到设置页，或在项目里点「恢复继承」";
+      paintAll();
+      return Promise.resolve();
+    }
+    return flush().then(function () {
+      return WB.rpc("style.effective.reset", {});
+    }).then(function (data) {
+      if (!data) return null;
+      state.draft = copy(data.config);
+      state.revision = data.revision || "";
+      state.dirty = false;
+      state.note = "全局已回到内置默认";
+      paintAll();
+    }).catch(function (error) {
+      state.error = (error && error.message) || "恢复失败";
+      paintAll();
+    });
+  }
+
+  // JSON 导入导出：规划书 §2 明确「保留 JSON 导入导出」——
+  // 这是跨机器搬样式的唯一通道，不能因为界面上更常点预设就砍掉。
   function importJson() {
     // 走产品既有的 fs.pick 通道。以前这里调 WB.fs.pickFile —— 全仓没有 WB.fs
     // 这个对象，于是「导入」在任何环境下都只弹一句"这个环境没有文件选择器"，
@@ -510,7 +350,7 @@
     }).then(function (data) {
       if (!data) return null;
       state.note = "已导入：" + data.style.name;
-      return loadList(data.style.id);
+      return loadList();
     }).catch(function (error) {
       state.error = (error && error.message) || "导入失败";
       paintAll();
@@ -518,42 +358,101 @@
   }
 
   function exportJson() {
-    if (!state.draft) return;
-    WB.rpc("style.export", { id: state.id }).then(function (data) {
-      state.note = "已导出：" + data.path;
+    var id = (state.draft && state.draft.id) || "";
+    if (!id) {
+      state.error = "先把这个样式存成预设，再导出 JSON";
       paintAll();
+      return;
+    }
+    WB.rpc("style.export", { id: id }).then(function (data) {
+      state.note = "已导出：" + data.path;
+      paintBar();
     }).catch(function (error) {
       state.error = (error && error.message) || "导出失败";
       paintAll();
     });
   }
 
-  function realRender() {
+  // ------------------------------------------------------------ 精确预览
+
+  function exactPreview() {
     if (!state.draft) return;
-    state.busy = true;
-    state.renderNote = "渲染中…";
+    state.renderBusy = true;
+    state.renderPath = "";
+    state.renderNote = "渲染中…（要起 FFmpeg，稍等）";
     paintRender();
-    WB.rpc("style.render", { id: state.builtin ? state.id : state.id, config: state.draft })
-      .then(function (data) {
-        state.renderPath = data.path;
-        state.renderNote = "真实渲染：" + data.width + "×" + data.height;
-        if ((data.warnings || []).length) state.warnings = data.warnings;
-      })
-      .catch(function (error) {
-        state.renderPath = "";
-        state.renderNote = "真实渲染失败（" + ((error && error.message) || "未知原因") + "），上面是画布近似预览";
-      })
-      .then(function () {
-        state.busy = false;
-        paintRender();
-      });
+    WB.rpc("style.render", {
+      id: state.draft.id || "",
+      config: state.draft,
+      project_id: state.projectId,
+      time_ms: state.previewTimeMs || -1
+    }).then(function (data) {
+      state.renderBusy = false;
+      state.renderPath = data.path || "";
+      state.renderNote = data.path
+        ? "精确预览：" + data.width + "×" + data.height + (data.real_frame ? "（真实帧）" : "（演示背景）")
+        : (data.note || "渲染完成但没有图片");
+      if ((data.warnings || []).length) state.warnings = data.warnings;
+      if (data.actual_fonts) state.actualFonts = data.actual_fonts;
+      paintRender();
+    }).catch(function (error) {
+      state.renderBusy = false;
+      state.renderPath = "";
+      // 失败就说失败：不退回"画布看着也行"当成功，那是假报告
+      state.renderNote = "精确预览失败（" + ((error && error.message) || "未知原因") + "），上面是画布近似预览";
+      paintRender();
+    });
   }
 
   // ------------------------------------------------------------ 渲染
 
+  function drawFast() {
+    var comp = previewComp();
+    if (!comp || !state.draft) return;
+    comp.drawFast(document.getElementById("styles-canvas-host"), state.draft);
+  }
+
+  function paintBar() {
+    var host = document.getElementById("styles-state");
+    if (!host) return;
+    var bits = [scopeLabel()];
+    if (state.saving) bits.push("保存中…");
+    else if (state.dirty) bits.push("有改动未保存");
+    else if (state.note) bits.push(state.note);
+    else bits.push("改动会自动保存");
+    host.textContent = bits.join(" · ");
+    host.setAttribute("data-scope", state.projectId ? (state.inherited ? "inherited" : "project") : "global");
+    var errHost = document.getElementById("styles-error");
+    if (errHost) {
+      errHost.textContent = state.error || "";
+      errHost.hidden = !state.error;
+    }
+  }
+
+  function paintRender() {
+    var comp = previewComp();
+    if (!comp) return;
+    comp.paintExact(document.getElementById("styles-render"), {
+      path: state.renderPath,
+      note: state.renderNote,
+      fonts: state.actualFonts
+    });
+  }
+
+  function btn(text, title, handler, opts) {
+    var options = opts || {};
+    var node = n("button", {
+      class: "btn btn--ghost" + (options.primary ? " btn--primary" : "") +
+        (options.danger ? " btn--danger" : ""),
+      text: text,
+      attrs: { type: "button", title: title || text }
+    });
+    if (options.disabled) node.disabled = true;
+    else node.addEventListener("click", handler);
+    return node;
+  }
+
   function listPane() {
-    // 左栏三态：读列表时不能显示成「还没有样式」（那会让人以为预设全丢了，
-    // 于是去点「新建」再手搓一遍），读失败也不能只剩一句空话。
     if (state.listLoading) {
       return n("div", { class: "styles__pane styles__pane--list" }, [
         n("div", { class: "styles__pane-head" }, [n("strong", { text: "预设" })]),
@@ -571,204 +470,115 @@
       ]);
     }
     var rows = state.list.map(function (row) {
-      var active = row.id === state.id;
+      var active = state.draft && state.draft.base_preset_id === row.id;
       var node = n("button", {
         class: "styles__item" + (active ? " is-active" : ""),
-        attrs: { type: "button" }
+        attrs: { type: "button", "data-preset-id": row.id }
       }, [
         n("span", { class: "styles__item-name", text: row.name }),
         n("span", { class: "styles__item-meta" }, [
           n("span", { class: "pill" + (row.mode === "rounded" ? " pill--warn" : ""),
-                         text: row.mode === "rounded" ? "圆角条" : "描边" }),
+                     text: row.mode === "rounded" ? "圆角条" : "描边" }),
           n("span", { class: "styles__hint", text: row.size + " 号" }),
           row.builtin ? n("span", { class: "styles__hint", text: "内置" }) : null
         ])
       ]);
-      node.addEventListener("click", function () {
-        if (state.dirty && !window.confirm("当前改动还没保存，切走就丢了。继续？")) return;
-        pick(row.id);
-      });
+      node.addEventListener("click", function () { pickPreset(row.id); });
       return node;
     });
     return n("div", { class: "styles__pane styles__pane--list" }, [
       n("div", { class: "styles__pane-head" }, [
         n("strong", { text: "预设" }),
-        n("span", { class: "styles__hint", text: state.list.length + " 个" })
+        n("span", { class: "styles__hint", text: state.list.length + " 个 · 选中即套用为模板" })
       ]),
-      n("div", { class: "styles__items" }, rows.length ? rows : [n("p", { class: "styles__hint", text: "还没有样式" })]),
+      n("div", { class: "styles__items" },
+        rows.length ? rows : [n("p", { class: "styles__hint", text: "还没有预设" })]),
       n("div", { class: "styles__actions" }, [
-        btn("新建", "新建一个空样式（从当前预设抄底）", duplicate),
-        btn("导入", "从 JSON 文件导入", importJson),
-        btn("导出", "导出当前样式为 JSON", exportJson),
-        btn("删除", state.builtin ? "内置样式不可删除" : "删除当前样式", remove,
-            state.builtin ? { disabled: true } : {})
+        btn("另存为新预设", "把当前配置存成一个新预设", saveAsPreset),
+        btn("重命名", "改当前预设的名字", renamePreset),
+        btn("复制", "复制当前预设", duplicatePreset),
+        btn("删除", "删除当前预设", removePreset, { danger: true }),
+        btn("导入 JSON", "从 JSON 文件导入一份样式", importJson),
+        btn("导出 JSON", "把当前预设导出成 JSON 文件", exportJson),
+        btn("打开目录", "打开样式 JSON 所在目录", revealStyles)
       ])
     ]);
   }
 
-  function btn(text, title, handler, opts) {
-    var options = opts || {};
-    var node = n("button", {
-      class: "btn btn--ghost" + (options.primary ? " btn--primary" : "") +
-        (options.danger ? " btn--danger" : ""),
-      text: text,
-      attrs: { type: "button", title: title || text }
+  function errorsPane() {
+    var list = state.errors || [];
+    if (!list.length && !state.error) return null;
+    var nodes = [];
+    if (state.error) {
+      nodes.push(n("p", { class: "callout callout--warn", text: state.error }));
+    }
+    list.forEach(function (text) {
+      nodes.push(n("p", { class: "callout callout--warn", text: text }));
     });
-    if (options.disabled) node.disabled = true;
-    else node.addEventListener("click", handler);
-    return node;
+    return n("div", { class: "styles__warnings", attrs: { id: "styles-errors" } }, nodes);
+  }
+
+  function scopeBar() {
+    var hint = state.projectId
+      ? (state.inherited
+         ? "这个视频还没有自己的样式，正在跟随全局默认。改任何一项就会建立独立覆盖。"
+         : "这个视频用的是自己的一份样式，全局改了不影响它。")
+      : "这里改的是全局默认，所有没有独立覆盖的视频都会跟着变。";
+    var actions = [];
+    if (state.projectId) {
+      actions.push(btn("恢复继承全局", "删掉这个视频的样式覆盖，回到全局默认", resetScope, {
+        disabled: state.inherited
+      }));
+    } else {
+      actions.push(btn("恢复内置默认", "把全局样式清回内置 default", resetGlobal));
+    }
+    return n("div", { class: "styles__scopebar" }, [
+      n("span", { class: "pill styles__scope-pill", text: scopeLabel(),
+                 attrs: { id: "styles-scope-pill" } }),
+      n("span", { class: "styles__hint", text: hint }),
+      n("div", { class: "styles__row" }, actions)
+    ]);
   }
 
   function formPane() {
-    var conf = state.draft;
-    if (!conf) {
+    var comp = form();
+    if (!comp || !state.draft) {
       return n("div", { class: "styles__pane styles__pane--edit" }, [
-        n("p", { class: "styles__hint", text: "左边选一个预设开始改；没有就点「新建」。" })
+        n("p", { class: "styles__hint", text: "还没有读到样式。" })
       ]);
     }
-    var name = n("input", { class: "input", value: conf.name, attrs: { "aria-label": "样式名" } });
-    name.addEventListener("input", function () {
-      state.draft.name = name.value;
-      markDirty();
-    });
-    var mode = n("select", { class: "select", attrs: { "aria-label": "模式" } });
-    MODES.forEach(function (pair) {
-      var opt = n("option", { text: pair[1], attrs: { value: pair[0] } });
-      if (pair[0] === conf.mode) opt.selected = true;
-      mode.appendChild(opt);
-    });
-    mode.addEventListener("change", function () {
-      state.draft.mode = mode.value;
-      markDirty();
-    });
-    var layout = n("select", { class: "select", attrs: { "aria-label": "版式" } });
-    LAYOUTS.forEach(function (pair) {
-      var opt = n("option", { text: pair[1], attrs: { value: pair[0] } });
-      if (pair[0] === conf.layout) opt.selected = true;
-      layout.appendChild(opt);
-    });
-    layout.addEventListener("change", function () {
-      state.draft.layout = layout.value;
-      markDirty();
-    });
-    var warnings = (state.warnings || []).map(function (text) {
-      return n("p", { class: "callout callout--warn", text: text });
-    });
-
+    var builtin = !!(state.list.filter(function (row) {
+      return row.id === state.draft.id;
+    })[0] || {}).builtin;
     return n("div", { class: "styles__pane styles__pane--edit" }, [
-      n("div", { class: "styles__block" }, [
-        n("div", { class: "styles__block-head" }, [
-          n("strong", { text: "基本" }),
-          state.builtin ? n("span", { class: "styles__hint", text: "内置样式：改了要先另存（保存会生成副本）" }) : null
-        ]),
-        n("div", { class: "styles__grid" }, [
-          n("label", { class: "field styles__field" }, [
-            n("span", { class: "field__label", text: "名称" }), name
-          ]),
-          n("label", { class: "field styles__field" }, [
-            n("span", { class: "field__label", text: "模式" }), mode
-          ]),
-          n("label", { class: "field styles__field" }, [
-            n("span", { class: "field__label", text: "版式" }), layout
-          ])
-        ])
-      ]),
-      previewBlock(),
-      faceBlock(FACES[0]),
-      faceBlock(FACES[1]),
-      roundedBlock(),
-      warnings.length ? n("div", { class: "styles__warnings" }, warnings) : null,
+      scopeBar(),
+      errorsPane(),
+      comp.render({
+        draft: state.draft,
+        fonts: state.fonts,
+        onChange: scheduleSave,
+        nameLocked: builtin,
+        headHint: builtin ? "内置预设只读：要改请点「另存为新预设」" : ""
+      }),
       n("div", { class: "styles__savebar" }, [
-        btn(state.builtin ? "另存为新样式" : "保存", "写入 wb_style 与 styles/*.json", save, { primary: true }),
-        btn("真实渲染", "用 FFmpeg 渲一张 PNG 检查实际效果", realRender),
-        n("span", { class: "styles__hint", text: state.busy ? "处理中…" : (state.note || "") })
+        btn("保存", "立即保存（平时会自动保存）", function () { flush(); }, { primary: true }),
+        n("span", { class: "styles__hint",
+                   text: state.saving ? "保存中…" : (state.note || "改动会自动保存") })
       ])
     ]);
   }
 
-  function previewBlock() {
-    // 放在右栏最上面并 position:sticky：改字号/描边时画布一直在眼前。
-    // 之前它在表最底下（y≈1134），改完参数要滚到底才看得见效果。
-    return n("div", { class: "styles__block styles__preview" }, [
-      n("div", { class: "styles__block-head" }, [
-        n("strong", { text: "预览" }),
-        n("span", { class: "styles__hint", text: "画布是近似排版；字体度量与半透明叠加以真实渲染为准" })
-      ]),
-      n("div", { class: "styles__grid" }, [
-        n("label", { class: "field styles__field" }, [
-          n("span", { class: "field__label", text: "文本长度" }), previewLength()
-        ]),
-        n("label", { class: "field styles__field" }, [
-          n("span", { class: "field__label", text: "画幅" }), previewOrient()
-        ]),
-        n("label", { class: "field styles__field" }, [
-          n("span", { class: "field__label", text: "背景" }), previewBackdrop()
-        ])
-      ]),
-      n("div", { class: "styles__canvas-host", id: "styles-canvas-host" }),
-      n("div", { class: "styles__render", id: "styles-render" })
+  function previewPane() {
+    var comp = previewComp();
+    if (!comp || !state.draft) return null;
+    return n("div", { class: "styles__pane styles__pane--preview" }, [
+      comp.render({
+        draft: state.draft,
+        busy: state.renderBusy,
+        onChange: scheduleSave,
+        onExact: exactPreview
+      })
     ]);
-  }
-
-  function previewLength() {
-    var select = n("select", { class: "select", attrs: { "aria-label": "文本长度" } });
-    LENGTHS.forEach(function (pair) {
-      var opt = n("option", { text: pair[1], attrs: { value: pair[0] } });
-      if (pair[0] === state.draft.preview.text_length) opt.selected = true;
-      select.appendChild(opt);
-    });
-    select.addEventListener("change", function () {
-      state.draft.preview.text_length = select.value;
-      markDirty();
-    });
-    return select;
-  }
-
-  function previewOrient() {
-    var select = n("select", { class: "select", attrs: { "aria-label": "预览画幅" } });
-    ORIENTS.forEach(function (pair) {
-      var opt = n("option", { text: pair[1], attrs: { value: pair[0] } });
-      if (pair[0] === state.draft.preview.orientation) opt.selected = true;
-      select.appendChild(opt);
-    });
-    select.addEventListener("change", function () {
-      state.draft.preview.orientation = select.value;
-      markDirty();
-    });
-    return select;
-  }
-
-  function previewBackdrop() {
-    var select = n("select", { class: "select", attrs: { "aria-label": "预览背景" } });
-    BACKDROPS.forEach(function (pair) {
-      var opt = n("option", { text: pair[1], attrs: { value: pair[0] } });
-      if (pair[0] === state.draft.preview.background) opt.selected = true;
-      select.appendChild(opt);
-    });
-    select.addEventListener("change", function () {
-      state.draft.preview.background = select.value;
-      markDirty();
-    });
-    return select;
-  }
-
-  function paintRender() {
-    var host = document.getElementById("styles-render");
-    if (!host) return;
-    while (host.firstChild) host.removeChild(host.firstChild);
-    if (state.renderPath && WB.mediaUrl) {
-      var img = n("img", { class: "styles__render-img", attrs: { alt: "真实渲染结果" } });
-      // 文件被挪走/删除时浏览器只剩一个破图标：直接换成一句说明
-      img.addEventListener("error", function () {
-        if (img.parentNode) img.parentNode.removeChild(img);
-        host.appendChild(n("p", { class: "styles__hint", text: "渲染图读不到（文件可能已被移动或删除）" }));
-      });
-      img.src = WB.mediaUrl(state.renderPath);
-      host.appendChild(img);
-    }
-    if (state.renderNote) {
-      host.appendChild(n("p", { class: "styles__hint", text: state.renderNote }));
-    }
   }
 
   function paintForm() {
@@ -776,69 +586,97 @@
     if (!host) return;
     while (host.firstChild) host.removeChild(host.firstChild);
     host.appendChild(formPane());
-    drawPreview();
+    drawFast();
     paintRender();
+  }
+
+  function paintList() {
+    var host = document.getElementById("styles-list");
+    if (!host) return;
+    while (host.firstChild) host.removeChild(host.firstChild);
+    host.appendChild(listPane());
   }
 
   function paintAll() {
     paintBar();
+    paintList();
+    // **先挂预览容器再画表单**：表单末尾会调 drawFast 去 canvas 上画，
+    // 而 canvas 由预览组件创建。顺序反了画布根本不存在，表现为
+    // "改了字号没反应"——很容易被当成预览坏了。
+    var host = document.getElementById("styles-preview");
+    if (host) {
+      while (host.firstChild) host.removeChild(host.firstChild);
+      var node = previewPane();
+      if (node) host.appendChild(node);
+    }
     paintForm();
-    var listHost = document.getElementById("styles-list");
-    if (listHost) {
-      while (listHost.firstChild) listHost.removeChild(listHost.firstChild);
-      listHost.appendChild(listPane());
-    }
-    var errorHost = document.getElementById("styles-error");
-    if (errorHost) {
-      errorHost.textContent = state.error || "";
-      errorHost.hidden = !state.error;
-    }
   }
 
   function render(ctx) {
+    var params = (ctx && ctx.params) || {};
+    // 作用域从路由参数来：设置页不带 project_id（全局），字幕页带（项目）
+    state.projectId = String(params.project_id || "");
+    state.draft = null;
+    state.errors = [];
+    state.error = "";
+    state.note = "";
     var root = n("div", { class: "styles" }, [
       n("div", { class: "styles__bar" }, [
-        n("span", { class: "styles__hint", id: "styles-state",
-                   text: state.dirty ? "有未保存的改动" : "改动实时预览，保存前不落盘" }),
+        n("span", { class: "styles__hint", id: "styles-state", text: scopeLabel() }),
         n("span", { class: "styles__error", id: "styles-error", hidden: true })
       ]),
       n("div", { class: "styles__grid2" }, [
         n("div", { id: "styles-list" }),
-        n("div", { id: "styles-edit" })
+        n("div", { class: "styles__col" }, [
+          n("div", { id: "styles-edit" }),
+          n("div", { id: "styles-preview" })
+        ])
       ])
     ]);
-    // 先挂进 DOM 再画：画布/表单都要 getElementById
     window.setTimeout(function () {
-      if (!state.list.length && !state.busy) {
-        loadFonts();
-        loadList();
-        return;
-      }
-      paintAll();
+      loadFonts();
+      loadList();
+      loadEffective();
     }, 0);
     return root;
+  }
+
+  /** 离页前把在途改动落地：不 flush 就是"切走就丢"，而且丢得没有提示。
+   *
+   * 钩子名必须是 destroy —— router.renderRoute 调的是 definition.destroy，
+   * 写成 teardown 会静默不执行（名字对不上不报错），表现成"切走就丢改动"。 */
+  function destroy() {
+    flush();
   }
 
   WB.pages = WB.pages || {};
   WB.pages.styles = {
     render: render,
+    destroy: destroy,
     _internals: {
       state: state,
-      pick: pick,
-      save: save,
-      duplicate: duplicate,
-      remove: remove,
-      realRender: realRender,
-      drawPreview: drawPreview,
-      loadList: loadList
+      flush: flush,
+      scheduleSave: scheduleSave,
+      loadEffective: loadEffective,
+      loadList: loadList,
+      pickPreset: pickPreset,
+      saveAsPreset: saveAsPreset,
+      renamePreset: renamePreset,
+      duplicatePreset: duplicatePreset,
+      removePreset: removePreset,
+      importJson: importJson,
+      exportJson: exportJson,
+      resetScope: resetScope,
+      resetGlobal: resetGlobal,
+      exactPreview: exactPreview,
+      drawFast: drawFast,
+      scopeLabel: scopeLabel
     }
   };
 
   WB.router.define("styles", {
     title: "字幕样式",
-    crumb: "预设与预览",
-    icon: "subtitles",
-    nav: false,
-    render: render
+    render: render,
+    destroy: destroy
   });
 })();

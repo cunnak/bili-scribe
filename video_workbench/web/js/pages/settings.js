@@ -601,17 +601,19 @@
   // 9 个分区的声明式表单破功。这里只放入口，编辑在独立页面（方案书 5.11）。
   function renderStylesLink() {
     var node = ui.h("div", { class: "settings__row" }, [
-      ui.h("span", { class: "field__label", text: "字幕样式" }),
+      ui.h("span", { class: "field__label", text: "全局字幕样式" }),
       ui.h("div", { class: "settings__row-actions" }, [
-        ui.h("span", { class: "muted", text: "字号 / 描边 / 圆角背景条，带实时预览与真实渲染" }),
+        ui.h("span", { class: "muted",
+                       text: "这里改的是全局默认；单个视频可以在字幕页单独覆盖" }),
         (function () {
           var btn = ui.h("button", {
             class: "btn btn--ghost",
-            text: "打开样式页",
+            text: "打开全局样式页",
             attrs: { type: "button" }
           });
           btn.addEventListener("click", function () {
-            WB.router.go("styles");
+            // 不带 project_id = 全局作用域。带了就变成改某个视频，入口不能含糊。
+            WB.router.go("styles", {});
           });
           return btn;
         })()

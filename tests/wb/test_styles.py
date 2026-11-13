@@ -55,7 +55,9 @@ def test_normalize_fills_defaults_and_drops_unknown_keys():
     assert conf["primary"]["size"] == 60
     assert "bogus" not in conf["primary"]
     assert "nope" not in conf
-    assert conf["secondary"]["size"] == 36  # 没给的取默认
+    # v2 的默认副字号是 54（1080 基准）；v1 的 36 换算过来正好是 54
+    assert conf["secondary"]["size"] == 54
+    assert conf["schema_version"] == styles.SCHEMA_VERSION
 
 
 def test_normalize_base_reads_legacy_flat_row():
@@ -73,9 +75,13 @@ def test_normalize_base_reads_legacy_flat_row():
     }
     conf = styles.normalize_base(row)
     assert conf["id"] == "old"
-    assert conf["primary"]["size"] == 66
+    # 旧值是 720 基准：归一成 v2（1080 基准）时尺寸乘 1.5，比例不变
+    assert conf["primary"]["size"] == 99
+    assert conf["primary"]["outline_width"] == 6
     assert conf["primary"]["color"] == "#FF0000"
     assert conf["primary"]["font"] == "SimHei"
+    # 720 输出时缩回去仍然是 66 —— 老成片的字号不该因为升级而变化
+    assert styles.to_ass_style(conf, height=720)["size"] == 66
 
 
 # ---------------------------------------------------------------- 校验
@@ -83,7 +89,7 @@ def test_normalize_base_reads_legacy_flat_row():
 
 def test_validate_lists_all_problems_at_once():
     bad = styles.normalize(
-        {"primary": {"size": 200, "outline_width": 40}, "secondary": {"size": 200}}
+        {"primary": {"size": 200, "outline_width": 200}, "secondary": {"size": 200}}
     )
     with pytest.raises(Exception) as exc:
         styles.validate(bad)
@@ -172,7 +178,8 @@ def test_style_list_has_two_builtins(service):
     by_id = {row["id"]: row for row in rows}
     assert {"default", "rounded-default"} <= set(by_id)
     assert by_id["default"]["builtin"] is True
-    assert by_id["default"]["config"]["primary"]["size"] == 48
+    assert by_id["default"]["config"]["primary"]["size"] == 72
+    assert by_id["default"]["config"]["schema_version"] == styles.SCHEMA_VERSION
 
 
 def test_style_get_falls_back_to_preset_by_name(service):
@@ -224,11 +231,11 @@ def test_style_update_keeps_id(service):
     created = ok(service, "style.save", {"name": "甲", "config": {}})
     style_id = created["style"]["id"]
     updated = ok(
-        service, "style.save", {"id": style_id, "name": "甲2", "config": {"primary": {"size": 52}}}
+        service, "style.save", {"id": style_id, "name": "甲2", "config": {"primary": {"size": 80}}}
     )
     assert updated["style"]["id"] == style_id
     assert updated["style"]["name"] == "甲2"
-    assert updated["style"]["primary"]["size"] == 52
+    assert updated["style"]["primary"]["size"] == 80
 
 
 def test_style_save_keeps_names_unique(service):

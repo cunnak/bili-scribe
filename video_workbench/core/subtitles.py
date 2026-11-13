@@ -385,26 +385,36 @@ def stats(segments: Iterable[dict[str, Any]]) -> dict[str, Any]:
 ASS_HEADER = """[Script Info]
 ; VideoWorkbench 生成
 ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
+PlayResX: {play_x}
+PlayResY: {play_y}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary},{primary},{outline_color},{back},{bold},0,0,0,100,100,{spacing},0,{border_style},{outline},{shadow},{alignment},60,60,{margin_v},1
+{styles}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-# 720P 是字号基准（方案书 5.11.2）：导出 1080P 时字号/描边/边距按 1.5 倍等比放大，
-# 否则播放器把 720P 的字号直接摆到 1080P 画面上，字会显得又小又飘。
+#: 主字幕与副字幕两条样式记录的名字。**Default 不能改**：老播放器、老导出文件、
+#: 以及测试都按这个名字找第一行样式；副字幕是 v2 新增的第二条记录。
+PRIMARY_STYLE = "Default"
+SECONDARY_STYLE = "Secondary"
+
+# 720P 是旧版（v1）的字号基准：那时样式里存的就是 720 下的像素，导出按高度等比放大。
+# v2 起参考高度改为 1080（横屏）/ 1920（竖屏），见 ``core/styles.py`` 的 REF_CANVAS。
+# 这个常量继续存在，因为它还是**旧平铺样式**的换算基准——改掉会让老库的字号翻倍。
 ASS_BASE_HEIGHT = 720
 
-# 没有 wb_style 可用时的兜底。数值与 ``wb_style`` 内置 default 同源，
-# 不一致会让「样式页看到 54」和「导出得到 48」对不上。
+#: v2 样式的参考高度：横屏 1920×1080、竖屏 1080×1920。
+ASS_REF_HEIGHT = {"landscape": 1080, "portrait": 1920}
+ASS_REF_WIDTH = {"landscape": 1920, "portrait": 1080}
+
+# 没有 wb_style 可用时的兜底（调用方一个样式都没给，例如裸 format_ass 的调用点）。
+# 数值与旧版内置 default 同源：54 是 v1 的 720 基准值，这里按 720 输出仍是 54。
 ASS_DEFAULT = {
     "font": "Microsoft YaHei",
     "size": 54,
@@ -445,8 +455,267 @@ def ass_color_alpha(value: Any, fallback: str = "#FFFFFF", opacity: float = 0.0)
     return f"&H{aa:02X}{b:02X}{g:02X}{r:02X}"
 
 
+# ------------------------------------------------------------------ v2 样式映射
+#
+# **这里是 ASS 字段映射的唯一 owner。** core/styles.py 只管 schema/校验/参考尺寸，
+# 它的 to_ass_style 只是往这里转发一层。两份映射迟早各说各话，那正是
+# 「样式页看到 48、导出得到 54」的成因。
+
+
+def _style_version(style: dict[str, Any] | None) -> int:
+    """样式 schema 版本。没有这个键 ＝ v1（720 基准、平铺字段）。"""
+    try:
+        return int((style or {}).get("schema_version") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _orientation(style: dict[str, Any]) -> str:
+    value = str(((style or {}).get("preview") or {}).get("orientation") or "landscape")
+    return value if value in ASS_REF_HEIGHT else "landscape"
+
+
+def _ref_height(style: dict[str, Any]) -> int:
+    return ASS_REF_HEIGHT[_orientation(style)]
+
+
+def _ref_width(style: dict[str, Any]) -> int:
+    return ASS_REF_WIDTH[_orientation(style)]
+
+
+def _play_res(style: dict[str, Any], height: int) -> tuple[int, int]:
+    """ASS 的 PlayResX/PlayResY。**必须等于目标画布**，不能固定 720。
+
+    这是 v1 的一个真 bug：字号已经按目标高度放大过（48 → 72），PlayResY 却还
+    写着 720，libass 于是按 1080/720 再放大一次——1080 导出的字幕比 720 的
+    相对大小大 50%。v2 让 PlayRes 跟着目标高度走，字号只需缩放一次，
+    720 与 1080 上占画面的比例才真正一致。
+    """
+    ref_w, ref_h = _ref_width(style), _ref_height(style)
+    if not height:
+        return ref_w, ref_h
+    return max(1, int(round(float(height) * ref_w / ref_h))), int(height)
+
+
+def _v2_factor(style: dict[str, Any], height: int) -> float:
+    base = float(_ref_height(style) or 1080)
+    return max(0.25, (float(height or 0) or base) / base)
+
+
+def _align_band(alignment: int) -> int:
+    """ASS alignment 的垂直段：0=底部（1-3）、1=中部（4-6）、2=顶部（7-9）。"""
+    return max(0, min(2, (int(alignment or 2) - 1) // 3))
+
+
+def _face_tags(face: dict[str, Any], *, blur: float) -> list[str]:
+    """ASS 样式表表达不了的字段 → 行内覆盖标签。
+
+    样式表里有的列（字号/颜色/描边/阴影/对齐/边距/缩放/角度/边框样式/粗斜体）
+    一律走列；**只有下面这几样**没有列，才用标签。少写一条就是「字段假支持」。
+    """
+    tags: list[str] = []
+    background = float(face.get("background_opacity") or 0)
+    if background > 0:
+        # 文字底下垫一块半透明色块：3a 调的是框（OutlineColour）的 alpha，
+        # 而 ASS 的 alpha 是反的（0 = 不透明），所以这里写 1-不透明度。
+        tags.append("\\3a" + f"{int(round((1.0 - background) * 255)):02X}")
+    opacity = float(face.get("opacity", 1.0))
+    if opacity < 1.0:
+        tags.append("\\alpha" + f"{int(round((1.0 - opacity) * 255)):02X}")
+    if blur > 0:
+        tags.append("\\blur" + f"{blur:g}")
+    return tags
+
+
+def _face_record(
+    face: dict[str, Any],
+    *,
+    factor: float,
+    role: str,
+) -> dict[str, Any]:
+    """一个 face → 一条 ASS 样式记录（全部字段都映射，不留「看着像支持」的字段）。"""
+    size = max(8, int(round(float(face.get("size") or 0) * factor)))
+    outline = max(0, int(round(float(face.get("outline_width") or 0) * factor)))
+    shadow = max(0, int(round(float(face.get("shadow_distance") or 0) * factor)))
+    blur = round(float(face.get("blur") or 0) * factor, 2)
+    return {
+        "role": role,
+        "font": str(face.get("font") or ASS_DEFAULT["font"]),
+        "size": size,
+        "primary": str(face.get("color") or "#FFFFFF"),
+        "primary_alpha": float(face.get("opacity", 1.0)),
+        "secondary": str(face.get("color") or "#FFFFFF"),
+        "outline_color": str(face.get("outline_color") or "#000000"),
+        "outline_alpha": float(face.get("outline_opacity", 1.0)),
+        "back_color": str(face.get("shadow_color") or "#000000"),
+        "back_alpha": float(face.get("shadow_opacity", 1.0)),
+        "bold": bool(face.get("bold")),
+        "italic": bool(face.get("italic")),
+        "underline": bool(face.get("underline")),
+        "strikeout": bool(face.get("strikeout")),
+        "scale_x": int(face.get("scale_x") or 100),
+        "scale_y": int(face.get("scale_y") or 100),
+        "spacing": round(float(face.get("spacing") or 0) * factor, 2),
+        "angle": round(float(face.get("angle") or 0), 2),
+        "border_style": int(face.get("border_style") or 1),
+        "outline": outline,
+        "shadow": shadow,
+        "alignment": int(face.get("alignment") or 2),
+        "margin_l": max(0, int(round(float(face.get("margin_l") or 0) * factor))),
+        "margin_r": max(0, int(round(float(face.get("margin_r") or 0) * factor))),
+        "margin_v": max(0, int(round(float(face.get("margin_v") or 0) * factor))),
+        "encoding": 1,
+        "tags": _face_tags(face, blur=blur),
+    }
+
+
+def _rounded_record(style: dict[str, Any], *, factor: float) -> dict[str, Any]:
+    """圆角背景条：libass 没有真圆角，用 BorderStyle=3 的实心框近似。"""
+    rnd = style.get("rounded") or {}
+    alpha = max(0.0, min(1.0, float(rnd.get("bg_alpha") or 0)))
+    return {
+        "role": "box",
+        "font": str(rnd.get("font") or ASS_DEFAULT["font"]),
+        "size": max(8, int(round(float(rnd.get("size") or 0) * factor))),
+        "primary": str(rnd.get("text_color") or "#FFFFFF"),
+        "primary_alpha": 1.0,
+        "secondary": str(rnd.get("text_color") or "#FFFFFF"),
+        # BorderStyle=3 的「框色」就是 OutlineColour，底色靠它
+        "outline_color": str(rnd.get("bg_color") or "#000000"),
+        # **刻意保留 v1 的换算**：v1 把 bg_alpha 直接当 ASS 的 alpha 用
+        # （写进 `back_alpha = 1 - bg_alpha` 后再翻一次），所以 0.6 实际渲染成
+        # 40% 不透明。这里照抄同一算式，默认圆角条的观感与升级前逐像素一致；
+        # 语义上的别扭（字段叫「不透明度」却按 alpha 用）是既有契约，不是这一版
+        # 引入的，改它属于"改变既有输出"，要单独拍板。
+        "outline_alpha": 1.0 - alpha,
+        "back_color": str(rnd.get("bg_color") or "#000000"),
+        "back_alpha": 1.0 - alpha,
+        "bold": False,
+        "italic": False,
+        "underline": False,
+        "strikeout": False,
+        "scale_x": 100,
+        "scale_y": 100,
+        "spacing": round(float(rnd.get("letter_spacing") or 0) * factor, 2),
+        "angle": 0.0,
+        "border_style": 3,
+        # BorderStyle=3 时 Outline 就是框的扩边
+        "outline": max(0, int(round(float(rnd.get("padding_v") or 0) * factor))),
+        "shadow": 0,
+        "alignment": 2,
+        "margin_l": max(0, int(round(float(rnd.get("padding_h") or 0) * factor))),
+        "margin_r": max(0, int(round(float(rnd.get("padding_h") or 0) * factor))),
+        "margin_v": max(0, int(round(float(rnd.get("margin_bottom") or 0) * factor))),
+        "encoding": 1,
+        "tags": [],
+    }
+
+
+def ass_style_records(
+    style: dict[str, Any] | None, *, height: int = 0, layout: str = ""
+) -> list[dict[str, Any]]:
+    """样式 → ASS 样式记录列表。**v2 的唯一映射入口。**
+
+    返回 [primary, secondary]（圆角模式只有一条，role=box）。顺序固定：第一条
+    永远是主字幕，format_ass 与 styles.to_ass_style 都按位置取。
+
+    双行布局时**上行的 margin_v 会被抬高**，让两行叠在同一侧而不压字：两行的
+    alignment 落在同一垂直段时，上行边距取 max(上行边距, 下行边距 + 下行字号 +
+    主副间距)。alignment 分段不同（一个顶部一个底部）就各用各的，不硬掰。
+    """
+    conf = style or {}
+    if _style_version(conf) < 2:
+        return [_legacy_record(conf, height=height)]
+
+    factor = _v2_factor(conf, height)
+    if str(conf.get("mode") or "").strip().lower() == "rounded":
+        return [_rounded_record(conf, factor=factor)]
+
+    primary = conf.get("primary") or {}
+    secondary = conf.get("secondary") or {}
+    want = str(layout or conf.get("layout") or "original_top").strip().lower()
+    gap = max(0, int(round(float(conf.get("vertical_gap") or 0) * factor)))
+
+    up_face, down_face = primary, secondary
+    up_role, down_role = "primary", "secondary"
+    if want == "translated_top":
+        up_face, down_face = secondary, primary
+        up_role, down_role = "secondary", "primary"
+
+    down = _face_record(down_face, factor=factor, role=down_role)
+    up = _face_record(up_face, factor=factor, role=up_role)
+    if _align_band(up["alignment"]) == _align_band(down["alignment"]):
+        up["margin_v"] = max(up["margin_v"], down["margin_v"] + down["size"] + gap)
+
+    if want == "original_only":
+        record = up if up_role == "primary" else down
+        return [dict(record, role="primary")]
+    if want == "translated_only":
+        record = up if up_role == "secondary" else down
+        return [dict(record, role="secondary")]
+    return [up, down]
+
+
+def _legacy_record(style: dict[str, Any], *, height: int) -> dict[str, Any]:
+    """v1 样式 → 一条 ASS 记录（720 基准，按目标高度缩放）。
+
+    旧平铺配置与「完全没给样式」的调用点都走这条；它必须与 v1 的输出逐像素等价，
+    否则升级后老用户的成片会突然变样。
+    """
+    conf = scale_style(style, height)
+    return {
+        "role": "primary",
+        "font": str(conf.get("font") or ASS_DEFAULT["font"]),
+        "size": int(conf["size"]),
+        "primary": str(conf.get("primary") or "#FFFFFF"),
+        "primary_alpha": 1.0,
+        "secondary": str(conf.get("primary") or "#FFFFFF"),
+        "outline_color": str(conf.get("outline_color") or "#000000"),
+        "outline_alpha": 1.0,
+        "back_color": str(conf.get("outline_color") or "#000000"),
+        "back_alpha": float(conf.get("back_alpha") if conf.get("back_alpha") is not None else 0.5),
+        "bold": bool(conf.get("bold")),
+        "italic": False,
+        "underline": False,
+        "strikeout": False,
+        "scale_x": 100,
+        "scale_y": 100,
+        "spacing": float(conf.get("spacing") or 0),
+        "angle": 0.0,
+        "border_style": int(conf.get("border_style") or 1),
+        "outline": int(conf["outline"]),
+        "shadow": int(conf.get("shadow") or 0),
+        "alignment": int(conf.get("alignment") or 2),
+        "margin_l": 60,
+        "margin_r": 60,
+        "margin_v": int(conf["margin_v"]),
+        "encoding": 1,
+        "tags": [],
+    }
+
+
+def _style_line(name: str, rec: dict[str, Any]) -> str:
+    """一条 ASS Style: 行。列顺序必须与 ASS_HEADER 的 Format 逐字一致。"""
+    bold = "-1" if rec["bold"] else "0"
+    italic = "-1" if rec["italic"] else "0"
+    underline = "-1" if rec["underline"] else "0"
+    strikeout = "-1" if rec["strikeout"] else "0"
+    alpha = float(rec.get("primary_alpha", 1.0))
+    primary = ass_color_alpha(rec["primary"], "#FFFFFF", alpha)
+    secondary = ass_color_alpha(rec["secondary"], "#FFFFFF", alpha)
+    outline = ass_color_alpha(rec["outline_color"], "#000000", float(rec.get("outline_alpha", 1.0)))
+    back = ass_color_alpha(rec["back_color"], "#000000", float(rec.get("back_alpha", 1.0)))
+    return (
+        f"Style: {name},{_ass_escape(rec['font'])},{rec['size']},{primary},{secondary},"
+        f"{outline},{back},{bold},{italic},{underline},{strikeout},"
+        f"{rec['scale_x']},{rec['scale_y']},{rec['spacing']:g},{rec['angle']:g},"
+        f"{rec['border_style']},{rec['outline']},{rec['shadow']},{rec['alignment']},"
+        f"{rec['margin_l']},{rec['margin_r']},{rec['margin_v']},{rec['encoding']}"
+    )
+
+
 def style_to_ass(style: dict[str, Any] | None) -> dict[str, Any]:
-    """把 ``wb_style.config`` 归一成 ASS 要的那几个键。
+    """把 wb_style.config 归一成 ASS 要的那几个键。
 
     字段名在样式表里是 ``font_size / outline_width / margin_v``，
     在 ASS 里是 ``size / outline / margin_v``；这层映射只写一次，
@@ -575,53 +844,80 @@ def format_ass(
     ``style`` 是 ``wb_style.config`` 原样传进来；显式给了 ``size/outline/margin_v``
     就以显式值为准（调用方明确要的数字不该被配置盖掉）。
     """
-    conf = scale_style(style, height)
+    records = ass_style_records(style, height=height)
     if font:
-        conf["font"] = font
+        for rec in records:
+            rec["font"] = font
     if size > 0:
-        conf["size"] = int(size)
+        for rec in records:
+            rec["size"] = int(size)
     if outline > 0:
-        conf["outline"] = int(outline)
+        for rec in records:
+            rec["outline"] = int(outline)
     if margin_v > 0:
-        conf["margin_v"] = int(margin_v)
-    bold = "-1" if conf.get("bold") else "0"
-    border_style = int(conf.get("border_style") or 1)
-    # 圆角条（BorderStyle=3）的底色吃 OutlineColour；BackColour 只在含阴影时可见，
-    # 这里仍给同一个颜色，免得播放器把阴影画成纯黑边。
-    back_alpha = float(conf.get("back_alpha") if conf.get("back_alpha") is not None else 0.5)
-    back = ass_color_alpha(
-        conf.get("outline_color") if border_style == 3 else "#000000", "#000000", back_alpha
-    )
-    header = ASS_HEADER.format(
-        font=_ass_escape(conf["font"]),
-        size=int(conf["size"]),
-        outline=int(conf["outline"]),
-        shadow=int(conf.get("shadow") or 0),
-        margin_v=int(conf["margin_v"]),
-        primary=ass_color(conf.get("primary"), "#FFFFFF"),
-        outline_color=ass_color(conf.get("outline_color"), "#000000"),
-        back=back,
-        bold=bold,
-        spacing=int(conf.get("spacing") or 0),
-        border_style=border_style,
-        alignment=int(conf.get("alignment") or 2),
-    )
+        for rec in records:
+            rec["margin_v"] = int(margin_v)
+
+    names = _record_names(records)
+    styles = "\n".join(_style_line(name, rec) for name, rec in zip(names, records))
+    play_x, play_y = _play_res(style or {}, height)
+    header = ASS_HEADER.format(play_x=play_x, play_y=play_y, styles=styles)
     out = [header]
     for seg in normalize(segments):
         raw = seg.get("lines")
         if isinstance(raw, list) and raw:
-            body = "\\N".join(_ass_escape(line) for line in raw if str(line).strip())
+            parts = [str(line) for line in raw if str(line).strip()]
         else:
-            body = _ass_escape(seg.get("text") or "")
+            text = str(seg.get("text") or "")
+            parts = [text] if text.strip() else []
         # 只有空白的行也算空：ASS 里它是个"什么都不显示但占了时间"的事件，
         # 导出后数行数会多出来，用户以为丢了一句又找不到。
+        if not parts:
+            continue
+        body = _dialogue_body(parts, names, records)
         if not body.strip():
             continue
+        # 首行样式：单条记录就是它自己；双条时取第一条（主字幕）
+        style_name = names[0]
         out.append(
             f"Dialogue: 0,{ass_time(seg['start_ms'])},{ass_time(seg['end_ms'])},"
-            f"Default,,0,0,0,,{body}"
+            f"{style_name},,0,0,0,,{body}"
         )
     return "\n".join(out) + "\n"
+
+
+def _record_names(records: list[dict[str, Any]]) -> list[str]:
+    """样式记录 → ASS 里的样式名。第一条永远是 Default（兼容老文件与老播放器）。"""
+    if not records:
+        return [PRIMARY_STYLE]
+    if len(records) == 1:
+        return [PRIMARY_STYLE]
+    # 两条记录时按角色命名：主字幕 Default、副字幕 Secondary。
+    # 但**位置决定首行**：layout=translated_top 时第一行是副字幕，它也必须叫
+    # Default——否则 Dialogue 的样式名与第一条记录对不上，libass 会用最后一条兜底。
+    return [PRIMARY_STYLE, SECONDARY_STYLE]
+
+
+def _dialogue_body(parts: list[str], names: list[str], records: list[dict[str, Any]]) -> str:
+    r"""把 1–2 行文本拼成 ASS 的正文（含必要的行内覆盖标签）。
+
+    双行时第二行用 \\N 换行并**切换样式名**（ASS 的行内样式语法是
+    \\rStyleName）：两行样式不同，光靠 \\N 会让第二行继承第一行的字体
+    字号。单条记录时退回纯 \\N（v1 的行为，逐字不变）。
+    """
+    if len(parts) == 1 or len(records) < 2:
+        return "\\N".join(_ass_escape(line) for line in parts)
+
+    first, second = parts[0], "\\N".join(_ass_escape(line) for line in parts[1:])
+    lead = _tag_block(records[0])
+    second_name = names[1]
+    return f"{lead}{_ass_escape(first)}\\N{{\\r{second_name}}}{second}"
+
+
+def _tag_block(rec: dict[str, Any]) -> str:
+    """一条记录的行内覆盖标签（没有就返回空串，不留空花括号）。"""
+    tags = [tag for tag in (rec.get("tags") or []) if tag]
+    return "{" + "".join(tags) + "}" if tags else ""
 
 
 def vtt_time(value: Any) -> str:

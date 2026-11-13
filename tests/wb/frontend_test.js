@@ -2227,9 +2227,10 @@ async function main() {
     off();
     assert.strictEqual(hit, 1, "通过 WB.events.on 订阅收不到事件");
   });
-  await check("样式页：两个内置预设、改字号能存成新样式、真实渲染出图", async () => {
+  await check("样式页：作用域可见、改字号自动保存、精确预览失败说清楚", async () => {
+    // 全局作用域：不带 project_id 进样式页
     WB.router.go("styles", {});
-    await tick(420);
+    await tick(520);
     const view = $("#view");
     assert.ok(view.querySelector(".styles__grid2"), "样式页没有两栏布局");
 
@@ -2237,47 +2238,83 @@ async function main() {
     assert.ok(items.length >= 2, "预设列表少于两个：" + items.length);
     assert.ok(items.some((n) => n.textContent.indexOf("圆角") >= 0), "没有圆角预设");
 
-    // 默认选中第一个，右侧表单与画布都该在
+    // 作用域条：全局页必须说清「改的是全局」
+    const pill = view.querySelector("#styles-scope-pill");
+    assert.ok(pill, "没有作用域标记");
+    assert.equal(pill.textContent.trim(), "全局默认", "全局页作用域写错了：" + pill.textContent);
+
     const host = view.querySelector("#styles-canvas-host");
     assert.ok(host, "没有预览画布容器");
     assert.ok(host.querySelector("canvas"), "画布没建出来");
+
+    // 改主字幕字号 → 400ms 后自动落盘（不再要求手动点保存）
     const sizeInput = [...view.querySelectorAll(".styles__num")].find(
-      (n) => n.getAttribute("aria-label") === "字号"
+      (n) => n.getAttribute("aria-label") === "字号" && n.getAttribute("data-face") === "primary"
     );
     assert.ok(sizeInput, "主字幕字号输入框没找到");
     const before = Number(sizeInput.value);
-
-    // 改字号 → 顶部提示有未保存改动（不落盘）
     sizeInput.value = String(before + 6);
     sizeInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-    await tick(60);
-    assert.ok(view.textContent.indexOf("有未保存的改动") >= 0, "改了值却没提示未保存");
+    await tick(80);
+    assert.ok($("#view").textContent.indexOf("有改动未保存") >= 0, "改了值却没提示未保存");
+    await tick(700);
+    assert.ok($("#view").textContent.indexOf("有改动未保存") < 0, "自动保存没生效：还挂着未保存");
+    const live = WB.pages.styles._internals.state;
+    assert.equal(live.draft.primary.size, before + 6, "自动保存后的字号不对");
+    assert.equal(live.dirty, false, "自动保存后 dirty 没清");
 
-    // 保存：内置改不动，这里走「另存为新样式」
-    const save = [...view.querySelectorAll("button")].find(
-      (b) => b.textContent.trim() === "另存为新样式" || b.textContent.trim() === "保存"
+    // 精确预览：mock 不产真 PNG，页面必须给一句说明而不是破图
+    const exact = [...$("#view").querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "精确预览"
     );
-    assert.ok(save, "没有保存按钮");
-    save.click();
-    await tick(420);
-    const after = [...$("#view").querySelectorAll(".styles__item")];
-    assert.ok(after.length > items.length, "另存后预设列表没变长：" + items.length + " → " + after.length);
-    const picked = after.find((n) => n.className.indexOf("is-active") >= 0);
-    assert.ok(picked, "另存后没有选中新样式");
-    assert.ok(picked.textContent.indexOf(String(before + 6) + " 号") >= 0,
-      "新样式的字号不是刚改的值：" + picked.textContent);
-
-    // 真实渲染：mock 不产真 PNG（没有可读文件），页面要给出明确说明而不是破图
-    const render = [...$("#view").querySelectorAll("button")].find(
-      (b) => b.textContent.trim() === "真实渲染"
-    );
-    assert.ok(render, "没有真实渲染按钮");
-    render.click();
-    await tick(300);
+    assert.ok(exact, "没有精确预览按钮");
+    exact.click();
+    await tick(360);
     const renderBox = $("#view").querySelector("#styles-render");
-    assert.ok(renderBox.textContent.trim().length > 0, "渲染完没有任何说明");
+    assert.ok(renderBox.textContent.trim().length > 0, "精确预览完没有任何说明");
     assert.equal($("#view").querySelectorAll(".styles__render-img").length, 0,
       "mock 下不该出现读不到的图片");
+  });
+
+  await check("样式页：项目作用域显示继承、改动建立独立覆盖、恢复继承回全局", async () => {
+    const pid = "p_demo_1";
+    WB.router.go("styles", { project_id: pid });
+    await tick(520);
+    let view = $("#view");
+    let pill = view.querySelector("#styles-scope-pill");
+    assert.ok(pill, "项目作用域没有标记");
+    assert.equal(pill.textContent.trim(), "正在继承全局",
+      "还没覆盖时该显示继承：" + pill.textContent);
+
+    const sizeInput = [...view.querySelectorAll(".styles__num")].find(
+      (n) => n.getAttribute("aria-label") === "字号" && n.getAttribute("data-face") === "primary"
+    );
+    assert.ok(sizeInput, "项目作用域没有主字幕字号输入框");
+    sizeInput.value = "88";
+    sizeInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    await tick(800);
+    view = $("#view");
+    pill = view.querySelector("#styles-scope-pill");
+    assert.equal(pill.textContent.trim(), "项目覆盖", "改动后没变成项目覆盖：" + pill.textContent);
+
+    // 全局页不该被项目覆盖带跑
+    WB.router.go("styles", {});
+    await tick(520);
+    const globalSize = WB.pages.styles._internals.state.draft.primary.size;
+    assert.notEqual(globalSize, 88, "项目覆盖把全局改掉了");
+
+    WB.router.go("styles", { project_id: pid });
+    await tick(520);
+    view = $("#view");
+    const reset = [...view.querySelectorAll("button")].find(
+      (b) => b.textContent.indexOf("恢复继承") >= 0
+    );
+    assert.ok(reset, "没有恢复继承按钮");
+    reset.click();
+    await tick(500);
+    pill = $("#view").querySelector("#styles-scope-pill");
+    assert.equal(pill.textContent.trim(), "正在继承全局",
+      "恢复继承后没回到继承：" + pill.textContent);
   });
 
   await check("切片台批量导出：勾两条一起导、一条失败不挡另一条、重试能补上", async () => {

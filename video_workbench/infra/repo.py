@@ -96,9 +96,7 @@ def _project_where(
     text = str(query or "").strip()
     if text:
         like = f"%{text}%"
-        clauses.append(
-            "(title LIKE ? OR up_name LIKE ? OR bvid LIKE ? OR collection_title LIKE ?)"
-        )
+        clauses.append("(title LIKE ? OR up_name LIKE ? OR bvid LIKE ? OR collection_title LIKE ?)")
         params.extend([like, like, like, like])
     stage_key = str(stage or "").strip()
     if stage_key:
@@ -468,9 +466,7 @@ class Repo:
         if not wanted:
             return {"changed": 0, "skipped": []}
         marks = ",".join("?" for _ in wanted)
-        rows = self._all(
-            f"SELECT id, archived_at FROM wb_project WHERE id IN ({marks})", wanted
-        )
+        rows = self._all(f"SELECT id, archived_at FROM wb_project WHERE id IN ({marks})", wanted)
         state = {str(row["id"]): row["archived_at"] for row in rows}
         skipped = [{"id": pid, "reason": "项目不存在"} for pid in wanted if pid not in state]
         stamp = now_iso()
@@ -554,8 +550,7 @@ class Repo:
                 wanted,
             ),
             "candidate": self._all(
-                f"SELECT * FROM wb_candidate WHERE project_id IN ({marks})"
-                " ORDER BY created_at, id",
+                f"SELECT * FROM wb_candidate WHERE project_id IN ({marks}) ORDER BY created_at, id",
                 wanted,
             ),
         }
@@ -1474,6 +1469,36 @@ class Repo:
             (style_id, name, mode, _dumps(config) or "{}", now_iso()),
         )
         return self.style_get(style_id) or {}
+
+    # ------------------------------------------------ 项目样式覆盖（v7）
+    #
+    # **不走 project_update 白名单**：那一列的语义是"整份覆盖或继承"，和
+    # 项目身份/状态字段完全不是一类东西；混进白名单会让任何一次 project_update
+    # 都能顺手把用户的样式覆盖清掉。三个专用入口，clear 写 NULL。
+
+    def project_style_get(self, project_id: str) -> dict[str, Any] | None:
+        """项目样式覆盖。返回 None ＝ 该项目继承全局（NULL 或项目不存在）。"""
+        row = self._one("SELECT subtitle_style_json FROM wb_project WHERE id=?", (project_id,))
+        if not row:
+            return None
+        return _loads(row.get("subtitle_style_json"))
+
+    def project_style_put(self, project_id: str, config: Any) -> dict[str, Any] | None:
+        """写项目覆盖（整份）。config 为 None 时等同 clear。"""
+        if config is None:
+            return self.project_style_clear(project_id)
+        self._exec(
+            "UPDATE wb_project SET subtitle_style_json=?, updated_at=? WHERE id=?",
+            (_dumps(config) or "{}", now_iso(), project_id),
+        )
+        return self.project_style_get(project_id)
+
+    def project_style_clear(self, project_id: str) -> None:
+        """恢复继承：写 NULL，不删行、不碰其他列。"""
+        self._exec(
+            "UPDATE wb_project SET subtitle_style_json=NULL, updated_at=? WHERE id=?",
+            (now_iso(), project_id),
+        )
 
     def style_delete(self, key: str) -> dict[str, Any]:
         """删自建样式。内置只读——被删掉后所有引用它的项目会掉回兜底值。"""

@@ -90,7 +90,8 @@ def test_ass_font_scales_with_height(service, tmp_path):
         {"project_id": project["id"], "formats": ["ass"], "height": 1080},
     )
     text = Path(data["files"][0]["path"]).read_text(encoding="utf-8")
-    assert style_field(text, 2) == 81
+    # v2 的参考画布是 1080P，内置 default 主字号就是 72，1080 下缩放系数 1.0
+    assert style_field(text, 2) == 72
     assert data["height"] == 1080
 
 

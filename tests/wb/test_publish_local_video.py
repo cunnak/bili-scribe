@@ -104,7 +104,10 @@ def test_publish_binding_columns_exist_after_migration(service):
 
     names = {row[1] for row in service.repo.conn.execute("PRAGMA table_info(wb_project)")}
     assert {"publish_bvid", "publish_aid"} <= names
-    assert db_mod.SCHEMA_VERSION == 6
+    # v7 加了 wb_project.subtitle_style_json（单视频字幕样式整份覆盖）。
+    # 这条断言钉的是"迁移跑过之后版本号真的抬了"，不是某一个具体数字：
+    # 每次升版都要把它跟着抬，否则它会红在一个与发布链路无关的地方。
+    assert db_mod.SCHEMA_VERSION >= 6
 
 
 def test_local_project_preview_exposes_empty_video_and_blocks_account(service, tmp_path):

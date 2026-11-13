@@ -1462,7 +1462,8 @@
 
     host.appendChild(h("p", {
       class: "muted",
-      text: "字号按 720P 为基准等比缩放：选 1080P 时字号/描边/边距自动 ×1.5。"
+      text: "字号按样式里的参考画布等比缩放（横屏 1080P / 竖屏 1920）。" +
+        "样式用这个视频自己的覆盖，没覆盖就跟全局默认。"
     }));
     var boxes = h("div", { class: "tr-form" }, EXPORT_FORMATS.map(function (pair) {
       var box = h("input", { type: "checkbox", class: "exp-fmt", value: pair[0] });
@@ -1483,6 +1484,16 @@
     host.appendChild(h("div", { class: "sub-opt__bar" }, [
       h("span", { class: "muted", text: "译文单独导出在「AI 翻译」里确认时完成" }),
       h("span", { class: "sub-status__spacer" }),
+      // 项目作用域的样式入口：带 project_id 进去，改的是这个视频的覆盖
+      h("button", {
+        class: "btn btn--ghost",
+        id: "exp-style",
+        text: "这个视频的字幕样式",
+        onclick: function () {
+          if (!state.projectId) return;
+          WB.router.go("styles", { project_id: state.projectId });
+        }
+      }),
       h("button", { class: "btn btn--ghost", text: "收起", onclick: closeExport }),
       h("button", { class: "btn btn--primary", id: "exp-start", text: "开始导出", onclick: startExport })
     ]));

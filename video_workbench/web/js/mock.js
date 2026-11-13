@@ -2545,6 +2545,65 @@
                     duration_ms: 213000, cached: true });
       case "style.list":
         return ok(STYLES.map(function (row) { return styleRow(row.config, row.builtin); }));
+      case "style.effective.get": {
+        // 作用域优先级：显式 > 项目覆盖 > 全局 > 内置。mock 也要照这个顺序，
+        // 否则前端在 mock 里试出来的交互和真机不一致。
+        var effPid = String(p.project_id || "");
+        var override = effPid ? STYLE_OVERRIDES[effPid] : null;
+        var base = styleFind("default");
+        var conf = JSON.parse(JSON.stringify(override || base.config));
+        var scope = override ? "project" : "global";
+        return ok({
+          config: conf,
+          scope: scope,
+          inherited: scope !== "project",
+          base_preset_id: conf.base_preset_id || "",
+          revision: "mock_" + scope + "_" + (conf.primary || {}).size,
+          global_revision: "mock_global_" + (base.config.primary || {}).size,
+          warnings: [],
+          actual_fonts: { fonts: { primary: conf.primary.font, secondary: conf.secondary.font },
+                          missing: [], fallback: "Microsoft YaHei", note: "" },
+          canvas: conf.preview.orientation === "portrait"
+            ? { width: 720, height: 1280 } : { width: 1280, height: 720 },
+          reference: conf.preview.orientation === "portrait"
+            ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 }
+        });
+      }
+      case "style.effective.put": {
+        var putPid = String(p.project_id || "");
+        if (!p.config) return fail("VALIDATION", "缺少样式内容");
+        var putConf = JSON.parse(JSON.stringify(p.config));
+        var putSize = Number((putConf.primary || {}).size || 0);
+        if (putSize < 12 || putSize > 120) {
+          return fail("VALIDATION", "主字幕字号要在 12–120，现在是 " + putSize);
+        }
+        if (putPid) {
+          STYLE_OVERRIDES[putPid] = putConf;
+        } else {
+          var globalRow = styleFind("default");
+          globalRow.config = putConf;
+        }
+        return ok({
+          config: putConf,
+          scope: putPid ? "project" : "global",
+          previous_scope: putPid ? "global" : "global",
+          revision: "mock_" + (putPid ? "project" : "global") + "_" + putSize,
+          warnings: [],
+          saved: true
+        });
+      }
+      case "style.effective.reset": {
+        var resetPid = String(p.project_id || "");
+        if (resetPid) delete STYLE_OVERRIDES[resetPid];
+        var resetBase = styleFind("default");
+        return ok({
+          config: JSON.parse(JSON.stringify(resetBase.config)),
+          scope: "global",
+          revision: "mock_global_" + (resetBase.config.primary || {}).size,
+          warnings: [],
+          reset: true
+        });
+      }
       case "style.get": {
         var hit = styleFind(p.id || "default");
         if (!hit) return fail("NOT_FOUND", "样式不存在", p.id);
@@ -2849,17 +2908,26 @@
     }
   }
 
+  // 字段清单照抄 core/styles.py 的 _face()：mock 少一个字段，界面上那个控件
+  // 在 mock 里就永远是空的，试交互的人会以为"这个字段没做"。
   function face(size) {
     return {
       font: "Microsoft YaHei", size: size, spacing: 0,
-      color: capToken("--cap-fg"), outline_color: capToken("--cap-stroke"),
-      outline_width: 2, bold: false
+      color: capToken("--cap-fg"), opacity: 1,
+      outline_color: capToken("--cap-stroke"), outline_opacity: 1, outline_width: 2,
+      bold: false, italic: false, underline: false, strikeout: false,
+      scale_x: 100, scale_y: 100, angle: 0, blur: 0,
+      alignment: 2, margin_l: 0, margin_r: 0, margin_v: 42,
+      border_style: 1,
+      background_color: capToken("--cap-bg"), background_opacity: 0,
+      shadow_color: capToken("--cap-stroke"), shadow_opacity: 1, shadow_distance: 1
     };
   }
 
   function preset(id, name, mode, size) {
     return {
       id: id, name: name, mode: mode, layout: "original_top",
+      schema_version: 2, vertical_gap: 12, base_preset_id: "",
       primary: face(size),
       secondary: face(Math.max(12, size - 12)),
       rounded: {
@@ -2872,6 +2940,10 @@
       preview: { text_length: "medium", orientation: "landscape", background: "dark" }
     };
   }
+
+  // 项目覆盖：键是 project_id，值是整份样式。NULL/缺键 = 继承全局。
+  // 单独一张表而不是塞进项目行里，是为了让"恢复继承"只需 delete 一次。
+  var STYLE_OVERRIDES = {};
 
   var STYLES = [
     { id: "default", name: "默认", mode: "ass", builtin: true, size: 48,

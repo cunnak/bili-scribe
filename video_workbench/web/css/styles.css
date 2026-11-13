@@ -232,3 +232,61 @@
   padding-top: 4px;
   border-top: 1px solid var(--line);
 }
+/* ---------------------------------------------------------------- 作用域条
+ * 三个状态必须一眼分开：全局默认 / 正在继承 / 项目覆盖。
+ * 只靠文字不够——用户在项目页看到「全局默认」四个字会以为在改全局。
+ */
+.styles__scopebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.styles__scope-pill[data-scope="project"],
+#styles-state[data-scope="project"] {
+  color: var(--accent);
+}
+
+/* 「正在继承」用 ember（暖色）：它不是错误，但需要被看见——
+   在项目页把它显示成和「项目覆盖」一样，用户会以为改的是全局。 */
+.styles__scope-pill[data-scope="inherited"],
+#styles-state[data-scope="inherited"] {
+  color: var(--ember);
+}
+
+/* 右栏：编辑在上、预览在下，两段各自滚动，互不挤占 */
+.styles__col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.styles__pane--preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.styles__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 1100×720 是产品窗口下限：两栏 + 每格 120px 会横向溢出，收窄到 104px */
+@media (max-width: 1180px) {
+  .styles__grid2 {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .styles__grid {
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  }
+}

@@ -121,7 +121,9 @@ def test_format_ass_writes_scaled_style_into_header():
     assert "Style: Default," in head
     assert ",72," in head  # 48 × 1.5
     assert "&H000000FF" in head  # 红字，BGR 顺序
-    assert "PlayResX: 1280" in head and "PlayResY: 720" in head
+    # PlayRes 必须等于**目标画布**：字号已经缩放过一次，PlayResY 再停在 720
+    # 会让 libass 按 1080/720 再放大一次（v1 的真 bug：1080 上字偏大 50%）。
+    assert "PlayResX: 1920" in head and "PlayResY: 1080" in head
 
 
 def test_format_ass_explicit_numbers_beat_style():
@@ -322,12 +324,13 @@ def test_export_uses_source_height_when_height_is_auto(service, tmp_path, monkey
     assert data["height"] == 1080
     assert fake.probed, "没探源视频就决定了基准高度"
     ass = (Path(project["root_dir"]) / "export" / "subtitle.orig.ass").read_text(encoding="utf-8")
-    # 720 基准的默认字号 54，1080P 要放大到 81（不跟样式库一致就会"预览与导出差一截"）
-    want = int(round(subtitles.ASS_DEFAULT["size"] * 1.5))
-    assert f",{want}," in ass.split("Dialogue:")[0]
+    # v2 起样式的参考画布就是 1080P，内置 default 的主字号存的是 72，
+    # 导出 1080 时缩放系数为 1.0 ⇒ 原样写 72（v1 是 720 基准 54 × 1.5 = 81）。
+    # 断言写死 72 而不是从函数算，是为了让"基准画布被谁改了"当场红。
+    assert ",72," in ass.split("Dialogue:")[0]
 
 
-def test_export_falls_back_to_720_when_probe_fails(service, tmp_path, monkeypatch):
+def test_export_falls_back_to_reference_height_when_probe_fails(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
 
     class Broken(FakeFFmpeg):
@@ -338,7 +341,8 @@ def test_export_falls_back_to_720_when_probe_fails(service, tmp_path, monkeypatc
 
     use_ffmpeg(service, monkeypatch, Broken())
     data = rpc(service, "subtitle.export", {"project_id": project["id"], "formats": ["ass"]})
-    assert data["height"] == subtitles.ASS_BASE_HEIGHT
+    # 探不到高度就按 v2 的横屏参考画布 1080 走（v1 那时是 720 基准）
+    assert data["height"] == subtitles.ASS_REF_HEIGHT["landscape"]
 
 
 def test_export_dedupes_and_drops_unknown_formats(service, tmp_path, monkeypatch):
@@ -415,8 +419,10 @@ def test_export_with_language_uses_translation_draft(service, tmp_path, monkeypa
     assert "Three things today" in srt
     assert "今天讲三件事" not in srt
     ass = (Path(project["root_dir"]) / "export" / "subtitle.en.ass").read_text(encoding="utf-8")
-    # 默认版式原文在上：两行都在
-    assert "今天讲三件事\\NThree things today" in ass
+    # 默认版式原文在上：两行都在，第二行用行内 \rSecondary 切到副字幕样式
+    # （v2 起两行可以各自不同字体字号，光靠 \N 会让第二行继承第一行）
+    assert "今天讲三件事" in ass
+    assert "\\N{\\rSecondary}Three things today" in ass
 
 
 def test_export_with_missing_language_is_not_found(service, tmp_path, monkeypatch):

@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.2.11"
+__version__ = "0.3.0"
 APP_NAME = "VideoWorkbench"
 
 __all__ = ["__version__", "APP_NAME"]

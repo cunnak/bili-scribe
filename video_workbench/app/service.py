@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import io
 import json
 import os
@@ -401,11 +402,41 @@ class StyleRenderParams(BaseModel):
     """真实渲染：用 ffmpeg 渲一张 PNG 检查 ASS 实际效果。
 
     ``config`` 优先于 ``id``——界面上改了没保存也要能试渲染。
+    ``project_id`` + ``time_ms`` 给了就抽真实帧与该时刻的真实字幕（Q13）。
     """
 
     id: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     text: str = ""
+    project_id: str = ""
+    time_ms: int = -1
+
+
+class StyleEffectiveParams(BaseModel):
+    """读当前作用域的有效样式。
+
+    ``project_id`` 留空 ＝ 全局（设置页）；给了 ＝ 那个视频（字幕模块）。
+    """
+
+    project_id: str = ""
+
+
+class StyleEffectivePutParams(BaseModel):
+    """保存当前作用域的样式。
+
+    ``revision`` 是乐观锁：与当前 revision 不一致就报冲突，防"两个窗口互相覆盖"。
+    """
+
+    project_id: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+    base_preset_id: str = ""
+    revision: str = ""
+
+
+class StyleEffectiveResetParams(BaseModel):
+    """恢复继承：项目清覆盖（回到全局），全局回到内置 default。"""
+
+    project_id: str = ""
 
 
 class SummaryStartParams(BaseModel):
@@ -903,7 +934,7 @@ class WorkbenchService:
             limits=limits,
             # 每个任务的临时目录由 JobManager 在收尾时删：handler 里漏一个 finally
             # 就会在用户盘上留一堆中间文件，清理不该靠每个 handler 自己记得。
-            tmp_root=Path(self.cfg.storage.cache_root) / "tmp",
+            tmp_root=Path(self.cfg.cache_root) / "tmp",
             # 任务日志同时落盘（界面抽屉关掉之后还得留得住）
             logger=log_mod.log_line,
         )
@@ -927,7 +958,7 @@ class WorkbenchService:
 
         # 真实业务：单集下载 + 批量下载。并发由 limits 里的 semaphore 控制，
         # batch 只派活，所以它自己的 limit=1 不影响子项并行度。
-        self._gateway = default_gateway(self.cfg.db_path, self.cfg.storage.key_path)
+        self._gateway = default_gateway(self.cfg.db_path, self.cfg.key_path)
         self._resolver = resolver_mod.Resolver(self._gateway)
         self.jobs.register(
             CHILD_TYPE,
@@ -1007,6 +1038,9 @@ class WorkbenchService:
         r.add("style.export", self.style_export, StyleFileParams)
         r.add("style.fonts", self.style_fonts)
         r.add("style.render", self.style_render, StyleRenderParams)
+        r.add("style.effective.get", self.style_effective_get, StyleEffectiveParams)
+        r.add("style.effective.put", self.style_effective_put, StyleEffectivePutParams)
+        r.add("style.effective.reset", self.style_effective_reset, StyleEffectiveResetParams)
         r.add("job.list", self.job_list)
         r.add("job.get", self.job_get, IdParams)
         r.add("job.cancel", self.job_cancel, IdParams)
@@ -1563,7 +1597,7 @@ class WorkbenchService:
     # 界面列表就空。所以 save 一次写三处，delete 一次清两处。
 
     def _style_dir(self) -> Path:
-        path = Path(str(self.cfg.storage.media_root)) / "styles"
+        path = Path(str(self.cfg.media_root)) / "styles"
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -1727,9 +1761,20 @@ class WorkbenchService:
         }
 
     def style_render(
-        self, id: str = "", config: dict[str, Any] | None = None, text: str = ""
+        self,
+        id: str = "",
+        config: dict[str, Any] | None = None,
+        text: str = "",
+        project_id: str = "",
+        time_ms: int = -1,
     ) -> dict[str, Any]:
-        """真渲一张 PNG。失败就该失败——界面自己退画布预览，别在这里返回假图。"""
+        """真渲一张 PNG。失败就该失败——界面自己退画布预览，别在这里返回假图。
+
+        project_id + time_ms 给了就抽**真实帧**（决策档 Q13）：有项目时优先用该时刻
+        的真实字幕文本，没有可用字幕才回落到演示内容。抽帧失败（项目没视频、ffmpeg
+        抽不出来）不抛错，退回色块背景并在 note 里说清楚——「预览」这个动作本身
+        不该被素材缺失卡死。
+        """
         if config:
             base = None
             if id:
@@ -1743,22 +1788,42 @@ class WorkbenchService:
         style, warnings = styles_core.validate(style)
         canvas = styles_core.canvas_size(style)
         height = int(canvas["height"])
-        texts = [text] if str(text or "").strip() else None
+
+        note = ""
+        frame_path = ""
+        texts: list[str] | None = [text] if str(text or "").strip() else None
+        pid = str(project_id or "").strip()
+        at_ms = int(time_ms if time_ms is not None else -1)
+        if pid:
+            picked = self._style_preview_texts(pid, at_ms)
+            if picked:
+                texts = picked
+            else:
+                note = "这个视频还没有可用字幕，预览用的是示例文本"
+            frame_path = self._style_preview_frame(pid, at_ms)
+
         ass_body = styles_core.preview_ass(style, height=height, texts=texts)
         ffmpeg, _probe = self._ffmpeg.require()
-        cache = Path(str(self.cfg.storage.cache_root)) / "previews"
+        cache = Path(str(self.cfg.cache_root)) / "previews"
         cache.mkdir(parents=True, exist_ok=True)
         # 文件名带时间戳只到秒：同一秒里连点两次「真实渲染」会互相覆盖，
         # 用户看到的可能是上一次的图。unique_path 保证每次都留一张。
         stamp = time.strftime("%Y%m%d-%H%M%S")
         ass_path = unique_path(cache / f"style-{stamp}.ass")
-        png_path = unique_path(
-            Path(str(self.cfg.storage.media_root)) / "previews" / f"style-{stamp}.png"
-        )
+        png_path = unique_path(Path(str(self.cfg.media_root)) / "previews" / f"style-{stamp}.png")
         png_path.parent.mkdir(parents=True, exist_ok=True)
         ass_path.write_text(ass_body, encoding="utf-8")
-        background = str((style.get("preview") or {}).get("background") or "dark")
-        color = {"light": "0xF7F6F1", "image": "0x14181A"}.get(background, "0x14181A")
+        if frame_path:
+            source = ["-i", frame_path]
+        else:
+            background = str((style.get("preview") or {}).get("background") or "dark")
+            color = {"light": "0xF7F6F1", "image": "0x14181A"}.get(background, "0x14181A")
+            source = [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s={canvas['width']}x{canvas['height']}:d=1",
+            ]
         self._ffmpeg.run(
             [
                 ffmpeg,
@@ -1766,10 +1831,7 @@ class WorkbenchService:
                 "-loglevel",
                 "error",
                 "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                f"color=c={color}:s={canvas['width']}x{canvas['height']}:d=1",
+                *source,
                 "-vf",
                 subtitle_filter(ass_path),
                 "-frames:v",
@@ -1787,7 +1849,276 @@ class WorkbenchService:
             "warnings": warnings,
             "ass": str(ass_path),
             "bytes": png_path.stat().st_size,
+            "frame": frame_path,
+            "real_frame": bool(frame_path),
+            "note": note,
         }
+
+    def _style_preview_texts(self, project_id: str, time_ms: int) -> list[str] | None:
+        """该时刻真实字幕的两行文本；没有可用字幕返回 None（调用方退演示内容）。"""
+        try:
+            segments = self._candidate_segments({"project_id": project_id})
+        except WBError:
+            return None
+        if not segments:
+            return None
+        pick = segments[0]
+        if time_ms >= 0:
+            hit = [s for s in segments if int(s["start_ms"]) <= time_ms < int(s["end_ms"])]
+            if hit:
+                pick = hit[0]
+            else:
+                # 该时刻没有字幕：取时间上最近的一条，别让预览空着
+                pick = min(segments, key=lambda s: abs(int(s["start_ms"]) - time_ms))
+        lines = pick.get("lines")
+        if isinstance(lines, list) and lines:
+            return [str(line) for line in lines if str(line).strip()] or None
+        text = str(pick.get("text") or "").strip()
+        return [text] if text else None
+
+    def _style_preview_frame(self, project_id: str, time_ms: int) -> str:
+        """抽一张真实帧当预览底图。抽不出来就返回空串（调用方退色块）。"""
+        try:
+            assets = [a for a in self.repo.asset_list(project_id) if a.get("kind") == "video"]
+        except Exception:  # noqa: BLE001 —— 预览不该因为读库失败整块挂掉
+            return ""
+        if not assets:
+            return ""
+        src = str(assets[0].get("path") or "")
+        if not src or not Path(src).is_file():
+            return ""
+        at = max(0.0, float(time_ms) / 1000.0) if time_ms and time_ms > 0 else 0.0
+        cache = Path(str(self.cfg.cache_root)) / "previews"
+        cache.mkdir(parents=True, exist_ok=True)
+        target = unique_path(cache / f"frame-{time.strftime('%Y%m%d-%H%M%S')}.png")
+        ffmpeg, _probe = self._ffmpeg.require()
+        try:
+            self._ffmpeg.run(
+                [
+                    ffmpeg,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-ss",
+                    f"{at:.3f}",
+                    "-i",
+                    src,
+                    "-frames:v",
+                    "1",
+                    str(target),
+                ]
+            )
+        except WBError:
+            return ""
+        return str(target) if target.is_file() and target.stat().st_size > 0 else ""
+
+    # ------------------------------------------------ 有效样式（作用域 / 覆盖 / 快照）
+    #
+    # 优先级（决策档与规划书 §3 同一条）：
+    #   显式 style_id > 项目覆盖 > 全局 default_style_config > 全局 default_style > 内置 default
+    # 每一次"取有效样式"都必须走 effective_style()，别在别处再拼一遍优先级——
+    # 预览、导出、烧录三处各拼一次，迟早有一处顺序写反，表现为"预览对、成片不对"。
+
+    def _project_or_404(self, project_id: str) -> dict[str, Any]:
+        row = self.repo.project_get(str(project_id or ""))
+        if not row:
+            raise WBError("NOT_FOUND", "找不到这个视频", str(project_id))
+        return row
+
+    def _global_style_config(self) -> dict[str, Any]:
+        """全局工作配置：配过就是那份，没配过就由 default_style 现推一份。"""
+        raw = getattr(self.cfg.subtitle, "default_style_config", None) or {}
+        if isinstance(raw, dict) and raw:
+            return styles_core.normalize(raw)
+        style_id = str(getattr(self.cfg.subtitle, "default_style", "") or "default")
+        conf, _builtin, _file = self._style_resolve(style_id)
+        return styles_core.normalize(conf)
+
+    def effective_style(
+        self, project_id: str = "", style_id: str = ""
+    ) -> tuple[dict[str, Any], str]:
+        """取有效样式，返回 (样式, 作用域)。作用域 ∈ {style_id, project, global}。"""
+        explicit = str(style_id or "").strip()
+        if explicit:
+            conf, _builtin, _file = self._style_resolve(explicit)
+            return styles_core.normalize(conf), "style_id"
+        pid = str(project_id or "").strip()
+        if pid:
+            override = self.repo.project_style_get(pid)
+            if isinstance(override, dict) and override:
+                return styles_core.normalize(override), "project"
+        return self._global_style_config(), "global"
+
+    @staticmethod
+    def style_hash(style: dict[str, Any]) -> str:
+        """样式指纹：同一份配置永远同一串，任何字段变了就变。
+
+        任务 payload 里存这个，用来判断"这个任务的成片是按哪一版样式烧的"。
+        用 sort_keys 而不是有序序列化：字段顺序不是语义，键值才是。
+        """
+        body = json.dumps(style, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+
+    def _actual_fonts(self, style: dict[str, Any]) -> dict[str, Any]:
+        """实际会用的字体：请求的字体不在系统里就说明用了哪个后备（Q16）。
+
+        只读注册表，不扫描字体文件——扫描要解析 TTF，慢且没必要。
+        """
+        available = {name.lower(): name for name in self.style_fonts().get("fonts") or []}
+        fallback = styles_core.FONT_FALLBACK
+        used: dict[str, str] = {}
+        missing: list[str] = []
+        for key in ("primary", "secondary"):
+            face = style.get(key) or {}
+            wanted = str(face.get("font") or "").strip()
+            hit = available.get(wanted.lower())
+            if hit:
+                used[key] = hit
+                continue
+            missing.append(wanted or "(空)")
+            used[key] = available.get(fallback.lower(), fallback)
+        rnd = style.get("rounded") or {}
+        rounded_font = str(rnd.get("font") or "").strip()
+        if rounded_font and rounded_font.lower() not in available:
+            missing.append(rounded_font)
+        return {
+            "fonts": used,
+            "missing": missing,
+            "fallback": fallback,
+            "note": (
+                f"这些字体这台机器上没有：{'、'.join(missing)}；实际用 {fallback} 渲染"
+                if missing
+                else ""
+            ),
+        }
+
+    def _style_digest(self, project_id: str = "", style_id: str = "") -> tuple[dict[str, Any], str]:
+        """有效样式 + 指纹，一次算好。
+
+        导出计划与 skip_exported 判断都从这里取：**签名只能有一个 owner**。
+        两处各拼一份的后果已经出现过——签名里加了 style_hash、跳过逻辑没跟，
+        于是「同样的参数」永远匹配不上，skip_exported 形同关闭。
+        """
+        style, _scope = self.effective_style(project_id=project_id, style_id=style_id)
+        validated, _warnings = styles_core.validate(style)
+        return validated, self.style_hash(validated)
+
+    def style_effective_get(self, project_id: str = "") -> dict[str, Any]:
+        """当前作用域的有效样式。**只读**：查看项目不会创建覆盖（决策档补充约束）。"""
+        pid = str(project_id or "").strip()
+        if pid:
+            self._project_or_404(pid)
+        style, scope = self.effective_style(project_id=pid)
+        validated, warnings = styles_core.validate(style)
+        global_conf = self._global_style_config()
+        return {
+            "config": validated,
+            "scope": scope,
+            "inherited": scope != "project",
+            "base_preset_id": str(validated.get("base_preset_id") or ""),
+            "revision": self.style_hash(validated),
+            "global_revision": self.style_hash(global_conf),
+            "warnings": warnings,
+            "actual_fonts": self._actual_fonts(validated),
+            # 两个画布不是一回事：canvas 是预览用的缩略尺寸（1280×720），
+            # reference 是字号的实际基准（1920×1080）。界面要同时显示——
+            # 只给 canvas，用户会以为"72 号"是按 1280 宽算的，换到成片上对不上。
+            "canvas": styles_core.canvas_size(validated),
+            "reference": styles_core.reference_canvas(validated),
+        }
+
+    def style_effective_put(
+        self,
+        project_id: str = "",
+        config: dict[str, Any] | None = None,
+        base_preset_id: str = "",
+        revision: str = "",
+    ) -> dict[str, Any]:
+        """保存当前作用域。
+
+        - 全局：写进 config.subtitle.default_style_config 并落盘（显式保存才写文件）。
+        - 项目：写 wb_project.subtitle_style_json（整份覆盖）。
+
+        无效输入**不落盘**：validate 先跑，错了整份拒收，上一份有效配置原样保留
+        （决策档补充约束）。revision 是乐观锁，只防"旧窗口覆盖新改动"。
+        """
+        pid = str(project_id or "").strip()
+        if pid:
+            self._project_or_404(pid)
+        current, scope = self.effective_style(project_id=pid)
+        if str(revision or "").strip() and str(revision) != self.style_hash(current):
+            raise WBError(
+                "CONFLICT",
+                "这份样式已经被别处改过了，刷新后再改",
+                {"current_revision": self.style_hash(current)},
+            )
+        base = styles_core.normalize(current)
+        merged = styles_core.normalize(config or {}, base=base)
+        if base_preset_id:
+            merged["base_preset_id"] = str(base_preset_id)
+        style, warnings = styles_core.validate(merged)
+        if pid:
+            self.repo.project_style_put(pid, style)
+            self.events.emit("library.changed", {"project_id": pid, "reason": "style.effective"})
+        else:
+            self.cfg.subtitle.default_style_config = style
+            self.cfg.save()
+            self.events.emit("config.changed", {"scope": "subtitle.default_style_config"})
+        # 返回**保存后**的作用域，不是保存前解析到的那个：在项目页第一次保存时
+        # 前一刻还是 global（在继承），保存完就是 project。回保存前的值会让界面
+        # 继续显示"正在继承"，用户以为没存上，再点一次才发现其实存了。
+        saved_scope = "project" if pid else "global"
+        return {
+            "config": style,
+            "scope": saved_scope,
+            # get / put / reset 三处返回同构：前端只看 inherited，不用各处猜 scope
+            "inherited": saved_scope != "project",
+            "previous_scope": scope,
+            "revision": self.style_hash(style),
+            "warnings": warnings,
+            "saved": True,
+        }
+
+    def style_effective_reset(self, project_id: str = "") -> dict[str, Any]:
+        """恢复继承：项目写 NULL（回到全局），全局清掉工作配置（回到内置 default）。"""
+        pid = str(project_id or "").strip()
+        if pid:
+            self._project_or_404(pid)
+            self.repo.project_style_clear(pid)
+            self.events.emit("library.changed", {"project_id": pid, "reason": "style.effective"})
+        else:
+            self.cfg.subtitle.default_style_config = {}
+            self.cfg.subtitle.default_style = "default"
+            self.cfg.save()
+            self.events.emit("config.changed", {"scope": "subtitle.default_style_config"})
+        style, scope = self.effective_style(project_id=pid)
+        validated, warnings = styles_core.validate(style)
+        return {
+            "config": validated,
+            "scope": scope,
+            # 与 get / put 同构：前端拿同一份字段判断「还在继承吗」，
+            # 少一个 inherited，页面就只能靠 scope 猜，两处判法迟早不一致。
+            "inherited": scope != "project",
+            "revision": self.style_hash(validated),
+            "warnings": warnings,
+            "reset": True,
+        }
+
+    def _style_ass_text(
+        self,
+        style: dict[str, Any],
+        segments: list[dict[str, Any]],
+        *,
+        height: int = 0,
+        start_ms: int = 0,
+        end_ms: int = 0,
+    ) -> str:
+        """把样式与字幕段渲成一份 ASS 文本（导出与烧录共用同一入口）。"""
+        items = segments
+        if start_ms or end_ms:
+            items = subtitles.window(segments, start_ms, end_ms)
+        return subtitles.format_ass(items, style=style, height=height)
 
     # ------------------------------------------------------- 任务
 
@@ -2979,8 +3310,12 @@ class WorkbenchService:
                     want = int(self._ffmpeg.probe(source_path).height or 0)
                 except WBError:
                     want = 0
-            want = want or subtitles.ASS_BASE_HEIGHT
-        style = self.repo.style_get(style_id or self.cfg.subtitle.default_style) or {}
+            want = want or styles_core.REF_HEIGHT["landscape"]
+        # 有效样式：显式 style_id > 项目覆盖 > 全局 > 内置（同一入口，别在这里再拼一遍）
+        style, scope = self.effective_style(project_id=project_id, style_id=style_id)
+        style, style_warnings = styles_core.validate(style)
+        style_digest = self.style_hash(style)
+        fonts = self._actual_fonts(style)
 
         suffix = lang or "orig"
         files: list[dict[str, Any]] = []
@@ -3007,6 +3342,10 @@ class WorkbenchService:
             "mode": mode,
             "height": want,
             "style_id": str(style.get("id") or ""),
+            "style_scope": scope,
+            "style_hash": style_digest,
+            "style_warnings": style_warnings,
+            "actual_fonts": fonts,
             "files": files,
             "job_id": "",
         }
@@ -3024,22 +3363,44 @@ class WorkbenchService:
         if not self._ffmpeg.available:
             self._ffmpeg.require()  # 抛 DEPENDENCY_MISSING，文案统一
         output = out_dir / f"{source_path.stem}.{want}p.{mode}.mp4"
+        # 任务吃的是自己那份快照，不是会被下次导出覆盖的 subtitle.orig.ass
+        job_ass = self._style_snapshot_ass(ass_path, style_digest)
         job = self.jobs.submit(
             "video.export",
             project_id,
             {
                 "source": str(source_path),
-                "subtitle": str(ass_path),
+                "subtitle": str(job_ass),
                 "output": str(output),
                 "mode": mode,
                 "height": want,
                 "language": suffix,
+                # 快照：任务启动那一刻的样式与字体，后续再改样式不影响这一版成片
+                "style_snapshot": style,
+                "style_hash": style_digest,
+                "actual_fonts": fonts,
             },
         )
         result["job_id"] = job.get("id") or ""
         result["job"] = job
         result["output"] = str(output)
         return result
+
+    def _style_snapshot_ass(self, ass_path: Path, style_digest: str) -> Path:
+        """给一个任务单独留一份 ASS，文件名带样式指纹。
+
+        导出产物 `subtitle.orig.ass` 是**用户可见的那一份**，下次导出会被覆盖。
+        任务如果直接吃它，就出现「任务启动之后改样式、又点了一次导出，先前那条
+        任务烧出来的却是新样式」——成片和它记录的快照对不上。指纹写进文件名，
+        同名同内容，不同样式各占一份，谁都不覆盖谁。
+        """
+        digest = (style_digest or "").strip()[:16] or "nohash"
+        target = ass_path.with_name(f"{ass_path.stem}@{digest}{ass_path.suffix}")
+        # 落盘即冻结：存在就不再写。任务可能已经读完它开始烧了，
+        # 「内容不一样就覆盖一遍」等于把正在跑的任务的输入换掉。
+        if not target.is_file():
+            target.write_bytes(ass_path.read_bytes())
+        return target
 
     def _export_job(self, ctx: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
         mode = str(payload.get("mode") or "soft")
@@ -5062,13 +5423,15 @@ class WorkbenchService:
                     want = int(self._ffmpeg.probe(str(sources[0]["path"])).height or 0)
                 except WBError:
                     want = 0
-            want = want or subtitles.ASS_BASE_HEIGHT
+            want = want or styles_core.REF_HEIGHT["landscape"]
         shift_ms = int(start_ms or 0)
         if shift_ms > 0:
             items = subtitles.window(items, shift_ms, int(end_ms or 0))
             if not items:
                 raise WBError("CONFLICT", "这个切片的时间窗内没有字幕，换切点或去掉烧字幕")
-        style, _builtin, _file = self._style_resolve(style_id)
+        # 与整片导出同一个入口：显式 style_id > 项目覆盖 > 全局 > 内置
+        style, _scope = self.effective_style(project_id=project_id, style_id=style_id)
+        style, _warnings = styles_core.validate(style)
         body = subtitles.format_ass(items, style=style, height=want)
         # 用毫秒而不是秒：两条切片起点只差半秒也会生成不同文件，不会互相覆盖
         name = (
@@ -5171,6 +5534,10 @@ class WorkbenchService:
             audio_path = str(candidate_path.resolve())
         span_ms = max(1, int(candidate["end_ms"]) - int(candidate["start_ms"]))
 
+        # 有效样式只解析一次：硬字幕用它现生成 ASS，payload 里存快照 + 指纹。
+        # 快照是「这个任务按哪一版样式烧的」的唯一凭据——之后再改样式，
+        # 这一版成片不受影响。
+        style_snapshot, style_digest = self._style_digest(project_id, style_id)
         subtitle = ""
         if subtitle_mode != "none":
             subs = [a for a in self.repo.asset_list(project_id) if a.get("kind") == "subtitle"]
@@ -5237,6 +5604,8 @@ class WorkbenchService:
             "vertical_mode": vertical_mode,
             "crop_x": reframe.clamp_x(crop_x),
             "style_id": style_id,
+            "style_snapshot": style_snapshot,
+            "style_hash": style_digest,
             "bgm": audio_path,
             "bgm_volume": audio_mix.clamp_volume(
                 bgm_volume if bgm_volume >= 0 else self.cfg.clip.bgm_volume
@@ -5266,6 +5635,9 @@ class WorkbenchService:
             str(body.get("vertical_mode") or ""),
             str(body.get("bgm") or ""),
             str(int(body.get("fade_ms") or 0)),
+            # 换了样式就是另一版片子：不把 style_hash 算进去，改了字号再点导出
+            # 会被 skip_exported 当成"已经导过"，用户拿到的还是旧样式那一条。
+            str(body.get("style_hash") or ""),
         )
 
     def _export_estimate(self, project_id: str, candidates: list[dict[str, Any]]) -> int:
@@ -5348,6 +5720,7 @@ class WorkbenchService:
             bgm_sig = ""
             if str(bgm or "").strip():
                 bgm_sig = str(Path(str(bgm).strip()).expanduser().resolve())
+            # 与 _export_signature 逐字段同源：少写一个字段，这条就永远匹配不上
             sig = (
                 candidate_id,
                 mode,
@@ -5361,6 +5734,7 @@ class WorkbenchService:
                         self.cfg.clip.fade_ms if fade_ms < 0 else fade_ms,
                     )
                 ),
+                self._style_digest(project_id, style_id)[1],
             )
             if skip_exported and sig in done:
                 skipped.append({"candidate_id": candidate_id, "reason": "这条已经导出过（同参数）"})
@@ -6121,7 +6495,7 @@ class WorkbenchService:
             source,
             start_ms=0,
             end_ms=duration_ms or 1,
-            models_root=str(self.cfg.storage.models_root),
+            models_root=str(self.cfg.models_root),
             proxy=str(getattr(self.cfg.llm, "proxy", "") or ""),
             log=ctx.log,
             enhance=enhance,

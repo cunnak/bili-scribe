@@ -518,7 +518,13 @@ BILINGUAL_MODES = ("original_top", "translated_top", "original_only", "translate
 
 @dataclass
 class SubtitleConfig:
+    # 旧版默认预设 id：仍然生效，是"全局没有完整配置"时的回落。
     default_style: str = "default"
+    # v2：全局完整样式工作配置。空 dict ＝ 沿用 default_style（升级用户与
+    # 从没打开过样式页的人都是这个状态），非空 ＝ 用户真的在设置页配过。
+    # 值类型写 Any 而不是 str：这是一份**嵌套结构**（primary/secondary/rounded），
+    # 被 _fill 当普通 dict[str,str] 处理会把整个样式拍平成字符串。
+    default_style_config: dict[str, Any] = field(default_factory=dict)
     optimize: bool = True
     translate: TranslateConfig = field(default_factory=TranslateConfig)
 
@@ -1028,6 +1034,16 @@ _SECTION_NAMES = (
 # =========================================================== 构造与校验
 
 
+def _is_free_form_dict(hint: Any) -> bool:
+    """``dict[str, Any]`` 这种「值是任意结构」的映射：不做 str 拍平。
+
+    判断只看**值类型**：``dict[str, str]`` 仍然走老的字符串归一（那是 glossary
+    这类自由文本），只有值声明成 Any 的才原样保留。
+    """
+    args = get_args(hint) or ()
+    return len(args) == 2 and args[1] is Any
+
+
 def _fill(cls: type, values: Any, path: str = ""):
     """按 dataclass 结构递归构造，**未知键报错**。
 
@@ -1064,8 +1080,14 @@ def _fill(cls: type, values: Any, path: str = ""):
             if value is None:
                 kwargs[key] = {}
             elif isinstance(value, dict):
-                # 头名/值都是自由文本：统一转 str，省掉「填了数字 5 就报类型错」。
-                kwargs[key] = {str(k): str(v) for k, v in value.items()}
+                if _is_free_form_dict(hint):
+                    # dict[str, Any]：值是**结构**（样式 config 就是这种），
+                    # 原样保留。转 str 会把 primary/secondary 拍平成一串 repr，
+                    # 表现为「样式页存进去、重启后读出来是个字符串」。
+                    kwargs[key] = dict(value)
+                else:
+                    # 头名/值都是自由文本：统一转 str，省掉「填了数字 5 就报类型错」。
+                    kwargs[key] = {str(k): str(v) for k, v in value.items()}
             else:
                 raise WBError("VALIDATION", f"{child} 必须是映射结构", repr(value))
         elif hint is list or str(hint).startswith("list["):
