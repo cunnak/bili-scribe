@@ -3567,7 +3567,7 @@ class WorkbenchService:
         return {
             "found": bool(latest),
             "summary": latest or {},
-            "versions": [_version_row(item) for item in versions],
+            "versions": _version_rows(versions),
             "totals": _usage_totals(versions),
         }
 
@@ -3575,7 +3575,7 @@ class WorkbenchService:
         if not id:
             raise WBError("VALIDATION", "缺少项目 id")
         rows = self.repo.summary_list(id, limit=100)
-        return {"versions": [_version_row(item) for item in rows]}
+        return {"versions": _version_rows(rows)}
 
     def summary_refine(
         self,
@@ -3649,7 +3649,7 @@ class WorkbenchService:
             content_md=summarizer.to_markdown(content),
             role=str(old.get("role") or ""),
             model=str(old.get("model") or ""),
-            usage={"restored_from": old.get("id")},
+            usage={"restored_from": old.get("id"), "restored_version": old.get("version")},
             status="ready",
         )
         self._write_summary_files(project_id, saved)
@@ -3807,7 +3807,7 @@ class WorkbenchService:
                 "root_dir": str((row or {}).get("root_dir") or ""),
             },
             "overview": latest or {},
-            "versions": [_version_row(item) for item in versions],
+            "versions": _version_rows(versions),
             "children": [
                 {
                     "id": str((entry.get("project") or {}).get("id") or ""),
@@ -7231,9 +7231,36 @@ def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
-def _version_row(row: dict[str, Any]) -> dict[str, Any]:
-    """版本列表的一行。只挑界面要显示的，别把整篇正文塞进列表。"""
+def _version_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按时间正序算相邻版本的字段差异，再按界面顺序（新→旧）返回。"""
+    ordered = sorted(rows, key=lambda item: int(item.get("version") or 0))
+    out: list[dict[str, Any]] = []
+    previous = None
+    for row in ordered:
+        out.append(_version_row(row, previous))
+        previous = row
+    out.reverse()
+    return out
+
+
+def _version_row(row: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    """版本列表的一行。只挑界面要显示的，别把整篇正文塞进列表。
+
+    ``changed_fields`` 是这一版相对上一版的**实际内容差异**，不是模型自述：
+    ``revise_note`` 由模型自己写，恢复版还会被写成“恢复自第 N 版”，把它当
+    “实际改动”展示会把来源误读成内容变化（bili-scribe 的版本列表也把两者分开）。
+    回退版不参与字段级比对：它没有“改”这回事，``changed_fields`` 为 ``None``。
+    """
     content = dict(row.get("content") or {})
+    usage = dict(row.get("usage") or {})
+    restored_version = 0
+    try:
+        restored_version = int(usage.get("restored_version") or 0)
+    except (TypeError, ValueError):
+        restored_version = 0
+    changed_fields = None
+    if not usage.get("restored_from") and previous is not None:
+        changed_fields = summarizer.diff_fields(dict(previous.get("content") or {}), content)
     return {
         "id": row.get("id"),
         "version": int(row.get("version") or 1),
@@ -7247,6 +7274,8 @@ def _version_row(row: dict[str, Any]) -> dict[str, Any]:
         "one_line": str(content.get("one_line") or content.get("theme") or ""),
         "theme": str(content.get("theme") or ""),
         "revise_note": str(content.get("revise_note") or ""),
+        "restored_version": restored_version,
+        "changed_fields": changed_fields,
         # 版本列表要能直接显示每版花了多少，不必再逐版回查。
-        "usage": dict(row.get("usage") or {}),
+        "usage": usage,
     }

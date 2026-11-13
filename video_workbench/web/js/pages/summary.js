@@ -1000,6 +1000,32 @@
     ]);
   }
 
+  function versionDiffText(item) {
+    var fields = item && item.changed_fields;
+    if (fields === null || fields === undefined) return "";
+    if (!fields.length) return "无 —— 和上一版逐字相同（要求没被落实）";
+    return fields.map(function (field) {
+      var ratio = (field.ratio === null || field.ratio === undefined)
+        ? "" : "，相似度 " + field.ratio;
+      return (field.label || field.field || "") + "（" + (field.detail || "") + ratio + "）";
+    }).join(" · ");
+  }
+
+  function versionNotes(item) {
+    var notes = [];
+    var note = String((item && item.revise_note) || "");
+    var hit = /^恢复自第\s*(\d+)\s*版$/.exec(note);
+    var restoredVersion = Number((item && item.restored_version) || (hit ? hit[1] : 0));
+    if (restoredVersion) {
+      notes.push({ label: "恢复自", text: "第 " + restoredVersion + " 版" });
+    } else if (note) {
+      notes.push({ label: "它说", text: note });
+    }
+    var diff = versionDiffText(item);
+    if (diff) notes.push({ label: "实际改动", text: diff });
+    return notes;
+  }
+
   function versionsCard() {
     var card = ui.h("div", { class: "card" });
     var current = state.summary ? state.summary.id : "";
@@ -1027,12 +1053,16 @@
             active ? ui.h("em", { text: "当前" }) : null
           ]),
           ui.h("div", { class: "ver-row__meta", text: meta }),
-          item.revise_note
-            ? ui.h("div", { class: "ver-row__note" }, [
-              ui.h("b", { text: "实际改动" }),
-              document.createTextNode(String(item.revise_note))
-            ])
-            : null
+          (function () {
+            var notes = versionNotes(item);
+            if (!notes.length) return null;
+            return ui.h("div", { class: "ver-row__note" }, notes.map(function (note) {
+              return ui.h("div", { class: "ver-row__note-line" }, [
+                ui.h("b", { text: note.label }),
+                document.createTextNode(note.text)
+              ]);
+            }));
+          })()
         ]),
         active ? null : ui.h("button", {
           class: "btn btn--ghost btn--sm",

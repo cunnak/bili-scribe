@@ -570,6 +570,38 @@ def test_restore_adds_a_version_instead_of_deleting(service, tmp_path, monkeypat
     assert rows[0]["content"]["one_line"] == "这期讲三件事"
     assert "恢复自第 1 版" in rows[0]["content"]["revise_note"]
 
+    # 版本行必须把「恢复来源」当成来源，而不是拿它冒充实际内容改动。
+    listed = rpc(service, "summary.versions", {"id": project["id"]})["versions"]
+    assert listed[0]["version"] == 3
+    assert listed[0]["restored_version"] == 1
+    assert listed[0]["changed_fields"] is None
+
+
+def test_version_rows_report_actual_content_changes(service, tmp_path, monkeypatch):
+    project = make_project(service, tmp_path)
+    run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
+    base = service.repo.summary_latest(project["id"])
+    run_job(
+        service,
+        monkeypatch,
+        StubClient(
+            [
+                json.dumps(GOOD),
+                "诊断：只改一句话。",
+                json.dumps({**GOOD, "one_line": "第二版一句话", "revise_note": "只改了开头"}),
+            ]
+        ),
+        {"kind": "refine", "requirement": "只改开头", "previous_id": base["id"]},
+        project,
+    )
+    rows = rpc(service, "summary.versions", {"id": project["id"]})["versions"]
+    assert [row["version"] for row in rows] == [2, 1]
+    assert rows[1]["changed_fields"] is None
+    changed = {item["field"]: item for item in rows[0]["changed_fields"]}
+    assert "one_line" in changed
+    assert "summary_md" not in changed
+    assert rows[0]["revise_note"] == "只改了开头"
+
 
 def test_restore_rejects_foreign_project(service, tmp_path, monkeypatch):
     one = make_project(service, tmp_path)

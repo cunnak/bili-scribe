@@ -63,6 +63,7 @@ from video_workbench.core.summary import (
     role_label as role_label,
 )
 from video_workbench.core.summary import summarizer as bs_summarizer
+from video_workbench.core.summary.summarizer import diff_fields as diff_fields
 from video_workbench.infra.jsonfix import repair_json
 from video_workbench.infra.llm import ChatClient, ChatError
 

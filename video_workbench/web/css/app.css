@@ -2334,6 +2334,7 @@ select,
   font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
   color: var(--dim); font-weight: 400; margin-right: 4px;
 }
+.ver-row__note-line + .ver-row__note-line { margin-top: 4px; }
 .ver-empty { font-size: 11.5px; color: var(--dim); line-height: 1.8; margin: 0; }
 
 /* ---------------------------------------------------------------- 源语言选择 */

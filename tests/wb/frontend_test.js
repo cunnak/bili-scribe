@@ -1198,6 +1198,9 @@ async function main() {
     assert.ok(host.querySelectorAll("#sum-body .md__h").length >= 2,
               "正文没渲染：" + host.textContent.slice(0, 60));
     assert.ok(host.querySelectorAll(".sum-time__row").length >= 1, "没有时间线");
+    const versionNoteLabel = host.querySelector(".ver-row__note b");
+    assert.ok(versionNoteLabel, "版本行没有说明标签");
+    assert.strictEqual(versionNoteLabel.textContent, "它说", "模型自述被标成了实际改动");
 
     // ① 换角色重新生成 → 版本数涨到 3
     const before = host.querySelectorAll(".ver-row").length;

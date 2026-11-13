@@ -235,3 +235,44 @@ def test_light_toolbar_does_not_overflow_at_wide_and_min_widths(browser, web_bas
         assert problems == [], f"控制台报错：{problems}"
     finally:
         page.close()
+
+
+def test_light_version_card_separates_model_note_from_change_source(browser, web_base_url):
+    """版本块不能把模型自述/恢复来源当成「实际改动」。
+
+    截图里的旧行为是：恢复版本显示「实际改动 恢复自第 3 版」。这里用 mock 的
+    两版总结先看模型自述，再点最早的版本恢复，两段都必须是独立标签。
+    """
+    page, problems = open_page(browser, web_base_url, "light")
+    try:
+        page.evaluate(
+            """async () => {
+                const s = window.WB.pages.summaryLight;
+                s.state.projectId = 'p_demo_1';
+                await s.reload();
+                window.WB.router.go('light', {});
+            }"""
+        )
+        page.wait_for_selector(".ver-row__note", timeout=8000)
+        labels = page.eval_on_selector_all(
+            ".ver-row__note b", "nodes => nodes.map(node => node.textContent)"
+        )
+        assert "它说" in labels, f"模型自述没有独立标签：{labels}"
+        assert "实际改动" not in labels, f"模型自述被标成实际改动：{labels}"
+        assert "要点压到三条" in page.inner_text(".sum-side"), "模型自述内容没显示"
+
+        # 点最早的一版恢复：新版本行必须是「恢复自」，不是「实际改动」。
+        page.eval_on_selector(".ver-row:last-child button", "button => button.click()")
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.ver-row__note b')]"
+            ".some(node => node.textContent === '恢复自')",
+            timeout=5000,
+        )
+        labels2 = page.eval_on_selector_all(
+            ".ver-row__note b", "nodes => nodes.map(node => node.textContent)"
+        )
+        assert "恢复自" in labels2, f"恢复来源没有独立标签：{labels2}"
+        assert "实际改动" not in labels2, f"恢复来源被标成实际改动：{labels2}"
+        assert problems == [], f"控制台报错：{problems}"
+    finally:
+        page.close()
