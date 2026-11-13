@@ -32,4 +32,8 @@
 - 构建：`.venv/Scripts/python.exe scripts/build_wb.py` → 退出码 0
 - 包内自检：`dist/VideoWorkbench/wb-check.json` → `info.version = 0.2.10`，`ok=true`
 - commit：`6d20110 fix(summary): 恢复旧版只切换当前版本且不再新增一版并抬到 0.2.10`
+- 发布记录提交：`daabb94 docs(release): 记录 v0.9.11 / 0.2.10 恢复语义修复`
+- tag：`v0.9.11`（指向 `daabb94`）
+- push：`git push origin main` → `3e3221c..daabb94`；`git push origin v0.9.11` → `* [new tag] v0.9.11`
 - release：`gh release create v0.9.11 dist/VideoWorkbench-0.2.10.zip --title "VideoWorkbench 0.2.10（打包版）" --notes-file docs/handoff/release-v0.9.11.md`，发布页 <https://github.com/cunnak/bili-scribe/releases/tag/v0.9.11>
+- release 资产回读：`gh release view v0.9.11 --json tagName,name,isDraft,assets` → `VideoWorkbench-0.2.10.zip`、`state=uploaded`、`size=177909870`、`digest=sha256:631bb72ea61c8c52517bd0b67213d46d71820917a3a895e9895e05fd7e1fe1ef`、`isDraft=false`
