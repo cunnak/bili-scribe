@@ -347,6 +347,20 @@ class Repo:
             )
         return self._one("SELECT * FROM wb_project WHERE bvid=? AND cid=?", (bvid, cid))
 
+    def project_find_by_root(self, root_dir: str) -> dict[str, Any] | None:
+        """按项目目录找项目。
+
+        轻量总结（只给一份 srt、没有 bvid）没有 bvid 可去重，而目录就是它的身份：
+        layout.allocate 对空 bvid 恒判「不是同一集」，同一个文件选两次会在旁边长出
+        「 (2)」，两份字幕各说各话。有了这个入口，srt 那条路也能落到同一行。
+        """
+        text = str(root_dir or "").strip()
+        if not text:
+            return None
+        return self._one(
+            "SELECT * FROM wb_project WHERE root_dir=? ORDER BY created_at LIMIT 1", (text,)
+        )
+
     def project_list(
         self,
         query: str = "",

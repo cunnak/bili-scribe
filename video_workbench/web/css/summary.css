@@ -284,6 +284,44 @@
 
 .sum-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
+/* 来源切换（本地项目 / 轻量）：与 .sum-tabs 是两个维度，所以做得更轻——
+ * 没有边框外壳、没有胶囊底，只在文字上分激活态。做成第二个胶囊条会让人以为
+ * 它和上面的「单条视频 / 合集」是同一层选择。 */
+.sum-srcs {
+  display: flex;
+  gap: var(--gap-3);
+  align-items: center;
+  margin-bottom: var(--gap-2);
+}
+
+.sum-src {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+}
+
+.sum-src:hover { color: var(--text); }
+
+.sum-src.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.sum-src:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* 轻量面板：输入框比其他字段宽一点（BV 号/链接比下拉长），其余沿用 .sum-fld */
+.sum-light .sum-fld .input { min-width: 220px; }
+
+.sum-light-err { color: var(--danger); font-size: 12px; }
+
+
+
 .coll-list {
   display: flex;
   flex-direction: column;

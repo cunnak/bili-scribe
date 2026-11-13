@@ -58,7 +58,19 @@
     overview: null,
     overviewVersions: [],
     children: [],
-    collBusy: false
+    collBusy: false,
+    // 轻量模式：只输 av/BV 拿字幕，不下载视频。它与「本地项目」是同一个标签页里的
+    // 两种素材来源，不是第三个标签——标签切的是"总结一条还是一整个合集"，
+    // 来源切的是"素材从哪来"，两个维度混在一个按钮条里会让人分不清。
+    source: "local",
+    lightUrl: "",
+    lightBusy: false,
+    lightInfo: null,
+    lightSubs: [],
+    lightLang: "",
+    lightSrt: "",
+    lightNote: "",
+    lightError: ""
   };
 
   function call(method, params) {
@@ -728,8 +740,209 @@
     ]);
   }
 
+  function switchSource(src) {
+    var next = src === "light" ? "light" : "local";
+    if (state.source === next) return;
+    state.source = next;
+    state.error = "";
+    state.note = "";
+    state.lightError = "";
+    paint();
+  }
+
+  function lightBasename(path) {
+    var text = String(path || "");
+    var cut = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+    return cut >= 0 ? text.slice(cut + 1) : text;
+  }
+
+  function sourceBar() {
+    function chip(key, text, hint) {
+      return ui.h("button", {
+        class: "sum-src" + (state.source === key ? " is-active" : ""),
+        type: "button",
+        id: "sum-src-" + key,
+        title: hint,
+        text: text,
+        onclick: function () { switchSource(key); }
+      });
+    }
+    return ui.h("div", { class: "sum-srcs" }, [
+      chip("local", "本地项目", "用已经下载/导入的项目自己的字幕总结"),
+      chip("light", "轻量", "只输 av/BV 号取 B站字幕，或选一个字幕文件，不下载视频")
+    ]);
+  }
+
+  function probe() {
+    var url = String(state.lightUrl || "").trim();
+    if (!url || state.lightBusy) return;
+    state.lightBusy = true;
+    state.lightError = "";
+    state.lightNote = "正在解析…";
+    paint();
+    call("summary.light.probe", { url: url })
+      .then(function (data) {
+        state.lightBusy = false;
+        state.lightInfo = data || null;
+        state.lightSubs = (data && data.subtitles) || [];
+        state.lightLang = state.lightSubs.length ? state.lightSubs[0].lan : "";
+        state.lightNote = (data && data.note) || "";
+        if (!state.lightSubs.length && !state.lightNote) {
+          state.lightNote = "这个视频没有字幕，选一个字幕文件也能总结。";
+        }
+        paint();
+      })
+      .catch(function (error) {
+        state.lightBusy = false;
+        state.lightNote = "";
+        state.lightError = error && error.message ? error.message : "解析失败";
+        paint();
+      });
+  }
+
+  function pickSrt() {
+    call("fs.pick", { kind: "file" })
+      .then(function (data) {
+        var path = (data && (data.path || data.value)) || "";
+        if (!path) return;
+        state.lightSrt = String(path);
+        state.lightError = "";
+        paint();
+      })
+      .catch(function (error) {
+        state.lightError = error && error.message ? error.message : "选不了文件";
+        paint();
+      });
+  }
+
+  /** 取素材落成项目，然后**复用 start()** 的排队与轮询——不复制第二份。 */
+  function lightStart() {
+    if (state.lightBusy || state.busy) return;
+    var url = String(state.lightUrl || "").trim();
+    var path = String(state.lightSrt || "");
+    if (!url && !path) {
+      state.lightError = "先输一个 av/BV 号，或选一个字幕文件。";
+      paint();
+      return;
+    }
+    state.lightBusy = true;
+    state.lightError = "";
+    state.note = "正在取字幕…";
+    paint();
+    call("summary.light.prepare", { url: url, lang: state.lightLang, path: path })
+      .then(function (data) {
+        state.lightBusy = false;
+        state.projectId = (data && data.project_id) || "";
+        var warns = (data && data.warnings) || [];
+        if (warns.length) WB.toast(warns[0]);
+        // 新项目要进下拉，否则本地模式的列表里看不到它
+        return loadProjects().then(function () { return data; });
+      })
+      .then(function (data) {
+        if (!state.projectId) {
+          state.lightError = "没取到可总结的项目";
+          paint();
+          return null;
+        }
+        state.note = "";
+        start();
+        return data;
+      })
+      .catch(function (error) {
+        state.lightBusy = false;
+        state.note = "";
+        state.lightError = error && error.message ? error.message : "取字幕失败";
+        paint();
+      });
+  }
+
+  function lightHead() {
+    var info = state.lightInfo;
+    var subs = state.lightSubs || [];
+    var subOptions = subs.map(function (item) {
+      return ui.h("option", {
+        value: item.lan,
+        text: (item.lan_doc || item.lan) + (item.is_ai ? " · AI" : ""),
+        selected: item.lan === state.lightLang ? "selected" : null
+      });
+    });
+    var input = ui.h("input", {
+      class: "input",
+      id: "sum-light-url",
+      type: "text",
+      value: state.lightUrl || "",
+      placeholder: "BV / av 号、视频链接，回车解析",
+      oninput: function (event) { state.lightUrl = event.target.value; },
+      onkeydown: function (event) {
+        if (event.key === "Enter") { state.lightUrl = event.target.value; probe(); }
+      }
+    });
+    var rows = [
+      ui.h("label", { class: "sum-fld", title: "只解析、不下载：拿到这条视频的字幕清单" }, [
+        ui.h("span", { class: "k", text: "AV / BV" }), input
+      ])
+    ];
+    if (subs.length) {
+      rows.push(ui.h("label", { class: "sum-fld", title: "选一条字幕轨；AI 字幕有同音字风险" }, [
+        ui.h("span", { class: "k", text: "字幕" }),
+        ui.h("select", {
+          id: "sum-light-subs",
+          onchange: function (event) { state.lightLang = event.target.value; }
+        }, subOptions)
+      ]));
+    }
+    rows.push(ui.h("button", {
+      class: "sum-ghost",
+      id: "sum-light-probe",
+      type: "button",
+      text: state.lightBusy ? "解析中…" : "解析",
+      disabled: state.lightBusy ? "disabled" : null,
+      onclick: probe
+    }));
+    rows.push(ui.h("button", {
+      class: "sum-ghost",
+      id: "sum-light-file",
+      type: "button",
+      title: "用本地 srt 文件总结，不需要登录 B站",
+      text: state.lightSrt ? "换一个文件…" : "选字幕文件…",
+      onclick: pickSrt
+    }));
+    if (state.lightSrt) {
+      rows.push(ui.h("span", {
+        class: "muted", id: "sum-light-srt", text: lightBasename(state.lightSrt)
+      }));
+    }
+    rows.push(ui.h("button", {
+      class: "sum-go",
+      id: "sum-light-go",
+      type: "button",
+      text: state.lightBusy ? "取字幕中…" : "提取字幕并总结",
+      disabled: state.lightBusy || state.busy ? "disabled" : null,
+      onclick: lightStart
+    }));
+    if (info && info.title) {
+      rows.push(ui.h("span", {
+        class: "muted", id: "sum-light-info",
+        text: info.title + (info.up_name ? " · " + info.up_name : "")
+      }));
+    }
+    if (state.lightNote) {
+      rows.push(ui.h("span", { class: "muted", id: "sum-light-note", text: state.lightNote }));
+    }
+    // 错误要真的出现在界面上。曾经只写进 state.lightError 而这里没渲染，
+    // 于是「什么都不填就点提取」看起来像按钮坏了——点了，没有任何反应。
+    if (state.lightError) {
+      rows.push(ui.h("span", { class: "sum-light-err", id: "sum-light-error", text: state.lightError }));
+    }
+    return ui.h("div", { class: "page__head sum-head sum-light" }, [
+      sourceBar(),
+      ui.h("div", { class: "sum-fields" }, rows)
+    ]);
+  }
+
   function head() {
     if (state.mode === "collection") return collHead();
+    if (state.source === "light") return lightHead();
 
     function field(id, key, title, options, onchange) {
       var sel = ui.h("select", { id: id, onchange: function (event) { onchange(event.target.value); } },
@@ -757,6 +970,7 @@
     });
 
     return ui.h("div", { class: "page__head sum-head" }, [
+      sourceBar(),
       ui.h("div", { class: "sum-fields" }, [
         field("sum-project", "PROJECT", "选一条素材，总结只用它自己的字幕",
           projectOptions, pickProject),
@@ -1329,7 +1543,8 @@
     markdown: markdown, start: start, refine: refine, restore: restore, chars: chars,
     groupNum: groupNum, groupSeconds: groupSeconds,
     switchMode: switchMode, startCollection: startCollection, pickCollection: pickCollection,
-    loadCollection: loadCollection
+    loadCollection: loadCollection,
+    switchSource: switchSource, probe: probe, lightStart: lightStart, pickSrt: pickSrt
   } };
 
   WB.router.define("summary", {

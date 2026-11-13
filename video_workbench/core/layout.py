@@ -272,6 +272,28 @@ def _same_item(sidecar: dict[str, Any], bvid: str, cid: int | None) -> bool:
     return sidecar.get("cid") in (None, cid)
 
 
+def base_root(
+    media_root: str | Path,
+    *,
+    up_name: str = "",
+    title: str = "",
+    collection_title: str = "",
+    part_index: int | None = None,
+    part_title: str = "",
+) -> Path:
+    """按命名规则算出这一集**本来**该落在哪，不看不避让、不追加序号。
+
+    存在的理由只有一个：轻量总结（只给一份 srt）没有 bvid 可去重，目录就是它的
+    身份。要在 allocate 之前先问一句「这个目录是不是已经有项目了」，就必须能拿到
+    **没被避让逻辑改过**的那个路径——allocate 一旦发现目录存在会直接给出 " (2)"，
+    拿它的返回值去查库，永远查不到上一行，同一个文件选两次就会长出两个项目。
+
+    命名规则仍然只有 _segments 一处，这里只是把入口暴露出来，不另立一套。
+    """
+    root = Path(media_root)
+    return root.joinpath(*_segments(up_name, title, collection_title, part_index, part_title))
+
+
 def allocate(
     media_root: str | Path,
     *,

@@ -30,7 +30,7 @@ from typing import Any, Callable
 
 from bili_scribe.core.collector import Bundle
 from video_workbench.app.errors import WBError
-from video_workbench.core import prompt_source
+from video_workbench.core import prompt_source, summary_source
 
 # 显示名一律**经这个模块属性现取**（下面 `role_label(...)` 的三个调用点都是），不用 import
 # 时绑进来的那个别名：别名在导入时就固定了函数对象，谁改了权威层的 `role_label`（或测试
@@ -697,21 +697,24 @@ def build_bundle(
     *,
     danmaku: list[str] | None = None,
     platform_summary: str = "",
+    origin: str = "asr",
 ) -> Bundle:
     """项目 + 字幕 → bili-scribe 的 ``Bundle``。
 
-    素材类型固定 ``subtitle_ai``：这段字幕是我们自己 ASR 出来的，不是平台字幕，
-    也不是人工字幕。标错类型会让提示词里的可信度说明失真（模型会以为自己在读
-    平台字幕，从而更少地写"素材未覆盖"）。
+    **素材类型按真实来源判定**（`origin`，词表在 `core/summary_source.py`）：
+    本机 ASR / B站 AI 字幕 / B站人工字幕 / 用户 srt 四者的 label、可信度与风险说明
+    各不相同。标错类型会让提示词里的可信度说明失真——把 B站 AI 字幕写成"本机 ASR"，
+    模型会以为自己读的是我们的机器转录，从而更少地写"素材未覆盖"。
+
+    默认 `origin="asr"`：这是轻量总结出现之前 WB 唯一能拿到字幕的路，也是没有
+    `origin` 键的老项目的读法，所以既有调用点的行为逐字不变。
     """
     body = segments_text(segments)
     if not body.strip():
         raise WBError("CONFLICT", "这个项目还没有字幕，先转录再总结")
     hot = [str(item) for item in (danmaku or []) if str(item).strip()][:400]
-    detail = (
-        f"字幕来自本机 ASR，共 {len(segments)} 段，含时间戳。"
-        if not hot
-        else f"字幕来自本机 ASR，共 {len(segments)} 段，含时间戳；另附观众弹幕 {len(hot)} 条。"
+    source_kind, source_label, source_trust, detail = summary_source.bundle_meta(
+        origin, segments=len(segments), danmaku=len(hot)
     )
     return Bundle(
         bvid=str(project.get("bvid") or ""),
@@ -730,11 +733,9 @@ def build_bundle(
         tags=list(project.get("tags") or []),
         hot_replies=hot,
         platform_summary=platform_summary,
-        # WB 目前唯一字幕来源是本机 ASR；一旦支持导入外部 srt/人工整稿，这里必须改成按来源判定，
-        # 否则提示词里的可信度说明失真。
-        source_kind="subtitle_ai",
-        source_label="AI 转录字幕",
-        source_trust="中（机器转录，可能有错字，时间戳可信）",
+        source_kind=source_kind,
+        source_label=source_label,
+        source_trust=source_trust,
         source_detail=detail,
         body=body,
     )
@@ -980,8 +981,12 @@ def run(
     task_key: str = "",
     extra_prompt: "bool | None" = None,
     frameset: Any = None,
+    origin: str = "asr",
 ) -> dict[str, Any]:
     """跑一次总结。返回 ``{summary, usage, model, role, calls, notes, chars}``。
+
+    ``origin`` 是素材来源（见 ``core/summary_source.py``），透传给 ``build_bundle``：
+    它决定提示词里那句"素材类型／可信度"怎么写。默认 ``"asr"`` 与历史行为一致。
 
     ``cache`` 是磁盘预读缓存（``infra/notecache.NoteCache``），``task_key`` 是内存复用那层
     的钥匙——WB 里就是 ``project_id``，对应 bs 的 ``task_id``。两个都不传就是老行为：每次都
@@ -996,7 +1001,9 @@ def run(
     ``as_content_blocks(frameset)`` 那句，以及它上面那段"为什么只接归约"的注释）。
     这里不传就是老行为——一次请求都不带图，parity 的"逐请求一致"照旧成立。
     """
-    bundle = build_bundle(project, segments, danmaku=danmaku, platform_summary=platform_summary)
+    bundle = build_bundle(
+        project, segments, danmaku=danmaku, platform_summary=platform_summary, origin=origin
+    )
     llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
     key, notice = resolve_role(role, getattr(cfg.llm, "role", ""))
@@ -1069,6 +1076,7 @@ def refine(
     task_key: str = "",
     extra_prompt: "bool | None" = None,
     frameset: Any = None,
+    origin: str = "asr",
 ) -> dict[str, Any]:
     """按用户的话改一版。素材**仍然带着**——只给上一版会像传话游戏一样越改越远。
 
@@ -1087,7 +1095,7 @@ def refine(
         raise WBError("VALIDATION", "说一下你想怎么改（至少几个字）")
     if not previous:
         raise WBError("CONFLICT", "还没有上一版总结，先生成一次")
-    bundle = build_bundle(project, segments, danmaku=danmaku)
+    bundle = build_bundle(project, segments, danmaku=danmaku, origin=origin)
     llm = SummaryLLM(client, model=model, cfg=cfg)
     _attach_timeline(llm, project, segments)
     key, notice = resolve_role(
@@ -1160,9 +1168,10 @@ def prepare(
     cfg: Any,
     ctx: Any,
     cache: Any = None,
+    origin: str = "asr",
 ) -> PreparedMaterial:
     """只跑预读（长素材才真的发请求），给"先看看素材有多长"这类场景用。"""
-    bundle = build_bundle(project, segments)
+    bundle = build_bundle(project, segments, origin=origin)
     llm = SummaryLLM(client, cfg=cfg)
     return bs_summarizer.prepare_material(bundle, llm, cfg, _notify(ctx), cache=cache)
 

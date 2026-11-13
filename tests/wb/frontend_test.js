@@ -1364,6 +1364,59 @@ async function main() {
     assert.ok(after > before, "生成总览没有加版本：" + before + " → " + after);
   });
 
+  await check("总结页：轻量模式只输 av/BV，不下载视频也能总结", async () => {
+    WB.router.go("summary", {});
+    await tick(260);
+    // 上一段检查把模式切到了「合集」，而 state 是模块级的、跨 render 保留。
+    // 不先切回单条，head() 会走 collHead()，来源条根本不存在。
+    const back = $("#view").querySelectorAll(".sum-tab")[0];
+    if (back && !back.classList.contains("is-active")) { back.click(); await tick(260); }
+    const view = $("#view");
+    const local = view.querySelector("#sum-src-local");
+    const light = view.querySelector("#sum-src-light");
+    assert.ok(local && light, "没有「本地项目 / 轻量」来源切换");
+    assert.strictEqual(local.classList.contains("is-active"), true, "默认该停在本地项目");
+    assert.ok(view.querySelector("#sum-project"), "本地模式下没有项目下拉");
+
+    light.click();
+    await tick(120);
+    const view2 = $("#view");
+    assert.strictEqual(view2.querySelectorAll(".sum-src").length, 2, "来源只该有两个");
+    assert.strictEqual(view2.querySelector("#sum-src-light").classList.contains("is-active"), true,
+                       "点了轻量但没切过去");
+    assert.strictEqual(view2.querySelectorAll(".sum-tab").length, 2,
+                       "来源切换不许动标签条（标签切的是单条/合集）");
+    assert.ok(!view2.querySelector("#sum-project"), "轻量模式不该还挂着本地项目下拉");
+    const url = view2.querySelector("#sum-light-url");
+    const probeBtn = view2.querySelector("#sum-light-probe");
+    const fileBtn = view2.querySelector("#sum-light-file");
+    const go = view2.querySelector("#sum-light-go");
+    assert.ok(url && probeBtn && fileBtn && go, "轻量面板字段不全");
+    assert.strictEqual(go.disabled, false, "「提取字幕并总结」是灰的");
+
+    // 不输任何东西就点：要给一句人话，而不是静默什么都不做
+    go.click();
+    await tick(120);
+    const note = $("#view").querySelector("#sum-light-note") || $("#view").querySelector("#sum-light-error");
+    assert.ok(note && note.textContent.trim().length > 0, "空输入点下去没有任何提示");
+
+    // 输一个 BV 号再解析：mock 会回两条字幕轨
+    const input = $("#view").querySelector("#sum-light-url");
+    input.value = "BV1xx411c7mD";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    $("#view").querySelector("#sum-light-probe").click();
+    await tick(400);
+    const picker2 = $("#view").querySelector("#sum-light-subs");
+    assert.ok(picker2, "解析完没有字幕轨下拉");
+    assert.strictEqual(picker2.options.length, 2, "字幕轨数量不对：" + picker2.options.length);
+    assert.ok(picker2.textContent.indexOf("AI") >= 0, "AI 字幕没标出来：" + picker2.textContent);
+
+    // 选字幕文件：按钮文案要变成「换一个文件…」并把文件名显示出来
+    $("#view").querySelector("#sum-light-file").click();
+    await tick(300);
+    const srt = $("#view").querySelector("#sum-light-srt");
+    assert.ok(srt, "选了文件但界面上看不到文件名");
+  });
   await check("设置页：字幕分区带术语表，能保存", async () => {
     WB.router.go("settings", { section: "subtitle" });
     await tick(200);

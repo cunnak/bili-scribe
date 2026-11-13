@@ -119,10 +119,30 @@ class BiliGateway:
     # ------------------------------------------------------------- 调用
 
     def get_data(
-        self, url: str, params: dict[str, Any] | None = None, action: str = "请求"
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        action: str = "请求",
+        *,
+        signed: bool = False,
     ) -> dict[str, Any]:
+        """请求一个返回 JSON 的接口。
+
+        ``signed`` 只在需要 WBI 签名的接口上开（字幕接口 ``x/player/wbi/v2`` 就是）：
+        不签名时它稳定返回空列表，看起来像"这个视频没字幕"，其实是没被认成登录用户。
+        默认关着——绝大多数接口（稿件、合集、番剧）不签名也能拿到数据，而签名本身要
+        多算一次 w_rid。
+
+        **参数只在需要时透传**：底层 ``BiliClient.get_data`` 有 ``signed`` 形参，但
+        测试里的假客户端签名是 ``get_data(url, params=None)``；无条件把这个 kwarg
+        传下去会当场把那些用例打成 TypeError。
+        """
         try:
-            data = self.client().get_data(url, params or {})
+            client = self.client()
+            if signed:
+                data = client.get_data(url, params or {}, signed=True)
+            else:
+                data = client.get_data(url, params or {})
         except Exception as exc:  # noqa: BLE001
             raise map_bili_error(exc, action) from exc
         if not isinstance(data, dict):

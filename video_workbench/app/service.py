@@ -57,15 +57,18 @@ from video_workbench.core import (
     translator,
     waveform,
 )
+from video_workbench.core import bili_subs as bili_subs_core
 from video_workbench.core import cover as cover_core
 from video_workbench.core import downloader as downloader_mod
 from video_workbench.core import frames as frames_core
+from video_workbench.core import layout as layout_mod
 from video_workbench.core import onboard as onboard_core
 from video_workbench.core import overview as overview_core
 from video_workbench.core import publisher as publisher_core
 from video_workbench.core import recovery as recovery_core
 from video_workbench.core import resolver as resolver_mod
 from video_workbench.core import styles as styles_core
+from video_workbench.core import summary_source as summary_source_mod
 from video_workbench.core.bili import default_gateway
 from video_workbench.core.downloader import BACKENDS
 from video_workbench.core.importer import import_videos
@@ -265,6 +268,24 @@ class TranscribeStartParams(BaseModel):
 
 class ModelParams(BaseModel):
     name: str = ""
+
+
+class LightProbeParams(BaseModel):
+    """轻量总结第一步：只解析，不建任务、不抓字幕。"""
+
+    url: str = ""
+
+
+class LightPrepareParams(BaseModel):
+    """轻量总结第二步：拿到素材并落成一个可总结的项目。
+
+    ``path`` 非空就走本地字幕文件，**不去碰 B站**——用户在未登录或没有字幕时
+    仍然能总结，这是这条路存在的意义。``lang`` 留空表示按配置偏好自动选轨。
+    """
+
+    url: str = ""
+    lang: str = ""
+    path: str = ""
 
 
 class SubtitleGetParams(BaseModel):
@@ -1024,6 +1045,10 @@ class WorkbenchService:
         r.add("summary.refine", self.summary_refine, SummaryRefineParams)
         r.add("summary.restore", self.summary_restore, SummaryRestoreParams)
         r.add("summary.roles", self.summary_roles)
+        # 轻量总结：不下载视频，只拿字幕。两步分开是因为「有哪些字幕」与「取哪一条」
+        # 是两个决定，而第一步要在未登录时也能回答（返回 logged_in=false + 说明）。
+        r.add("summary.light.probe", self._light_probe, LightProbeParams)
+        r.add("summary.light.prepare", self._light_prepare, LightPrepareParams)
         # 预读缓存的两个入口（↔ bs 的 notes_stats / clear_notes）。名字跟着 WB 的点号
         # 命名域走（summary. 域下已有 9 个），返回体形状照 bs：stats() 的键名与
         # {"removed": n} 都不改，将来两侧对照不用动结构。
@@ -3073,11 +3098,17 @@ class WorkbenchService:
             "duration_ms": info.duration_ms,
         }
 
-    def _store_subtitles(self, project_id: str, items: list[dict[str, Any]]) -> None:
+    def _store_subtitles(
+        self, project_id: str, items: list[dict[str, Any]], *, origin: str = ""
+    ) -> None:
         """写三处：数据库、``transcript.json``、``transcript.srt``。
 
         少写任何一处都会造成"界面上是对的、导出出来是旧的"这类很难查的问题，
         所以干脆一次写完。写文件失败只记日志不抛——数据库已经是最新，导出会重建。
+
+        ``origin``（素材来源，见 ``core/summary_source.py``）只在**首次取到素材**时由
+        调用方给。留空表示"沿用这份 transcript.json 里已有的值"——用户编辑字幕、优化、
+        翻译之后来源没变，把 B站 AI 字幕改回"本机 ASR"会让下一版总结的可信度说明失真。
         """
         project = self.repo.project_get(project_id)
         if not project:
@@ -3096,6 +3127,12 @@ class WorkbenchService:
         payload["duration_ms"] = items[-1]["end_ms"] if items else 0
         payload.setdefault("language", row.get("language") or "")
         payload.setdefault("model", row.get("model") or "")
+        # 来源跟着字幕走：显式给了就用新的，没给就保住盘上那份（老项目没有这个键 ⇒ asr）
+        payload["origin"] = (
+            summary_source_mod.normalize_origin(origin)
+            if str(origin or "").strip()
+            else summary_source_mod.normalize_origin(payload.get("origin"))
+        )
         try:
             json_path.parent.mkdir(parents=True, exist_ok=True)
             json_path.write_text(
@@ -3169,6 +3206,284 @@ class WorkbenchService:
                 )
             return card.id, model
         return "", model
+
+    # ------------------------------------------------------------- 轻量总结
+    #
+    # 这两步把"不下载视频也能总结"接进来：先解析出 aid/cid 与字幕清单（probe），
+    # 再取素材落成一个可总结的项目（prepare）。**取到素材之后的一切都与本地项目
+    # 模式共用同一条路**——同一个 wb_transcript 表、同一个 transcript.json、
+    # 同一个 summary.start 任务。复制一份总结逻辑是这里最容易犯的错：那会让
+    # 两条路的产出（版本、成本账、发布草稿）慢慢长成两个东西。
+
+    def _light_probe(self, url: str) -> dict[str, Any]:
+        """解析链接 + 列字幕轨。**不建项目、不抓字幕**。
+
+        为什么先分一步：用户要能看见"这条视频有哪些字幕"再决定用哪一条；也要能
+        在未登录时**先看到**"需要登录"而不是点下去才报错。一次把两者都做完的话，
+        未登录的用户连"这个视频有没有字幕"都问不出来。
+        """
+        raw = str(url or "").strip()
+        if not raw:
+            raise WBError("VALIDATION", "请先输入 av/BV 号或视频链接")
+        res = self._resolver.resolve(raw)
+        items = [item.to_payload() for item in res.items]
+        first = items[0] if items else {}
+        aid = int(first.get("aid") or 0)
+        cid = int(first.get("cid") or 0)
+        logged_in = False
+        subtitles: list[dict[str, Any]] = []
+        note = ""
+        if aid and cid:
+            logged_in = bool(self._gateway.is_logged_in())
+            subtitles, note = bili_subs_core.list_tracks(self._gateway, aid, cid)
+        else:
+            note = "这个链接里没有可用的稿件"
+        return {
+            "raw": raw,
+            "kind": res.kind,
+            "title": res.title,
+            "up_name": res.up_name,
+            "up_mid": int(res.up_mid or 0),
+            "collection_title": res.collection_title,
+            "page_count": len(items) or 1,
+            "bvid": str(first.get("bvid") or ""),
+            "aid": aid,
+            "cid": cid,
+            "page": int(first.get("page") or 1),
+            "duration_ms": int(first.get("duration_ms") or 0),
+            "items": items,
+            "logged_in": logged_in,
+            "subtitles": subtitles,
+            "note": note,
+        }
+
+    def _light_project(
+        self,
+        *,
+        bvid: str,
+        aid: int,
+        cid: int,
+        page: int,
+        title: str,
+        up_name: str,
+        up_mid: int,
+        collection_title: str,
+        collection_index: int | None,
+        part_title: str,
+        url: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """找到或建出这条视频的项目行，返回 ``(project, reused)``。
+
+        **去重只有一个入口**：``project_find_by_bvid``。下载 worker 也用它，所以
+        "轻量总结过的视频后来又下载了"与"下载过的视频又来轻量总结"落到同一行，
+        不会出现两条记录抢同一份字幕。
+
+        **为什么也写 sidecar**：``layout.allocate`` 靠 ``source.wb.json`` 判"这个目录
+        是不是同一集"。写了它，之后真的去下载这一集时会**复用**这个目录；不写就会
+        在旁边多出一个 " (2)" 的空目录，两份字幕各说各话。
+        """
+        if bvid:
+            found = self.repo.project_find_by_bvid(bvid, cid)
+            if found:
+                return found, True
+        else:
+            # 没有 bvid（只给了一份 srt）：目录就是身份。这里必须先查**没被避让过**的
+            # 那个路径——allocate 发现目录存在会直接给出 " (2)"，拿它查库永远查不到
+            # 上一行，同一个文件选两次就长出两个项目。
+            base = layout_mod.base_root(
+                self.cfg.media_root,
+                up_name=up_name,
+                title=title,
+                collection_title=collection_title,
+                part_index=page if page > 1 else None,
+                part_title=part_title,
+            )
+            found = self.repo.project_find_by_root(str(base))
+            if found:
+                return found, True
+        spot = layout_mod.allocate(
+            self.cfg.media_root,
+            up_name=up_name,
+            title=title,
+            collection_title=collection_title,
+            part_index=page if page > 1 else None,
+            part_title=part_title,
+            bvid=bvid,
+            cid=cid,
+        )
+        root = Path(str(spot.root))
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            layout_mod.write_sidecar(
+                spot,
+                layout_mod.build_sidecar(
+                    bvid=bvid,
+                    aid=aid,
+                    cid=cid,
+                    page=page,
+                    title=title,
+                    up=up_name,
+                    collection=collection_title,
+                    url=url,
+                    extra={"light": True},
+                ),
+            )
+        except OSError as exc:  # pragma: no cover - 目录不可写时不该挡住总结
+            self.events.toast(f"侧车文件写入失败：{exc}", "warning")
+        project = self.repo.project_create(
+            title=title or bvid or "未命名视频",
+            # 有 bvid 就是「轻量」——它在库页归到未分组，因为它确实是一条 B站视频；
+            # 没有 bvid（只给了一份 srt）就是本地素材，归本地分组才对得上它的身份。
+            source_kind="bili_light" if bvid else "local",
+            bvid=bvid,
+            aid=aid,
+            cid=cid,
+            page_no=page,
+            up_mid=up_mid,
+            up_name=up_name,
+            collection_title=collection_title,
+            collection_index=collection_index,
+            root_dir=str(root),
+            stage="subtitle",
+        )
+        return project, False
+
+    def _existing_with_subtitles(self, bvid: str, cid: int | None) -> dict[str, Any] | None:
+        """这条视频已经有项目、而且已经有字幕，就返回它。
+
+        **只认「不是轻量项目」的那一类**：轻量项目本身就是「只有字幕、没有视频」，
+        它被再次命中时应当照常重取一次（用户可能换了字幕轨），而不是被当成
+        「已有本地项目」挡回去。
+        """
+        if not bvid:
+            return None
+        found = self.repo.project_find_by_bvid(bvid, cid)
+        if not found:
+            return None
+        if str(found.get("source_kind") or "") == "bili_light":
+            return None
+        row = self.repo.transcript_get(str(found.get("id") or "")) or {}
+        if not row.get("segments"):
+            return None
+        root = Path(str(found.get("root_dir") or ""))
+        if not (root / "transcript.json").is_file():
+            # 库里有行、盘上没有文件 ⇒ 页面会判 has_transcript=false，那条总结点不动。
+            # 这种项目按「还没有字幕」处理，让这次轻量总结把它补齐。
+            return None
+        return found
+
+    @staticmethod
+    def _light_payload(
+        project: dict[str, Any],
+        *,
+        origin: str,
+        segments: int,
+        duration_ms: int,
+        reused: bool,
+        encoding: str = "",
+        warnings: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """两个出口（复用 / 新取）共用的返回形状——写两遍必然会漂。"""
+        return {
+            "project_id": str(project.get("id") or ""),
+            "title": str(project.get("title") or ""),
+            "origin": origin,
+            "segments": int(segments or 0),
+            "duration_sec": round(int(duration_ms or 0) / 1000.0, 1),
+            "reused": bool(reused),
+            "encoding": encoding,
+            "warnings": list(warnings or []),
+        }
+
+    def _light_prepare(self, url: str = "", lang: str = "", path: str = "") -> dict[str, Any]:
+        """拿到素材并落成一个可总结的项目。返回给页面的只是"可以开始总结了"。"""
+        file_path = str(path or "").strip()
+        raw = str(url or "").strip()
+        if not file_path and not raw:
+            raise WBError("VALIDATION", "输入 av/BV 号，或选一个字幕文件")
+        # 文件这条路不强制解析链接：用户可能压根没有视频，只有一份别人给的字幕。
+        # 所以链接解析失败**不拦**——它只用来把标题和时长补得好看一点。为了一个锦上添花
+        # 的元信息，把用户手上那份字幕挡在门外，是最不值得的失败方式。
+        info: dict[str, Any] = {}
+        if raw:
+            try:
+                info = self._light_probe(raw)
+            except WBError:
+                if not file_path:
+                    raise
+                info = {}
+        if file_path:
+            title = str(info.get("title") or "") or Path(file_path).stem
+            try:
+                blob = Path(file_path).read_bytes()
+            except OSError as exc:
+                raise WBError("IO", f"读不了这个字幕文件：{exc}", file_path) from exc
+            segments, warnings, encoding = summary_source_mod.segments_from_srt(
+                blob, duration_ms=int(info.get("duration_ms") or 0)
+            )
+            origin = "user_srt"
+        else:
+            aid = int(info.get("aid") or 0)
+            cid = int(info.get("cid") or 0)
+            if not aid or not cid:
+                raise WBError("BILI_ERROR", "这个链接里没有可用的稿件", raw)
+            title = str(info.get("title") or "")
+            # 先看这条视频是不是已经有项目、而且已经有字幕。**这一步必须在抓取之前**：
+            # 已经花过 ASR 时间的本地项目，不该因为我们多点了一次就去请求平台接口——
+            # 那既不省钱也不安全（一次没必要的网络往返），而且抓回来还得再判一次要不要覆盖。
+            existing = self._existing_with_subtitles(str(info.get("bvid") or ""), cid)
+            if existing:
+                return self._light_payload(
+                    existing,
+                    origin=summary_source_mod.origin_of(existing),
+                    segments=len(
+                        (self.repo.transcript_get(str(existing.get("id"))) or {}).get("segments")
+                        or []
+                    ),
+                    duration_ms=int(info.get("duration_ms") or 0),
+                    reused=True,
+                    encoding="",
+                    warnings=["这条视频已有本地项目，直接用它自己的字幕，没有重新抓取"],
+                )
+            got = bili_subs_core.fetch(
+                self._gateway,
+                aid,
+                cid,
+                self.cfg.collect.prefer_subtitle_lang,
+                lang=lang,
+                duration_ms=int(info.get("duration_ms") or 0),
+            )
+            segments = got["segments"]
+            warnings = []
+            encoding = ""
+            origin = str(got["origin"])
+
+        project, reused = self._light_project(
+            bvid=str(info.get("bvid") or ""),
+            aid=int(info.get("aid") or 0),
+            cid=int(info.get("cid") or 0),
+            page=int(info.get("page") or 1),
+            title=title,
+            up_name=str(info.get("up_name") or ""),
+            up_mid=int(info.get("up_mid") or 0),
+            collection_title=str(info.get("collection_title") or ""),
+            collection_index=None,
+            part_title="",
+            url=raw or file_path,
+        )
+        project_id = str(project.get("id") or "")
+        # 走到这里说明手上是刚取到的素材。已有本地项目那一支在上面就早退了，
+        # 所以这里不需要再判一次「要不要覆盖」——两处都判会让后来的人以为判据有两条。
+        self._store_subtitles(project_id, segments, origin=origin)
+        return self._light_payload(
+            project,
+            origin=origin,
+            segments=len(segments),
+            duration_ms=int(info.get("duration_ms") or 0),
+            reused=reused,
+            encoding=encoding,
+            warnings=list(warnings),
+        )
 
     def summary_models(self) -> dict[str, Any]:
         """列出总结能选的模型：所有服务商卡里的模型 + 当前的默认选择。"""
@@ -6006,6 +6321,10 @@ class WorkbenchService:
         # 画面帧是加分项：抽不出来就是 None，总结照跑（失败原因已经在 ctx.log 里）。
         # 放在分支之前，是因为 refine 也要重抽一次——理由见 summarizer.refine 的 docstring。
         frameset = self._summary_frameset(ctx, project_id)
+        # 素材来源跟着项目走（本机 ASR / B站 AI 字幕 / B站人工字幕 / 用户 srt），
+        # 它决定提示词里那句「素材类型／可信度」怎么写。判据只有一处：
+        # core/summary_source.py，这里不自己判。
+        origin = summary_source_mod.origin_of(project)
 
         if str(payload.get("kind")) == "refine":
             previous = self.repo.summary_get(str(payload.get("previous_id") or ""))
@@ -6028,6 +6347,7 @@ class WorkbenchService:
                 cache=self.notes,
                 task_key=project_id,
                 frameset=frameset,
+                origin=origin,
             )
         else:
             result = summarizer.run(
@@ -6042,6 +6362,7 @@ class WorkbenchService:
                 cache=self.notes,
                 task_key=project_id,
                 frameset=frameset,
+                origin=origin,
             )
         ctx.check_cancel()
         content = dict(result["summary"])

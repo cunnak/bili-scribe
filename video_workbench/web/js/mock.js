@@ -1613,6 +1613,74 @@
                     default: act && (act.models || []).length ? (act.id + "/" + act.models[0]) : "",
                     configured: out.length > 0 });
       }
+      case "summary.light.probe": {
+        // 演示态固定回答「登录着、有两条字幕」：这条路的界面判据要看的是
+        // 「列得出来、选得中、能开始」，不是演示 B站 到底登没登录。
+        var lightUrl = String((p && p.url) || "");
+        return ok({
+          raw: lightUrl,
+          kind: "single",
+          title: "演示：轻量总结样本",
+          up_name: "演示UP",
+          up_mid: 170001,
+          collection_title: "",
+          page_count: 1,
+          bvid: "BV1xx411c7mD",
+          aid: 170001,
+          cid: 1,
+          page: 1,
+          duration_ms: 742000,
+          items: [],
+          logged_in: true,
+          subtitles: [
+            { lan: "ai-zh", lan_doc: "中文（AI生成）", is_ai: true },
+            { lan: "zh-CN", lan_doc: "中文（中国）", is_ai: false }
+          ],
+          note: ""
+        });
+      }
+      case "summary.light.prepare": {
+        var lightRow = null;
+        for (var li = 0; li < PROJECTS.length; li += 1) {
+          if (PROJECTS[li].id === "pj_light_demo") lightRow = PROJECTS[li];
+        }
+        if (!lightRow) {
+          // 形状与真 _decorate 的输出对齐：source_kind / has_transcript / bvid 三个
+          // 字段有消费者（库页分组、总结页拦截、发布卡），少一个就会在演示态现原形。
+          lightRow = {
+            id: "pj_light_demo",
+            title: "演示：轻量总结样本",
+            source_kind: "bili_light",
+            up_name: "演示UP",
+            bvid: "BV1xx411c7mD",
+            source_url: "https://www.bilibili.com/video/BV1xx411c7mD",
+            stage: "transcribed",
+            root_dir: "C:\\Users\\demo\\AppData\\Roaming\\VideoWorkbench\\media\\pj_light_demo",
+            duration_sec: 742.0,
+            bytes: 0,
+            asset_count: 0,
+            kinds: [],
+            has_thumb: false,
+            has_transcript: true,
+            thumb: "",
+            missing: [],
+            collection_title: "",
+            created_at: "2026-11-07 09:12:00",
+            updated_at: "2026-11-07 09:12:00"
+          };
+          PROJECTS.unshift(lightRow);
+        }
+        return ok({
+          project_id: "pj_light_demo",
+          title: "演示：轻量总结样本",
+          origin: p.path ? "user_srt" : "bili_ai",
+          segments: 96,
+          duration_sec: 742.0,
+          reused: false,
+          encoding: "",
+          warnings: []
+        });
+      }
       case "summary.start":
       case "summary.refine": {
         var pid = p.project_id || "p_demo_1";
