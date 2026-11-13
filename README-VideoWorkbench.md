@@ -199,6 +199,32 @@ pyinstaller video_workbench.spec --noconfirm
 **不夹带** FFmpeg、字体、语音模型：那是几十 MB 到 2 GB 的外部资源，装到用户目录更合适。
 `video_workbench.spec` 里 `_WANT` 显式列了 `yt_dlp`（动态导入，PyInstaller 扫不到）。
 
+
+## 字幕样式
+
+字幕样式有一套独立的作用域模型，不是「设置里那几个字段」：
+
+```text
+显式 style_id  >  项目覆盖（单个视频）  >  全局默认  >  内置 default
+```
+
+- **两层作用域**：全局那份在 设置 → 字幕；某个视频可以有一份**整份**独立覆盖（不是字段级），
+  NULL = 继承。**只是打开看不会建立覆盖**，第一次改动才建。
+- **字号按参考画布等比缩放**：横屏 1920×1080 / 竖屏 1080×1920 上记字号，出片按目标高度缩一次；
+  ASS 的 PlayResX/PlayResY 直接写目标画布，所以缩放只发生一次（v1 曾叠了两次）。
+- **格式边界**：ASS 是唯一完整样式载体；SRT / VTT 格式本身没有样式字段；
+  MP4 软字幕是 mov_text，外观由播放器决定；要样式就导**硬字幕**。
+- **缺字体不静默**：回落到 Microsoft YaHei（中文一定有字形），并把「缺哪个 / 实际用哪个」
+  写进载荷与界面，不依赖 libass 自己替换。
+- **任务快照**：导出任务吃的是带样式指纹的独立 ASS（subtitle.orig@hash.ass，落盘即冻结），
+  后续改样式、再点一次导出都不会改到已经启动的那条任务。
+- **单一 owner**：有效样式只经 WorkbenchService.effective_style() 取，预览 / 导出 / 烧录三处共用；
+  ASS 映射只在 core/subtitles.ass_style_records()，不许造第二套。
+
+判据：tests/wb/test_style_effective.py（16 条：作用域 / 覆盖独立性 / 旧写保护 / 快照冻结 /
+路径展开）+ tests/wb/test_styles_real_backend_ui.py（9 条：真后端 + 真 Chromium）+
+tests/wb/frontend_test.js 里的两条样式页用例。
+
 ## 已知问题
 
 | 现象 | 原因 / 办法 |
@@ -207,7 +233,7 @@ pyinstaller video_workbench.spec --noconfirm
 | 转录报 `cublas64_12.dll is not found` | cuBLAS 缺；程序自动退回 CPU/int8，日志里有 `notes: gpu_fallback` |
 | 唱歌/强背景音乐段落转录为空 | VAD 把音乐判成非语音；自动关 VAD 重跑一次，`notes: vad_fallback` |
 | 人脸检测一直「按居中裁切」 | OpenCV 5 没有 Haar 了，改用 YuNet；下载要走代理（`llm.proxy`） |
-| 草稿在剪映里字幕样式不是自己设的 | 设计如此：**字幕样式不跟随草稿**，要样式就导出硬字幕 |
+| 草稿在剪映里字幕样式不是自己设的 | 设计如此：**字幕样式不跟随草稿**，要样式就导出硬字幕。样式在「字幕样式」页配，见上文 |
 | 发布提示「这个视频已经发过笔记了」 | 60 秒节奏按**账号**算，换视频不算换账号 |
 | 数据库被占用 | bili-scribe 与工作台共用 SQLite；关掉另一个再来 |
 | 大模型只说「内部错误」 | 多半是鉴权 / 限流；设置页「测试连接」会给出具体错误码 |
