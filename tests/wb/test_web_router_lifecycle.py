@@ -24,7 +24,10 @@ from _js_source import read_js
 
 
 def _page_source(name: str) -> str:
-    return read_js(f"pages/{name}.js")
+    # summary.js 现在用一个工厂同时注册 summary / light 两条路由；
+    # 两条路由的源码都住在 pages/summary.js 里。
+    filename = "summary" if name == "light" else name
+    return read_js(f"pages/{filename}.js")
 
 
 def _route_block(source: str, route: str) -> str:
@@ -62,6 +65,9 @@ GLOBAL_REGISTRATIONS = {
     "summary": [
         ("setTimeout(tick", "轮询计时器"),
     ],
+    "light": [
+        ("setTimeout(tick", "轮询计时器"),
+    ],
 }
 
 
@@ -88,11 +94,17 @@ def test_the_destroy_hook_actually_releases_what_was_registered(page: str) -> No
     assert destroy_at >= 0
     body = block[destroy_at:]
 
-    expected = {
-        "clips": ["stopPolling", "removeEventListener"],
-        "merge": ["unwatchJob"],
-        "summary": ["pollToken"],
-    }[page]
+    if page in ("summary", "light"):
+        # 页面工厂把实例状态收进 destroyPage；路由对象只负责把实例交给它。
+        start = source.find("function destroyPage")
+        assert start >= 0, f"{page}.js 找不到 destroyPage"
+        body = source[start : start + 900]
+        expected = ["state.pollToken", "publish.unmount"]
+    else:
+        expected = {
+            "clips": ["stopPolling", "removeEventListener"],
+            "merge": ["unwatchJob"],
+        }[page]
     for token in expected:
         assert token in body, (
             f"{page}.js 的 destroy 里没有 {token} —— 那一项没有被真的收掉，只是写了个空钩子"
@@ -118,8 +130,13 @@ def test_publish_has_an_unmount_because_it_mounts_into_another_page() -> None:
 
 def test_summary_calls_publish_unmount_when_it_leaves() -> None:
     """总结页离开时必须替 publish 调一次 unmount：publish 自己不挂在路由上。"""
-    block = _route_block(_page_source("summary"), "summary")
-    assert "unmount" in block, "summary 的 destroy 没有调 publish.unmount"
+    source = _page_source("summary")
+    block = _route_block(source, "summary")
+    assert "destroyPage" in block, "summary 的 destroy 没有交给实例清理"
+    start = source.find("function destroyPage")
+    assert start >= 0 and "publish.unmount" in source[start : start + 900], (
+        "destroyPage 没有调 publish.unmount"
+    )
 
 
 def test_the_router_calls_destroy_before_clearing_the_view() -> None:

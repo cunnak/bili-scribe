@@ -25,6 +25,7 @@ const ROUTES = [
   ["merge", "合并"],
   ["publish", "发布"],
   ["subtitles", "字幕"],
+  ["light", "轻量总结"],
   ["settings", "设置"]
 ];
 
@@ -121,14 +122,14 @@ async function main() {
     assert.ok(WB.isMock(), "没进 mock 模式：mock=1 的检测逻辑失效了");
   });
 
-  await check("左栏渲染出 7 个入口且顺序稳定", () => {
+  await check("左栏渲染出 8 个入口且顺序稳定", () => {
     const items = [...window.document.querySelectorAll("#rail-nav .rail__item, #rail-nav button, #rail-nav a")];
-    assert.strictEqual(items.length, 7, `左栏条目 ${items.length} 个，应为 7`);
+    assert.strictEqual(items.length, 8, `左栏条目 ${items.length} 个，应为 8`);
     // 顺序也是契约：用户靠肌肉记忆点左栏，插一个入口不该把别的挤走。
     // 「发布」2026-11-02 并进总结页：路由还在（nav:false，兼容老链接），入口不再有。
     // 「字幕」2026-11-07 升成一级入口（plan-subtitles-entry §2 决策 1）：不必再从素材库点进。
     const labels = items.map((item) => item.textContent.trim().replace(/\s+/g, ""));
-    const order = ["新建任务", "素材库", "字幕", "总结", "切片台", "合并", "设置"];
+    const order = ["新建任务", "素材库", "字幕", "总结", "轻量总结", "切片台", "合并", "设置"];
     order.forEach((name, index) => {
       assert.ok(labels[index] && labels[index].indexOf(name) >= 0,
         `第 ${index + 1} 个入口应该是「${name}」，实际是「${labels[index]}」`);
@@ -1364,58 +1365,132 @@ async function main() {
     assert.ok(after > before, "生成总览没有加版本：" + before + " → " + after);
   });
 
-  await check("总结页：轻量模式只输 av/BV，不下载视频也能总结", async () => {
+  await check("总结页与轻量总结是两条独立路由", async () => {
+    if (WB.pages.summary.state.mode !== "video") {
+      WB.pages.summary._internals.switchMode("video");
+      await tick(300);
+    }
     WB.router.go("summary", {});
-    await tick(260);
-    // 上一段检查把模式切到了「合集」，而 state 是模块级的、跨 render 保留。
-    // 不先切回单条，head() 会走 collHead()，来源条根本不存在。
-    const back = $("#view").querySelectorAll(".sum-tab")[0];
-    if (back && !back.classList.contains("is-active")) { back.click(); await tick(260); }
-    const view = $("#view");
-    const local = view.querySelector("#sum-src-local");
-    const light = view.querySelector("#sum-src-light");
-    assert.ok(local && light, "没有「本地项目 / 轻量」来源切换");
-    assert.strictEqual(local.classList.contains("is-active"), true, "默认该停在本地项目");
-    assert.ok(view.querySelector("#sum-project"), "本地模式下没有项目下拉");
+    await tick(300);
+    let view = $("#view");
+    assert.strictEqual(view.querySelectorAll(".sum-src").length, 0, "本地项目页不该再有来源切换");
+    assert.ok(view.querySelector("#sum-project"), "本地项目页没有项目下拉");
+    assert.ok(view.querySelector("#sum-role"), "本地项目页没有角色下拉");
+    assert.ok(view.querySelector("#sum-model"), "本地项目页没有模型下拉");
+    assert.strictEqual(view.querySelectorAll(".sum-tab").length, 2, "本地项目页的标签条不对");
 
-    light.click();
-    await tick(120);
-    const view2 = $("#view");
-    assert.strictEqual(view2.querySelectorAll(".sum-src").length, 2, "来源只该有两个");
-    assert.strictEqual(view2.querySelector("#sum-src-light").classList.contains("is-active"), true,
-                       "点了轻量但没切过去");
-    assert.strictEqual(view2.querySelectorAll(".sum-tab").length, 2,
-                       "来源切换不许动标签条（标签切的是单条/合集）");
-    assert.ok(!view2.querySelector("#sum-project"), "轻量模式不该还挂着本地项目下拉");
-    const url = view2.querySelector("#sum-light-url");
-    const probeBtn = view2.querySelector("#sum-light-probe");
-    const fileBtn = view2.querySelector("#sum-light-file");
-    const go = view2.querySelector("#sum-light-go");
-    assert.ok(url && probeBtn && fileBtn && go, "轻量面板字段不全");
+    WB.router.go("light", {});
+    await tick(300);
+    view = $("#view");
+    assert.ok(WB.pages.summaryLight, "没有注册轻量总结页面");
+    assert.notStrictEqual(WB.pages.summary.state, WB.pages.summaryLight.state, "两个页面共用了同一份 state");
+    assert.strictEqual(view.querySelectorAll(".sum-tab").length, 0, "轻量页不该有单条/合集标签");
+    assert.ok(!view.querySelector("#sum-project"), "轻量页不该有本地项目下拉");
+    assert.ok(!view.querySelector("#sum-title"), "轻量空态不该出现本地正文的项目标题");
+    assert.strictEqual(view.querySelectorAll(".sum-side .card").length, 0, "轻量空态不该挂本地总结的版本/打磨/用量侧栏");
+    assert.strictEqual(view.querySelector("#sum-light-title").textContent.trim(), "轻量总结");
+    const url = view.querySelector("#sum-light-url");
+    const role = view.querySelector("#sum-light-role");
+    const model = view.querySelector("#sum-light-model");
+    const probeBtn = view.querySelector("#sum-light-probe");
+    const fileBtn = view.querySelector("#sum-light-file");
+    const go = view.querySelector("#sum-light-go");
+    assert.ok(url && role && model && probeBtn && fileBtn && go, "轻量面板字段不全");
     assert.strictEqual(go.disabled, false, "「提取字幕并总结」是灰的");
+  });
 
-    // 不输任何东西就点：要给一句人话，而不是静默什么都不做
-    go.click();
-    await tick(120);
-    const note = $("#view").querySelector("#sum-light-note") || $("#view").querySelector("#sum-light-error");
-    assert.ok(note && note.textContent.trim().length > 0, "空输入点下去没有任何提示");
+  await check("轻量页：角色/模型随开始一起提交", async () => {
+    const view = $("#view");
+    await until(() => view.querySelectorAll("#sum-light-role option").length >= 2, "轻量角色选项");
+    await until(() => view.querySelectorAll("#sum-light-model option").length >= 2, "轻量模型选项");
+    const role = view.querySelector("#sum-light-role");
+    const roleTarget = [...role.options].map((o) => o.value).filter((v) => v)[0];
+    assert.ok(roleTarget, "没有可选角色");
+    role.value = roleTarget;
+    role.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const model = view.querySelector("#sum-light-model");
+    const modelTarget = [...model.options].map((o) => o.value).filter((v) => v)[0];
+    assert.ok(modelTarget, "没有可选模型");
+    model.value = modelTarget;
+    model.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await tick(60);
 
-    // 输一个 BV 号再解析：mock 会回两条字幕轨
-    const input = $("#view").querySelector("#sum-light-url");
+    const input = view.querySelector("#sum-light-url");
     input.value = "BV1xx411c7mD";
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
-    $("#view").querySelector("#sum-light-probe").click();
+    const seen = [];
+    const realRpc = WB.rpc;
+    WB.rpc = function (method, params, opts) {
+      if (method === "summary.start") seen.push(params || {});
+      return realRpc.call(WB, method, params, opts);
+    };
+    try {
+      view.querySelector("#sum-light-go").click();
+      await until(() => seen.length === 1, "轻量页发出 summary.start", 40);
+      await tick(500);
+    } finally {
+      WB.rpc = realRpc;
+    }
+    assert.strictEqual(seen[0].role, roleTarget, "轻量页带上去的角色不对：" + JSON.stringify(seen[0]));
+    assert.strictEqual(seen[0].model, modelTarget, "轻量页带上去的模型不对：" + JSON.stringify(seen[0]));
+    const lightProject = WB.pages.summaryLight.state.projectId;
+    assert.ok(lightProject, "轻量页没有拿到自己的项目");
+    assert.strictEqual(WB.pages.publish.state.filterProjectId, lightProject, "发布卡没有按轻量页的项目过滤");
+  });
+
+  await check("轻量页：空输入提示、解析字幕、选文件", async () => {
+    const view = $("#view");
+    const input = view.querySelector("#sum-light-url");
+    input.value = "";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    view.querySelector("#sum-light-go").click();
+    await tick(120);
+    const note = view.querySelector("#sum-light-note") || view.querySelector("#sum-light-error");
+    assert.ok(note && note.textContent.trim().length > 0, "空输入点下去没有任何提示");
+
+    input.value = "BV1yy411c7mD";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    view.querySelector("#sum-light-probe").click();
     await tick(400);
     const picker2 = $("#view").querySelector("#sum-light-subs");
     assert.ok(picker2, "解析完没有字幕轨下拉");
     assert.strictEqual(picker2.options.length, 2, "字幕轨数量不对：" + picker2.options.length);
     assert.ok(picker2.textContent.indexOf("AI") >= 0, "AI 字幕没标出来：" + picker2.textContent);
 
-    // 选字幕文件：按钮文案要变成「换一个文件…」并把文件名显示出来
     $("#view").querySelector("#sum-light-file").click();
     await tick(300);
     const srt = $("#view").querySelector("#sum-light-srt");
     assert.ok(srt, "选了文件但界面上看不到文件名");
+  });
+
+  await check("本地项目与轻量页的 state 互不覆盖", async () => {
+    WB.router.go("summary", {});
+    await tick(300);
+    let view = $("#view");
+    const pick = view.querySelector("#sum-project");
+    const projects = WB.pages.summary.state.projects;
+    const current = WB.pages.summary.state.projectId;
+    const other = projects.find((item) => item.id !== current);
+    if (other) {
+      pick.value = other.id;
+      pick.dispatchEvent(new window.Event("change", { bubbles: true }));
+      await tick(300);
+      view = $("#view");
+    }
+    const localId = WB.pages.summary.state.projectId;
+    const localTitle = view.querySelector("#sum-title").textContent;
+    WB.router.go("light", {});
+    await tick(300);
+    const lightUrl = $("#view").querySelector("#sum-light-url");
+    lightUrl.value = "BV1isolation";
+    lightUrl.dispatchEvent(new window.Event("input", { bubbles: true }));
+    WB.router.go("summary", {});
+    await tick(300);
+    assert.strictEqual(WB.pages.summary.state.projectId, localId, "本地项目被轻量页改写");
+    assert.strictEqual($("#view").querySelector("#sum-title").textContent, localTitle, "本地正文标题被轻量页改写");
+    WB.router.go("light", {});
+    await tick(300);
+    assert.strictEqual($("#view").querySelector("#sum-light-url").value, "BV1isolation", "轻量输入被本地页改写");
   });
   await check("设置页：字幕分区带术语表，能保存", async () => {
     WB.router.go("settings", { section: "subtitle" });

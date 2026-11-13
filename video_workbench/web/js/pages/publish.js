@@ -24,6 +24,7 @@
   var state = {
     projects: [],
     projectId: "",
+    filterProjectId: "",   // 总结页传入的当前项目；非空时草稿列表只列这个项目的
     notes: [],
     current: null,   // 已保存的草稿（publish.get）
     draft: null,     // 刚生成、还没保存的预览（publish.preview）
@@ -123,6 +124,14 @@
   function loadProjects() {
     return call("library.list", { limit: 200, offset: 0 }).then(function (data) {
       state.projects = (data && data.items) || [];
+      if (state.filterProjectId) {
+        for (var f = 0; f < state.projects.length; f += 1) {
+          if (state.projects[f].id === state.filterProjectId) {
+            state.projectId = state.filterProjectId;
+            return;
+          }
+        }
+      }
       if (!state.projectId && state.projects.length) {
         var pick = state.projects[0];
         for (var i = 0; i < state.projects.length; i += 1) {
@@ -141,7 +150,9 @@
     // 这里一 reject 整个 all 就 reject，收尾那一步被跳过 —— 现场表现是按钮永久停在
     // 「发布中…」且点不动，用户以为发失败了，其实请求早就回来了（2026-11-07）。
     // 口径与 loadRecords 一致：列表拿不到只说明这一屏没数据，不该让整页红掉。
-    return call("publish.list", {}).then(function (data) {
+    // 传 filterProjectId 时只列当前页面对应项目的草稿；独立挂载（无 projectId）保持旧行为。
+    var noteParams = state.filterProjectId ? { project_id: state.filterProjectId } : {};
+    return call("publish.list", noteParams).then(function (data) {
       state.notes = (data && data.notes) || [];
       if (selectId) return loadNote(selectId);
       if (state.notes.length) return loadNote(state.notes[0].id);
@@ -991,6 +1002,12 @@
   function mount(nodes) {
     state.panel = nodes || null;
     if (!state.panel || !state.panel.main) return Promise.resolve();
+    var nextProject = (nodes && nodes.projectId) || "";
+    if (state.filterProjectId !== nextProject || (nextProject && state.projectId !== nextProject)) {
+      state.filterProjectId = nextProject;
+      if (nextProject) state.projectId = nextProject;
+      state.loaded = false;
+    }
     if (state.loaded) {
       paint();
       return Promise.resolve();
@@ -1014,6 +1031,7 @@
   function unmount() {
     state.panel = null;
     state.loaded = false;
+    state.filterProjectId = "";
   }
 
   function render() {

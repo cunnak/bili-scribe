@@ -1,0 +1,45 @@
+version: 1
+summary: { total: 7, passed: 7, failed: 0 }
+checks:
+  - id: C1
+    assert: "轻量页四档视口下 AV/BV 输入框不越出 .sum-fld，页面无横向滚动"
+    run: "$env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe docs/acceptance/ux-summary-modes/capture.py"
+    expect: "1100/1525/2306/3840: inputRight <= fieldRight；scrollWidth == clientWidth；errors=[]"
+    measured: "1100 641<=656；1525 530<=545；2306 790<=805；3840 1302<=1317；四档 scrollWidth==clientWidth；errors=[]"
+    result: pass
+  - id: C2
+    assert: "总结页与轻量总结是两条独立路由，轻量空态不挂本地侧栏卡片"
+    run: "node tests/wb/frontend_test.js"
+    expect: "112 passed；含「总结页与轻量总结是两条独立路由」"
+    measured: "全部通过（112 项），FAIL=0"
+    result: pass
+  - id: C3
+    assert: "轻量页有可操作的角色/模型栏，两个值随 summary.start 一起提交"
+    run: "$env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe -m pytest tests/wb/test_summary_light_ui.py -q"
+    expect: "3 passed；role/model option >=2；summary.start 带 role/model"
+    measured: "3 passed in 2.96s（同次 lifecycle/light 合计 48 passed in 4.15s）"
+    result: pass
+  - id: C4
+    assert: "本地项目页与轻量页的 state 互不覆盖"
+    run: "node tests/wb/frontend_test.js"
+    expect: "「本地项目与轻量页的 state 互不覆盖」通过"
+    measured: "112 passed；该断言通过"
+    result: pass
+  - id: C5
+    assert: "轻量页发布卡按自己的 projectId 过滤，不影响本地页发布草稿"
+    run: "$env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe -m pytest tests/wb/test_publish_local_video_ui.py tests/wb/test_publish_gates.py -q"
+    expect: "23 passed"
+    measured: "23 passed in 4.79s"
+    result: pass
+  - id: C6
+    assert: "summary.js 错误提示条结构锚点仍满足既有 error-display 判据"
+    run: "$env:PYTHONIOENCODING='utf-8'; .venv/Scripts/python.exe -m pytest tests/wb/test_summary_error_display.py -q -k 'not untouched_copy and not burn_when'"
+    expect: "26 passed, 6 deselected"
+    measured: "26 passed, 6 deselected in 43.66s"
+    result: pass
+  - id: C7
+    assert: "改动过的 Python 测试文件 lint/format 通过"
+    run: ".venv/Scripts/ruff.exe check tests/wb/test_summary_light_ui.py tests/wb/test_web_router_lifecycle.py; .venv/Scripts/ruff.exe format --check tests/wb/test_summary_light_ui.py tests/wb/test_web_router_lifecycle.py"
+    expect: "All checks passed!；2 files already formatted"
+    measured: "All checks passed!；2 files already formatted"
+    result: pass

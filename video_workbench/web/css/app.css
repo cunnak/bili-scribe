@@ -2052,7 +2052,9 @@ select,
 #sum-project,
 #sum-role,
 #sum-model,
-#sum-coll-model {
+#sum-coll-model,
+#sum-light-role,
+#sum-light-model {
   text-align: center;
   text-align-last: center;
   padding-left: var(--gap-3);
@@ -2061,7 +2063,8 @@ select,
 
 /* 模型名比角色名长，不给宽度会截成「跟随设置 · deepseek-cha」 */
 #sum-model,
-#sum-coll-model {
+#sum-coll-model,
+#sum-light-model {
   min-width: 200px;
   max-width: 280px;
 }

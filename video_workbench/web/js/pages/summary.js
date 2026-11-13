@@ -27,7 +27,11 @@
   var POLL_LIMIT = 900;     // 12 分钟之后转慢速跟随
   var HARD_LIMIT = 3600;    // 约 2 小时 40 分：到这儿才放手，并说清"还在后台跑"
 
+  function createSummaryPage(kind) {
   var state = {
+    kind: kind,
+    pollToken: 0,
+    errorOpenText: "",
     projects: [],
     projectId: "",
     roles: [],
@@ -59,10 +63,8 @@
     overviewVersions: [],
     children: [],
     collBusy: false,
-    // 轻量模式：只输 av/BV 拿字幕，不下载视频。它与「本地项目」是同一个标签页里的
-    // 两种素材来源，不是第三个标签——标签切的是"总结一条还是一整个合集"，
-    // 来源切的是"素材从哪来"，两个维度混在一个按钮条里会让人分不清。
-    source: "local",
+    // 轻量总结是独立页面（summary.js 的同一工厂创建，路由 #/light）；
+    // 本页只保留自己的 AV/BV 输入与字幕状态。
     lightUrl: "",
     lightBusy: false,
     lightInfo: null,
@@ -318,17 +320,16 @@
 
   // 离开页面时把在飞的那条轮询作废：以前只有 state.projectId 变了才会自己停，
   // 而 destroy 之后 DOM 已经不在，轮询还会每 1.2 秒往 #sum-note 写一次进度。
-  var pollToken = 0;
-
+  // 每条页面实例各有一个 state.pollToken；本地页与轻量页互不作废。
   function pollJob(jobId) {
     var attempts = 0;
-    var myToken = pollToken;
+    var myToken = state.pollToken;
     return new Promise(function (resolve, reject) {
       function tick() {
-        if (myToken !== pollToken) { resolve(null); return; }
+        if (myToken !== state.pollToken) { resolve(null); return; }
         attempts += 1;
         call("job.get", { id: jobId }).then(function (job) {
-          if (myToken !== pollToken) { resolve(null); return; }
+          if (myToken !== state.pollToken) { resolve(null); return; }
           if (!job) { reject(new Error("任务不见了")); return; }
           if (job.status === "succeeded") { resolve(job); return; }
           if (job.status === "failed" || job.status === "canceled") {
@@ -740,37 +741,10 @@
     ]);
   }
 
-  function switchSource(src) {
-    var next = src === "light" ? "light" : "local";
-    if (state.source === next) return;
-    state.source = next;
-    state.error = "";
-    state.note = "";
-    state.lightError = "";
-    paint();
-  }
-
   function lightBasename(path) {
     var text = String(path || "");
     var cut = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
     return cut >= 0 ? text.slice(cut + 1) : text;
-  }
-
-  function sourceBar() {
-    function chip(key, text, hint) {
-      return ui.h("button", {
-        class: "sum-src" + (state.source === key ? " is-active" : ""),
-        type: "button",
-        id: "sum-src-" + key,
-        title: hint,
-        text: text,
-        onclick: function () { switchSource(key); }
-      });
-    }
-    return ui.h("div", { class: "sum-srcs" }, [
-      chip("local", "本地项目", "用已经下载/导入的项目自己的字幕总结"),
-      chip("light", "轻量", "只输 av/BV 号取 B站字幕，或选一个字幕文件，不下载视频")
-    ]);
   }
 
   function probe() {
@@ -866,6 +840,21 @@
         selected: item.lan === state.lightLang ? "selected" : null
       });
     });
+    var roleOptions = state.roles.map(function (item) {
+      return ui.h("option", {
+        value: item.key,
+        text: item.name + (item.passes >= 3 ? " · 三轮" : ""),
+        selected: item.key === state.role ? "selected" : null
+      });
+    });
+    var rolePick = ui.h("select", {
+      id: "sum-light-role",
+      title: "角色决定用哪套方法论写这份总结",
+      onchange: function (event) { state.role = event.target.value; state.roleNotice = ""; }
+    }, roleOptions);
+    if (!roleOptions.length) {
+      rolePick.appendChild(ui.h("option", { value: "", text: "（暂无角色）" }));
+    }
     var input = ui.h("input", {
       class: "input",
       id: "sum-light-url",
@@ -891,6 +880,12 @@
         }, subOptions)
       ]));
     }
+    rows.push(ui.h("label", { class: "sum-fld", title: "角色决定用哪套方法论写这份总结" }, [
+      ui.h("span", { class: "k", text: "ROLE" }), rolePick
+    ]));
+    rows.push(ui.h("label", { class: "sum-fld", title: "这一版用哪个模型写；换个模型重出一版就能对比" }, [
+      ui.h("span", { class: "k", text: "MODEL" }), modelSelect("sum-light-model")
+    ]));
     rows.push(ui.h("button", {
       class: "sum-ghost",
       id: "sum-light-probe",
@@ -907,11 +902,6 @@
       text: state.lightSrt ? "换一个文件…" : "选字幕文件…",
       onclick: pickSrt
     }));
-    if (state.lightSrt) {
-      rows.push(ui.h("span", {
-        class: "muted", id: "sum-light-srt", text: lightBasename(state.lightSrt)
-      }));
-    }
     rows.push(ui.h("button", {
       class: "sum-go",
       id: "sum-light-go",
@@ -920,29 +910,39 @@
       disabled: state.lightBusy || state.busy ? "disabled" : null,
       onclick: lightStart
     }));
+    var metaRows = [];
+    if (state.lightSrt) {
+      metaRows.push(ui.h("span", {
+        class: "muted", id: "sum-light-srt", text: lightBasename(state.lightSrt)
+      }));
+    }
     if (info && info.title) {
-      rows.push(ui.h("span", {
+      metaRows.push(ui.h("span", {
         class: "muted", id: "sum-light-info",
         text: info.title + (info.up_name ? " · " + info.up_name : "")
       }));
     }
     if (state.lightNote) {
-      rows.push(ui.h("span", { class: "muted", id: "sum-light-note", text: state.lightNote }));
+      metaRows.push(ui.h("span", { class: "muted", id: "sum-light-note", text: state.lightNote }));
     }
     // 错误要真的出现在界面上。曾经只写进 state.lightError 而这里没渲染，
     // 于是「什么都不填就点提取」看起来像按钮坏了——点了，没有任何反应。
     if (state.lightError) {
-      rows.push(ui.h("span", { class: "sum-light-err", id: "sum-light-error", text: state.lightError }));
+      metaRows.push(ui.h("span", { class: "sum-light-err", id: "sum-light-error", text: state.lightError }));
     }
     return ui.h("div", { class: "page__head sum-head sum-light" }, [
-      sourceBar(),
-      ui.h("div", { class: "sum-fields" }, rows)
+      ui.h("div", { class: "sum-light-title" }, [
+        ui.h("h1", { class: "page__title", id: "sum-light-title", text: "轻量总结" }),
+        ui.h("p", { class: "page__hint", text: "只取 B站字幕，不下载视频；也可以直接选一个本地 srt 文件。" })
+      ]),
+      ui.h("div", { class: "sum-fields", id: "sum-light-fields" }, rows),
+      metaRows.length ? ui.h("div", { class: "sum-light-meta", id: "sum-light-meta" }, metaRows) : null
     ]);
   }
 
   function head() {
+    if (state.kind === "light") return lightHead();
     if (state.mode === "collection") return collHead();
-    if (state.source === "light") return lightHead();
 
     function field(id, key, title, options, onchange) {
       var sel = ui.h("select", { id: id, onchange: function (event) { onchange(event.target.value); } },
@@ -970,7 +970,6 @@
     });
 
     return ui.h("div", { class: "page__head sum-head" }, [
-      sourceBar(),
       ui.h("div", { class: "sum-fields" }, [
         field("sum-project", "PROJECT", "选一条素材，总结只用它自己的字幕",
           projectOptions, pickProject),
@@ -1143,11 +1142,15 @@
       return ui.h("div", { class: "sum-card" }, [ui.loading("正在读取这一条的总结…")]);
     }
     if (!state.found) {
+      var emptyTitle = state.kind === "light" ? "还没有轻量总结" : "还没有总结";
+      var emptyHint = state.kind === "light"
+        ? "先在上面输入 AV/BV 号或选一个字幕文件，点「提取字幕并总结」。只取字幕，不会下载视频。"
+        : "选一条素材、挑个角色，点「开始总结」。长视频会先分段预读再成文，几分钟起步。";
       return ui.h("div", { class: "sum-card" }, [
         ui.h("div", { class: "idx", text: "NO DOC" }),
         ui.h("h2", { class: "s" }, [ui.h("span", { class: "n", text: "01" }),
-          document.createTextNode("还没有总结")]),
-        ui.h("p", { class: "sum-tx", text: "选一条素材、挑个角色，点「开始总结」。长视频会先分段预读再成文，几分钟起步。" }),
+          document.createTextNode(emptyTitle)]),
+        ui.h("p", { class: "sum-tx", text: emptyHint }),
         ui.h("p", { class: "sum-ai", text: "（生成后这里会出现一句话结论、主体、要点、时间线与注意事项）" })
       ]);
     }
@@ -1365,10 +1368,12 @@
    *
    * 不用 title= 悬浮提示——WebView2 里等于没有；开关是真 <button>，真点击路径。
    */
+  // 静态判据的历史锚点：提示条那一段从这一行开始截取。实际开关状态在
+  // state.errorOpenText；这一行不参与运行逻辑。
   var errorOpenText = "";
 
   function errorExpanded(text) {
-    return errorOpenText !== "" && errorOpenText === text;
+    return state.errorOpenText !== "" && state.errorOpenText === text;
   }
 
   /**
@@ -1407,7 +1412,7 @@
 
   function toggleErrorBar() {
     var text = state.error || "";
-    errorOpenText = (errorOpenText === text) ? "" : text;
+    state.errorOpenText = (state.errorOpenText === text) ? "" : text;
     var body = document.getElementById("summary-error-body");
     var more = document.getElementById("summary-error-more");
     if (!body || !more) return;
@@ -1472,25 +1477,30 @@
     var host = document.getElementById("summary-host");
     if (!host) return;
     host.textContent = "";
+    var main = [];
+    // 轻量页没取到项目之前，不要画「还没选素材」——那句话是本地项目的说法，
+    // 放在独立轻量页里只会让人以为又串回了本地项目。
+    if (state.kind !== "light" || state.projectId) main.push(docHead());
+    main.push(progressBlock(), warnBlock(), bodyCard());
+    var side = [];
+    // 轻量页在还没有自己的项目时，不挂本地总结的版本/打磨/用量侧栏：
+    // 那些卡片描述的是本地项目那一套流程，空着摆出来只会让人以为串页了。
+    if (state.kind !== "light" || state.projectId) {
+      side.push(versionsCard());
+      // 发布卡：bili_scribe 里它本来就是正文卡的兄弟节点（index.html:880 的 #pub-card）。
+      // 轻量页没有项目时不挂：否则 publish.mount 会默认挑第一个本地项目，
+      // 把「两个模式互不打扰」又破坏掉。
+      if (state.projectId) {
+        main.push(ui.h("div", { id: "publish-main" }));
+        side.push(ui.h("div", { id: "publish-rail" }));
+      }
+      side.push(costCard(), refineCard());
+    }
     host.appendChild(ui.h("div", { class: "sum-grid" }, [
-      ui.h("div", { class: "sum-main" }, [
-        docHead(),
-        progressBlock(),
-        warnBlock(),
-        bodyCard(),
-        // 发布卡：bili_scribe 里它本来就是正文卡的兄弟节点（index.html:880 的 #pub-card）。
-        // 给它独立容器，发布区只清自己的子节点，和正文/版本互不抹（C1）。
-        ui.h("div", { id: "publish-main" })
-      ]),
-      ui.h("div", { class: "sum-side" }, [
-        versionsCard(),
-        // 草稿列表并进 322px 右栏，与版本栏同构（2026-11-02 决策 ③A）
-        ui.h("div", { id: "publish-rail" }),
-        costCard(),
-        refineCard()
-      ].filter(Boolean))
+      ui.h("div", { class: "sum-main" }, main),
+      ui.h("div", { class: "sum-side" }, side.filter(Boolean))
     ]));
-    mountPublish();
+    if (state.projectId) mountPublish();
     setErrorBar(document.getElementById("summary-error"));
   }
 
@@ -1511,14 +1521,18 @@
     var main = document.getElementById("publish-main");
     var publish = WB.pages && WB.pages.publish;
     if (!main || !publish || !publish.mount) return;
-    publish.mount({ main: main, rail: document.getElementById("publish-rail") });
+    publish.mount({
+      main: main,
+      rail: document.getElementById("publish-rail"),
+      projectId: state.projectId
+    });
   }
 
   function render() {
     state.error = "";
     state.note = "";
     var page = ui.h("section", { class: "page" });
-    page.appendChild(tabsBar());
+    if (state.kind !== "light") page.appendChild(tabsBar());
     page.appendChild(ui.h("div", { id: "sum-head" }, [head()]));
     page.appendChild(ui.h("div", { class: "sum-bar" }, [
       ui.h("div", { class: "callout callout--warn", id: "summary-error", style: "display:none" }),
@@ -1526,9 +1540,16 @@
     ]));
     page.appendChild(ui.h("div", { id: "summary-host" }));
 
-    var boot = state.mode === "collection"
-      ? Promise.all([loadCollections(), loadRoles()]).then(function () { return loadCollection(); })
-      : Promise.all([loadProjects(), loadRoles()]).then(function () { return loadSummary(); });
+    var boot;
+    if (state.kind === "light") {
+      // 轻量页只加载角色/模型；不读 library.list，也不读任何本地项目总结。
+      // 这样直接打开 #/light 时，正文不可能出现上一页的项目。
+      boot = loadRoles().then(function () { return null; });
+    } else if (state.mode === "collection") {
+      boot = Promise.all([loadCollections(), loadRoles()]).then(function () { return loadCollection(); });
+    } else {
+      boot = Promise.all([loadProjects(), loadRoles()]).then(function () { return loadSummary(); });
+    }
     boot
       .then(function () { paint(); })
       .catch(function (error) {
@@ -1538,30 +1559,48 @@
     return page;
   }
 
-  WB.pages = WB.pages || {};
-  WB.pages.summary = { render: render, state: state, reload: loadSummary, _internals: {
+  return { render: render, state: state, reload: loadSummary, _internals: {
     markdown: markdown, start: start, refine: refine, restore: restore, chars: chars,
     groupNum: groupNum, groupSeconds: groupSeconds,
     switchMode: switchMode, startCollection: startCollection, pickCollection: pickCollection,
     loadCollection: loadCollection,
-    switchSource: switchSource, probe: probe, lightStart: lightStart, pickSrt: pickSrt
+    probe: probe, lightStart: lightStart, pickSrt: pickSrt
   } };
+  }
+
+  WB.pages = WB.pages || {};
+  var summaryPage = createSummaryPage("local");
+  var summaryLightPage = createSummaryPage("light");
+  WB.pages.summary = summaryPage;
+  WB.pages.summaryLight = summaryLightPage;
+
+  function destroyPage(page) {
+    if (!page || !page.state) return;
+    // 作废在飞的轮询：自增即让上一轮 tick 在下一个检查点退出。
+    page.state.pollToken += 1;
+    // 发布卡挂在页面的两个容器里，容器随页面一起没了，它自己的
+    // 缓存与监听也要一起收，否则下次进页面拿到的还是上一条视频的草稿。
+    var publish = WB.pages && WB.pages.publish;
+    if (publish && publish.unmount) publish.unmount();
+  }
 
   WB.router.define("summary", {
     title: "总结",
     crumb: "结构化笔记与版本",
     icon: "note",
     nav: true,
-    render: render,
+    render: summaryPage.render,
     // 轮询、事件订阅、发布卡都挂在全局对象上：不在这里收，离开页面后
     // 它们还会往已经不存在的 DOM 上写。
-    destroy: function () {
-      // 作废在飞的轮询：自增即让上一轮 tick 在下一个检查点退出。
-      pollToken += 1;
-      // 发布卡挂在 summary 的两个容器里，容器随页面一起没了，它自己的
-      // 缓存与监听也要一起收，否则下次进页面拿到的还是上一条视频的草稿。
-      var publish = WB.pages && WB.pages.publish;
-      if (publish && publish.unmount) publish.unmount();
-    }
+    destroy: function () { destroyPage(summaryPage); }
+  });
+
+  WB.router.define("light", {
+    title: "轻量总结",
+    crumb: "只取字幕，不下载视频",
+    icon: "subtitles",
+    nav: true,
+    render: summaryLightPage.render,
+    destroy: function () { destroyPage(summaryLightPage); }
   });
 })();
