@@ -49,7 +49,14 @@
 ## 发布执行记录
 
 - 版本：`video_workbench/__init__.py` → `0.2.7`
-- 构建：`.venv/Scripts/python.exe scripts/build_wb.py`
-- 冻结包验收：`.venv/Scripts/python.exe scripts/accept_frozen_package.py`
-- tag：`v0.9.8`
-- release：`gh release create v0.9.8 dist/VideoWorkbench-0.2.7.zip --title "VideoWorkbench 0.2.7（打包版）"`
+- 构建：`.venv/Scripts/python.exe scripts/build_wb.py` → PyInstaller 退出码 0，耗时 80.9s（第一次 80.9s 那次失败：上一版打包程序 PID 36828 还开着，锁住 `_internal/charset_normalizer/cd.cp314-win_amd64.pyd`，`WinError 5`；关掉进程后重建通过）
+- 包内自检：`dist/VideoWorkbench/wb-check.json` → `info.version = 0.2.7`，目录 413.5 MB / 2164 个文件
+- 冻结包验收：`.venv/Scripts/python.exe scripts/accept_frozen_package.py` → **16/16 PASS**
+- 包内模块核对：`build/video_workbench/PYZ-00.toc`（555042 B，2026-11-13 08:52:50）逐字含 `video_workbench.core.summary_source` 与 `video_workbench.core.bili_subs`；包内 `_internal/video_workbench/web/js/pages/summary.js` 含 `sum-srcs` / `lightStart` / `sum-light-go`
+- 发布资产：`dist/VideoWorkbench-0.2.7.zip`，**1959 个条目（1959 个文件），174,067,464 B**，逐条 `OpenRead` 无坏块
+- commit：`8be70aa feat(summary): 轻量总结——只输 av/BV 取字幕或选 srt，不下载视频`
+- tag：`v0.9.8`（`git cat-file -t v0.9.8` = `tag`，`v0.9.8^{commit}` = `commit`）
+- push：`git push origin main` → `5009e77..8be70aa`；`git push origin v0.9.8` → `* [new tag] v0.9.8`
+- release：`gh release create v0.9.8 dist/VideoWorkbench-0.2.7.zip --title "VideoWorkbench 0.2.7（打包版）" --notes-file <notes>` → `rc=0`，<https://github.com/cunnak/bili-scribe/releases/tag/v0.9.8>
+- 资产回读：`gh release view v0.9.8 --json assets` → `VideoWorkbench-0.2.7.zip`、`state=uploaded`、`size=174067464`、`digest=sha256:1bcd7436…`
+- 远端回读：`git ls-remote --tags origin v0.9.8` → `fcb730e008e7f8e7025275879fdcbe4208aa76ad refs/tags/v0.9.8`（annotated tag 对象，指向 `8be70aa`）；`git log --oneline -1 origin/main` → `8be70aa`
