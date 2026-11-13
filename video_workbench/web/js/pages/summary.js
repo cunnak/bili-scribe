@@ -461,7 +461,7 @@
       .then(function () { return loadSummary(); })
       .then(function () {
         state.busy = false;
-        WB.toast("已恢复第 " + version + " 版（存成了新的一版，旧版都还在）");
+        WB.toast("已恢复第 " + version + " 版");
         paint();
       })
       .catch(function (error) {

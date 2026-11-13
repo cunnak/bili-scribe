@@ -855,7 +855,7 @@ class Repo:
     # 用户会想回去看"上一版是怎么写的"——删掉历史就等于让他没法反悔。
     #
     # 版本号按 (project_id, scope) 自增，删版本不重排（``version`` 只是显示用的序号，
-    # 不是主键）。恢复旧版也是**新增一版**，见 service.summary_restore。
+    # 不是主键）。恢复旧版只切换当前指针，不新增版本，历史仍只增不改；见 service.summary_restore。
 
     def summary_next_version(self, project_id: str, scope: str = "video") -> int:
         row = self._one(
@@ -863,6 +863,23 @@ class Repo:
             (project_id, scope),
         )
         return int((row or {}).get("v") or 0) + 1
+
+    def summary_current(self, subject_id: str, scope: str = "video") -> dict[str, Any] | None:
+        """取当前指针指向的版本；老库没有指针时由 summary_latest 回落到最新版。"""
+        key = f"summary_current:{scope}:{subject_id}"
+        row = self._one("SELECT value FROM wb_meta WHERE key=?", (key,))
+        return self.summary_get(str(row["value"])) if row else None
+
+    def summary_set_current(self, subject_id: str, summary_id: str, scope: str = "video") -> None:
+        """只移动当前指针，不插入/复制 summary 行。"""
+        if not subject_id or not summary_id:
+            return
+        key = f"summary_current:{scope}:{subject_id}"
+        self._exec(
+            "INSERT INTO wb_meta (key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, summary_id),
+        )
 
     def summary_insert(
         self,
@@ -896,13 +913,19 @@ class Repo:
         columns = ",".join(row)
         marks = ",".join("?" for _ in row)
         self._exec(f"INSERT INTO wb_summary ({columns}) VALUES ({marks})", list(row.values()))
-        return self.summary_get(str(row["id"])) or {}
+        saved = self.summary_get(str(row["id"])) or {}
+        subject_id = str(collection_id or project_id or "")
+        self.summary_set_current(subject_id, str(saved.get("id") or ""), scope)
+        return saved
 
     def summary_get(self, summary_id: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM wb_summary WHERE id=?", (summary_id,))
         return self._summary_row(row)
 
     def summary_latest(self, project_id: str, scope: str = "video") -> dict[str, Any] | None:
+        current = self.summary_current(project_id, scope)
+        if current is not None:
+            return current
         row = self._one(
             "SELECT * FROM wb_summary WHERE project_id=? AND scope=? ORDER BY version DESC LIMIT 1",
             (project_id, scope),
@@ -1072,9 +1095,14 @@ class Repo:
         columns = ",".join(row)
         marks = ",".join("?" for _ in row)
         self._exec(f"INSERT INTO wb_summary ({columns}) VALUES ({marks})", list(row.values()))
-        return self.summary_get(str(row["id"])) or {}
+        saved = self.summary_get(str(row["id"])) or {}
+        self.summary_set_current(collection_id, str(saved.get("id") or ""), "collection")
+        return saved
 
     def collection_summary_latest(self, collection_id: str) -> dict[str, Any] | None:
+        current = self.summary_current(collection_id, "collection")
+        if current is not None:
+            return current
         row = self._one(
             "SELECT * FROM wb_summary WHERE collection_id=? AND scope='collection'"
             " ORDER BY version DESC LIMIT 1",

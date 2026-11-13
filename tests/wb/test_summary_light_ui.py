@@ -237,12 +237,8 @@ def test_light_toolbar_does_not_overflow_at_wide_and_min_widths(browser, web_bas
         page.close()
 
 
-def test_light_version_card_separates_model_note_from_change_source(browser, web_base_url):
-    """版本块不能把模型自述/恢复来源当成「实际改动」。
-
-    截图里的旧行为是：恢复版本显示「实际改动 恢复自第 3 版」。这里用 mock 的
-    两版总结先看模型自述，再点最早的版本恢复，两段都必须是独立标签。
-    """
+def test_light_version_card_restore_does_not_add_a_version(browser, web_base_url):
+    """恢复只切换当前版本，不新增版本；模型自述仍是独立标签。"""
     page, problems = open_page(browser, web_base_url, "light")
     try:
         page.evaluate(
@@ -261,17 +257,17 @@ def test_light_version_card_separates_model_note_from_change_source(browser, web
         assert "实际改动" not in labels, f"模型自述被标成实际改动：{labels}"
         assert "要点压到三条" in page.inner_text(".sum-side"), "模型自述内容没显示"
 
-        # 点最早的一版恢复：新版本行必须是「恢复自」，不是「实际改动」。
+        before_count = page.locator(".ver-row").count()
         page.eval_on_selector(".ver-row:last-child button", "button => button.click()")
-        page.wait_for_function(
-            "() => [...document.querySelectorAll('.ver-row__note b')]"
-            ".some(node => node.textContent === '恢复自')",
-            timeout=5000,
-        )
+        page.wait_for_timeout(500)
+        assert page.locator(".ver-row").count() == before_count, "恢复不应该新增版本"
+        assert page.eval_on_selector(
+            ".ver-row:last-child", "node => node.classList.contains('is-active')"
+        ), "恢复后当前标记没落到目标版本"
         labels2 = page.eval_on_selector_all(
             ".ver-row__note b", "nodes => nodes.map(node => node.textContent)"
         )
-        assert "恢复自" in labels2, f"恢复来源没有独立标签：{labels2}"
+        assert "恢复自" not in labels2, f"恢复不应再写恢复说明：{labels2}"
         assert "实际改动" not in labels2, f"恢复来源被标成实际改动：{labels2}"
         assert problems == [], f"控制台报错：{problems}"
     finally:

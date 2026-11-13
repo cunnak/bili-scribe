@@ -1225,8 +1225,7 @@ async function main() {
     assert.ok(/压到三条/.test(view.querySelector("#summary-host").textContent),
       "修改说明没显示：" + view.querySelector("#summary-host").textContent.slice(0, 120));
 
-    // ③ 恢复旧版：列表按版本倒序，第一行是当前版（没有恢复按钮），
-    //    最末行才是最早的那一版。点它，版本数继续涨而不是替换。
+    // ③ 恢复旧版：版本总数不变，当前标记落到被恢复的那一版。
     const rows = [...view.querySelectorAll(".ver-row")];
     const oldest = rows[rows.length - 1];
     assert.ok(rows[0].classList.contains("is-active"), "当前版本没标出来");
@@ -1236,11 +1235,10 @@ async function main() {
     const counted = rows.length;
     restoreBtn.click();
     await tick(700);
-    const rows2 = view.querySelectorAll(".ver-row");
-    assert.ok(rows2.length > counted, "恢复应该新增一版：" + counted + " → " + rows2.length);
-    assert.ok(/恢复自第\d+版/.test(view.querySelector("#summary-host").textContent.replace(/ /g, "")) ||
-      /恢复自第 \d+ 版/.test(view.querySelector("#summary-host").textContent),
-      "没标出恢复来源");
+    const rows2 = [...view.querySelectorAll(".ver-row")];
+    assert.strictEqual(rows2.length, counted, "恢复不应该新增版本：" + counted + " → " + rows2.length);
+    assert.ok(rows2[rows2.length - 1].classList.contains("is-active"), "恢复后当前版没落到目标版本");
+    assert.ok(!/恢复自第/.test(view.querySelector("#summary-host").textContent), "恢复不应再写恢复说明");
   });
 
   await check("总结页：用量卡给出这一版开销与这条视频累计", async () => {

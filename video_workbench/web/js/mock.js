@@ -1735,13 +1735,9 @@
         var old = null;
         bin.versions.forEach(function (row) { if (row.id === p.summary_id) old = row; });
         if (!old) return fail("NOT_FOUND", "找不到这一版总结");
-        var copy = JSON.parse(JSON.stringify(old));
-        copy.id = "sum_mock_" + (bin.versions.length + 1);
-        copy.version = bin.versions.length + 1;
-        copy.revise_note = "恢复自第 " + old.version + " 版";
-        bin.summary = copy;
-        bin.versions = [copy].concat(bin.versions);
-        return ok({ summary: copy, restored_from: old.version });
+        // 恢复只切换当前版本，不新增版本；历史列表保持原样。
+        bin.summary = old;
+        return ok({ summary: old, restored_from: old.version });
       }
       case "publish.preview": {
         var draft = mockPreview(p.project_id);

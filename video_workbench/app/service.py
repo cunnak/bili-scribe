@@ -3633,7 +3633,7 @@ class WorkbenchService:
         return {"job": job, "requirement": demand, "base": base.get("version")}
 
     def summary_restore(self, project_id: str = "", summary_id: str = "") -> dict[str, Any]:
-        """把旧版恢复成新的一版。**不删历史**——所以这不是回滚，是"照这版再存一份"。"""
+        """把旧版设为当前版：只移动当前指针，不新增版本，历史仍全部保留。"""
         if not project_id or not summary_id:
             raise WBError("VALIDATION", "缺少 project_id 或 summary_id")
         old = self.repo.summary_get(summary_id)
@@ -3641,19 +3641,9 @@ class WorkbenchService:
             raise WBError("NOT_FOUND", "找不到这一版总结")
         if str(old.get("project_id") or "") != project_id:
             raise WBError("VALIDATION", "这一版不属于这个项目")
-        content = dict(old.get("content") or {})
-        content["revise_note"] = f"恢复自第 {old.get('version')} 版"
-        saved = self.repo.summary_insert(
-            project_id,
-            content=content,
-            content_md=summarizer.to_markdown(content),
-            role=str(old.get("role") or ""),
-            model=str(old.get("model") or ""),
-            usage={"restored_from": old.get("id"), "restored_version": old.get("version")},
-            status="ready",
-        )
-        self._write_summary_files(project_id, saved)
-        return {"summary": saved, "restored_from": old.get("version")}
+        self.repo.summary_set_current(project_id, str(old.get("id") or ""), "video")
+        self._write_summary_files(project_id, old)
+        return {"summary": old, "restored_from": old.get("version")}
 
     # ------------------------------------------------------- 合集总览（P2-08）
     #

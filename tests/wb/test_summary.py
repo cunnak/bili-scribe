@@ -4,7 +4,7 @@
 
 1. **素材对得上**：字幕进得去，时间戳还在（丢了时间戳，模型就不许写 timeline）；
 2. **角色换得动**：换一个现役角色真的换了提示词，不是换了个下拉框（角色名现读，别写死）；
-3. **版本存得住**：每次生成/打磨各存一版，恢复不删历史；
+3. **版本存得住**：每次生成/打磨各存一版，恢复只切换当前指针、不新增版本；
 4. **失败说得清**：模型不吐 JSON 时报 LLM_BAD_RESPONSE，而不是把空总结入库。
 
 ## ``standard`` 退役之后，本目录里 ``role="standard"`` 的分类标准
@@ -552,7 +552,7 @@ def test_refine_creates_new_version_with_note(service, tmp_path, monkeypatch):
     assert service.repo.summary_get(base["id"])["content"]["one_line"] == "这期讲三件事"
 
 
-def test_restore_adds_a_version_instead_of_deleting(service, tmp_path, monkeypatch):
+def test_restore_reuses_selected_version_without_adding_one(service, tmp_path, monkeypatch):
     project = make_project(service, tmp_path)
     run_job(service, monkeypatch, StubClient([json.dumps(GOOD)]), {"kind": "fresh"}, project)
     first = service.repo.summary_latest(project["id"])
@@ -563,18 +563,22 @@ def test_restore_adds_a_version_instead_of_deleting(service, tmp_path, monkeypat
         {"kind": "fresh"},
         project,
     )
+    second = service.repo.summary_latest(project["id"])
     data = rpc(service, "summary.restore", {"project_id": project["id"], "summary_id": first["id"]})
-    assert data["summary"]["version"] == 3
-    rows = service.repo.summary_list(project["id"])
-    assert len(rows) == 3  # 历史一条没少
-    assert rows[0]["content"]["one_line"] == "这期讲三件事"
-    assert "恢复自第 1 版" in rows[0]["content"]["revise_note"]
+    assert data["summary"]["id"] == first["id"]
+    assert data["summary"]["version"] == 1
 
-    # 版本行必须把「恢复来源」当成来源，而不是拿它冒充实际内容改动。
+    rows = service.repo.summary_list(project["id"])
+    assert len(rows) == 2  # 恢复不新增版本，历史一条没少
+    assert [row["id"] for row in rows] == [second["id"], first["id"]]
+    latest = service.repo.summary_latest(project["id"])
+    assert latest["id"] == first["id"]
+    assert latest["content"]["one_line"] == "这期讲三件事"
+
     listed = rpc(service, "summary.versions", {"id": project["id"]})["versions"]
-    assert listed[0]["version"] == 3
-    assert listed[0]["restored_version"] == 1
-    assert listed[0]["changed_fields"] is None
+    assert [row["version"] for row in listed] == [2, 1]
+    assert listed[1]["changed_fields"] is None
+    assert listed[0]["changed_fields"] is not None
 
 
 def test_version_rows_report_actual_content_changes(service, tmp_path, monkeypatch):
