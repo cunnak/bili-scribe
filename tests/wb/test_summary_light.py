@@ -308,6 +308,40 @@ class FakeResolver:
         )
 
 
+class FakeCollectionResolver:
+    """模拟合集：解析结果按下载器形状返回两集，用户输入的是第二集。"""
+
+    def resolve(self, raw: str) -> Resolution:
+        return Resolution(
+            kind="collection",
+            title="合集中的某一集",
+            up_name="示例UP",
+            up_mid=170001,
+            collection_title="合集名",
+            raw=raw,
+            items=[
+                Item(
+                    bvid="BV1first411c",
+                    aid=170001,
+                    cid=11,
+                    page_no=1,
+                    title="第一集 结构",
+                    collection_index=0,
+                    duration_ms=500000,
+                ),
+                Item(
+                    bvid="BV1second411",
+                    aid=170002,
+                    cid=22,
+                    page_no=1,
+                    title="第二集 通道",
+                    collection_index=1,
+                    duration_ms=700000,
+                ),
+            ],
+        )
+
+
 def rpc(service, method, params=None):
     out = service.dispatch(method, params or {})
     assert out.get("ok") is True, out
@@ -330,6 +364,18 @@ def wire(service, *, logged_in=True, payload=None):
             "https://x/ai.json": json3((0.0, "第一段"), (20.0, "第二段")),
         },
         logged_in=logged_in,
+    )
+    return service
+
+
+def wire_collection(service):
+    service._resolver = FakeCollectionResolver()
+    service._gateway = FakeGateway(
+        {
+            PLAYER: player_payload(track("ai-zh", "https://x/ai.json", "中文（AI生成）")),
+            "https://x/ai.json": json3((0.0, "第二集字幕")),
+        },
+        logged_in=True,
     )
     return service
 
@@ -362,6 +408,32 @@ def test_probe_without_login_still_answers(service):
 def test_probe_without_a_url_is_a_validation_error(service):
     error = err(service, "summary.light.probe", {"url": "   "})
     assert error["code"] == "VALIDATION"
+
+
+def test_probe_picks_the_requested_bv_from_a_collection(service):
+    wire_collection(service)
+
+    data = rpc(service, "summary.light.probe", {"url": "BV1second411"})
+
+    assert data["bvid"] == "BV1second411", "不能把合集第一集当成用户输入的视频"
+    assert data["cid"] == 22
+    assert data["title"] == "第二集 通道"
+    assert data["collection_index"] == 1
+    assert [item["bvid"] for item in data["items"]] == ["BV1first411c", "BV1second411"]
+
+
+def test_prepare_for_a_collection_bv_uses_that_episodes_subtitles(service):
+    wire_collection(service)
+
+    data = rpc(service, "summary.light.prepare", {"url": "BV1second411"})
+    project = service.repo.project_get(data["project_id"])
+
+    assert project["bvid"] == "BV1second411"
+    assert project["cid"] == 22
+    assert project["title"] == "第二集 通道"
+    player_calls = [call for call in service._gateway.calls if call[0] == PLAYER]
+    assert player_calls, "取字幕必须真的请求播放器接口"
+    assert {call[1].get("cid") for call in player_calls} == {22}, player_calls
 
 
 def test_prepare_writes_the_subtitles_and_marks_the_origin(service):

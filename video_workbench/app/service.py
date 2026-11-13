@@ -3227,9 +3227,36 @@ class WorkbenchService:
             raise WBError("VALIDATION", "请先输入 av/BV 号或视频链接")
         res = self._resolver.resolve(raw)
         items = [item.to_payload() for item in res.items]
-        first = items[0] if items else {}
-        aid = int(first.get("aid") or 0)
-        cid = int(first.get("cid") or 0)
+        # Resolver 对合集返回整季，这是下载器需要的形状；轻量总结只处理用户
+        # 输入的那一条。按输入里的 BV/av 找 items 里的对应项，绝不能拿 items[0]：
+        # 合集里的第二集会被错拿成第一集的 cid，字幕与总结内容就会对不上。
+        selected = items[0] if items else {}
+        wanted_kind = ""
+        wanted_value = ""
+        try:
+            wanted_kind, wanted_value, _ = resolver_mod.identify(raw)
+        except WBError:
+            pass
+        if items and wanted_kind == "bv" and wanted_value:
+            hit = next(
+                (
+                    item
+                    for item in items
+                    if str(item.get("bvid") or "").lower() == wanted_value.lower()
+                ),
+                None,
+            )
+            if hit is not None:
+                selected = hit
+        elif items and wanted_kind == "av" and wanted_value:
+            hit = next(
+                (item for item in items if str(item.get("aid") or "") == str(wanted_value)),
+                None,
+            )
+            if hit is not None:
+                selected = hit
+        aid = int(selected.get("aid") or 0)
+        cid = int(selected.get("cid") or 0)
         logged_in = False
         subtitles: list[dict[str, Any]] = []
         note = ""
@@ -3241,16 +3268,18 @@ class WorkbenchService:
         return {
             "raw": raw,
             "kind": res.kind,
-            "title": res.title,
+            "title": str(selected.get("title") or res.title or ""),
             "up_name": res.up_name,
             "up_mid": int(res.up_mid or 0),
             "collection_title": res.collection_title,
             "page_count": len(items) or 1,
-            "bvid": str(first.get("bvid") or ""),
+            "bvid": str(selected.get("bvid") or ""),
             "aid": aid,
             "cid": cid,
-            "page": int(first.get("page") or 1),
-            "duration_ms": int(first.get("duration_ms") or 0),
+            "page": int(selected.get("page") or 1),
+            "duration_ms": int(selected.get("duration_ms") or 0),
+            "collection_index": selected.get("collection_index"),
+            "part_title": str(selected.get("part_title") or ""),
             "items": items,
             "logged_in": logged_in,
             "subtitles": subtitles,
@@ -3467,8 +3496,8 @@ class WorkbenchService:
             up_name=str(info.get("up_name") or ""),
             up_mid=int(info.get("up_mid") or 0),
             collection_title=str(info.get("collection_title") or ""),
-            collection_index=None,
-            part_title="",
+            collection_index=info.get("collection_index"),
+            part_title=str(info.get("part_title") or ""),
             url=raw or file_path,
         )
         project_id = str(project.get("id") or "")
