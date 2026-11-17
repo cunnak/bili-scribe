@@ -178,6 +178,7 @@ class ServerPatch(BaseModel):
 class LlmPatch(BaseModel):
     base_url: str = Field(min_length=1, max_length=500)
     api_key: str = ""
+    clear_api_key: bool = False
     model: str = Field(min_length=1, max_length=200)
     temperature: float = Field(ge=0, le=2)
     max_tokens: int = Field(ge=1, le=200000)
@@ -193,6 +194,14 @@ class LlmPatch(BaseModel):
     # 用 str + 显式校验而不是 Literal：角色清单定义在 core/roles.py 里，
     # 双份维护迟早会漂移。校验失败时把可选清单一起返回，比 422 有用。
     role: str = "standard"
+
+
+def _resolved_llm_patch(current: LlmConfig, patch: LlmPatch) -> dict[str, Any]:
+    """把表单提交的 llm 补丁整理成配置字典：未填新 key 且未显式清空时保留原 key。"""
+    data = patch.model_dump(exclude={"clear_api_key"})
+    if not patch.api_key and not patch.clear_api_key:
+        data["api_key"] = current.api_key
+    return data
 
 
 class DanmakuPatch(BaseModel):
@@ -1014,7 +1023,9 @@ class Service:
                 "没有确认环节；误发了只能自己去评论区删。",
             )
 
-        restart_sections = apply_settings(cfg, payload.model_dump())
+        values = payload.model_dump()
+        values["llm"] = _resolved_llm_patch(cfg.llm, payload.llm)
+        restart_sections = apply_settings(cfg, values)
 
         try:
             written = save_config(cfg, cfg.source_path)
@@ -1038,9 +1049,13 @@ class Service:
         """测试模型连通性。
 
         可以带上还没保存的值，这样能"先测再存"——不必为了试一个 key 先写盘再改回来。
-        不传就用当前生效的配置。
+        不传就用当前生效的配置；留空 api_key 时沿用当前已配置的密钥。
         """
-        llm_cfg = LlmConfig(**payload.model_dump()) if payload is not None else self.state.cfg.llm
+        llm_cfg = (
+            LlmConfig(**_resolved_llm_patch(self.state.cfg.llm, payload))
+            if payload is not None
+            else self.state.cfg.llm
+        )
         ok, detail = LlmClient(llm_cfg).health_check()
         return {
             "ok": ok,

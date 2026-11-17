@@ -3294,11 +3294,13 @@ def _settings_api() -> None:
             assert data["gate_disabled"] is False, data["gate_disabled"]
             for section in ("server", "llm", "collect", "publish", "storage"):
                 assert section in data["values"], f"缺少 {section} 段"
+            assert "api_key" not in data["values"]["llm"], "/api/settings 泄露了明文 api_key"
+            assert isinstance(data["values"]["llm"].get("configured"), bool), data["values"]["llm"]
             # 主页面每次都打 /api/config，密钥绝不能出现在那里
             pub = requests.get(base + "/api/config", timeout=10).json()
             assert "api_key" not in pub["llm"], "公开展示接口泄露了 api_key"
             assert "source_path" not in pub, "公开展示接口泄露了 source_path"
-            return "五段齐备，/api/config 不含 api_key"
+            return "五段齐备，/api/settings 与 /api/config 均不含明文 api_key"
 
         run("GET /api/settings 结构", _get_shape)
 
@@ -3327,7 +3329,9 @@ def _settings_api() -> None:
             assert after["llm"]["model"] == "smoke-test-model", after["llm"]["model"]
             assert after["llm"]["temperature"] == 0.7
             assert after["publish"]["min_interval_seconds"] == 42
-            return f"PUT 后回读一致，{on_disk} 字节，备份已生成"
+            assert "api_key" not in after["llm"], "保存后 /api/settings 回传了明文 api_key"
+            assert after["llm"]["configured"] is True, after["llm"]
+            return f"PUT 后回读一致且密钥脱敏，{on_disk} 字节，备份已生成"
 
         run("PUT /api/settings 往返", _put_roundtrip)
 
@@ -3423,6 +3427,31 @@ def _settings_api() -> None:
             return "确认后关闭，状态同步到 /api/config"
 
         run("确认后可关闭闸门", _gate_can_be_disabled)
+
+        def _trusted_host_blocks_rebinding() -> str:
+            r = requests.get(
+                base + "/api/settings",
+                headers={"Host": "evil.example.com:8818"},
+                timeout=10,
+            )
+            assert r.status_code == 400, f"期望 TrustedHost 拒掉 400，实际 {r.status_code}"
+            return "400 · 非法 Host 被 TrustedHostMiddleware 拦截"
+
+        run("TrustedHost 拦截 DNS rebinding Host", _trusted_host_blocks_rebinding)
+
+        def _test_llm_reuses_saved_key() -> str:
+            patch = copy.deepcopy(payload["llm"])
+            patch["api_key"] = ""
+            patch["base_url"] = "http://127.0.0.1:1/v1"
+            patch["timeout_seconds"] = 5
+            r = requests.post(base + "/api/settings/test-llm", json=patch, timeout=15)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+            body = r.json()
+            assert body["ok"] is False
+            assert "未配置 api_key" not in body.get("detail", ""), body
+            return "留空 api_key 测连通自动沿用已保存密钥"
+
+        run("测连通留空 api_key 沿用已保存密钥", _test_llm_reuses_saved_key)
 
         # —— 角色切换（顶栏那个独立选择器） ——
         #

@@ -81,7 +81,7 @@ function makeBackend(overrides) {
     history: [],
     notes: { entries: 0, bytes: 0, dir: "/home/u/.bili-scribe/notes", session_hits: 0, session_misses: 0 },
     settings: {
-      values: { llm: { model: "qwen-test", base_url: "https://example.invalid/v1", api_key: "sk-x", role: "wengao" } },
+      values: { llm: { model: "qwen-test", base_url: "https://example.invalid/v1", configured: true, role: "wengao" } },
       path: "/home/u/.bili-scribe/config.yaml",
       config_exists: true,
       gate_disabled: false,
@@ -947,6 +947,24 @@ test("测试连通性发的是 llm 那一段本身，不再多包一层", async 
     assert(G6, "没有多包一层 llm", !(arg && arg.llm), "还带着 llm 这层壳");
     eq(G6, "模型名跟着一起发了", arg ? arg.model : null, "qwen-test");
     eq(G6, "结果显示在抽屉里", p.$("d-msg").className.includes("ok"), true);
+  } finally { p.close(); }
+});
+
+test("已配置密钥时输入框留空并提示，输入新密钥保存后清空", async () => {
+  const p = await loadPage();
+  try {
+    p.win.openDrawer();
+    await wait(80);
+    eq(G6, "读取设置后密钥框为空（不回填明文）", p.$("s-key").value, "");
+    assert(G6, "提示已配置密钥", p.$("s-key").placeholder.includes("已配置"),
+      "placeholder=" + p.$("s-key").placeholder);
+
+    p.$("s-key").value = "sk-new-test";
+    await p.win.saveSettings();
+    await wait(90);
+    const c = p.backend.calls.find((x) => x.name === "save_settings");
+    eq(G6, "保存时带上了新输入的密钥", c ? c.args[0].llm.api_key : null, "sk-new-test");
+    eq(G6, "保存后密钥框被清空", p.$("s-key").value, "");
   } finally { p.close(); }
 });
 

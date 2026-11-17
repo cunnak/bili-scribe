@@ -2792,6 +2792,13 @@ function collectSettings() {
   return out;
 }
 
+function syncApiKeyPlaceholder(configured) {
+  const el = $("s-key");
+  if (!el) return;
+  el.value = "";
+  el.placeholder = configured ? "已配置密钥（留空则保持不变）" : "sk-…";
+}
+
 function syncGateAck() {
   const on = $("s-gate").checked;
   $("gate-ack").classList.toggle("hidden", on);
@@ -2811,6 +2818,7 @@ async function loadSettings() {
     const d = await call("get_settings");
     S.settingsLoaded = true;
     fillSettings(d.values);
+    syncApiKeyPlaceholder(!!(d.values && d.values.llm && d.values.llm.configured));
     $("d-msg").textContent = d.config_exists
       ? "配置文件：" + d.path
       : "配置文件还没创建，保存时会新建：" + d.path;
@@ -2858,6 +2866,7 @@ async function saveSettings() {
     const values = collectSettings();
     const r = await call("save_settings", values);
     S.cfg = await call("get_config");
+    syncApiKeyPlaceholder(!!(S.cfg && S.cfg.llm && S.cfg.llm.configured));
     renderTop();
     $("d-msg").textContent = "已写入 " + r.written +
       (r.restart_required ? " · " + (r.restart_sections || []).join("、") + " 段需要重启程序才生效"

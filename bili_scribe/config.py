@@ -278,14 +278,12 @@ class AppConfig:
         return data
 
     def settings_view(self) -> dict[str, Any]:
-        """设置页面用的完整视图，含明文 api_key。
+        """设置页面用的配置视图，绝不回传明文 api_key。
 
-        单独一个方法而不是复用 public_view：调用点不同、暴露面不同，
-        混在一起迟早会有人把密钥带到不该去的地方。
+        只通过 `llm.configured` 告知前端是否已配置密钥；保存其它配置时留空
+        提交即可，服务端会保留原有密钥而不覆盖。
         """
-        data = asdict(self)
-        data.pop("source_path", None)
-        return data
+        return self.public_view()
 
 
 # ----------------------------------------------------------------- 应用

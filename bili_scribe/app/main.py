@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -84,6 +85,12 @@ def _http(exc: ServiceError) -> HTTPException:
 
 def create_app(cfg: AppConfig) -> FastAPI:
     app = FastAPI(title="bili-scribe", version=__version__)
+    # 防止 DNS rebinding 绕过本机绑定读取 /api/settings 等接口。
+    allowed_hosts = ["127.0.0.1", "localhost", "[::1]", "::1"]
+    bound_host = (cfg.server.host or "").strip().lower()
+    if bound_host and bound_host not in ("0.0.0.0", "::", "*", *allowed_hosts):
+        allowed_hosts.append(bound_host)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
     # `service` 在 AppState 之外多管两件启动期的事（清残留画面缓存、探测二维码依赖），
     # 所以这里构造它而不是自己 new AppState。
     service = Service(cfg)
