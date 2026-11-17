@@ -122,9 +122,7 @@ class DanmakuConfig:
 
 @dataclass
 class CollectConfig:
-    prefer_subtitle_lang: list[str] = field(
-        default_factory=lambda: list(DEFAULT_SUBTITLE_LANGS)
-    )
+    prefer_subtitle_lang: list[str] = field(default_factory=lambda: list(DEFAULT_SUBTITLE_LANGS))
     include_platform_summary: bool = True
     danmaku: DanmakuConfig = field(default_factory=DanmakuConfig)
     frames: FramesConfig = field(default_factory=FramesConfig)
@@ -200,9 +198,7 @@ class AppConfig:
             known = {f.name for f in dataclass_fields(node)}
             unknown = set(values) - known
             if unknown:
-                raise ValueError(
-                    f"{node.__name__} 存在未知配置项：{', '.join(sorted(unknown))}"
-                )
+                raise ValueError(f"{node.__name__} 存在未知配置项：{', '.join(sorted(unknown))}")
             return node(**values)
 
         raw: dict[str, Any] = {}
@@ -244,18 +240,14 @@ class AppConfig:
         if frames_cfg.max_frames < 0:
             raise ValueError(f"collect.frames.max_frames 不能为负，收到：{frames_cfg.max_frames}")
         if not 1 <= frames_cfg.quality <= 100:
-            raise ValueError(
-                f"collect.frames.quality 必须在 1–100，收到：{frames_cfg.quality}"
-            )
+            raise ValueError(f"collect.frames.quality 必须在 1–100，收到：{frames_cfg.quality}")
 
         ui_cfg = section(UiConfig, raw.get("ui"))
         # 皮肤名写错时必须当场报错，不能默默用默认值：
         # CSS 里没有对应的变量块时，界面会变成"所有颜色都取不到"的白板，
         # 而配置文件本身看起来完全正常 —— 那种问题排查起来最费时间。
         if ui_cfg.skin not in SKIN_KEYS:
-            raise ValueError(
-                f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{ui_cfg.skin!r}"
-            )
+            raise ValueError(f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{ui_cfg.skin!r}")
 
         return cls(
             server=section(ServerConfig, raw.get("server")),
@@ -264,9 +256,7 @@ class AppConfig:
                 prefer_subtitle_lang=list(
                     collect_raw.get("prefer_subtitle_lang", DEFAULT_SUBTITLE_LANGS)
                 ),
-                include_platform_summary=bool(
-                    collect_raw.get("include_platform_summary", True)
-                ),
+                include_platform_summary=bool(collect_raw.get("include_platform_summary", True)),
                 danmaku=section(DanmakuConfig, danmaku_raw),
                 frames=frames_cfg,
             ),
@@ -336,9 +326,7 @@ def apply_settings(cfg: AppConfig, values: dict[str, Any]) -> list[str]:
     if cfg.ui.skin not in SKIN_KEYS:
         bad = cfg.ui.skin
         cfg.ui.skin = previous_skin
-        raise ValueError(
-            f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{bad!r}"
-        )
+        raise ValueError(f"ui.skin 只能是 {' / '.join(SKIN_KEYS)}，收到：{bad!r}")
     return restarted
 
 
@@ -351,6 +339,7 @@ def render_config_yaml(cfg: AppConfig) -> str:
     刻意不用 `yaml.dump`：它会把所有注释丢掉。这个文件是给人看的，
     注释本身就是文档，丢了以后只剩一堆裸键值。
     """
+
     def q(value: Any) -> str:
         # JSON 字符串转义是 YAML 双引号标量的子集，直接借来用，
         # 省得自己处理中文、引号、反斜杠的转义。
@@ -391,7 +380,7 @@ def render_config_yaml(cfg: AppConfig) -> str:
             f"  timeout_seconds: {cfg.llm.timeout_seconds}",
             "  # 调用模型时走的 HTTP 代理。留空 = 直连，并且不读 HTTP_PROXY/HTTPS_PROXY 环境变量。",
             "  # 有些站点（DNS 被污染的那些）必须走代理才能连上，填上你的代理地址，例如：",
-            "  #   proxy: \"http://127.0.0.1:7897\"",
+            '  #   proxy: "http://127.0.0.1:7897"',
             f"  proxy: {q(cfg.llm.proxy)}",
             "  # 总结角色。可选：standard / xueshu（学术分析）/ wengao（文稿编辑）/",
             "  # xiezuo（写作专家）/ fenxi（分析报告）/ jinglian（首席思想精炼师）。",

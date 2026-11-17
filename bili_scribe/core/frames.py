@@ -266,9 +266,7 @@ def _crop_frames(client, cfg: FramesConfig, aid: int, cache: Path, notify) -> "F
             raise FrameError(f"抽帧接口调用失败：{exc}") from exc
         code = res.get("code")
         if code != 0:
-            raise FrameError(
-                f"抽帧接口返回 code={code}：{res.get('message') or '未知原因'}"
-            )
+            raise FrameError(f"抽帧接口返回 code={code}：{res.get('message') or '未知原因'}")
         data = res.get("data") or {}
         urls = [u if u.startswith("http") else "https:" + u for u in (data.get("image") or [])]
         if not urls:
@@ -281,9 +279,7 @@ def _crop_frames(client, cfg: FramesConfig, aid: int, cache: Path, notify) -> "F
             "cw": int(data.get("img_x_size") or 480),
             "ch": int(data.get("img_y_size") or 270),
         }
-        (cache / "meta.json").write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
+        (cache / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
     urls: list[str] = meta["urls"]
     index: list[int] = meta["index"]
@@ -317,9 +313,7 @@ def _crop_frames(client, cfg: FramesConfig, aid: int, cache: Path, notify) -> "F
                 except BiliError as exc:
                     raise FrameError(f"抽帧图下载失败：{exc}") from exc
                 try:
-                    fetched_sprites[sprite_i] = Image.open(
-                        io.BytesIO(raw_sprite)
-                    ).convert("RGB")
+                    fetched_sprites[sprite_i] = Image.open(io.BytesIO(raw_sprite)).convert("RGB")
                 except (UnidentifiedImageError, OSError) as exc:
                     raise FrameError(f"抽帧图不是有效图片：{exc}") from exc
             box = cell_box(cell, grid_x, grid_y, cw, ch)

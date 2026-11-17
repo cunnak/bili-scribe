@@ -208,9 +208,7 @@ def _dark_title_bar(window: webview.Window) -> None:
         dwm = ctypes.windll.dwmapi
         for attr in (20, 19):
             value = ctypes.c_int(1 if dark_skin else 0)
-            dwm.DwmSetWindowAttribute(
-                hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
-            )
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(value), ctypes.sizeof(value))
         # COLORREF 是 0x00BBGGRR，和 CSS 的 #RRGGBB 反着来。
         color = ctypes.c_int(r | (g << 8) | (b << 16))
         dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(color), ctypes.sizeof(color))
@@ -296,8 +294,7 @@ def _patch_webview_settings_hook() -> None:
                 _apply_shell_settings(settings)
                 state = _read_shell_settings(settings)
                 print(
-                    "[ctx] sender 上已设并读回："
-                    + " / ".join(k for k, v in state.items() if v),
+                    "[ctx] sender 上已设并读回：" + " / ".join(k for k, v in state.items() if v),
                     flush=True,
                 )
             except Exception as exc:  # noqa: BLE001

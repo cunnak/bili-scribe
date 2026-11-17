@@ -87,7 +87,9 @@ def build_preview(bundle: Bundle, summary: Summary, cfg: PublishConfig) -> str:
         lines.append("## 时间轴")
         for item in summary.timeline:
             stamp = item.get("t", "")
-            lines.append(f"- `{stamp}` {item.get('text', '')}" if stamp else f"- {item.get('text', '')}")
+            lines.append(
+                f"- `{stamp}` {item.get('text', '')}" if stamp else f"- {item.get('text', '')}"
+            )
         lines.append("")
 
     if summary.caution:

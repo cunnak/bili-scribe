@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import re
 import secrets
-import shutil
 import time
 from pathlib import Path
 

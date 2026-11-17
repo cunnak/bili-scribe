@@ -1,55 +1,45 @@
-config.yaml
-config.yml
-# 设置页保存配置时的备份/中间文件，可能含真实 api_key
-config.yaml.bak*
-config.yaml.tmp*
-# 上面两条的 config.yml 版本：第 2 行承认这个兼容写法，save() 同样会写出它的
-# .bak/.tmp。少这两行等于「用 config.yml 的人，备份文件不设防」——
-# 这条是 tests/wb/test_secret_paths_ignored.py 第一次跑就自己抓出来的。
-config.yml.bak*
-config.yml.tmp*
-# sidecar 存的是 **全量**配置：llm.providers 里每一家服务商的 api_key 都在里面
-# （video_workbench/config.py:68 的 EXT_NAME，save() 在 :807-810 整份 asdict 落盘）。
-# 它比 config.yaml 更敏感——config.yaml 只有当前那一家的一把 key。
-# 拦住它的是 tests/wb/test_secret_paths_ignored.py：文件名改了那边会红。
-workbench.json
-workbench.json.bak*
-workbench.json.tmp*
-workbench.llm.json
-workbench.llm.json.bak*
-workbench.llm.json.tmp*
-*.db
-*.db-wal
-*.db-shm
-key.bin
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
-venv/
-uvicorn.log
-# 桌面版 --windowed 下没有控制台，日志写在 exe 旁边（或临时目录）
-bili-scribe.log
-
-# 打包产物与编辑器目录
-dist/
-build/
-*.spec
-.idea/
-.vscode/
-node_modules/
 .pytest_cache/
+.ruff_cache/
 
-# 在仓库目录里运行 gh 时它会把自己的状态写到这里（device-id 之类）。
-# 不是项目内容，但会一直挂在 git status 里，所以挡掉。
-.local/
+# Node
+node_modules/
 
-# 实机截图里有真实 UID、用户名和观看记录，不进仓库。
-# 验收照常生成本地文件，只是不提交——样张（docs/design/style-probe*）用的是虚构数据，可以留。
-docs/design/app-exe.png
-docs/design/app-shot-*.png
+# Local config / secrets / logs
+config.yaml*
+config.yaml.bak
+config.yaml.tmp
+*bench*.json*
+*.log
+logs/
 
-# VideoWorkbench 验收矩阵每次重跑都重拍这些样张，不入库
-docs/acceptance/matrix/
-
-# 某次脚本把 %APPDATA% 当字面量建出来的日志目录
-%APPDATA%/
+# Local-only legacy product copy — never publish
+/video_*/
+/README-Video*.md
+/tests/w?/
+/scripts/build_w?.py
+/scripts/accept_*.py
+/scripts/backfill_collection_index.py
+/scripts/bench_*.py
+/scripts/check_colors.py
+/scripts/dirty_report.py
+/scripts/make_wb_icon.py
+/scripts/p502_child.py
+/scripts/probe_frozen_naming.py
+/scripts/shoot_wb.py
+/scripts/sync_mirror*.py
+/scripts/verify_cover_fix.py
+/scripts/verify_manual.py
+/docs/acceptance/
+/report/
+/dist/Video*/
+/build/
+/Temp/
+/_tmp_imgs/
+/mockups/
+/assets/
+/_tiku/
+*.spec

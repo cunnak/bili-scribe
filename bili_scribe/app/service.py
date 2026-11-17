@@ -434,8 +434,14 @@ def sum_usage(versions: list[dict[str, Any]]) -> dict[str, int]:
     **根本没调用模型**，消耗是确定的 0，而不是"不知道"。把它当成"未记录"会让人
     以为账丢了。
     """
-    total = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
-             "reasoning_tokens": 0, "total_tokens": 0, "unpriced": 0}
+    total = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "unpriced": 0,
+    }
     untracked = 0
     for version in versions:
         if version.get("source") == "restore":
@@ -616,9 +622,7 @@ def run_task(
 
         # 上传件在创建任务时已校验过存在性。真读不到（极端情况下被兜底清理捡走了）
         # 就按"没有上传件"继续——采集层会降级回平台字幕，不会让任务失败。
-        user_srt = (
-            uploads.load(state.cfg.db_path, subtitle_token) if subtitle_token else None
-        )
+        user_srt = uploads.load(state.cfg.db_path, subtitle_token) if subtitle_token else None
 
         bundle = collector_mod.collect(
             client,
@@ -673,9 +677,7 @@ def run_task(
         )
         note_bundle = copy.copy(bundle)
         note_bundle.body = material.body
-        state.remember_prepared(
-            task_id, RefineContext(bundle=note_bundle, material=material)
-        )
+        state.remember_prepared(task_id, RefineContext(bundle=note_bundle, material=material))
 
         summary = summarizer.summarize(
             bundle,
@@ -785,9 +787,7 @@ def run_refine(
             role_key=role,
             frameset=frameset,
             prepared=ctx.material,
-            refinement=summarizer.Refinement(
-                requirement=requirement, previous=previous
-            ),
+            refinement=summarizer.Refinement(requirement=requirement, previous=previous),
         )
         comment_text = composer.build_comment(summary, ctx.bundle, state.cfg.publish)
         preview_md = composer.build_preview(ctx.bundle, summary, state.cfg.publish)
@@ -810,9 +810,7 @@ def run_refine(
         # ⚠️ 失败时把状态放回 ready，不是 failed：**上一版还在**，还能继续用、
         # 继续改。打成 failed 会把已有成果一起作废——那是最不该发生的事。
         # 也不写版本：没改成的那一版不是一版，记进去只会让版本史说谎。
-        store.update_task(
-            task_id, status="ready", progress=f"这一版没改成：{exc}", error=str(exc)
-        )
+        store.update_task(task_id, status="ready", progress=f"这一版没改成：{exc}", error=str(exc))
     except Exception as exc:  # 兜底，理由同上
         traceback.print_exc()
         store.update_task(
@@ -897,8 +895,7 @@ class Service:
         if role not in summarizer.roles.ROLE_KEYS:
             raise ServiceError(
                 400,
-                f"未知的总结角色：{role}。可选："
-                + "、".join(summarizer.roles.ROLE_KEYS),
+                f"未知的总结角色：{role}。可选：" + "、".join(summarizer.roles.ROLE_KEYS),
             )
 
         cfg = self.state.cfg
@@ -940,9 +937,7 @@ class Service:
         """
         skin = payload.skin
         if skin not in SKIN_KEYS:
-            raise ServiceError(
-                400, f"未知的皮肤：{skin}。可选：" + "、".join(SKIN_KEYS)
-            )
+            raise ServiceError(400, f"未知的皮肤：{skin}。可选：" + "、".join(SKIN_KEYS))
 
         cfg = self.state.cfg
         if not cfg.source_path:
@@ -992,9 +987,7 @@ class Service:
                 "chunk_overlap 必须小于 chunk_size，否则分块窗口不会向前推进。",
             )
         if payload.publish.max_comment_chars > 1000:
-            raise ServiceError(
-                400, "评论上限不能超过 1000，这是平台的硬限制。"
-            )
+            raise ServiceError(400, "评论上限不能超过 1000，这是平台的硬限制。")
         if payload.llm.role not in summarizer.roles.ROLE_KEYS:
             raise ServiceError(
                 400,
@@ -1013,9 +1006,7 @@ class Service:
                 )
         payload.llm.proxy = proxy
 
-        turning_off_gate = (
-            cfg.publish.require_confirm and not payload.publish.require_confirm
-        )
+        turning_off_gate = cfg.publish.require_confirm and not payload.publish.require_confirm
         if turning_off_gate and not payload.confirm_disable_gate:
             raise ServiceError(
                 400,
@@ -1049,9 +1040,7 @@ class Service:
         可以带上还没保存的值，这样能"先测再存"——不必为了试一个 key 先写盘再改回来。
         不传就用当前生效的配置。
         """
-        llm_cfg = (
-            LlmConfig(**payload.model_dump()) if payload is not None else self.state.cfg.llm
-        )
+        llm_cfg = LlmConfig(**payload.model_dump()) if payload is not None else self.state.cfg.llm
         ok, detail = LlmClient(llm_cfg).health_check()
         return {
             "ok": ok,
@@ -1183,9 +1172,7 @@ class Service:
         ).start()
         return {
             "task_id": task_id,
-            "role": summarizer.roles.get_role(
-                payload.role or self.state.cfg.llm.role
-            ).key,
+            "role": summarizer.roles.get_role(payload.role or self.state.cfg.llm.role).key,
         }
 
     @_api
@@ -1215,9 +1202,7 @@ class Service:
         # 已发出的评论改不了，再打磨只能是为了撤回重发。
         # 只取几个字段：发布记录里存着整段评论正文，原样带出来会让任务详情接口
         # 白白多背几 KB，而界面只需要知道"发过没有、是哪一条、什么时候"。
-        live = (
-            self.state.store.find_live_publish(task["bvid"]) if task.get("bvid") else None
-        )
+        live = self.state.store.find_live_publish(task["bvid"]) if task.get("bvid") else None
         task["live_publish"] = (
             {
                 "publish_id": live["id"],
@@ -1255,11 +1240,7 @@ class Service:
             raise ServiceError(404, f"这条没有第 {version_no} 版")
         current = self.state.store.latest_version_no(task_id)
         # 详情页也给同一份"实际改了什么"，免得同一件事在两个地方口径不同
-        previous = (
-            self.state.store.get_version(task_id, version_no - 1)
-            if version_no > 1
-            else None
-        )
+        previous = self.state.store.get_version(task_id, version_no - 1) if version_no > 1 else None
         payload = version_brief(version, current, previous)
         payload["summary_json"] = version.get("summary_json") or {}
         payload["preview_md"] = version.get("preview_md") or ""
@@ -1329,9 +1310,7 @@ class Service:
 
         summary_json = task.get("summary_json")
         if not summary_json:
-            raise ServiceError(
-                400, "这条任务还没有生成过总结，没有可改的底稿。先跑一次总结。"
-            )
+            raise ServiceError(400, "这条任务还没有生成过总结，没有可改的底稿。先跑一次总结。")
 
         allowed, blocked = refine_gate(self.state, task)
         if not allowed:
@@ -1364,9 +1343,7 @@ class Service:
         # 先占名额再起线程：检查与占用之间如果隔了一行，两个几乎同时到达的请求
         # 会双双通过检查。占位失败说明已经有一版在改。
         if not self.state.begin_refine(task_id):
-            raise ServiceError(
-                409, "这条视频已经有一版在改了，等它出结果再提新要求。"
-            )
+            raise ServiceError(409, "这条视频已经有一版在改了，等它出结果再提新要求。")
 
         # 上一版给**完整 JSON**：模型这次要输出同构结构，让它看到上一版的每个字段，
         # 比只给 summary_md 更能避免「顺手把别的字段也重写了」。
@@ -1451,9 +1428,7 @@ class Service:
         if task is None:
             raise ServiceError(404, "任务不存在")
         if task.get("status") != "ready":
-            raise ServiceError(
-                400, f"任务当前状态是「{task.get('status')}」，还不能发布"
-            )
+            raise ServiceError(400, f"任务当前状态是「{task.get('status')}」，还不能发布")
 
         client = self.state.new_client()
         publisher = Publisher(client, self.state.store, self.state.cfg.publish)

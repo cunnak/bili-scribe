@@ -157,7 +157,13 @@ def _join_lines(parts: list[str]) -> str:
     cleaned = [piece for piece in (clean_markup(p) for p in parts) if piece]
     out = ""
     for piece in cleaned:
-        if out and out[-1].isascii() and out[-1].isalnum() and piece[0].isascii() and piece[0].isalnum():
+        if (
+            out
+            and out[-1].isascii()
+            and out[-1].isalnum()
+            and piece[0].isascii()
+            and piece[0].isalnum()
+        ):
             out += " "
         out += piece
     return out.strip()

@@ -64,9 +64,7 @@ def resolve(raw: str, client: BiliClient) -> Target:
             raise ResolveError(f"av{aid} 没有返回对应的 bvid")
         return Target(bvid=bvid, page=page, raw=raw, aid=aid)
 
-    raise ResolveError(
-        "没认出 BV 号。可以粘贴完整链接、b23.tv 短链、BV 号或 av 号"
-    )
+    raise ResolveError("没认出 BV 号。可以粘贴完整链接、b23.tv 短链、BV 号或 av 号")
 
 
 def format_duration(seconds: int | float) -> str:

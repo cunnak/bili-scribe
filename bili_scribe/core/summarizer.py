@@ -324,8 +324,8 @@ def diff_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[dict[
     所以要点出"有几项不同"并给一个例子。
     """
     changed: list[dict[str, Any]] = []
-    for field, label in CONTENT_FIELDS:
-        old, new = previous.get(field), current.get(field)
+    for field_key, label in CONTENT_FIELDS:
+        old, new = previous.get(field_key), current.get(field_key)
         if old == new:
             continue
         if isinstance(old, list) or isinstance(new, list):
@@ -343,7 +343,7 @@ def diff_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[dict[
             )
             changed.append(
                 {
-                    "field": field,
+                    "field": field_key,
                     "label": label,
                     "kind": "list",
                     "detail": f"{len(old_items)} 项 → {len(new_items)} 项，其中 {differ} 项内容不同",
@@ -357,7 +357,7 @@ def diff_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[dict[
         ratio = difflib.SequenceMatcher(None, old_text, new_text).ratio()
         changed.append(
             {
-                "field": field,
+                "field": field_key,
                 "label": label,
                 "kind": "text",
                 "detail": f"{len(old_text)} → {len(new_text)} 字",
@@ -417,9 +417,7 @@ def prepare_material(
         hit = cache.get(key)
         if hit is not None:
             notify("mapping", f"复用已存的预读笔记（{hit['chunks']} 段，跳过预读）")
-            return PreparedMaterial(
-                body=hit["body"], chunks=hit["chunks"], cached=True
-            )
+            return PreparedMaterial(body=hit["body"], chunks=hit["chunks"], cached=True)
 
     pieces = _split(body, llm_cfg.chunk_size, llm_cfg.chunk_overlap)
     chunks = len(pieces)
@@ -441,9 +439,7 @@ def prepare_material(
         )
         notes.append(note.strip())
 
-    merged = "\n\n".join(
-        f"【第 {index} 段笔记】\n{note}" for index, note in enumerate(notes, 1)
-    )
+    merged = "\n\n".join(f"【第 {index} 段笔记】\n{note}" for index, note in enumerate(notes, 1))
     budget = llm_cfg.max_input_chars * 2
     if len(merged) > budget:
         merged = merged[:budget] + "\n…（笔记已截断）"

@@ -19,6 +19,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
@@ -143,8 +144,17 @@ def _composer() -> str:
     long_text = "## 这是标题\n\n**要点**：这段很长。" * 40
     summary = Summary(one_line="一句话", summary_md=long_text, comment_short=long_text)
     bundle = Bundle(
-        bvid="BV1", aid=1, cid=1, page=1, page_count=1,
-        title="t", desc="", up_name="u", up_mid=1, duration=60, tname="x",
+        bvid="BV1",
+        aid=1,
+        cid=1,
+        page=1,
+        page_count=1,
+        title="t",
+        desc="",
+        up_name="u",
+        up_mid=1,
+        duration=60,
+        tname="x",
     )
     comment = build_comment(summary, bundle, cfg)
 
@@ -214,7 +224,10 @@ def _store() -> str:
 
     task_id = st.create_task("BV1xx411c7mD")
     st.update_task(
-        task_id, status="ready", warnings=["w1"], candidates=[{"k": 1}],
+        task_id,
+        status="ready",
+        warnings=["w1"],
+        candidates=[{"k": 1}],
         summary_json={"one_line": "x"},
     )
     task = st.get_task(task_id)
@@ -340,8 +353,11 @@ def _llm_thinking() -> str:
 
     def client(thinking: str) -> LlmClient:
         return LlmClient(
-            LlmConfig(api_key="k", model="m", base_url="http://example.invalid/v1", thinking=thinking)
+            LlmConfig(
+                api_key="k", model="m", base_url="http://example.invalid/v1", thinking=thinking
+            )
         )
+
     # ---------- 1. 参数发送策略 ----------
     assert THINKING_PARAM not in client("auto")._payload(msgs, None, None, False, "auto"), (
         "thinking=auto 不该发送任何相关参数（对非思考模型要保持兼容）"
@@ -455,15 +471,18 @@ def _llm_proxy() -> str:
 
     # ---------- 3. 环境变量不能漏进来（这条是核心） ----------
     # 用 requests 自己的解析函数取证：它就是真正决定"这次请求走哪个代理"的那一步。
-    saved = {k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
+    saved = {
+        k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    }
     try:
         for k in saved:
             os.environ[k] = "http://127.0.0.1:55159"
         plain2 = make()
-        merged = plain2.session.merge_environment_settings(url, dict(plain2.proxies or {}), None, None, None)
+        merged = plain2.session.merge_environment_settings(
+            url, dict(plain2.proxies or {}), None, None, None
+        )
         assert not merged.get("proxies"), (
-            f"环境变量里的代理漏进了请求：{merged.get('proxies')}——"
-            "这正是那个 502 事故的成因"
+            f"环境变量里的代理漏进了请求：{merged.get('proxies')}——这正是那个 502 事故的成因"
         )
         # 对照组：trust_env=True 时确实会读到，说明上面那条不是因为用例写错了
         leaky = requests.Session()
@@ -577,7 +596,9 @@ def _frames_module() -> str:
     assert cell_box(0, 10, 10, 480, 270) == (0, 0, 480, 270), cell_box(0, 10, 10, 480, 270)
     assert cell_box(9, 10, 10, 480, 270) == (4320, 0, 4800, 270), cell_box(9, 10, 10, 480, 270)
     assert cell_box(10, 10, 10, 480, 270) == (0, 270, 480, 540), cell_box(10, 10, 10, 480, 270)
-    assert cell_box(99, 10, 10, 480, 270) == (4320, 2430, 4800, 2700), cell_box(99, 10, 10, 480, 270)
+    assert cell_box(99, 10, 10, 480, 270) == (4320, 2430, 4800, 2700), cell_box(
+        99, 10, 10, 480, 270
+    )
     # 跨到第二张拼图时，格内下标要回绕（这是最容易写错的一处）
     assert cell_box(100, 10, 10, 480, 270) == (0, 0, 480, 270), cell_box(100, 10, 10, 480, 270)
 
@@ -598,7 +619,8 @@ def _frames_module() -> str:
     assert kinds == ["text", "image_url", "text", "image_url"], kinds
     assert all(
         b["image_url"]["url"].startswith("data:image/jpeg;base64,")
-        for b in blocks if b["type"] == "image_url"
+        for b in blocks
+        if b["type"] == "image_url"
     )
     # 必须明确"不要逐帧描述"——实测不然会烧掉大量输出 token
     assert "不要逐帧描述" in blocks[0]["text"], blocks[0]["text"]
@@ -783,8 +805,7 @@ def _frames_own_their_dir() -> str:
     assert not (Path(tmp_db).parent / "frames").exists(), "并发跑完还留着空壳目录"
 
     return (
-        "采完即清（成功、失败都清，连空壳目录一起收）；"
-        "同一视频并发采集互不干扰（每次采集独占目录）"
+        "采完即清（成功、失败都清，连空壳目录一起收）；同一视频并发采集互不干扰（每次采集独占目录）"
     )
 
 
@@ -861,9 +882,7 @@ def _frames_wired() -> str:
     assert kinds[0] == "text", f"第一个块必须是正文：{kinds[:2]}"
     assert kinds.count("image_url") == 2, f"应当有 2 张图，实际 {kinds.count('image_url')}：{kinds}"
     images = [c for c in content if c["type"] == "image_url"]
-    assert all(
-        c["image_url"]["url"].startswith("data:image/jpeg;base64,") for c in images
-    ), images
+    assert all(c["image_url"]["url"].startswith("data:image/jpeg;base64,") for c in images), images
     assert out.frames == 2, f"summary 要记下这次附了几帧，实际 {out.frames}"
     assert "reducing" in stages, stages
 
@@ -885,9 +904,7 @@ def _frames_wired() -> str:
 
     # 空帧集（采集拿不到图）不能把请求变成空数组，必须安全退回纯文本
     seen.clear()
-    out4 = summarizer.summarize(
-        bundle, FakeLlm(), cfg, role_key="standard", frameset=FrameSet()
-    )
+    out4 = summarizer.summarize(bundle, FakeLlm(), cfg, role_key="standard", frameset=FrameSet())
     assert isinstance(seen[0][1]["content"], str), "空帧集不该把 content 变成数组"
     assert out4.frames == 0, out4.frames
 
@@ -957,14 +974,15 @@ def _user_subtitle() -> str:
     assert srt.clean_markup("&lt;i&gt;") == "<i>"
 
     # ---------- 4. 乱序检测 ----------
-    unordered = srt.parse_text("00:00:09,000 --> 00:00:10,000\n后\n\n00:00:01,000 --> 00:00:02,000\n前\n")
+    unordered = srt.parse_text(
+        "00:00:09,000 --> 00:00:10,000\n后\n\n00:00:01,000 --> 00:00:02,000\n前\n"
+    )
     assert srt.is_ordered(unordered) is False
     assert srt.is_ordered(expect) is True
 
     # 时间重叠是字幕的常态（双行对白同时显示），两条都要保留，不该被合并或丢弃
     overlap = srt.parse_text(
-        "00:00:01,000 --> 00:00:05,000\n甲说的话\n\n"
-        "00:00:03,000 --> 00:00:06,000\n乙说的话\n\n"
+        "00:00:01,000 --> 00:00:05,000\n甲说的话\n\n00:00:03,000 --> 00:00:06,000\n乙说的话\n\n"
     )
     assert len(overlap) == 2, overlap
     assert overlap[0][1] == "甲说的话" and overlap[1][1] == "乙说的话", overlap
@@ -1296,7 +1314,8 @@ def _subtitle_parse_offload() -> str:
         return f"{h:02d}:{mnt:02d}:{s:02d},000"
 
     bulk = "\n".join(
-        f"{i}\n{stamp(i * 2)} --> {stamp(i * 2 + 1)}\n第 {i} 条测试字幕内容\n" for i in range(1, 40001)
+        f"{i}\n{stamp(i * 2)} --> {stamp(i * 2 + 1)}\n第 {i} 条测试字幕内容\n"
+        for i in range(1, 40001)
     ).encode("utf-8")
     t0 = time.perf_counter()
     items, enc = srt_mod.parse_bytes(bulk)
@@ -1326,9 +1345,7 @@ def _upload_entry_visible() -> str:
         token = token.strip()
         var = re.fullmatch(r"var\((--[\w-]+)\)", token)
         if var:
-            found = re.search(
-                rf"{re.escape(var.group(1))}\s*:\s*#([0-9a-fA-F]{{6}})", html
-            )
+            found = re.search(rf"{re.escape(var.group(1))}\s*:\s*#([0-9a-fA-F]{{6}})", html)
             assert found, f"CSS 变量 {var.group(1)} 没有定义，样式会静默失效"
             token = "#" + found.group(1)
         short = re.fullmatch(r"#([0-9a-fA-F]{3})", token)
@@ -1355,8 +1372,7 @@ def _upload_entry_visible() -> str:
     btn = re.search(r"<button[^>]*id=\"srt-btn\"[^>]*>", html)
     assert btn, "找不到 id=srt-btn 的按钮 —— 上传入口没了"
     assert "onclick" not in btn.group(0), (
-        "按钮不该用内联 onclick 接线（脚本在末尾统一绑定），"
-        "两处都接会让一次点击触发两次"
+        "按钮不该用内联 onclick 接线（脚本在末尾统一绑定），两处都接会让一次点击触发两次"
     )
 
     # 2) 桌面端走的是原生文件对话框，所以页面上不该再有 <input type=file>：
@@ -1382,8 +1398,7 @@ def _upload_entry_visible() -> str:
 
     # 4) 页面不能自己再维护一份「在跑」状态：多一份就多一处会不一致
     assert "isRunning()" in html and "function isRunning" in html, (
-        "提交按钮没有用 isRunning() 从任务状态推「在跑」，"
-        "说明又另外存了一份状态"
+        "提交按钮没有用 isRunning() 从任务状态推「在跑」，说明又另外存了一份状态"
     )
 
     return f"入口为按钮形态且接 pick_subtitle；按钮文字对比度 {c_page:.2f}:1"
@@ -1463,9 +1478,7 @@ def _refine_reuses_prepared() -> str:
     out1 = summarizer.summarize(bundle, llm, cfg, role_key="standard", prepared=material)
     assert len(seen) == 1, f"复用了笔记就不该再有预读调用，实际 {len(seen)} 次"
     assert marker not in seen[0][0]["content"], "又发了一次 MAP_SYSTEM —— 预读没被跳过"
-    assert out1.chunks == material.chunks, (
-        f"分块数要如实带过来：{out1.chunks} != {material.chunks}"
-    )
+    assert out1.chunks == material.chunks, f"分块数要如实带过来：{out1.chunks} != {material.chunks}"
     assert out1.revise_note == "", "初次生成不该有 revise_note"
 
     # ---------- 3. 迭代打磨 ----------
@@ -1496,8 +1509,7 @@ def _refine_reuses_prepared() -> str:
     assert len(long_notes.body) > cfg.llm.max_input_chars, "这条的前提是笔记比上限长"
     out3 = summarizer.summarize(bundle, llm, cfg, role_key="standard", prepared=long_notes)
     assert len(seen) == 1, (
-        f"笔记超限时被当成新素材又预读了一遍（{len(seen)} 次调用）"
-        "—— 那是二次压缩，信息会再掉一层"
+        f"笔记超限时被当成新素材又预读了一遍（{len(seen)} 次调用）—— 那是二次压缩，信息会再掉一层"
     )
     assert out3.chunks == 9, out3.chunks
 
@@ -1536,8 +1548,11 @@ def _version_history() -> str:
     # ---------- 1. 升级前的老记录：有总结、没有版本行 ----------
     old = st.create_task("BV1old")
     st.update_task(
-        old, status="ready", summary_json={"one_line": "老总结", "role": "cordial"},
-        preview_md="旧预览", comment_text="旧正文",
+        old,
+        status="ready",
+        summary_json={"one_line": "老总结", "role": "cordial"},
+        preview_md="旧预览",
+        comment_text="旧正文",
     )
     assert st.list_versions(old) == [], "还没写版本，列表应当是空的"
     assert st.ensure_initial_version(old) is True, "有总结的老记录应当被补成第 1 版"
@@ -1550,11 +1565,16 @@ def _version_history() -> str:
 
     # 老记录上再改一版：这里走的是"读时已补写过"的那条路，所以不该再补一次
     out = st.record_version(
-        old, source="refine", requirement="展开第三段",
+        old,
+        source="refine",
+        requirement="展开第三段",
         summary_json={"one_line": "新总结", "role": "cordial", "revise_note": "展开了第三段"},
-        preview_md="新预览", comment_text="新正文", role="cordial",
+        preview_md="新预览",
+        comment_text="新正文",
+        role="cordial",
         metrics={"usage": {"calls": 2, "total_tokens": 300}, "elapsed": 12.5},
-        status="ready", progress="改好了",
+        status="ready",
+        progress="改好了",
     )
     assert out["version_no"] == 2 and out["backfilled_previous"] is False, out
     assert len(st.list_versions(old)) == 2, "老版本不该被新版本挤掉"
@@ -1562,10 +1582,15 @@ def _version_history() -> str:
     # 另一条老记录：从没被读过就直接改一版 —— 补写必须发生在这一次写入里，
     # 否则第 1 版会凭空消失，而"改过的东西都留着"就成了一句空话。
     legacy = st.create_task("BV1legacy")
-    st.update_task(legacy, summary_json={"one_line": "从没被读过的老总结"},
-                   preview_md="旧预览", comment_text="旧正文")
-    out2 = st.record_version(legacy, source="refine", requirement="改一下",
-                             summary_json={"one_line": "第二条新总结"})
+    st.update_task(
+        legacy,
+        summary_json={"one_line": "从没被读过的老总结"},
+        preview_md="旧预览",
+        comment_text="旧正文",
+    )
+    out2 = st.record_version(
+        legacy, source="refine", requirement="改一下", summary_json={"one_line": "第二条新总结"}
+    )
     assert out2["version_no"] == 2 and out2["backfilled_previous"] is True, out2
     kept = st.list_versions(legacy)
     assert [v["version_no"] for v in kept] == [1, 2], kept
@@ -1581,8 +1606,9 @@ def _version_history() -> str:
     # 它的内容自己会说话——summary_json 里带着 revise_note。标成「初次生成」
     # 就是标签和内容对不上，而这种小谎最难被发现，因为它看起来很正常。
     revised = st.create_task("BV1revised")
-    st.update_task(revised, summary_json={"one_line": "改过的总结",
-                                          "revise_note": "按上一条要求改了开头"})
+    st.update_task(
+        revised, summary_json={"one_line": "改过的总结", "revise_note": "按上一条要求改了开头"}
+    )
     st.ensure_initial_version(revised)
     v = st.list_versions(revised)[0]
     assert v["source"] == "refine", f"带改动说明的老记录该标成 refine：{v['source']}"
@@ -1590,10 +1616,16 @@ def _version_history() -> str:
 
     # ---------- 2. 回退：把第 1 版抄成新的当前版，不动已有版本 ----------
     st.record_version(
-        old, source="restore", requirement="以第 1 版为底稿",
-        summary_json=v1["summary_json"], preview_md=v1["preview_md"],
-        comment_text=v1["comment_text"], role=v1["role"], metrics=None,
-        status="ready", progress="回来了",
+        old,
+        source="restore",
+        requirement="以第 1 版为底稿",
+        summary_json=v1["summary_json"],
+        preview_md=v1["preview_md"],
+        comment_text=v1["comment_text"],
+        role=v1["role"],
+        metrics=None,
+        status="ready",
+        progress="回来了",
     )
     versions = st.list_versions(old)
     assert [v["version_no"] for v in versions] == [1, 2, 3], [v["version_no"] for v in versions]
@@ -1612,7 +1644,9 @@ def _version_history() -> str:
     def spawn(index: int) -> None:
         try:
             st.record_version(
-                race, source="refine", requirement=f"并发 {index}",
+                race,
+                source="refine",
+                requirement=f"并发 {index}",
                 summary_json={"one_line": f"第 {index} 次"},
             )
         except Exception as exc:  # noqa: BLE001
@@ -1677,15 +1711,17 @@ def _llm_usage() -> str:
     def fake_post(url, json=None, headers=None, timeout=None, proxies=None):  # noqa: ANN001, ARG001
         seen.append(json)
         if len(seen) == 1:
-            return FakeResp({
-                "choices": [{"message": {"content": "好"}}],
-                "usage": {
-                    "prompt_tokens": 1000,
-                    "completion_tokens": 50,
-                    "total_tokens": 1050,
-                    "completion_tokens_details": {"reasoning_tokens": 30},
-                },
-            })
+            return FakeResp(
+                {
+                    "choices": [{"message": {"content": "好"}}],
+                    "usage": {
+                        "prompt_tokens": 1000,
+                        "completion_tokens": 50,
+                        "total_tokens": 1050,
+                        "completion_tokens_details": {"reasoning_tokens": 30},
+                    },
+                }
+            )
         # 有些兼容端点压根不返回 usage
         return FakeResp({"choices": [{"message": {"content": "好"}}]})
 
@@ -1706,16 +1742,36 @@ def _llm_usage() -> str:
     # 汇总：把版本里存的账加起来，老版本（没记账）如实算"未记录"
     from bili_scribe.app.main import _sum_usage
 
-    total = _sum_usage([
-        {"source": "initial", "metrics": {"usage": {"calls": 7, "prompt_tokens": 100,
-                                                    "completion_tokens": 20,
-                                                    "total_tokens": 120, "unpriced": 0}}},
-        {"source": "refine", "metrics": {"usage": {"calls": 1, "prompt_tokens": 10,
-                                                   "completion_tokens": 5,
-                                                   "total_tokens": 15, "unpriced": 0}}},
-        {"source": "restore", "metrics": None},
-        {"source": "refine", "metrics": None},
-    ])
+    total = _sum_usage(
+        [
+            {
+                "source": "initial",
+                "metrics": {
+                    "usage": {
+                        "calls": 7,
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                        "unpriced": 0,
+                    }
+                },
+            },
+            {
+                "source": "refine",
+                "metrics": {
+                    "usage": {
+                        "calls": 1,
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                        "unpriced": 0,
+                    }
+                },
+            },
+            {"source": "restore", "metrics": None},
+            {"source": "refine", "metrics": None},
+        ]
+    )
     assert total["calls"] == 8 and total["total_tokens"] == 135, total
     assert total["untracked"] == 1, f"只有没记账的那一版才算未记录：{total}"
     return (
@@ -1898,10 +1954,22 @@ def _refine_writes_version() -> str:
     state = AppState(cfg)
 
     bundle = Bundle(
-        bvid="BV1ver", aid=7, cid=8, page=1, page_count=1,
-        title="迭代落库", desc="", up_name="某人", up_mid=9, duration=600,
-        tname="知识", source_kind="subtitle_ai", source_label="平台 AI 字幕",
-        source_trust="中", source_detail="测试", body="笔记正文",
+        bvid="BV1ver",
+        aid=7,
+        cid=8,
+        page=1,
+        page_count=1,
+        title="迭代落库",
+        desc="",
+        up_name="某人",
+        up_mid=9,
+        duration=600,
+        tname="知识",
+        source_kind="subtitle_ai",
+        source_label="平台 AI 字幕",
+        source_trust="中",
+        source_detail="测试",
+        body="笔记正文",
     )
 
     class FakeLlm:
@@ -1916,31 +1984,52 @@ def _refine_writes_version() -> str:
         def chat(self, messages, **_kw):
             self.systems.append(messages[0]["content"])
             if self.fail:
-                self.usage.add(ChatResult(content="", prompt_tokens=5, completion_tokens=50,
-                                          total_tokens=55))
+                self.usage.add(
+                    ChatResult(content="", prompt_tokens=5, completion_tokens=50, total_tokens=55)
+                )
                 raise LlmError("假模型：这次改不动")
-            self.usage.add(ChatResult(content="", prompt_tokens=800, completion_tokens=100,
-                                      total_tokens=900))
-            return _json.dumps({
-                "one_line": "改后的一句话",
-                "summary_md": "改后的正文",
-                "key_points": ["甲"],
-                "timeline": [],
-                "caution": "",
-                "comment_short": "改后的短评",
-                "revise_note": "把第三节展开了",
-            }, ensure_ascii=False)
+            self.usage.add(
+                ChatResult(content="", prompt_tokens=800, completion_tokens=100, total_tokens=900)
+            )
+            return _json.dumps(
+                {
+                    "one_line": "改后的一句话",
+                    "summary_md": "改后的正文",
+                    "key_points": ["甲"],
+                    "timeline": [],
+                    "caution": "",
+                    "comment_short": "改后的短评",
+                    "revise_note": "把第三节展开了",
+                },
+                ensure_ascii=False,
+            )
 
     def seed(task_id: str) -> None:
         """把任务摆到"已经生成过初版、且素材笔记还在内存里"的状态。"""
         state.store.record_version(
-            task_id, source="initial",
-            summary_json={"one_line": "初版一句话", "summary_md": "初版正文",
-                          "comment_short": "初版短评", "role": "standard"},
-            preview_md="初版预览", comment_text="初版短评", role="standard",
-            metrics={"usage": {"calls": 3, "prompt_tokens": 500, "completion_tokens": 60,
-                               "total_tokens": 560, "unpriced": 0}, "elapsed": 40.0},
-            status="ready", progress="总结已生成",
+            task_id,
+            source="initial",
+            summary_json={
+                "one_line": "初版一句话",
+                "summary_md": "初版正文",
+                "comment_short": "初版短评",
+                "role": "standard",
+            },
+            preview_md="初版预览",
+            comment_text="初版短评",
+            role="standard",
+            metrics={
+                "usage": {
+                    "calls": 3,
+                    "prompt_tokens": 500,
+                    "completion_tokens": 60,
+                    "total_tokens": 560,
+                    "unpriced": 0,
+                },
+                "elapsed": 40.0,
+            },
+            status="ready",
+            progress="总结已生成",
         )
         state.remember_prepared(
             task_id,
@@ -1956,7 +2045,7 @@ def _refine_writes_version() -> str:
     tid = state.store.create_task("BV1ver")
     seed(tid)
     llm = FakeLlm()
-    state.new_llm = lambda: llm          # 只替换模型，其余全是真的
+    state.new_llm = lambda: llm  # 只替换模型，其余全是真的
     assert state.begin_refine(tid) is True
 
     _run_refine(state, tid, state.get_prepared(tid), "把第三节展开", "standard", previous_of(tid))
@@ -1983,7 +2072,7 @@ def _refine_writes_version() -> str:
 
     # ---------- 2. 失败：不落版本，且名额要放开 ----------
     before = len(state.store.list_versions(tid))
-    state.new_llm = lambda: FakeLlm(fail=True)   # 换成"这次改不动"的模型
+    state.new_llm = lambda: FakeLlm(fail=True)  # 换成"这次改不动"的模型
     assert state.begin_refine(tid) is True
     _run_refine(state, tid, state.get_prepared(tid), "再改一次", "standard", previous_of(tid))
 
@@ -2013,7 +2102,6 @@ def _refine_survives_three_passes() -> str:
     跑一遍真实角色才会暴露。这里的补救是让批判与修订这两轮也能看见那条要求，
     并用假模型钉住"它确实被传下去了"这个事实——否则同一个坑会再踩一次。
     """
-    import json as _json
     import types
 
     from bili_scribe.config import AppConfig
@@ -2023,14 +2111,27 @@ def _refine_survives_three_passes() -> str:
 
     cfg = AppConfig()
     bundle = Bundle(
-        bvid="BV1passes", aid=1, cid=2, page=1, page_count=1,
-        title="三轮回", desc="", up_name="某人", up_mid=3, duration=600,
-        tname="知识", source_kind="subtitle_ai", source_label="平台 AI 字幕",
-        source_trust="中", source_detail="测试", body="素材正文",
+        bvid="BV1passes",
+        aid=1,
+        cid=2,
+        page=1,
+        page_count=1,
+        title="三轮回",
+        desc="",
+        up_name="某人",
+        up_mid=3,
+        duration=600,
+        tname="知识",
+        source_kind="subtitle_ai",
+        source_label="平台 AI 字幕",
+        source_trust="中",
+        source_detail="测试",
+        body="素材正文",
     )
 
     role = next(
-        r for r in (get_role(k) for k in summarizer.roles.ROLE_KEYS)
+        r
+        for r in (get_role(k) for k in summarizer.roles.ROLE_KEYS)
         if r.passes >= 3 and r.critique and r.revise
     )
     seen: list[list[dict]] = []
@@ -2048,7 +2149,10 @@ def _refine_survives_three_passes() -> str:
 
     requirement = "只把开头那句压到 25 字以内，其余一个字都别动"
     out = summarizer.summarize(
-        bundle, FakeLlm(), cfg, role_key=role.key,
+        bundle,
+        FakeLlm(),
+        cfg,
+        role_key=role.key,
         prepared=summarizer.PreparedMaterial(body="素材正文", chunks=1),
         refinement=summarizer.Refinement(
             requirement=requirement, previous='{"summary_md":"上一版"}'
@@ -2074,7 +2178,10 @@ def _refine_survives_three_passes() -> str:
     # 而那时压根没有"上一版"和"要求"。
     seen.clear()
     summarizer.summarize(
-        bundle, FakeLlm(), cfg, role_key=role.key,
+        bundle,
+        FakeLlm(),
+        cfg,
+        role_key=role.key,
         prepared=summarizer.PreparedMaterial(body="素材正文", chunks=1),
     )
     assert len(seen) == 3, len(seen)
@@ -2155,9 +2262,17 @@ def _field_diff() -> str:
     from bili_scribe.core import summarizer as s
 
     base = {
-        "one_line": "甲", "summary_md": "aaa bbb", "key_points": ["一", "二"],
-        "timeline": [], "caution": "c", "comment_short": "s",
-        "chunks": 1, "model": "m", "role": "standard", "frames": 12, "revise_note": "旧说明",
+        "one_line": "甲",
+        "summary_md": "aaa bbb",
+        "key_points": ["一", "二"],
+        "timeline": [],
+        "caution": "c",
+        "comment_short": "s",
+        "chunks": 1,
+        "model": "m",
+        "role": "standard",
+        "frames": 12,
+        "revise_note": "旧说明",
     }
 
     assert s.diff_fields(base, dict(base)) == [], "完全一样却报出了改动"
@@ -2227,12 +2342,12 @@ def _prepared_cache_eviction() -> str:
         state.remember_prepared("b", Fake("b"))
         assert state.get_prepared("a") is not None
 
-        state.remember_prepared("c", Fake("c"))          # 超上限，该挤掉最久没用的 a
+        state.remember_prepared("c", Fake("c"))  # 超上限，该挤掉最久没用的 a
         assert state.get_prepared("a") is None, "最久没用的那条没被淘汰"
         assert state.get_prepared("b") is not None and state.get_prepared("c") is not None
 
-        state.remember_prepared("b", Fake("b2"))         # 重存 b → 它排到队尾
-        state.remember_prepared("d", Fake("d"))          # 于是这次该挤掉 c
+        state.remember_prepared("b", Fake("b2"))  # 重存 b → 它排到队尾
+        state.remember_prepared("d", Fake("d"))  # 于是这次该挤掉 c
         assert state.get_prepared("c") is None, "重存没让它排到队尾（LRU 写成了先进先出）"
         assert state.get_prepared("b").name == "b2", "重存应当覆盖旧的那条，而不是并排留着"
         assert len(state.prepared) == 2, f"条数应当被压在 2，实际 {len(state.prepared)}"
@@ -2269,7 +2384,9 @@ def _note_cache() -> str:
 
     # ---------- 1. 地址：该变的必须变 ----------
     key = NoteCache.make_key(body, "人工字幕", recipe, prompt)
-    assert key == NoteCache.make_key(body, "人工字幕", dict(recipe), prompt), "同样的输入算出了两个地址"
+    assert key == NoteCache.make_key(body, "人工字幕", dict(recipe), prompt), (
+        "同样的输入算出了两个地址"
+    )
     assert key != NoteCache.make_key(body, "弹幕", recipe, prompt), (
         "素材类型没进地址——同一段文字标成弹幕还是字幕，会拿到同一份笔记"
     )
@@ -2279,7 +2396,9 @@ def _note_cache() -> str:
     assert key != NoteCache.make_key(body, "人工字幕", recipe, prompt + "补充一句要求"), (
         "预读提示词没进地址——指令变了还吃旧笔记，产物会静默按旧指令生成"
     )
-    assert key != NoteCache.make_key(body + "多一个字", "人工字幕", recipe, prompt), "素材内容没进地址"
+    assert key != NoteCache.make_key(body + "多一个字", "人工字幕", recipe, prompt), (
+        "素材内容没进地址"
+    )
 
     # ---------- 2. 地址：不该变的必须不变 ----------
     # 模型的加入是最容易犯的错：换了模型确实会得到不同笔记，但那是「换模型后
@@ -2299,7 +2418,9 @@ def _note_cache() -> str:
     # ---------- 4. 坏条目只算未命中，不能让任务挂 ----------
     (tmp / "notes" / f"{key}.json").write_text("{ 不是 json", encoding="utf-8")
     assert cache.get(key) is None, "坏掉的条目被当成命中了"
-    (tmp / "notes" / f"{key}.json").write_text('{"v": 1, "body": "x", "chunks": 2}', encoding="utf-8")
+    (tmp / "notes" / f"{key}.json").write_text(
+        '{"v": 1, "body": "x", "chunks": 2}', encoding="utf-8"
+    )
     assert cache.get(key) is None, "格式版本对不上却命中了——旧笔记会污染新产物"
     (tmp / "notes" / f"{key}.json").write_text(
         json.dumps({"v": CACHE_VERSION, "body": "", "chunks": 2}), encoding="utf-8"
@@ -2358,9 +2479,20 @@ def _note_cache_really_saves_tokens() -> str:
     cfg.llm.chunk_overlap = 20
 
     bundle = collector.Bundle(
-        bvid="BVprobe", aid=1, cid=2, page=1, page_count=1,
-        title="探针", desc="", up_name="UP", up_mid=3, duration=600, tname="知识",
-        source_label="人工字幕", source_kind="subtitle", source_trust="human",
+        bvid="BVprobe",
+        aid=1,
+        cid=2,
+        page=1,
+        page_count=1,
+        title="探针",
+        desc="",
+        up_name="UP",
+        up_mid=3,
+        duration=600,
+        tname="知识",
+        source_label="人工字幕",
+        source_kind="subtitle",
+        source_trust="human",
         body="这是一段素材。" * 200,
     )
 
@@ -2391,9 +2523,20 @@ def _note_cache_really_saves_tokens() -> str:
     # 短素材不预读，也就不该写缓存（写进去只是占地方）
     cfg.llm.max_input_chars = 100000
     short = collector.Bundle(
-        bvid="BVshort", aid=1, cid=2, page=1, page_count=1,
-        title="短", desc="", up_name="UP", up_mid=3, duration=10, tname="知识",
-        source_label="人工字幕", source_kind="subtitle", source_trust="human",
+        bvid="BVshort",
+        aid=1,
+        cid=2,
+        page=1,
+        page_count=1,
+        title="短",
+        desc="",
+        up_name="UP",
+        up_mid=3,
+        duration=10,
+        tname="知识",
+        source_label="人工字幕",
+        source_kind="subtitle",
+        source_trust="human",
         body="很短。",
     )
     short_llm = CountingLlm()
@@ -2421,7 +2564,12 @@ def _shell_settings() -> str:
     这里用假对象记赋值，不启动 GUI：能这样测才可能进常态回归。
     """
 
-    from bili_scribe.desktop import _apply_shell_settings
+    try:
+        from bili_scribe.desktop import _apply_shell_settings
+    except RuntimeError as exc:
+        if "Python.Runtime" in str(exc) or "Loader.Initialize" in str(exc):
+            return "跳过：本机缺 .NET/Python.Runtime，桌面窗口开关未验证"
+        raise
 
     class Recorder:
         def __init__(self) -> None:
@@ -2502,9 +2650,7 @@ def _shell_settings() -> str:
     swallowed = Swallowed()
     _apply_shell_settings(swallowed)
     state = _read_shell_settings(swallowed)
-    assert not any(state.values()), (
-        "被盖回去的情况没被识别出来 —— 调用方会以为开好了，日志会撒谎"
-    )
+    assert not any(state.values()), "被盖回去的情况没被识别出来 —— 调用方会以为开好了，日志会撒谎"
 
     # ---- 接管 on_webview_ready：exe 里唯一真正生效的写法 ----------------
     # 上面两条只是「设了、读回 True」。实测 0.7.3 前三轮：读回真、右键假。
@@ -2523,6 +2669,10 @@ def _shell_settings() -> str:
         assert hooked.__name__ == "patched", "接管后应指向包装函数"
     except ImportError:  # 非 Windows / 没装 pywebview 的环境跳过
         pass
+    except RuntimeError as exc:
+        if "Python.Runtime" in str(exc) or "Loader.Initialize" in str(exc):
+            return "跳过：本机缺 .NET/Python.Runtime，WebView2 接管未验证"
+        raise
 
     return f"设 {len(done)} 项：{' / '.join(done)}；读回能识别「写了但没留住」；已接管 sender"
 
@@ -2734,9 +2884,7 @@ def _desktop_config_falls_back_when_exe_dir_readonly() -> str:
         existing.write_text("llm:\n  model: demo\n", encoding="utf-8")
         desktop._config_candidates = lambda: [existing, writable / "config.yaml"]
         got3 = desktop._default_config()
-        assert got3 == existing, (
-            f"已存在的配置没被优先采用：{got3} —— 会读不到用户自己写的那份"
-        )
+        assert got3 == existing, f"已存在的配置没被优先采用：{got3} —— 会读不到用户自己写的那份"
 
         return "配置落脚点：只读退用户目录 / 可写优先 exe 旁 / 已存在优先"
     finally:
@@ -2799,9 +2947,18 @@ def _skin_switch() -> str:
     )
     # 换肤必须翻的几档，漏一个就是"只换了一半"
     must_flip = [
-        "--void", "--bg", "--panel", "--panel-2",
-        "--acid", "--acid-d", "--ember", "--paper",
-        "--text", "--muted", "--dim", "--ink-rgb",
+        "--void",
+        "--bg",
+        "--panel",
+        "--panel-2",
+        "--acid",
+        "--acid-d",
+        "--ember",
+        "--paper",
+        "--text",
+        "--muted",
+        "--dim",
+        "--ink-rgb",
     ]
     missing = [v for v in must_flip if v not in light]
     assert not missing, f"浅色皮肤没覆盖这些必须反相的变量：{missing}"
@@ -2883,7 +3040,7 @@ def _skin_switch() -> str:
     body_start = html.find("<body", head_end)
     assert body_start > head_end, "找不到 </head> 之后的 <body>"
     head = html[:head_end]
-    assert 'data-skin' in head, (
+    assert "data-skin" in head, (
         "`<head>` 里没有设置 data-skin 的同步脚本 —— 浅色皮肤会先按深色画一帧再跳"
     )
     assert "skin=" in head and "URLSearchParams" in head, (
@@ -2916,20 +3073,20 @@ check("报错指出出错的那一行", _error_detail_points_at_the_frame)
 
 
 def _http_probes() -> None:
+    import os
+
     import requests
     import uvicorn
 
     from bili_scribe.app.main import create_app
     from bili_scribe.config import AppConfig
 
-    port = 8899
+    port = int(os.environ.get("BILI_SCRIBE_TEST_PORT", "8899"))
     cfg = AppConfig.load(PROJECT / "config.yaml" if (PROJECT / "config.yaml").exists() else None)
     cfg.server.port = port
     app = create_app(cfg)
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(60):
         if server.started:
@@ -3101,9 +3258,7 @@ def _settings_api() -> None:
     cfg.server.port = port
     app = create_app(cfg)
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(60):
         if server.started:
@@ -3418,9 +3573,21 @@ def _settings_api() -> None:
             assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
             rows = r.json()
             assert isinstance(rows, list), type(rows)
-            need = {"id", "title", "bvid", "up_name", "status", "created_at",
-                    "updated_at", "one_line", "role", "version_count",
-                    "current_version", "has_summary", "error"}
+            need = {
+                "id",
+                "title",
+                "bvid",
+                "up_name",
+                "status",
+                "created_at",
+                "updated_at",
+                "one_line",
+                "role",
+                "version_count",
+                "current_version",
+                "has_summary",
+                "error",
+            }
             if rows:
                 got = set(rows[0])
                 assert need <= got, f"缺字段：{sorted(need - got)}"
@@ -3511,9 +3678,6 @@ def _settings_api() -> None:
 
         run("store 层就没读正文", _history_store_layer)
 
-
-
-
         def _untouched() -> str:
             now = real_config.read_bytes() if real_config.exists() else None
             assert now == real_before, "测试改动了项目里的 config.yaml"
@@ -3583,13 +3747,29 @@ def _refine_api() -> None:
     # 就无从查起（发布记录是按 bvid 建的索引）。
     state.store.update_task(task_id, bvid="BV1probe", aid=1, cid=2, title="探针")
     state.store.record_version(
-        task_id, source="initial",
-        summary_json={"one_line": "初版一句话", "summary_md": "初版正文",
-                      "comment_short": "初版短评", "role": "standard"},
-        preview_md="初版预览", comment_text="初版短评", role="standard",
-        metrics={"usage": {"calls": 3, "prompt_tokens": 500, "completion_tokens": 60,
-                           "total_tokens": 560, "unpriced": 0}, "elapsed": 40.0},
-        status="ready", progress="总结已生成",
+        task_id,
+        source="initial",
+        summary_json={
+            "one_line": "初版一句话",
+            "summary_md": "初版正文",
+            "comment_short": "初版短评",
+            "role": "standard",
+        },
+        preview_md="初版预览",
+        comment_text="初版短评",
+        role="standard",
+        metrics={
+            "usage": {
+                "calls": 3,
+                "prompt_tokens": 500,
+                "completion_tokens": 60,
+                "total_tokens": 560,
+                "unpriced": 0,
+            },
+            "elapsed": 40.0,
+        },
+        status="ready",
+        progress="总结已生成",
     )
 
     def seed_cache() -> None:
@@ -3598,18 +3778,28 @@ def _refine_api() -> None:
             task_id,
             RefineContext(
                 bundle=Bundle(
-                    bvid="BV1probe", aid=1, cid=2, page=1, page_count=1,
-                    title="探针", desc="", up_name="某人", up_mid=3, duration=60,
-                    tname="知识", source_kind="subtitle_ai", source_label="平台 AI 字幕",
-                    source_trust="中", source_detail="测试", body="笔记正文",
+                    bvid="BV1probe",
+                    aid=1,
+                    cid=2,
+                    page=1,
+                    page_count=1,
+                    title="探针",
+                    desc="",
+                    up_name="某人",
+                    up_mid=3,
+                    duration=60,
+                    tname="知识",
+                    source_kind="subtitle_ai",
+                    source_label="平台 AI 字幕",
+                    source_trust="中",
+                    source_detail="测试",
+                    body="笔记正文",
                 ),
                 material=PreparedMaterial(body="笔记正文", chunks=2),
             ),
         )
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=8897, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8897, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(60):
         if server.started:
@@ -3651,8 +3841,9 @@ def _refine_api() -> None:
         return f"can_refine=False · {data['refine_blocked'][:46]}…"
 
     def cache_expired_refine_is_409() -> str:
-        resp = probe.post(f"{base}/api/task/{task_id}/refine",
-                          json={"requirement": "改一下"}, timeout=10)
+        resp = probe.post(
+            f"{base}/api/task/{task_id}/refine", json={"requirement": "改一下"}, timeout=10
+        )
         assert resp.status_code == 409, f"期望 409，实际 {resp.status_code}：{resp.text[:160]}"
         detail = resp.json().get("detail", "")
         assert "重新跑一次" in detail, f"没告诉人该怎么办：{detail}"
@@ -3666,7 +3857,9 @@ def _refine_api() -> None:
         assert row["source"] == "initial" and row["current"] is True, row
         assert "summary_json" not in row, "列表不该背全文，否则几版之后接口会越来越重"
         assert row["metrics"]["usage"]["calls"] == 3, row["metrics"]
-        return f"1 版 · 累计 {data['total']['calls']} 次调用 / {data['total']['total_tokens']} tokens"
+        return (
+            f"1 版 · 累计 {data['total']['calls']} 次调用 / {data['total']['total_tokens']} tokens"
+        )
 
     def version_detail() -> str:
         data = probe.get(f"{base}/api/task/{task_id}/versions/1", timeout=10).json()
@@ -3692,6 +3885,7 @@ def _refine_api() -> None:
         null / [] / 非空 是三件不同的事：没比过 / 比过没变 / 逐字段变了。
         界面上把「没比过」读成「没改动」，就等于替模型圆了谎。
         """
+
         def data_versions() -> dict:
             resp = probe.get(f"{base}/api/task/{task_id}/versions", timeout=10)
             assert resp.status_code == 200, resp.text[:200]
@@ -3702,12 +3896,21 @@ def _refine_api() -> None:
         )
 
         state.store.record_version(
-            task_id, source="refine", requirement="把 one_line 改得更平实",
-            summary_json={"one_line": "改后一句话", "summary_md": "初版正文",
-                          "comment_short": "初版短评", "role": "standard",
-                          "revise_note": "只改了 one_line，其余未动"},
-            preview_md="改后预览", comment_text="初版短评", role="standard",
-            status="ready", progress="已改好",
+            task_id,
+            source="refine",
+            requirement="把 one_line 改得更平实",
+            summary_json={
+                "one_line": "改后一句话",
+                "summary_md": "初版正文",
+                "comment_short": "初版短评",
+                "role": "standard",
+                "revise_note": "只改了 one_line，其余未动",
+            },
+            preview_md="改后预览",
+            comment_text="初版短评",
+            role="standard",
+            status="ready",
+            progress="已改好",
         )
         rows = data_versions()["versions"]
         assert len(rows) == 2, rows
@@ -3717,11 +3920,20 @@ def _refine_api() -> None:
 
         # 再追加一版逐字相同的：必须是空数组（比过了、没变），而不是 null（没比过）
         state.store.record_version(
-            task_id, source="refine", requirement="什么都不改",
-            summary_json={"one_line": "改后一句话", "summary_md": "初版正文",
-                          "comment_short": "初版短评", "role": "standard"},
-            preview_md="改后预览", comment_text="初版短评", role="standard",
-            status="ready", progress="已改好",
+            task_id,
+            source="refine",
+            requirement="什么都不改",
+            summary_json={
+                "one_line": "改后一句话",
+                "summary_md": "初版正文",
+                "comment_short": "初版短评",
+                "role": "standard",
+            },
+            preview_md="改后预览",
+            comment_text="初版短评",
+            role="standard",
+            status="ready",
+            progress="已改好",
         )
         assert data_versions()["versions"][2]["changed_fields"] == [], (
             "逐字相同应当报空数组——'要求没被落实'本身就是有用信息"
@@ -3729,18 +3941,29 @@ def _refine_api() -> None:
 
         # 回退版不参与比对（它没有"改"这回事）
         state.store.record_version(
-            task_id, source="restore", requirement="以第 1 版为底稿",
-            summary_json={"one_line": "初版一句话", "summary_md": "初版正文",
-                          "comment_short": "初版短评", "role": "standard"},
-            preview_md="初版预览", comment_text="初版短评", role="standard",
-            status="ready", progress="已回到第 1 版",
+            task_id,
+            source="restore",
+            requirement="以第 1 版为底稿",
+            summary_json={
+                "one_line": "初版一句话",
+                "summary_md": "初版正文",
+                "comment_short": "初版短评",
+                "role": "standard",
+            },
+            preview_md="初版预览",
+            comment_text="初版短评",
+            role="standard",
+            status="ready",
+            progress="已回到第 1 版",
         )
         assert data_versions()["versions"][3]["changed_fields"] is None, (
             "回退版没有字段级 diff——它该说的是「内容回到第 N 版」"
         )
         # 单版详情与列表口径一致（同一件事在两个地方不能各说各的）
         detail = probe.get(f"{base}/api/task/{task_id}/versions/2", timeout=10).json()
-        assert [f["field"] for f in detail["changed_fields"]] == ["one_line"], detail["changed_fields"]
+        assert [f["field"] for f in detail["changed_fields"]] == ["one_line"], detail[
+            "changed_fields"
+        ]
         return "第 1 版/回退版 = 不适用；改动版逐字段列出；未改动 = 空数组"
 
     def cache_back_opens_the_gate() -> str:
@@ -3750,16 +3973,22 @@ def _refine_api() -> None:
         return "缓存回来后 can_refine=True"
 
     def stale_base_version_is_rejected() -> str:
-        resp = probe.post(f"{base}/api/task/{task_id}/refine",
-                          json={"requirement": "改一下", "base_version": 99}, timeout=10)
+        resp = probe.post(
+            f"{base}/api/task/{task_id}/refine",
+            json={"requirement": "改一下", "base_version": 99},
+            timeout=10,
+        )
         assert resp.status_code == 409, f"期望 409，实际 {resp.status_code}：{resp.text[:160]}"
         detail = resp.json().get("detail", "")
         assert "第 99 版" in detail and "第 1 版" in detail, detail
         return f"409 · {detail[:46]}…"
 
     def failed_refine_keeps_previous() -> str:
-        resp = probe.post(f"{base}/api/task/{task_id}/refine",
-                          json={"requirement": "把第三节展开", "base_version": 1}, timeout=10)
+        resp = probe.post(
+            f"{base}/api/task/{task_id}/refine",
+            json={"requirement": "把第三节展开", "base_version": 1},
+            timeout=10,
+        )
         assert resp.status_code == 200, f"提交应当被接受：{resp.status_code} {resp.text[:160]}"
         assert resp.json()["base_version"] == 1, resp.json()
 
@@ -3783,8 +4012,9 @@ def _refine_api() -> None:
         assert data["can_refine"] is False, "已经发出去的评论不能编辑，打磨入口必须关掉"
         assert "撤回" in data["refine_blocked"], data["refine_blocked"]
         assert data["live_publish"] and data["live_publish"]["rpid"] == "999", data["live_publish"]
-        resp = probe.post(f"{base}/api/task/{task_id}/refine",
-                          json={"requirement": "再改"}, timeout=10)
+        resp = probe.post(
+            f"{base}/api/task/{task_id}/refine", json={"requirement": "再改"}, timeout=10
+        )
         assert resp.status_code == 409, resp.status_code
         assert "撤回" in resp.json().get("detail", ""), resp.text[:160]
         return f"已发布 → can_refine=False · {data['refine_blocked'][:34]}…"
@@ -3832,10 +4062,21 @@ for item in report["http"]:
         tail = item["path"]
     print(f"[{flag}] {tail}：{str(item.get('body', ''))[:110]}")
 print("-" * 66)
-print(f"离线 {len(report['offline']) - len(offline_failed)}/{len(report['offline'])} 通过，"
-      f"HTTP {len(report['http']) - len(http_failed)}/{len(report['http'])} 通过")
+print(
+    f"离线 {len(report['offline']) - len(offline_failed)}/{len(report['offline'])} 通过，"
+    f"HTTP {len(report['http']) - len(http_failed)}/{len(report['http'])} 通过"
+)
 for err in report["errors"]:
     print(err)
 print("=" * 66)
 
-sys.exit(1 if (offline_failed or http_failed or report["errors"]) else 0)
+
+def test_smoke_report():
+    """pytest 入口：断言模块级冒烟检查全部通过。"""
+    assert not offline_failed, offline_failed
+    assert not http_failed, http_failed
+    assert not report["errors"], report["errors"]
+
+
+if __name__ == "__main__":
+    sys.exit(1 if (offline_failed or http_failed or report["errors"]) else 0)

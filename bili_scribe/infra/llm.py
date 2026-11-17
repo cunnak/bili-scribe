@@ -182,8 +182,14 @@ class Usage:
         """把一份 to_dict() 的结果加进来。汇总历史版本时用。"""
         if not other:
             return
-        for name in ("calls", "prompt_tokens", "completion_tokens",
-                     "reasoning_tokens", "total_tokens", "unpriced"):
+        for name in (
+            "calls",
+            "prompt_tokens",
+            "completion_tokens",
+            "reasoning_tokens",
+            "total_tokens",
+            "unpriced",
+        ):
             setattr(self, name, getattr(self, name) + int(other.get(name) or 0))
 
     def to_dict(self) -> dict[str, int]:
@@ -221,9 +227,7 @@ class LlmClient:
         # 代理只能来自 llm.proxy，绝不来自环境。
         self.session.trust_env = False
         proxy = (getattr(cfg, "proxy", "") or "").strip()
-        self.proxies: dict[str, str] | None = (
-            {"http": proxy, "https": proxy} if proxy else None
-        )
+        self.proxies: dict[str, str] | None = {"http": proxy, "https": proxy} if proxy else None
         # 最近一次调用的过程说明（例如"已自动关闭思考重试"），供界面展示。
         # 这些是"发生过但没失败"的事情，不记下来用户就不知道模型被降级过。
         self.notes: list[str] = []

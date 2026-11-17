@@ -180,9 +180,7 @@ class Publisher:
             return PublishResult(STATUS_FAILED, "发布失败，且没有捕获到具体错误")
 
         message = self._explain(last_error)
-        self.store.add_publish(
-            task_id, bvid, aid, None, text, STATUS_FAILED, message
-        )
+        self.store.add_publish(task_id, bvid, aid, None, text, STATUS_FAILED, message)
         return PublishResult(STATUS_FAILED, message, raw_error=str(last_error))
 
     # ---------------------------------------------------------- 笔记发布
@@ -252,7 +250,12 @@ class Publisher:
                     note_id = str(data.get("note_id") or "")
                 stored = f"{NOTE_RPID_PREFIX}{note_id}" if note_id else None
                 publish_id = self.store.add_publish(
-                    task_id, bvid, aid, stored, summary_text, STATUS_PUBLISHED,
+                    task_id,
+                    bvid,
+                    aid,
+                    stored,
+                    summary_text,
+                    STATUS_PUBLISHED,
                     f"已发布为笔记并同步到评论区（note_id={note_id or '未知'}）",
                 )
                 return PublishResult(
@@ -274,10 +277,7 @@ class Publisher:
     def _explain_note(error: BiliError) -> str:
         code = error.code
         if code == 79508:
-            hint = (
-                "这个视频已经存在一篇你创建的笔记，平台不允许重复新增。"
-                "先到 B站 删除旧笔记再试。"
-            )
+            hint = "这个视频已经存在一篇你创建的笔记，平台不允许重复新增。先到 B站 删除旧笔记再试。"
         elif code == 79513:
             hint = "这个视频不支持笔记功能（不是所有稿件都开放）。只能改用普通评论。"
         elif code == 12015:
@@ -299,9 +299,7 @@ class Publisher:
                 "本工具不实现验证码绕过。"
             )
         elif code == 12051:
-            hint = (
-                "平台判定为重复评论——风控已经介入。请换一段内容，或先撤回旧评论。"
-            )
+            hint = "平台判定为重复评论——风控已经介入。请换一段内容，或先撤回旧评论。"
         elif code == 12035:
             hint = "你被这位 UP 主加入了评论黑名单，在该视频下无法评论。"
         elif code == 12016:
@@ -359,9 +357,7 @@ class Publisher:
                 },
             )
         except BiliError as exc:
-            return PublishResult(
-                STATUS_FAILED, f"撤回失败：{exc}", rpid=rpid, raw_error=str(exc)
-            )
+            return PublishResult(STATUS_FAILED, f"撤回失败：{exc}", rpid=rpid, raw_error=str(exc))
 
         self.store.mark_publish_deleted(publish_id, "已撤回")
         return PublishResult(

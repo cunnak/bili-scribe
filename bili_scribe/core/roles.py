@@ -30,7 +30,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -619,7 +619,8 @@ SHENSI = Role(
 
 
 # 不套用任何角色方法论，就用流水线原本的提示词。
-STANDARD = Role(    key="standard",
+STANDARD = Role(
+    key="standard",
     name="标准",
     tagline="克制的内容总结（不套用角色方法论）",
     passes=1,

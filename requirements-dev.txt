@@ -1,37 +1,8 @@
-# VideoWorkbench 开发/验收依赖 —— 运行时不装。
+# bili-scribe 开发依赖 —— 运行时不装。
 #
 # 装法：.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 #
-# 为什么和 requirements.txt / requirements-wb.txt 分开：这里的东西只服务浏览器验收
-# 用例（tests/wb/test_settings_role_warning_ui.py 那类），打进运行时依赖会让桌面版
-# 发布包白背几十 MB。requirements.txt 保持只有产品跑起来需要的东西。
-#
-# 注意：pip 只装 Python 包，**浏览器二进制不随 pip 安装**，还得跑一次：
-#   .venv/Scripts/python.exe -m playwright install chromium
-# （装过 node 版 playwright 的机器也可以用 `npx playwright install chromium`，落到
-#  同一个用户缓存目录。盘上已经有 ms-playwright/chromium-1248 的机器不用重新下载，
-#  用例启动时会自动用上那份二进制。）
-#
-# 没装上的机器不会假绿：用例文件顶部 pytest.importorskip("playwright.sync_api") 会把
-# 整个模块 skip 掉，装了包但 chromium 起不来时 launch 那条路也走 pytest.skip，两处
-# reason 里都写着上面那条可执行的修复命令。skip 不等于通过——看 pytest 结尾的 skipped
-# 计数，别只看 failed 为 0。
+# ruff 钉版本，避免规则集/格式化风格漂移。
 
-# 为什么这里也放一个「非浏览器」的东西：**「ruff format --check 过关」这句话过去
-# 谁都没验过** —— venv 里没有 ruff（`python -m ruff` → No module named ruff；当时本
-# 文件全文只有 playwright 一行；`grep -rn ruff pyproject.toml ruff.toml setup.cfg
-# pytest.ini tox.ini` 零命中）。成员只能老实写「这句我没验、也没当证据写」。
-# 现在装上，这句才有可核对的含义。
-#
-# 跑法（含义不同，两条都要跑）：
-#   .venv/Scripts/ruff.exe check .                     # 找问题，不改文件
-#   .venv/Scripts/ruff.exe format --check --diff .      # 只报不改，交差用这一条
-#   .venv/Scripts/ruff.exe format .                     # 真改文件（先看上面那条的 diff）
-# 规则范围与 exclude（逐字节锁定面 / bili_scribe / 历史一次性脚本）全在仓库根 `ruff.toml`，
-# 那里记了装上当天的基线数：check 默认集 1272 条、format 会重排 288 个文件。
-#
-# 钉死版本的理由同 playwright：ruff 的规则集与 formatter 风格随版本变，不钉会出现
-# 同一份代码昨天绿今天红。升级 ruff 单独一次 commit，并跑一遍全量测试。
-
-playwright==1.64.1   # 本机 .venv 实装版本（pip show playwright 核对过），钉死以免用例忽红忽绿
-ruff==0.17.3         # 本机 .venv 实装版本（`pip show ruff` 与 `ruff --version` 均核对过），同上
+-r requirements.txt
+ruff==0.17.3

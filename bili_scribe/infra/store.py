@@ -255,9 +255,7 @@ class Store:
         assignments, values = self._task_columns(fields)
         values.append(task_id)
         with self._connect() as conn:
-            conn.execute(
-                f"UPDATE task SET {', '.join(assignments)} WHERE id = ?", values
-            )
+            conn.execute(f"UPDATE task SET {', '.join(assignments)} WHERE id = ?", values)
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -370,8 +368,7 @@ class Store:
             # 两个并发迭代就可能双双升级失败（database is locked）。直接拿写锁。
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT summary_json, preview_md, comment_text, created_at "
-                "FROM task WHERE id = ?",
+                "SELECT summary_json, preview_md, comment_text, created_at FROM task WHERE id = ?",
                 (task_id,),
             ).fetchone()
             if row is None:
@@ -417,9 +414,7 @@ class Store:
             fields.update(task_fields)
             assignments, values = self._task_columns(fields)
             values.append(task_id)
-            conn.execute(
-                f"UPDATE task SET {', '.join(assignments)} WHERE id = ?", values
-            )
+            conn.execute(f"UPDATE task SET {', '.join(assignments)} WHERE id = ?", values)
 
         return {
             "task_id": task_id,
@@ -486,8 +481,7 @@ class Store:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT summary_json, preview_md, comment_text, created_at "
-                "FROM task WHERE id = ?",
+                "SELECT summary_json, preview_md, comment_text, created_at FROM task WHERE id = ?",
                 (task_id,),
             ).fetchone()
             if row is None:
@@ -604,7 +598,5 @@ class Store:
 
     def get_publish(self, publish_id: int) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM publish WHERE id = ?", (publish_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM publish WHERE id = ?", (publish_id,)).fetchone()
         return dict(row) if row else None

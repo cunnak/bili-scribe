@@ -136,10 +136,16 @@ def visible_rect(hwnd: int) -> "wt.RECT | None":
         dwmapi = ctypes.windll.dwmapi
         drect = wt.RECT()
         # DWMWA_EXTENDED_FRAME_BOUNDS = 9
-        if dwmapi.DwmGetWindowAttribute(
-            wt.HWND(hwnd), ctypes.c_uint(9),
-            ctypes.byref(drect), ctypes.sizeof(drect),
-        ) == 0 and drect.right - drect.left > 0:
+        if (
+            dwmapi.DwmGetWindowAttribute(
+                wt.HWND(hwnd),
+                ctypes.c_uint(9),
+                ctypes.byref(drect),
+                ctypes.sizeof(drect),
+            )
+            == 0
+            and drect.right - drect.left > 0
+        ):
             return drect
     except Exception:
         pass
@@ -174,10 +180,12 @@ def is_unobstructed(hwnd: int, rect: "wt.RECT") -> bool:
     pts = []
     for r in range(rows):
         for c in range(cols):
-            pts.append((
-                rect.left + inset + (w - 2 * inset) * c // (cols - 1),
-                rect.top + inset + (h - 2 * inset) * r // (rows - 1),
-            ))
+            pts.append(
+                (
+                    rect.left + inset + (w - 2 * inset) * c // (cols - 1),
+                    rect.top + inset + (h - 2 * inset) * r // (rows - 1),
+                )
+            )
     for x, y in pts:
         hit = user32.WindowFromPoint(wt.POINT(x, y))
         if not hit:
@@ -232,11 +240,17 @@ def print_window(hwnd: int):
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
-            ("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG),
-            ("biPlanes", wt.WORD), ("biBitCount", wt.WORD),
-            ("biCompression", wt.DWORD), ("biSizeImage", wt.DWORD),
-            ("biXPelsPerMeter", wt.LONG), ("biYPelsPerMeter", wt.LONG),
-            ("biClrUsed", wt.DWORD), ("biClrImportant", wt.DWORD),
+            ("biSize", wt.DWORD),
+            ("biWidth", wt.LONG),
+            ("biHeight", wt.LONG),
+            ("biPlanes", wt.WORD),
+            ("biBitCount", wt.WORD),
+            ("biCompression", wt.DWORD),
+            ("biSizeImage", wt.DWORD),
+            ("biXPelsPerMeter", wt.LONG),
+            ("biYPelsPerMeter", wt.LONG),
+            ("biClrUsed", wt.DWORD),
+            ("biClrImportant", wt.DWORD),
         ]
 
     info = BITMAPINFOHEADER()
@@ -441,7 +455,9 @@ def main() -> int:
                 print(f"--- {label} ---\n{text[-3000:]}")
         log = EXE.parent / "bili-scribe.log"
         if log.exists():
-            print(f"--- {log.name} ---\n{log.read_text(encoding='utf-8', errors='replace')[-3000:]}")
+            print(
+                f"--- {log.name} ---\n{log.read_text(encoding='utf-8', errors='replace')[-3000:]}"
+            )
         return 1
 
     print(f"[v] 窗口出现：{window_text(hwnd)!r}")
@@ -507,7 +523,7 @@ def main() -> int:
         print(f"[i] 运行后新增文件：{new}")
         if "config.yaml" in new:
             # 只是启动不该写配置——那说明有人在启动路径上调了 save_config。
-            print("[!] 启动就写了 config.yaml，设置页的\"保存了却没生效\"会从这里开始")
+            print('[!] 启动就写了 config.yaml，设置页的"保存了却没生效"会从这里开始')
     else:
         print("[v] 启动没有在 exe 旁边乱写文件（日志除外）")
 

@@ -431,7 +431,9 @@ def collect(
 
     page_index = min(max(page, 1), len(pages))
     if page_index != page:
-        warnings.append(f"请求的是第 {page} P，但该稿件只有 {len(pages)} P，已改为第 {page_index} P")
+        warnings.append(
+            f"请求的是第 {page} P，但该稿件只有 {len(pages)} P，已改为第 {page_index} P"
+        )
     selected = pages[page_index - 1] or {}
 
     aid = int(view["aid"])
@@ -465,9 +467,7 @@ def collect(
     notify("fetching_subtitle", "尝试获取字幕")
     user_subtitle: dict[str, Any] | None = None
     if user_srt:
-        user_subtitle, user_warnings, user_note = _prepare_user_subtitle(
-            user_srt, bundle.duration
-        )
+        user_subtitle, user_warnings, user_note = _prepare_user_subtitle(user_srt, bundle.duration)
         warnings.extend(user_warnings)
         checks.append(
             SourceCheck(
@@ -484,8 +484,7 @@ def collect(
         chosen, platform_note = _list_subtitles(client, aid, cid, cfg)
         if chosen:
             platform_note = (
-                f"平台另有 {chosen.get('lan_doc') or chosen.get('lan')} 字幕，"
-                "按你的选择本次未采用"
+                f"平台另有 {chosen.get('lan_doc') or chosen.get('lan')} 字幕，按你的选择本次未采用"
             )
         checks.append(SourceCheck("subtitle", "平台字幕", bool(chosen), platform_note))
     else:
@@ -506,9 +505,7 @@ def collect(
 
     # 判断"已有字幕"必须把上传件算进去，否则传了字幕还会再去抓一遍弹幕
     have_subtitle = bool(user_subtitle or subtitle)
-    need_danmaku = cfg.danmaku.enabled and (
-        not have_subtitle or cfg.danmaku.also_with_subtitle
-    )
+    need_danmaku = cfg.danmaku.enabled and (not have_subtitle or cfg.danmaku.also_with_subtitle)
     danmaku: dict[str, Any] | None = None
     if need_danmaku:
         notify("fetching_danmaku", "尝试获取弹幕")

@@ -55,7 +55,9 @@ class BiliError(RuntimeError):
 
 
 class BiliClient:
-    def __init__(self, store: Store, timeout: int = 20, logger: Callable[[str], None] | None = None):
+    def __init__(
+        self, store: Store, timeout: int = 20, logger: Callable[[str], None] | None = None
+    ):
         self.store = store
         self.timeout = timeout
         self.log = logger or (lambda _msg: None)
@@ -154,7 +156,9 @@ class BiliClient:
             self.store.kv_set("buvid3", keep["buvid3"])
         return {"cookies": sorted(keep), "identity": ident}
 
-    def login_with_cookies(self, sessdata: str, bili_jct: str, dedeuserid: str = "") -> dict[str, Any]:
+    def login_with_cookies(
+        self, sessdata: str, bili_jct: str, dedeuserid: str = ""
+    ) -> dict[str, Any]:
         """手工填 Cookie 的兜底通道。"""
         payload = {"SESSDATA": sessdata.strip(), "bili_jct": bili_jct.strip()}
         if dedeuserid.strip():
@@ -187,9 +191,7 @@ class BiliClient:
     def qr_poll(self, key: str) -> dict[str, Any]:
         """轮询扫码状态。注意状态码在 data.code 里，外层 code 恒为 0。"""
         try:
-            resp = self.session.get(
-                QR_POLL, params={"qrcode_key": key}, timeout=self.timeout
-            )
+            resp = self.session.get(QR_POLL, params={"qrcode_key": key}, timeout=self.timeout)
         except requests.RequestException as exc:
             raise BiliError(NETWORK_ERROR_CODE, f"轮询失败：{exc}", QR_POLL) from exc
         try:
@@ -262,7 +264,9 @@ class BiliClient:
 
         raise last_error or BiliError(-352, "签名重试后仍然失败", url)
 
-    def get_raw(self, url: str, params: dict[str, Any] | None = None, signed: bool = False) -> dict[str, Any]:
+    def get_raw(
+        self, url: str, params: dict[str, Any] | None = None, signed: bool = False
+    ) -> dict[str, Any]:
         return self._request_json("GET", url, params=params, signed=signed)
 
     def get_data(
