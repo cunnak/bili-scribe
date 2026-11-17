@@ -35,14 +35,16 @@
 
 ### 方式一：双击 exe（不需要装 Python）
 
-`dist\bili-scribe.exe` 双击就能用。配置和数据都放在外面，换机器只要把 exe 和 `config.yaml` 一起拷走。
+`dist\bili-scribe\bili-scribe.exe` 双击就能用（默认打成目录版，避免单文件每次向 `%TEMP%\_MEI*` 解压触发 `Could not create temporary directory!`）。配置和数据都放在外面，换机器只要把 `dist\bili-scribe` 整个目录一起拷走。
 
 ```
-bili-scribe.exe        约 28 MB，单文件
-config.yaml            放在 exe 旁边（首次启动也可以不放，在设置页里填）
+bili-scribe\
+  bili-scribe.exe      启动程序
+  _internal\           运行依赖与前端资源
+  config.yaml          放在 exe 旁边（首次启动也可以不放，在设置页里填）
 ```
 
-配置查找顺序是 **exe 旁边 → `~/.bili-scribe/config.yaml`**：便携版把配置跟着 exe 走，装机版放在用户目录，两种都认。两个位置都还没有配置时，挑**第一个写得进去的**——exe 被拖进 `Program Files\`、或者从压缩包里直接双击（解压在只读的临时目录），旁边就写不进去，这时会退到用户目录，而不是等对方填完 `api_key` 再甩一个权限错误给他。数据（数据库、凭据密钥、笔记缓存）一律在 `~/.bili-scribe/`。
+配置查找顺序是 **exe 旁边 → `~/.bili-scribe/config.yaml`**：便携版把配置跟着目录走，装机版放在用户目录，两种都认。两个位置都还没有配置时，挑**第一个写得进去的**——程序被拖进 `Program Files\`、或者在只读目录里运行，旁边就写不进去，这时会退到用户目录，而不是等对方填完 `api_key` 再甩一个权限错误给他。数据（数据库、凭据密钥、笔记缓存）一律在 `~/.bili-scribe/`。
 
 日志写在 exe 旁边的 `bili-scribe.log`（目录不可写时退到系统临时目录）——窗口程序没有控制台，出了问题那是唯一的现场。
 
@@ -50,8 +52,9 @@ config.yaml            放在 exe 旁边（首次启动也可以不放，在设�
 
 ```bash
 .venv\Scripts\python -m pip install pyinstaller
-.venv\Scripts\python scripts\build-exe.py            # 出 dist/bili-scribe.exe
+.venv\Scripts\python scripts\build-exe.py            # 出 dist/bili-scribe/bili-scribe.exe（目录版）
 .venv\Scripts\python scripts\build-exe.py --console  # 带控制台，排障用
+.venv\Scripts\python scripts\build-exe.py --onefile  # 出单文件 dist/bili-scribe.exe
 ```
 
 打包脚本会把项目根的 `config.yaml` 复制到 exe 旁边（`dist/` 在 `.gitignore` 里，不进仓库）。
@@ -154,7 +157,7 @@ stop.bat 8819       :: 停自定义端口
 
 ## 分享给别人
 
-**桌面版最简单：只发一个 exe 就够了。** `dist\bili-scribe.exe`（28 MB，单文件，对方不用装 Python）拷给他，双击就开窗。他打开「设置」，填自己的大模型 `api_key`，扫码登自己的 B站 账号，就能用了。
+**桌面版最简单：把打包目录发过去就能用。** `dist\bili-scribe\`（目录版，对方不用装 Python，也不依赖 `%TEMP%` 临时解压）整份打个 zip 拷给他，解压后双击里面的 `bili-scribe.exe` 就开窗。他打开「设置」，填自己的大模型 `api_key`，扫码登自己的 B站 账号，就能用了。
 
 **不要把你自己那份 `config.yaml` 一起发过去**——里面有你的 api_key。程序首次启动时用内置默认值，配置为空的状态是正常的，界面会引导着填。
 
@@ -186,7 +189,7 @@ python scripts/package.py
 
 ### 先看页面最下面那行版本号
 
-界面底部常驻一行版本号（`v0.7.4`），**来自后端**（`/api/config` 的 `version`），前端不另抄一份——抄一份就会出现过期的数字，而过期的那个往往就摆在界面上。桌面版窗口标题里也有（`bili-scribe 0.7.4`）。连不上后端时它不猜，直接写「版本未知」。
+界面底部常驻一行版本号（`v0.7.5`），**来自后端**（`/api/config` 的 `version`），前端不另抄一份——抄一份就会出现过期的数字，而过期的那个往往就摆在界面上。桌面版窗口标题里也有（`bili-scribe 0.7.5`）。连不上后端时它不猜，直接写「版本未知」。
 
 它回答的是一个很具体的问题：**"我现在跑的到底是哪一版？"**
 
@@ -595,7 +598,7 @@ bili-scribe/
 ├── stop.bat                   停服务：按端口找进程并结束
 ├── scripts/
 │   ├── create-shortcuts.bat   生成桌面快捷方式
-│   ├── build-exe.py           打包成单个 exe（桌面版）
+│   ├── build-exe.py           打包成桌面版 exe（默认目录版）
 │   ├── make-icon.py           生成 assets/bili-scribe.ico
 │   ├── package.py             打源码 zip（自带凭据自检）
 │   └── verify-package.py      独立复核源码 zip（另一套判据）

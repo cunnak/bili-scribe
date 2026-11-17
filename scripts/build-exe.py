@@ -1,8 +1,13 @@
-"""把桌面版打成单个 exe。
+"""把桌面版打成可直接双击的目录版 exe（默认 `--onedir`，也支持 `--onefile`）。
 
-    python scripts/build-exe.py               出 dist/bili-scribe.exe
+    python scripts/build-exe.py               出 dist/bili-scribe/bili-scribe.exe
     python scripts/build-exe.py --console     带控制台（排障用）
-    python scripts/build-exe.py --onedir      出一个目录而不是单文件
+    python scripts/build-exe.py --onefile     出单文件 dist/bili-scribe.exe
+
+为什么默认改成 `--onedir` 而不是 `--onefile`：单文件每次启动都要往 `%TEMP%\\_MEI*`
+解出 30 MB 文件并设专有安全描述符，容易被安全软件拦截、或因临时目录权限/锁冲突
+在 C 引导层直接弹窗报错 `Could not create temporary directory!`；目录版把依赖直接
+放在旁边的 `_internal/` 里，启动期零临时目录解压、启动更快，也不会残留 `_MEI*`。
 
 和 `scripts/package.py` 的区别：那个打的是**源码 zip**（给已经装了 Python 的人
 用，改一行就能跑）；这个打的是**能直接双击的窗口程序**（给没装 Python 的人用，
@@ -71,15 +76,25 @@ def _pyinstaller() -> list[str]:
     return [sys.executable, "-m", "PyInstaller"]
 
 
-def _clean() -> None:
-    """清掉上一次的中间产物。
+def _clean(*, onedir: bool) -> None:
+    """清掉上一次的中间产物，以及另一种形态留下的旧入口。
 
     不清 build 目录会让 PyInstaller 复用旧的分析缓存——改了依赖却打出旧包，
-    这种"明明改了怎么没生效"最难查。dist 里只删同名 exe，不动历史 zip。
+    这种"明明改了怎么没生效"最难查。切换目录版/单文件时同时清掉旧形态的
+    入口（dist/bili-scribe.exe 或 dist/bili-scribe/），避免双击点错旧包；
+    dist 里的历史 zip 与 VideoWorkbench 不动。
     """
     for path in (BUILD_DIR, SPEC_DIR):
         if path.exists():
             shutil.rmtree(path, ignore_errors=True)
+    if onedir:
+        stale_exe = DIST_DIR / "bili-scribe.exe"
+        if stale_exe.is_file():
+            stale_exe.unlink()
+    else:
+        stale_dir = DIST_DIR / "bili-scribe"
+        if stale_dir.is_dir():
+            shutil.rmtree(stale_dir, ignore_errors=True)
 
 
 def _collect_args() -> list[str]:
@@ -138,11 +153,11 @@ def _icon() -> Path | None:
     return None
 
 
-def _copy_config() -> str:
+def _copy_config(target_dir: Path) -> str:
     """把项目根的 config.yaml 复制到 exe 旁边，返回一句给人看的结果。
 
     **为什么这一步要做。** exe 找配置的顺序是"exe 旁边 → `~/.bili-scribe/`"
-    （见 `desktop.py:_config_candidates`）。`dist/` 里原本没有 config.yaml，
+    （见 `desktop.py:_config_candidates`）。新打包产物里原本没有 config.yaml，
     于是双击出来的程序是"未配置大模型"的状态——功能都在，但你得重新填一遍
     key。既然这台机器上已经有一份配好的，直接放到它能找到的位置才算"双击即用"。
 
@@ -155,15 +170,15 @@ def _copy_config() -> str:
     src = ROOT / "config.yaml"
     if not src.exists():
         return "项目根没有 config.yaml，exe 首次启动会用内置默认值（在设置页里填）"
-    dst = DIST_DIR / "config.yaml"
+    dst = target_dir / "config.yaml"
     if dst.resolve() == src.resolve():
         return "config.yaml 已就位"
     shutil.copy2(src, dst)
-    return f"已把 config.yaml 复制到 exe 旁边（{dst.name}，含 api_key，仅本机）"
+    return f"已把 config.yaml 复制到 exe 旁边（{dst}，含 api_key，仅本机）"
 
 
 def build(*, console: bool, onedir: bool) -> int:
-    _clean()
+    _clean(onedir=onedir)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     SPEC_DIR.mkdir(parents=True, exist_ok=True)
     DIST_DIR.mkdir(parents=True, exist_ok=True)
@@ -174,6 +189,7 @@ def build(*, console: bool, onedir: bool) -> int:
         "bili-scribe",
         "--onedir" if onedir else "--onefile",
         "--console" if console else "--windowed",
+        "--noupx",
         "--noconfirm",
         "--clean",
         "--distpath",
@@ -189,6 +205,7 @@ def build(*, console: bool, onedir: bool) -> int:
     if icon is not None:
         cmd += ["--icon", str(icon)]
 
+    exe_path = DIST_DIR / ("bili-scribe/bili-scribe.exe" if onedir else "bili-scribe.exe")
     print("=" * 70)
     print(
         " 打包 "
@@ -198,7 +215,7 @@ def build(*, console: bool, onedir: bool) -> int:
     )
     print("=" * 70)
     print(f"  入口     {ROOT / 'bili_scribe' / 'desktop.py'}")
-    print(f"  产物     {DIST_DIR / ('bili-scribe' if onedir else 'bili-scribe.exe')}")
+    print(f"  产物     {exe_path}")
     if icon is None:
         print("  图标     未找到 assets/bili-scribe.ico，使用默认图标")
     print("=" * 70)
@@ -212,8 +229,8 @@ def build(*, console: bool, onedir: bool) -> int:
         return result.returncode
 
     target = DIST_DIR / ("bili-scribe" if onedir else "bili-scribe.exe")
-    if not target.exists():
-        print(f"\n[x] 打包进程返回 0，但没找到产物：{target}")
+    if not exe_path.exists():
+        print(f"\n[x] 打包进程返回 0，但没找到产物：{exe_path}")
         return 1
 
     if onedir:
@@ -221,9 +238,9 @@ def build(*, console: bool, onedir: bool) -> int:
     else:
         total = target.stat().st_size
     print(f"\n[v] 完成，用时 {elapsed:.1f}s")
-    print(f"    产物   {target}")
+    print(f"    产物   {exe_path}")
     print(f"    体积   {total / 1048576:.1f} MB")
-    print(f"    配置   {_copy_config() if not onedir else '（目录版请手动放 config.yaml）'}")
+    print(f"    配置   {_copy_config(target if onedir else DIST_DIR)}")
     print()
     print("    直接双击即可运行。")
     print("    配置查找顺序：exe 旁边 → ~/.bili-scribe/config.yaml")
@@ -239,9 +256,22 @@ def main() -> int:
         print(f"    {sys.executable} -m pip install pyinstaller")
         return 2
 
-    parser = argparse.ArgumentParser(description="把桌面版打成 exe")
+    parser = argparse.ArgumentParser(description="把桌面版打成 exe（默认目录版）")
     parser.add_argument("--console", action="store_true", help="保留控制台窗口（排障用）")
-    parser.add_argument("--onedir", action="store_true", help="出目录而不是单文件（启动更快）")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--onedir",
+        dest="onedir",
+        action="store_true",
+        default=True,
+        help="出目录版 dist/bili-scribe/（默认，免临时目录解压）",
+    )
+    mode.add_argument(
+        "--onefile",
+        dest="onedir",
+        action="store_false",
+        help="出单文件 dist/bili-scribe.exe",
+    )
     args = parser.parse_args()
     return build(console=args.console, onedir=args.onedir)
 

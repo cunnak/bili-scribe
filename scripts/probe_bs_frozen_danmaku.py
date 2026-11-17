@@ -36,27 +36,44 @@ REQUIRED = {
 HTML_ENTRY = "bili_scribe/app/static/index.html"
 
 
-def main() -> int:
-    exe = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "dist" / "bili-scribe.exe"
-    if not exe.exists():
-        print(f"✗ 没有产物：{exe}")
-        return 1
+def _read_packed_index(target: Path) -> tuple[str, bytes] | None:
+    """支持目录版（_internal/.../index.html）与单文件 exe（CArchive）两种形态。"""
+    if target.is_dir():
+        target = target / "bili-scribe.exe"
+    internal_html = target.parent / "_internal" / HTML_ENTRY
+    if internal_html.is_file():
+        return str(internal_html), internal_html.read_bytes()
 
-    car = CArchiveReader(str(exe))
+    if not target.exists():
+        return None
+    car = CArchiveReader(str(target))
     names = [n for n in car.toc if n.replace("\\", "/").endswith("index.html")]
-    target = next(
-        (n for n in names if HTML_ENTRY in n.replace("\\", "/")),
-        None,
-    )
-    print(f"EXE={exe}")
+    found = next((n for n in names if HTML_ENTRY in n.replace("\\", "/")), None)
     print(f"HTML_ENTRIES={names}")
-    if target is None:
-        print(f"✗ CArchive 里没有 {HTML_ENTRY}")
-        return 1
-
-    raw = car.extract(target)
+    if found is None:
+        return None
+    raw = car.extract(found)
     if isinstance(raw, tuple):  # 旧版 API 返回 (ispkg, data)
         raw = raw[-1]
+    return str(target), raw
+
+
+def main() -> int:
+    default_onedir = ROOT / "dist" / "bili-scribe" / "bili-scribe.exe"
+    default_onefile = ROOT / "dist" / "bili-scribe.exe"
+    exe = (
+        Path(sys.argv[1])
+        if len(sys.argv) > 1
+        else (default_onedir if default_onedir.exists() else default_onefile)
+    )
+    loaded = _read_packed_index(exe)
+    if loaded is None:
+        print(f"✗ 找不到打包产物或其中的 {HTML_ENTRY}：{exe}")
+        return 1
+
+    origin, raw = loaded
+    print(f"EXE={exe}")
+    print(f"INDEX_SOURCE={origin}")
     text = raw.decode("utf-8", "replace")
     found = set(re.findall(r'data-path="collect\.danmaku\.([^"]+)"', text))
 

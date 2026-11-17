@@ -23,7 +23,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / "dist" / "bili-scribe.exe"
+ONEDIR_EXE = ROOT / "dist" / "bili-scribe" / "bili-scribe.exe"
+ONEFILE_EXE = ROOT / "dist" / "bili-scribe.exe"
+EXE = ONEDIR_EXE if ONEDIR_EXE.exists() or not ONEFILE_EXE.exists() else ONEFILE_EXE
 SHOT = ROOT / "docs" / "design" / "app-exe.png"
 TITLE = "bili-scribe"
 
